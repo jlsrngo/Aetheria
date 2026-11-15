@@ -107,6 +107,40 @@ describe("HtmlFilmStage utilities", () => {
 
     expect(html).not.toContain("cdnjs.cloudflare.com");
     expect(html).toContain('data-script="three.min.js"');
+    expect(html.indexOf('data-script="three.min.js"')).toBeLessThan(
+      html.indexOf('data-script="scene1.js"')
+    );
+  });
+
+  it("inlines body script tags in place so they run after the body canvas exists", () => {
+    const html = prepareInjectedHtml({
+      exists: true,
+      activeDir: "D:/Projects/Stock",
+      filmRoot: "D:/Projects/Stock",
+      title: "Stock Loop",
+      width: 1920,
+      height: 1080,
+      fps: 30,
+      duration: 12,
+      scenes: [],
+      totalFrames: 360,
+      rawHtml:
+        '<!doctype html><html><head><style>body{}</style></head><body><canvas id="stage"></canvas><script src="script/scene1.js"></script><script src="script/aetheria-motion.js"></script></body></html>',
+      scripts: [
+        { name: "aetheria-motion.js", relativePath: "script/aetheria-motion.js", code: "window.renderAt=function(){};" },
+        { name: "scene1.js", relativePath: "script/scene1.js", code: "var s='$&$1';document.getElementById('stage');" },
+      ],
+    });
+
+    const canvasIdx = html.indexOf('<canvas id="stage">');
+    const sceneIdx = html.indexOf('data-script="scene1.js"');
+    const motionIdx = html.indexOf('data-script="aetheria-motion.js"');
+    expect(canvasIdx).toBeGreaterThan(html.indexOf("</head>"));
+    expect(sceneIdx).toBeGreaterThan(canvasIdx);
+    expect(motionIdx).toBeGreaterThan(sceneIdx);
+    expect(html.match(/data-script="scene1\.js"/g)).toHaveLength(1);
+    expect(html).toContain("var s='$&$1';");
+    expect(html).not.toContain('src="script/');
   });
 
   it("matches only film source edits for live Studio reload", () => {

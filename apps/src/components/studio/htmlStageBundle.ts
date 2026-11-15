@@ -194,17 +194,31 @@ html, body {
 </style>`;
 }
 
+const LOCAL_SCRIPT_TAG_RE =
+  /<script\b[^>]*src=["'](?:\.?\/)?(?:script|public\/script)\/([^"'?#]+)(?:[?#][^"']*)?["'][^>]*>\s*<\/script>/gi;
+
+function inlineScriptTag(s: HtmlFilmScriptAsset): string {
+  return `<script data-script="${s.name}">\n${s.code}\n</script>`;
+}
+
 /**
  * Injects asset URL rewriting and inlined scene scripts into raw stage HTML.
  */
 export function prepareInjectedHtml(film: HtmlFilmDescriptor): string {
   let html = film.rawHtml;
+  const byName = new Map(film.scripts.map((s) => [s.name.toLowerCase(), s]));
+  const placed = new Set<string>();
 
-  // Strip local external script tags already resolved via film.scripts
-  html = html.replace(
-    /<script\b[^>]*src=["'](?:\.?\/)?(?:script|public\/script)\/[^"']+["'][^>]*>\s*<\/script>/gi,
-    ""
-  );
+  // Inline each referenced local script at its original tag position (not hoisted into
+  // <head>) so it runs after the DOM above it, e.g. a body <canvas>, exactly like the
+  // headless renderer which serves index.html unchanged.
+  html = html.replace(LOCAL_SCRIPT_TAG_RE, (_tag: string, rawName: string) => {
+    const key = rawName.toLowerCase();
+    const asset = byName.get(key);
+    if (!asset || placed.has(key)) return "";
+    placed.add(key);
+    return inlineScriptTag(asset);
+  });
   if (film.scripts.some((s) => s.name.toLowerCase() === "three.min.js")) {
     html = html.replace(
       /<script\b[^>]*src=["'](?:https?:)?\/\/[^"']*three(?:\.min)?\.js(?:\?[^"']*)?["'][^>]*>\s*<\/script>/gi,
@@ -212,25 +226,28 @@ export function prepareInjectedHtml(film: HtmlFilmDescriptor): string {
     );
   }
 
-  const shimTag = buildAssetShimScript(film.activeDir);
-  const inlineScripts = film.scripts
-    .map((s) => `<script data-script="${s.name}">\n${s.code}\n</script>`)
-    .join("\n");
+  // Unreferenced scripts ordered before the first referenced one (vendor/runtime such as
+  // three.min.js or the built-in aetheria-motion.js) must load first; the rest load last.
+  const firstPlacedIdx = film.scripts.findIndex((s) => placed.has(s.name.toLowerCase()));
+  const leadEnd = firstPlacedIdx === -1 ? film.scripts.length : firstPlacedIdx;
+  const unplaced = (s: HtmlFilmScriptAsset) => !placed.has(s.name.toLowerCase());
+  const leadingScripts = film.scripts.slice(0, leadEnd).filter(unplaced).map(inlineScriptTag).join("\n");
+  const trailingScripts = film.scripts.slice(leadEnd).filter(unplaced).map(inlineScriptTag).join("\n");
 
-  const payloadBlock = `${shimTag}\n${inlineScripts}\n`;
-
+  const headPayload = `${buildAssetShimScript(film.activeDir)}\n${leadingScripts}\n`;
+  // Function replacers keep `$&`/`$1` sequences inside user script code literal.
   if (/<head[^>]*>/i.test(html)) {
-    html = html.replace(/<head[^>]*>/i, (m) => `${m}\n${shimTag}\n`);
+    html = html.replace(/<head[^>]*>/i, (m) => `${m}\n${headPayload}`);
   } else {
-    html = `${shimTag}\n${html}`;
+    html = `${headPayload}${html}`;
   }
 
-  if (html.includes("</head>")) {
-    html = html.replace("</head>", `${inlineScripts}\n</head>`);
-  } else if (html.includes("</body>")) {
-    html = html.replace("</body>", `${inlineScripts}\n</body>`);
-  } else {
-    html = `${payloadBlock}${html}`;
+  if (trailingScripts) {
+    if (html.includes("</body>")) {
+      html = html.replace("</body>", () => `${trailingScripts}\n</body>`);
+    } else {
+      html = `${html}\n${trailingScripts}`;
+    }
   }
 
   return html;
