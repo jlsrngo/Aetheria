@@ -16,6 +16,56 @@ fn normalize_codex_model(model: &str) -> &str {
     model.strip_prefix("codex/").unwrap_or(model)
 }
 
+fn build_codex_user_content(content: Option<&Value>) -> Vec<Value> {
+    let mut parts = Vec::new();
+    match content {
+        Some(Value::String(s)) => {
+            parts.push(json!({ "type": "input_text", "text": s }));
+        }
+        Some(Value::Array(arr)) => {
+            for item in arr {
+                if let Some(s) = item.as_str() {
+                    if !s.is_empty() {
+                        parts.push(json!({ "type": "input_text", "text": s }));
+                    }
+                    continue;
+                }
+                let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                if item_type == "image_url" || item_type == "input_image" || item.get("image_url").is_some() {
+                    let raw_url = item
+                        .pointer("/image_url/url")
+                        .or_else(|| item.get("image_url"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .trim();
+                    if !raw_url.is_empty() {
+                        parts.push(json!({
+                            "type": "input_image",
+                            "image_url": raw_url
+                        }));
+                    }
+                    continue;
+                }
+                if let Some(txt) = item
+                    .get("text")
+                    .or_else(|| item.get("input_text"))
+                    .or_else(|| item.get("content"))
+                    .and_then(|v| v.as_str())
+                {
+                    if !txt.is_empty() {
+                        parts.push(json!({ "type": "input_text", "text": txt }));
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    if parts.is_empty() {
+        parts.push(json!({ "type": "input_text", "text": "" }));
+    }
+    parts
+}
+
 pub(crate) async fn handle_codex_request(body: Value, model: &str, is_stream: bool) -> Response {
     let mut cred = match ensure_fresh_credential("codex").await {
         Some(c) => c,
@@ -103,11 +153,11 @@ pub(crate) async fn handle_codex_request(body: Value, model: &str, is_stream: bo
             }
             continue;
         }
-        let txt = extract_content_text(m.get("content"));
+        let user_content = build_codex_user_content(m.get("content"));
         input.push(json!({
             "type": "message",
             "role": "user",
-            "content": [{ "type": "input_text", "text": txt }]
+            "content": user_content
         }));
     }
 
@@ -258,6 +308,31 @@ pub(crate) async fn handle_codex_request(body: Value, model: &str, is_stream: bo
         super::make_sse_response_with_reasoning(model, full_text, thought_text, tool_calls)
     } else {
         super::make_completion_response_with_reasoning(model, full_text, thought_text, tool_calls)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn forwards_user_image_url_as_input_image() {
+        let content = json!([
+            { "type": "text", "text": "buat animasi untuk adobestock dari 2 gambar ini" },
+            { "type": "image_url", "image_url": { "url": "data:image/png;base64,iVBORw0KGgo=" } },
+            { "type": "image_url", "image_url": { "url": "data:image/png;base64,AAAA" } }
+        ]);
+        let mapped = build_codex_user_content(Some(&content));
+        assert_eq!(mapped.len(), 3);
+        assert_eq!(mapped[0]["type"], "input_text");
+        assert_eq!(
+            mapped[0]["text"],
+            "buat animasi untuk adobestock dari 2 gambar ini"
+        );
+        assert_eq!(mapped[1]["type"], "input_image");
+        assert_eq!(mapped[1]["image_url"], "data:image/png;base64,iVBORw0KGgo=");
+        assert_eq!(mapped[2]["type"], "input_image");
+        assert_eq!(mapped[2]["image_url"], "data:image/png;base64,AAAA");
     }
 }
 

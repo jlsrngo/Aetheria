@@ -11,6 +11,73 @@ use crate::cred_store::ensure_fresh_credential;
 // ============================================================================
 // 5. CLAUDE (Anthropic Messages API)
 // ============================================================================
+fn parse_data_image_url(url: &str) -> Option<(String, String)> {
+    let trimmed = url.trim();
+    let rest = trimmed.strip_prefix("data:")?;
+    let (meta, b64) = rest.split_once(";base64,")?;
+    let mime = meta.trim();
+    let clean_b64: String = b64.chars().filter(|c| !c.is_whitespace()).collect();
+    if mime.is_empty() || clean_b64.is_empty() {
+        return None;
+    }
+    Some((mime.to_string(), clean_b64))
+}
+
+fn build_claude_user_content(content: Option<&Value>) -> Vec<Value> {
+    let mut blocks = Vec::new();
+    match content {
+        Some(Value::String(s)) => {
+            if !s.is_empty() {
+                blocks.push(json!({ "type": "text", "text": s }));
+            }
+        }
+        Some(Value::Array(arr)) => {
+            for item in arr {
+                if let Some(s) = item.as_str() {
+                    if !s.is_empty() {
+                        blocks.push(json!({ "type": "text", "text": s }));
+                    }
+                    continue;
+                }
+                let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                if item_type == "image_url" || item.get("image_url").is_some() {
+                    let raw_url = item
+                        .pointer("/image_url/url")
+                        .or_else(|| item.get("image_url"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    if let Some((mime, b64)) = parse_data_image_url(raw_url) {
+                        blocks.push(json!({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": mime,
+                                "data": b64
+                            }
+                        }));
+                    }
+                    continue;
+                }
+                if let Some(txt) = item
+                    .get("text")
+                    .or_else(|| item.get("input_text"))
+                    .or_else(|| item.get("content"))
+                    .and_then(|v| v.as_str())
+                {
+                    if !txt.is_empty() {
+                        blocks.push(json!({ "type": "text", "text": txt }));
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    if blocks.is_empty() {
+        blocks.push(json!({ "type": "text", "text": " " }));
+    }
+    blocks
+}
+
 pub(crate) async fn handle_claude_request(body: Value, model: &str, is_stream: bool) -> Response {
     let cred = match ensure_fresh_credential("claude").await {
         Some(c) => c,
@@ -107,10 +174,10 @@ pub(crate) async fn handle_claude_request(body: Value, model: &str, is_stream: b
             continue;
         }
 
-        let txt = extract_content_text(m.get("content"));
+        let user_blocks = build_claude_user_content(m.get("content"));
         claude_msgs.push(json!({
             "role": "user",
-            "content": [{ "type": "text", "text": if txt.is_empty() { " ".to_string() } else { txt } }]
+            "content": user_blocks
         }));
     }
 
@@ -224,5 +291,26 @@ pub(crate) async fn handle_claude_request(body: Value, model: &str, is_stream: b
         super::make_sse_response_with_reasoning(model, text, thought_text, tool_calls)
     } else {
         super::make_completion_response_with_reasoning(model, text, thought_text, tool_calls)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn forwards_user_image_url_as_anthropic_base64_image() {
+        let content = json!([
+            { "type": "text", "text": "inspect this reference image" },
+            { "type": "image_url", "image_url": { "url": "data:image/png;base64,iVBORw0KGgo=" } }
+        ]);
+        let blocks = build_claude_user_content(Some(&content));
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0]["type"], "text");
+        assert_eq!(blocks[0]["text"], "inspect this reference image");
+        assert_eq!(blocks[1]["type"], "image");
+        assert_eq!(blocks[1]["source"]["type"], "base64");
+        assert_eq!(blocks[1]["source"]["media_type"], "image/png");
+        assert_eq!(blocks[1]["source"]["data"], "iVBORw0KGgo=");
     }
 }

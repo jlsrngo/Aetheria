@@ -15,7 +15,30 @@ pub fn build_chat_messages(effective_history: &[Value], sys_prompt: &str) -> Vec
             }
         } else if mtype == "user" {
             let txt = m.get("text").and_then(|v| v.as_str()).unwrap_or("");
-            chat_messages.push(json!({ "role": "user", "content": txt }));
+            let img_urls: Vec<String> = m
+                .get("files")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|f| {
+                            f.get("uri")
+                                .or_else(|| f.get("url"))
+                                .and_then(|v| v.as_str())
+                                .filter(|u| u.starts_with("data:image/"))
+                                .map(str::to_string)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            if img_urls.is_empty() {
+                chat_messages.push(json!({ "role": "user", "content": txt }));
+            } else {
+                let mut parts = vec![json!({ "type": "text", "text": txt })];
+                for u in img_urls {
+                    parts.push(json!({ "type": "image_url", "image_url": { "url": u } }));
+                }
+                chat_messages.push(json!({ "role": "user", "content": parts }));
+            }
         } else if mtype == "assistant" {
             let parts = m.get("content").and_then(|v| v.as_array());
             let mut tool_calls = Vec::new();

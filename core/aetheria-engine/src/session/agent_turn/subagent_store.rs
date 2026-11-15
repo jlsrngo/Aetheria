@@ -53,12 +53,19 @@ pub fn build_subagent_system_prompt(subagent_type: &str, workspace_dir: &str) ->
         subagent_type.trim().to_ascii_lowercase().as_str(),
         "motion-designer" | "qa-verifier"
     ) {
+        let mut s = String::new();
         let discovered = super::context::discover_workspace_skills(workspace_dir);
-        if discovered.is_empty() {
-            String::new()
-        } else {
-            format!("\n\n{}", discovered)
+        if !discovered.is_empty() {
+            s.push_str("\n\n");
+            s.push_str(&discovered);
         }
+        if let Some(ms_block) =
+            crate::studio::microstock::build_active_microstock_prompt_block(workspace_dir)
+        {
+            s.push_str("\n\n");
+            s.push_str(&ms_block);
+        }
+        s
     } else {
         String::new()
     };
@@ -66,11 +73,15 @@ pub fn build_subagent_system_prompt(subagent_type: &str, workspace_dir: &str) ->
     format!(
         "{}{}\n\n\
          Active Project Workspace: `{}`\n\
+         Platform: `{}` (On `windows`, the `bash` tool executes in PowerShell — NEVER use bash-only syntax like `set -e`, `|| true`, `&&`, or external `rg`; prefer built-in `read`, `grep`, and `glob` tools first, or use `;` / `if ($LASTEXITCODE -eq 0)` in PowerShell.)\n\
          IMPORTANT RULES:\n\
          1. Focus strictly on the delegated subtask.\n\
          2. Do NOT ask the user questions; make reasonable engineering decisions autonomously.\n\
          3. When finished, output a concise final report summarizing what was done and which files were touched.",
-        persona_rules, skills_section, workspace_dir
+        persona_rules,
+        skills_section,
+        workspace_dir,
+        std::env::consts::OS
     )
 }
 
