@@ -45,6 +45,7 @@ jobs:
 
       - run: npm ci
       - run: npx playwright install chromium
+      - run: npm run build
       - run: cargo test --workspace
       - run: npm run build:engine
       - run: npx playwright test e2e/studio-projects.spec.ts e2e/chat-scroll-and-clipboard.spec.ts
