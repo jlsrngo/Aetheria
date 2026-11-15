@@ -9,6 +9,7 @@ import { ScriptPanel } from "../components/studio/panels/ScriptPanel";
 import { InspectorPanel } from "../components/studio/panels/InspectorPanel";
 import { ElementsCaptionsPanel } from "../components/studio/panels/ElementsCaptionsPanel";
 import { RenderQueuePanel } from "../components/studio/panels/RenderQueuePanel";
+import { MicrostockPanel } from "../components/studio/panels/MicrostockPanel";
 import {
   DetachablePanelShell,
   type FloatingPanelGeometry,
@@ -24,6 +25,7 @@ import { useWorkstationSession } from "../components/workstation/hooks/useWorkst
 import { useWorkstationFiles } from "../components/workstation/hooks/useWorkstationFiles";
 import { useWorkstationLayout } from "../components/workstation/hooks/useWorkstationLayout";
 import { useStudioStore } from "../hooks/useStudioStore";
+import { useMicrostockStore } from "../hooks/useMicrostockStore";
 import { ErrorBoundary } from "../components/common/ErrorBoundary";
 
 export function UnifiedWorkstationPage() {
@@ -110,9 +112,24 @@ export function UnifiedWorkstationPage() {
   const [, setTopZIndex] = useState(55);
 
   const { renderJobs } = useStudioStore();
+  const microstock = useMicrostockStore();
   const activeRenderCount =
     renderJobs.filter((j) => j.status === "rendering" || j.status === "pending").length ||
     renderJobs.length;
+
+  useEffect(() => {
+    if (!microstock.manifest.enabled) {
+      if (activeSidebarView === "microstock") {
+        setActiveSidebarView("compositions");
+      }
+      setFloatingPanels((prev) => {
+        if (!prev.microstock) return prev;
+        const next = { ...prev };
+        delete next.microstock;
+        return next;
+      });
+    }
+  }, [microstock.manifest.enabled, activeSidebarView]);
 
   const handleFloatPanel = useCallback(
     (view: SidebarView, pos: { x: number; y: number }) => {
@@ -278,6 +295,14 @@ export function UnifiedWorkstationPage() {
             width="100%"
           />
         );
+      case "microstock":
+        return (
+          <MicrostockPanel
+            width="100%"
+            isFloating={isFloating}
+            onClose={onCloseAction}
+          />
+        );
     }
   };
 
@@ -319,6 +344,7 @@ export function UnifiedWorkstationPage() {
           isCollapsed={leftCollapsed}
           onSelectView={handleSelectSidebarView}
           renderJobCount={activeRenderCount}
+          isMicrostockActive={microstock.manifest.enabled}
         />
 
         {/* Docked Left Sidebar Panel (Can be dragged out into a floating window) */}

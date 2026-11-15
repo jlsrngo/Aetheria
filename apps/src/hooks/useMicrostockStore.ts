@@ -212,7 +212,7 @@ export const microstockActions = {
         enabled: nextEnabled,
         presetId: nextPresetId,
       },
-      isPopoverOpen: nextEnabled ? true : false,
+      isPopoverOpen: false,
     };
     emit();
 

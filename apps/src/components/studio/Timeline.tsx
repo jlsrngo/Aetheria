@@ -8,7 +8,6 @@ import { useTimelineInteractions } from "../../hooks/useTimelineInteractions";
 import { buildCompositionLayers, type VideoLayerSpec } from "../../types/video";
 import { ClipEditModal } from "./ClipEditModal";
 import { TimelineHeaderToolbar } from "./timeline/TimelineHeaderToolbar";
-import { MicrostockToolbarPopover } from "./timeline/MicrostockToolbarPopover";
 import { TimelineTrackSidebar } from "./timeline/TimelineTrackSidebar";
 import { TimelineClipLanes } from "./timeline/TimelineClipLanes";
 import { buildDynamicHtmlSceneLayers } from "./timeline/timelineLayerUtils";
@@ -206,19 +205,16 @@ export const Timeline: React.FC<TimelineProps> = ({
         onAddLayer={timelineActions.handleAddCustomLayer}
         isMicrostockActive={microstock.manifest.enabled}
         onMotionClick={() => {
-          if (!microstock.manifest.enabled) {
-            void microstock.actions.toggleMode(true).then(() => {
+          const next = !microstock.manifest.enabled;
+          void microstock.actions.toggleMode(next).then(() => {
+            if (next) {
               toast.success(
                 "Adobe Stock Mode Active: 16:9 (1920×1080) Rec.709 • LLM Auto-Metadata"
               );
-            });
-          } else if (!microstock.isPopoverOpen) {
-            microstock.actions.setPopoverOpen(true);
-          } else {
-            void microstock.actions.toggleMode(false).then(() => {
+            } else {
               toast.info("Adobe Stock Mode Off: Returned to 9:16 (1080×1920)");
-            });
-          }
+            }
+          });
         }}
         onExport={() => {
           if (microstock.manifest.enabled) {
@@ -246,54 +242,6 @@ export const Timeline: React.FC<TimelineProps> = ({
         }}
         onZoomChange={setTimelineZoom}
       />
-
-      {microstock.isPopoverOpen && (
-        <MicrostockToolbarPopover
-          manifest={microstock.manifest}
-          activeCodec={microstock.activeCodec}
-          isBusy={microstock.isBusy}
-          lastPackage={microstock.lastPackage}
-          onClose={() => microstock.actions.setPopoverOpen(false)}
-          onToggleMode={(enabled, presetId) => {
-            void microstock.actions.toggleMode(enabled, presetId).then((next) => {
-              if (next) {
-                toast.success("Adobe Stock Mode Active: 16:9 (1920×1080)");
-              } else {
-                toast.info("Adobe Stock Mode Off: Returned to 9:16 (1080×1920)");
-              }
-            });
-          }}
-          onSelectPreset={(presetId) => {
-            void microstock.actions.selectPreset(presetId);
-          }}
-          onSelectCodec={(codec) => {
-            microstock.actions.setCodec(codec);
-          }}
-          onUpdateManifest={(partial) => {
-            void microstock.actions.updateManifest(partial);
-          }}
-          onRunRenderAndPreflight={() => {
-            void microstock.actions
-              .runRenderAndPreflight({
-                compositionId: activeComposition.id,
-                width: activeComposition.width,
-                height: activeComposition.height,
-                fps: activeComposition.fps,
-                durationSec: activeComposition.duration,
-              })
-              .then((res) => {
-                if (res.ok) toast.success(res.message);
-                else toast.error(res.message);
-              });
-          }}
-          onBuildPackage={() => {
-            void microstock.actions.buildPackage().then((res) => {
-              if (res.ok) toast.success(res.message);
-              else toast.error(res.message);
-            });
-          }}
-        />
-      )}
 
       {!isTimelineCollapsed && (
         <div className="flex-1 flex min-h-0 overflow-hidden">

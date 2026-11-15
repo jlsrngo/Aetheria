@@ -19,13 +19,15 @@ export type SidebarView =
   | "inspector"
   | "elements"
   | "renders"
-  | "search";
+  | "search"
+  | "microstock";
 
 interface WorkstationActivityBarProps {
   activeView: SidebarView;
   isCollapsed: boolean;
   onSelectView: (view: SidebarView) => void;
   renderJobCount?: number;
+  isMicrostockActive?: boolean;
 }
 
 const ITEMS: {
@@ -91,8 +93,10 @@ export const WorkstationActivityBar = memo(function WorkstationActivityBar({
   isCollapsed,
   onSelectView,
   renderJobCount = 0,
+  isMicrostockActive = false,
 }: WorkstationActivityBarProps) {
   const { isNeobrutalism } = useTheme();
+  const microstockSelected = !isCollapsed && activeView === "microstock";
 
   return (
     <aside
@@ -143,6 +147,43 @@ export const WorkstationActivityBar = memo(function WorkstationActivityBar({
             </button>
           );
         })}
+
+        {isMicrostockActive && (
+          <button
+            type="button"
+            data-testid="activity-bar-microstock-btn"
+            onClick={() => onSelectView("microstock")}
+            className={cn(
+              "w-9 h-9 rounded-lg flex items-center justify-center transition-all cursor-pointer relative group",
+              isNeobrutalism
+                ? cn(
+                    "neo-icon-badge text-[#141413] border border-[#141413]",
+                    microstockSelected ? "bg-amber-300" : "bg-[var(--bg-card)] hover:bg-amber-300"
+                  )
+                : microstockSelected
+                ? "text-amber-400 bg-[var(--bg-hover)]"
+                : "text-amber-400 hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]/60"
+            )}
+            title="Adobe Stock Microstock (M)"
+            aria-label="Adobe Stock Microstock (M)"
+          >
+            {!isNeobrutalism && microstockSelected && (
+              <span className="absolute left-0 top-2 bottom-2 w-0.5 bg-amber-400 rounded-r" />
+            )}
+            <svg
+              viewBox="0 0 24 24"
+              className="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M4 19V5l8 9 8-9v14" />
+            </svg>
+          </button>
+        )}
       </div>
     </aside>
   );

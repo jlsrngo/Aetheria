@@ -462,7 +462,7 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
           className={cn(
             "w-9 h-9 rounded-full border flex items-center justify-center transition-all cursor-pointer shrink-0 select-none",
             isMicrostockActive
-              ? "bg-[var(--text-primary)] border-[var(--text-primary)] text-[var(--bg-app)] shadow-sm"
+              ? "bg-amber-600 hover:bg-amber-500 border-amber-500 text-white shadow-sm"
               : "border-[var(--border-color)] bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
           )}
         >
@@ -470,7 +470,7 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
             viewBox="0 0 24 24"
             className={cn(
               "w-4 h-4",
-              isMicrostockActive ? "text-[var(--bg-app)]" : "text-amber-400"
+              isMicrostockActive ? "text-white" : "text-amber-400"
             )}
             fill="none"
             stroke="currentColor"

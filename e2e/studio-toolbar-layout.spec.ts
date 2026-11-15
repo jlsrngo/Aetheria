@@ -173,8 +173,34 @@ test.describe("Studio Timeline & Preview Toolbar Layout E2E (Real Engine + Brows
     expect(mBox!.x).toBeGreaterThan(fpsBox!.x + fpsBox!.width - 1);
     expect(Math.abs(mBox!.y - fpsBox!.y)).toBeLessThanOrEqual(4);
 
-    // Interactive check: Ratio, Speed, FPS dropdowns + M logo click
+    // Interactive check: M logo toggles orange active state + adds +1 menu in left Activity Bar (no floating popover)
+    const activityMicrostockBtn = page.getByTestId("activity-bar-microstock-btn");
+    await expect(motionLogoBtn).toHaveAttribute("data-active", "false");
+    await expect(activityMicrostockBtn).toHaveCount(0);
+
     await motionLogoBtn.click();
+    await expect(motionLogoBtn).toHaveAttribute("data-active", "true");
+    await expect(page.getByTestId("microstock-toolbar-popover")).toHaveCount(0);
+    await expect(ratioBtn).toContainText("16:9");
+    await expect(activityMicrostockBtn).toBeVisible();
+
+    // Verify M button has orange background when active
+    const mActiveBg = await motionLogoBtn.evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(mActiveBg).not.toBe("rgba(0, 0, 0, 0)");
+
+    // Clicking the +1 menu in the left Activity Bar opens the Microstock sidebar panel
+    await activityMicrostockBtn.click();
+    const microstockSidebar = page.getByTestId("microstock-sidebar-panel");
+    await expect(microstockSidebar).toBeVisible();
+    await expect(page.getByTestId("microstock-preset-select")).toBeVisible();
+    await expect(page.getByTestId("microstock-ai-no")).toBeVisible();
+
+    // Clicking M again turns Microstock mode OFF, restores 9:16, and removes the +1 Activity Bar menu
+    await motionLogoBtn.click();
+    await expect(motionLogoBtn).toHaveAttribute("data-active", "false");
+    await expect(ratioBtn).toContainText("9:16");
+    await expect(activityMicrostockBtn).toHaveCount(0);
+    await expect(microstockSidebar).toHaveCount(0);
 
     await ratioBtn.click();
     await page.getByRole("button", { name: /1:1 Square/i }).click();
