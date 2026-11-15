@@ -70,16 +70,19 @@ export const StudioPreviewHeader: React.FC<StudioPreviewHeaderProps> = ({
     </div>
 
     {/* Row 2: Canvas viewport & grid controls */}
-    <div className="h-8 px-3 bg-[var(--bg-panel-sub)] flex items-center justify-between gap-1.5 overflow-x-auto no-scrollbar">
-      <div className="flex items-center gap-1.5 shrink-0">
-      <div className="flex items-center gap-1 px-1.5 h-6 rounded-md bg-[var(--bg-card)] border border-[var(--border-strong)]">
+    <div
+      data-testid="studio-preview-controls-bar"
+      className="h-9 px-3 bg-[var(--bg-panel-sub)] flex items-center justify-between gap-3 overflow-x-auto no-scrollbar"
+    >
+      {/* Left group: Zoom controls */}
+      <div className="flex items-center gap-1.5 px-2 h-7 rounded-lg bg-[var(--bg-card)] border border-[var(--border-strong)] shrink-0">
         <button
           type="button"
           onClick={() =>
             onUpdateCanvas({ zoom: canvas.zoom === "fit" ? 1 : "fit", panX: 0, panY: 0 })
           }
           className={cn(
-            "px-1 h-4 rounded text-[9px] font-mono cursor-pointer transition-colors",
+            "px-1.5 h-5 rounded text-[9px] font-mono cursor-pointer transition-colors",
             canvas.zoom === "fit"
               ? "bg-[#cf6613] text-white font-bold"
               : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
@@ -135,132 +138,137 @@ export const StudioPreviewHeader: React.FC<StudioPreviewHeaderProps> = ({
         </span>
       </div>
 
-      <button
-        type="button"
-        onClick={() => onUpdateCanvas({ showMinimap: !canvas.showMinimap })}
-        title="Toggle Canvas Viewport Minimap"
-        className={cn(
-          "h-6 px-1.5 rounded-md border flex items-center justify-center cursor-pointer transition-colors",
-          canvas.showMinimap !== false
-            ? "bg-[#cf6613] text-white border-[#e07b27]"
-            : "bg-[var(--bg-card)] text-[var(--text-secondary)] border-[var(--border-strong)] hover:text-[var(--text-primary)]"
-        )}
-      >
-        <Compass className="w-3.5 h-3.5 shrink-0" />
-      </button>
-
-      <button
-        type="button"
-        onClick={() => onUpdateCanvas({ showRulers: !canvas.showRulers })}
-        title="Toggle Dynamic Photoshop/Corel Style Rulers"
-        className={cn(
-          "h-6 px-1.5 rounded-md border flex items-center justify-center cursor-pointer transition-colors",
-          canvas.showRulers
-            ? "bg-[#cf6613] text-white border-[#e07b27]"
-            : "bg-[var(--bg-card)] text-[var(--text-secondary)] border-[var(--border-strong)] hover:text-[var(--text-primary)]"
-        )}
-      >
-        <Ruler className="w-3.5 h-3.5 shrink-0" />
-      </button>
-
-      <button
-        type="button"
-        onClick={() => onUpdateCanvas({ showGuides: !canvas.showGuides })}
-        title="Toggle TikTok Safe Zone Guides"
-        className={cn(
-          "h-6 px-1.5 rounded-md border flex items-center justify-center cursor-pointer transition-colors",
-          canvas.showGuides
-            ? "bg-[#cf6613] text-white border-[#e07b27]"
-            : "bg-[var(--bg-card)] text-[var(--text-secondary)] border-[var(--border-strong)] hover:text-[var(--text-primary)]"
-        )}
-      >
-        <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
-      </button>
-
-      <div className="flex items-center rounded-md bg-[var(--bg-card)] border border-[var(--border-strong)] overflow-hidden">
+      {/* Center group: Viewport overlays & grid */}
+      <div className="flex items-center gap-2 shrink-0">
         <button
           type="button"
-          onClick={() => onUpdateCanvas({ showGrid: !canvas.showGrid })}
-          title="Toggle Custom Grid Lines"
+          onClick={() => onUpdateCanvas({ showMinimap: !canvas.showMinimap })}
+          title="Toggle Canvas Viewport Minimap"
           className={cn(
-            "h-6 px-1.5 flex items-center justify-center cursor-pointer transition-colors",
-            canvas.showGrid
-              ? "bg-[#cf6613] text-white"
-              : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+            "h-7 px-2 rounded-lg border flex items-center justify-center cursor-pointer transition-colors",
+            canvas.showMinimap !== false
+              ? "bg-[#cf6613] text-white border-[#e07b27]"
+              : "bg-[var(--bg-card)] text-[var(--text-secondary)] border-[var(--border-strong)] hover:text-[var(--text-primary)]"
           )}
         >
-          <Grid className="w-3.5 h-3.5 shrink-0" />
+          <Compass className="w-3.5 h-3.5 shrink-0" />
         </button>
 
-        <div className="flex items-center gap-0.5 px-1 bg-[var(--bg-panel)] border-l border-[var(--border-strong)] text-[10px] font-mono">
-          <input
-            type="number"
-            min={1}
-            max={64}
-            value={gridCols}
-            onChange={(e) => {
-              const val = Math.max(1, Math.min(64, Number(e.target.value) || 1));
-              onUpdateCanvas({ showGrid: true, gridCols: val });
-            }}
-            className="w-6 text-center bg-[var(--bg-card)] border border-[var(--border-color)] rounded text-[9px] text-[var(--text-primary)] outline-none focus:border-amber-400"
-            title="Grid Columns (Vertical Lines)"
-          />
-          <span className="text-[var(--text-muted)] text-[9px]">×</span>
-          <input
-            type="number"
-            min={1}
-            max={64}
-            value={gridRows}
-            onChange={(e) => {
-              const val = Math.max(1, Math.min(64, Number(e.target.value) || 1));
-              onUpdateCanvas({ showGrid: true, gridRows: val });
-            }}
-            className="w-6 text-center bg-[var(--bg-card)] border border-[var(--border-color)] rounded text-[9px] text-[var(--text-primary)] outline-none focus:border-amber-400"
-            title="Grid Rows (Horizontal Lines)"
-          />
-        </div>
-
-        <select
-          value={`${gridCols}x${gridRows}`}
-          onChange={(e) => {
-            const [c, r] = e.target.value.split("x").map(Number);
-            if (c && r) {
-              onUpdateCanvas({ showGrid: true, gridCols: c, gridRows: r });
-            }
-          }}
-          className="h-6 px-1 bg-[var(--bg-panel)] border-l border-[var(--border-color)] text-[10px] font-mono text-[var(--text-muted)] hover:text-[var(--text-primary)] outline-none cursor-pointer"
-          title="Select Grid Preset"
+        <button
+          type="button"
+          onClick={() => onUpdateCanvas({ showRulers: !canvas.showRulers })}
+          title="Toggle Dynamic Photoshop/Corel Style Rulers"
+          className={cn(
+            "h-7 px-2 rounded-lg border flex items-center justify-center cursor-pointer transition-colors",
+            canvas.showRulers
+              ? "bg-[#cf6613] text-white border-[#e07b27]"
+              : "bg-[var(--bg-card)] text-[var(--text-secondary)] border-[var(--border-strong)] hover:text-[var(--text-primary)]"
+          )}
         >
-          {GRID_PRESETS.map((p) => (
-            <option key={p.label} value={`${p.cols}x${p.rows}`}>
-              {p.label}
-            </option>
-          ))}
-        </select>
+          <Ruler className="w-3.5 h-3.5 shrink-0" />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onUpdateCanvas({ showGuides: !canvas.showGuides })}
+          title="Toggle TikTok Safe Zone Guides"
+          className={cn(
+            "h-7 px-2 rounded-lg border flex items-center justify-center cursor-pointer transition-colors",
+            canvas.showGuides
+              ? "bg-[#cf6613] text-white border-[#e07b27]"
+              : "bg-[var(--bg-card)] text-[var(--text-secondary)] border-[var(--border-strong)] hover:text-[var(--text-primary)]"
+          )}
+        >
+          <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
+        </button>
+
+        <div className="flex items-center h-7 rounded-lg bg-[var(--bg-card)] border border-[var(--border-strong)] overflow-hidden">
+          <button
+            type="button"
+            onClick={() => onUpdateCanvas({ showGrid: !canvas.showGrid })}
+            title="Toggle Custom Grid Lines"
+            className={cn(
+              "h-full px-2 flex items-center justify-center cursor-pointer transition-colors",
+              canvas.showGrid
+                ? "bg-[#cf6613] text-white"
+                : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+            )}
+          >
+            <Grid className="w-3.5 h-3.5 shrink-0" />
+          </button>
+
+          <div className="flex items-center gap-1 px-1.5 h-full bg-[var(--bg-panel)] border-l border-[var(--border-strong)] text-[10px] font-mono">
+            <input
+              type="number"
+              min={1}
+              max={64}
+              value={gridCols}
+              onChange={(e) => {
+                const val = Math.max(1, Math.min(64, Number(e.target.value) || 1));
+                onUpdateCanvas({ showGrid: true, gridCols: val });
+              }}
+              className="w-6 text-center bg-[var(--bg-card)] border border-[var(--border-color)] rounded text-[9px] text-[var(--text-primary)] outline-none focus:border-amber-400"
+              title="Grid Columns (Vertical Lines)"
+            />
+            <span className="text-[var(--text-muted)] text-[9px]">×</span>
+            <input
+              type="number"
+              min={1}
+              max={64}
+              value={gridRows}
+              onChange={(e) => {
+                const val = Math.max(1, Math.min(64, Number(e.target.value) || 1));
+                onUpdateCanvas({ showGrid: true, gridRows: val });
+              }}
+              className="w-6 text-center bg-[var(--bg-card)] border border-[var(--border-color)] rounded text-[9px] text-[var(--text-primary)] outline-none focus:border-amber-400"
+              title="Grid Rows (Horizontal Lines)"
+            />
+          </div>
+
+          <select
+            value={`${gridCols}x${gridRows}`}
+            onChange={(e) => {
+              const [c, r] = e.target.value.split("x").map(Number);
+              if (c && r) {
+                onUpdateCanvas({ showGrid: true, gridCols: c, gridRows: r });
+              }
+            }}
+            className="h-full px-1.5 bg-[var(--bg-panel)] border-l border-[var(--border-color)] text-[10px] font-mono text-[var(--text-muted)] hover:text-[var(--text-primary)] outline-none cursor-pointer"
+            title="Select Grid Preset"
+          >
+            {GRID_PRESETS.map((p) => (
+              <option key={p.label} value={`${p.cols}x${p.rows}`}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
-      <button
-        type="button"
-        onClick={() => onUpdateCanvas({ loop: !canvas.loop })}
-        title="Toggle Playback Loop"
-        className={cn(
-          "h-6 px-1.5 rounded-md border flex items-center justify-center text-[10px] cursor-pointer transition-colors",
-          canvas.loop
-            ? "bg-[#cf6613] text-white border-[#e07b27]"
-            : "bg-[var(--bg-card)] text-[var(--text-secondary)] border-[var(--border-strong)] hover:text-[var(--text-primary)]"
-        )}
-      >
-        <Repeat className="w-3 h-3" />
-      </button>
+      {/* Right group: Loop & Fullscreen */}
+      <div className="flex items-center gap-2 shrink-0">
+        <button
+          type="button"
+          onClick={() => onUpdateCanvas({ loop: !canvas.loop })}
+          title="Toggle Playback Loop"
+          className={cn(
+            "h-7 px-2 rounded-lg border flex items-center justify-center text-[10px] cursor-pointer transition-colors",
+            canvas.loop
+              ? "bg-[#cf6613] text-white border-[#e07b27]"
+              : "bg-[var(--bg-card)] text-[var(--text-secondary)] border-[var(--border-strong)] hover:text-[var(--text-primary)]"
+          )}
+        >
+          <Repeat className="w-3.5 h-3.5" />
+        </button>
 
-      <button
-        type="button"
-        onClick={onRequestFullscreen}
-        title="Fullscreen Preview"
-        className="h-6 px-1.5 rounded-md bg-[var(--bg-card)] border border-[var(--border-strong)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex items-center justify-center cursor-pointer transition-colors"
-      >
-        <Maximize2 className="w-3 h-3" />
-      </button>
+        <button
+          type="button"
+          onClick={onRequestFullscreen}
+          title="Fullscreen Preview"
+          className="h-7 px-2 rounded-lg bg-[var(--bg-card)] border border-[var(--border-strong)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex items-center justify-center cursor-pointer transition-colors"
+        >
+          <Maximize2 className="w-3.5 h-3.5" />
+        </button>
       </div>
     </div>
   </div>

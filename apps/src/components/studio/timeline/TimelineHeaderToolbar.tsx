@@ -1,7 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
 import {
-  Play,
-  Pause,
   ChevronLeft,
   ChevronRight,
   ChevronUp,
@@ -70,6 +68,7 @@ export interface TimelineHeaderToolbarProps {
   onExport: () => void;
   onShare?: () => void;
   onZoomChange: (zoom: number) => void;
+  onMotionClick?: () => void;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
 }
@@ -107,6 +106,7 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
   onExport,
   onShare,
   onZoomChange,
+  onMotionClick,
   isCollapsed = false,
   onToggleCollapse,
 }) => {
@@ -224,14 +224,19 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
           <button
             type="button"
             onClick={onTogglePlay}
+            data-testid="timeline-play-toggle"
+            data-state={isPlaying ? "playing" : "paused"}
             title={isPlaying ? "Pause (Space)" : "Play Video (Space)"}
             className="w-7 h-7 rounded-full bg-[#cf6613] hover:bg-[#b8580f] text-white flex items-center justify-center transition-transform hover:scale-105 active:scale-95 shadow-md shadow-orange-950/40 cursor-pointer shrink-0"
           >
-            {isPlaying ? (
-              <Pause className="w-3.5 h-3.5 fill-current" />
-            ) : (
-              <Play className="w-3.5 h-3.5 fill-current translate-x-0.5" />
-            )}
+            <span
+              data-testid="timeline-play-shape"
+              aria-hidden="true"
+              className={cn(
+                "bg-current transition-all duration-150",
+                isPlaying ? "w-3 h-3 rounded-full" : "w-2.5 h-2.5 rounded-[2px]"
+              )}
+            />
           </button>
 
           <button
@@ -246,9 +251,10 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
 
         {/* Timecode Badge */}
         <div
+          data-testid="timeline-timecode-badge"
           className={cn(
-            "h-7 rounded-xl bg-[var(--bg-card)] border border-[var(--border-color)] flex items-center gap-1 font-mono shrink-0",
-            isCompact ? "px-1.5 text-[9.5px]" : "px-2 text-[10px]"
+            "h-7 rounded-full bg-[var(--bg-card)] border border-[var(--border-color)] flex items-center gap-1 font-mono shrink-0",
+            isCompact ? "px-2 text-[9.5px]" : "px-2.5 text-[10px]"
           )}
         >
           {isWide && <span className="text-[var(--text-muted)] text-[9px]">FRAME</span>}
@@ -270,9 +276,10 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
         </div>
 
         {/* Ratio Dropdown (NO chevron arrow, fully clickable) */}
-        <div ref={ratioRef} className="relative shrink-0 w-8.5 h-8">
+        <div ref={ratioRef} className="relative shrink-0 w-9 h-9">
           <button
             type="button"
+            data-testid="timeline-ratio-btn"
             onClick={() => {
               setIsRatioOpen((v) => !v);
               setIsSpeedOpen(false);
@@ -280,10 +287,10 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
             }}
             title="Video Aspect Ratio"
             className={cn(
-              "w-full h-full flex flex-col items-center justify-center rounded-lg border transition-all cursor-pointer group text-center select-none p-0.5",
+              "w-full h-full flex flex-col items-center justify-center rounded-full border transition-all cursor-pointer group text-center select-none p-0.5",
               isRatioOpen
                 ? "bg-[var(--bg-hover)] border-amber-400/80 text-amber-400 shadow-sm shadow-amber-500/10"
-                : "bg-[var(--bg-card)] border-[var(--border-color)] text-[var(--text-secondary)] hover:text-white hover:bg-[var(--bg-hover)]"
+                : "bg-[var(--bg-card)] border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
             )}
           >
             <LayoutTemplate className="w-3 h-3 text-amber-400 transition-colors" />
@@ -331,9 +338,10 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
         </div>
 
         {/* Speed Dropdown (NO chevron arrow, fully clickable) */}
-        <div ref={speedRef} className="relative shrink-0 w-8.5 h-8">
+        <div ref={speedRef} className="relative shrink-0 w-9 h-9">
           <button
             type="button"
+            data-testid="timeline-speed-btn"
             onClick={() => {
               setIsSpeedOpen((v) => !v);
               setIsRatioOpen(false);
@@ -341,10 +349,10 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
             }}
             title="Playback Speed"
             className={cn(
-              "w-full h-full flex flex-col items-center justify-center rounded-lg border transition-all cursor-pointer group text-center select-none p-0.5",
+              "w-full h-full flex flex-col items-center justify-center rounded-full border transition-all cursor-pointer group text-center select-none p-0.5",
               isSpeedOpen
                 ? "bg-[var(--bg-hover)] border-amber-400/80 text-amber-400 shadow-sm shadow-amber-500/10"
-                : "bg-[var(--bg-card)] border-[var(--border-color)] text-[var(--text-secondary)] hover:text-white hover:bg-[var(--bg-hover)]"
+                : "bg-[var(--bg-card)] border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
             )}
           >
             <Gauge className="w-3 h-3 text-amber-400 transition-colors" />
@@ -382,9 +390,10 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
         </div>
 
         {/* Frame Rate (FPS) Dropdown (NO chevron arrow, fully clickable) */}
-        <div ref={fpsRef} className="relative shrink-0 w-8.5 h-8">
+        <div ref={fpsRef} className="relative shrink-0 w-9 h-9">
           <button
             type="button"
+            data-testid="timeline-fps-btn"
             onClick={() => {
               setIsFpsOpen((v) => !v);
               setIsRatioOpen(false);
@@ -392,10 +401,10 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
             }}
             title="Composition Frame Rate (FPS)"
             className={cn(
-              "w-full h-full flex flex-col items-center justify-center rounded-lg border transition-all cursor-pointer group text-center select-none p-0.5",
+              "w-full h-full flex flex-col items-center justify-center rounded-full border transition-all cursor-pointer group text-center select-none p-0.5",
               isFpsOpen
                 ? "bg-[var(--bg-hover)] border-amber-400/80 text-amber-400 shadow-sm shadow-amber-500/10"
-                : "bg-[var(--bg-card)] border-[var(--border-color)] text-[var(--text-secondary)] hover:text-white hover:bg-[var(--bg-hover)]"
+                : "bg-[var(--bg-card)] border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
             )}
           >
             <Film className="w-3 h-3 text-amber-400 transition-colors" />
@@ -431,6 +440,29 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
             </div>
           )}
         </div>
+
+        {/* Circular M Logo Button beside FPS */}
+        <button
+          type="button"
+          data-testid="timeline-motion-logo-btn"
+          onClick={onMotionClick}
+          title="Motion (M)"
+          aria-label="Motion Logo"
+          className="w-9 h-9 rounded-full border border-[var(--border-color)] bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex items-center justify-center transition-all cursor-pointer shrink-0 select-none"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            className="w-4 h-4 text-amber-400"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M4 19V5l8 9 8-9v14" />
+          </svg>
+        </button>
       </div>
 
       <div className="w-px h-5 bg-[var(--border-color)] mx-0.5 shrink-0" />
