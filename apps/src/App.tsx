@@ -2,6 +2,7 @@ import { BrowserRouter, HashRouter, Routes, Route, Navigate } from "react-router
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
 import { ErrorBoundary } from "./components/common/ErrorBoundary";
+import { CenterNoticeModal } from "./components/common/CenterNoticeModal";
 import { AppLayout } from "./components/layout/AppLayout";
 import { useTheme } from "./lib/theme";
 import { DEFAULT_MODELS } from "./components/settings/constants";
@@ -121,6 +122,7 @@ export default function App() {
           duration: 2000,
         }}
       />
+      <CenterNoticeModal />
       <ErrorBoundary fullScreen fallbackTitle="Workstation encountered an unexpected error">
         <RouterComponent>
           <Routes>

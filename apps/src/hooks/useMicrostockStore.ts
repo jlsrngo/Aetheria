@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react";
 import { apiFetch } from "../lib/api";
 import {
   ADOBE_MVP_PRESETS,
+  getMissingMicrostockGateItems,
   isMicrostockChecklistComplete,
 } from "../lib/microstockUtils";
 import type {
@@ -120,12 +121,24 @@ function mapBackendManifestToFrontend(
   };
 }
 
+export interface MicrostockRenderProgress {
+  renderId: string;
+  status: "preparing" | "rendering" | "preflight" | "completed" | "failed";
+  percent: number;
+  renderedFrames: number;
+  totalFrames: number;
+  phaseLabel: string;
+  outputPath?: string | null;
+  error?: string | null;
+}
+
 interface MicrostockStoreState {
   manifest: MicrostockManifest;
   activeCodec: "h264" | "prores";
   isPopoverOpen: boolean;
   isBusy: boolean;
   lastPackage: MicrostockPackageResult | null;
+  renderProgress: MicrostockRenderProgress | null;
 }
 
 let state: MicrostockStoreState = {
@@ -134,7 +147,19 @@ let state: MicrostockStoreState = {
   isPopoverOpen: false,
   isBusy: false,
   lastPackage: null,
+  renderProgress: null,
 };
+
+let manifestMutationSeq = 0;
+let manifestWriteQueue: Promise<void> = Promise.resolve();
+let activeRenderPollTimer: ReturnType<typeof setInterval> | null = null;
+
+function stopRenderProgressPolling() {
+  if (activeRenderPollTimer !== null) {
+    clearInterval(activeRenderPollTimer);
+    activeRenderPollTimer = null;
+  }
+}
 
 const listeners = new Set<() => void>();
 
@@ -178,11 +203,12 @@ export const microstockActions = {
   },
 
   async syncManifest(): Promise<void> {
+    const startSeq = manifestMutationSeq;
     try {
       const res = await apiFetch(`${API_BASE}/manifest`);
-      if (res.ok) {
+      if (res.ok && startSeq === manifestMutationSeq) {
         const json = (await res.json()) as { data?: BackendManifestDto };
-        if (json.data) {
+        if (json.data && startSeq === manifestMutationSeq) {
           state = {
             ...state,
             manifest: mapBackendManifestToFrontend(json.data, state.manifest),
@@ -284,7 +310,39 @@ export const microstockActions = {
     }
   },
 
+  clearRenderProgress() {
+    if (!state.renderProgress) return;
+    state = { ...state, renderProgress: null };
+    emit();
+  },
+
+  async setAiDeclared(val: boolean): Promise<void> {
+    await this.updateManifest({
+      provenance: {
+        ...state.manifest.provenance,
+        aiDeclared: val,
+      },
+    });
+  },
+
+  async updateChecklistField(
+    key: keyof MicrostockChecklist,
+    value: boolean
+  ): Promise<void> {
+    await this.updateManifest({
+      provenance: {
+        ...state.manifest.provenance,
+        checklist: {
+          ...state.manifest.provenance.checklist,
+          [key]: value,
+        },
+      },
+    });
+  },
+
   async updateManifest(partial: Partial<MicrostockManifest>): Promise<void> {
+    manifestMutationSeq += 1;
+    const mySeq = manifestMutationSeq;
     const nextManifest: MicrostockManifest = {
       ...state.manifest,
       ...partial,
@@ -302,45 +360,51 @@ export const microstockActions = {
     emit();
 
     const cl = nextManifest.provenance.checklist;
-    try {
-      const res = await apiFetch(`${API_BASE}/manifest`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          enabled: nextManifest.enabled,
-          preset: nextManifest.presetId,
-          codec: state.activeCodec,
-          isLoop: nextManifest.isLoop,
-          aiDeclaredPresent: true,
-          aiDeclared: nextManifest.provenance.aiDeclared,
-          checklist: {
-            noLogosOrBrands: cl.noLogosWatermarksTextOrAudio,
-            noArtistOrIpNames: cl.notCopiedFromExternalReference,
-            noIdentifiablePeopleOrProperty: cl.notUpscaled,
-            noThirdPartyFontsOrGraphicsWithoutLicense:
-              cl.ownsFullRightsAndLicenses,
-          },
-          metadata: {
-            title: nextManifest.metadata.title,
-            keywords: nextManifest.metadata.keywords,
-            category:
-              nextManifest.metadata.categoryName || "Graphic Resources",
-          },
-        }),
-      });
-      if (res.ok) {
-        const json = (await res.json()) as { data?: BackendManifestDto };
-        if (json.data) {
-          state = {
-            ...state,
-            manifest: mapBackendManifestToFrontend(json.data, state.manifest),
-          };
-          emit();
+    const payloadBody = JSON.stringify({
+      enabled: nextManifest.enabled,
+      preset: nextManifest.presetId,
+      codec: state.activeCodec,
+      isLoop: nextManifest.isLoop,
+      aiDeclaredPresent: true,
+      aiDeclared: nextManifest.provenance.aiDeclared,
+      checklist: {
+        noLogosOrBrands: cl.noLogosWatermarksTextOrAudio,
+        noArtistOrIpNames: cl.notCopiedFromExternalReference,
+        noIdentifiablePeopleOrProperty: cl.notUpscaled,
+        noThirdPartyFontsOrGraphicsWithoutLicense:
+          cl.ownsFullRightsAndLicenses,
+      },
+      metadata: {
+        title: nextManifest.metadata.title,
+        keywords: nextManifest.metadata.keywords,
+        category:
+          nextManifest.metadata.categoryName || "Graphic Resources",
+      },
+    });
+
+    const persistTask = manifestWriteQueue.then(async () => {
+      try {
+        const res = await apiFetch(`${API_BASE}/manifest`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: payloadBody,
+        });
+        if (res.ok && mySeq === manifestMutationSeq) {
+          const json = (await res.json()) as { data?: BackendManifestDto };
+          if (json.data && mySeq === manifestMutationSeq) {
+            state = {
+              ...state,
+              manifest: mapBackendManifestToFrontend(json.data, state.manifest),
+            };
+            emit();
+          }
         }
+      } catch {
+        // Keep optimistic state
       }
-    } catch {
-      // Keep optimistic state
-    }
+    });
+    manifestWriteQueue = persistTask;
+    await persistTask;
   },
 
   async runRenderAndPreflight(input: {
@@ -352,10 +416,16 @@ export const microstockActions = {
     codec?: "h264" | "prores";
   }): Promise<{
     ok: boolean;
+    title: string;
     message: string;
+    details?: string[];
     preflight?: PreflightReport;
   }> {
     const { manifest } = state;
+    const missingItems = getMissingMicrostockGateItems(
+      manifest.provenance.aiDeclared,
+      manifest.provenance.checklist
+    );
     if (
       manifest.provenance.aiDeclared === null ||
       !isMicrostockChecklistComplete(manifest.provenance.checklist)
@@ -364,34 +434,135 @@ export const microstockActions = {
       emit();
       return {
         ok: false,
+        title: "Compliance Gate Incomplete",
         message:
-          "Complete Adobe Stock AI Disclosure (Yes/No) and all 4 compliance checks in the M popover before rendering.",
+          "Complete Generative AI disclosure (Yes/No) and confirm all 4 Adobe Stock contributor checks in section 2 before rendering.",
+        details: missingItems,
       };
     }
 
+    // Ensure pending manifest checkbox/metadata writes are flushed before backend reads manifest.json
+    await manifestWriteQueue;
+
     const codec = input.codec ?? state.activeCodec;
     const totalFrames = Math.max(15, Math.round(input.durationSec * input.fps));
-    const localJobId = `microstock-${Date.now().toString(36)}`;
+    const renderId = `msrnd_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 
     studioActions.upsertRenderJob({
-      renderId: localJobId,
+      renderId,
       compositionId: `${input.compositionId} [Adobe Stock]`,
       status: "rendering",
-      percent: 10,
-      renderedFrames: Math.round(totalFrames * 0.1),
+      percent: 0,
+      renderedFrames: 0,
       totalFrames,
       outputPath: "output/microstock/staging/",
       createdAt: Date.now(),
     });
 
-    state = { ...state, isBusy: true };
+    state = {
+      ...state,
+      isBusy: true,
+      renderProgress: {
+        renderId,
+        status: "preparing",
+        percent: 0,
+        renderedFrames: 0,
+        totalFrames,
+        phaseLabel: "Preparing headless render...",
+      },
+    };
     emit();
+
+    stopRenderProgressPolling();
+    let pollInFlight = false;
+    let pollStopped = false;
+    activeRenderPollTimer = setInterval(() => {
+      if (pollInFlight || pollStopped) return;
+      pollInFlight = true;
+      void (async () => {
+        try {
+          const progRes = await apiFetch(
+            `/api/render-progress?renderId=${encodeURIComponent(renderId)}`
+          );
+          if (!progRes.ok || pollStopped) return;
+          const prog = (await progRes.json()) as {
+            status?: string;
+            percent?: number;
+            renderedFrames?: number;
+            totalFrames?: number;
+            outputPath?: string | null;
+            error?: string | null;
+          };
+          if (pollStopped || prog.status === "not_found") return;
+
+          const framesDone =
+            typeof prog.renderedFrames === "number"
+              ? prog.renderedFrames
+              : state.renderProgress?.renderedFrames ?? 0;
+          const framesTotal =
+            typeof prog.totalFrames === "number" && prog.totalFrames > 0
+              ? prog.totalFrames
+              : totalFrames;
+          const rawPct =
+            typeof prog.percent === "number" ? prog.percent : 0;
+          const inPreflightPhase =
+            prog.status === "completed" ||
+            (framesTotal > 0 && framesDone >= framesTotal);
+          const nextStatus: MicrostockRenderProgress["status"] =
+            prog.status === "failed"
+              ? "failed"
+              : inPreflightPhase
+                ? "preflight"
+                : "rendering";
+          const nextPct = inPreflightPhase
+            ? Math.min(99, Math.max(rawPct, 95))
+            : Math.min(95, Math.max(0, rawPct));
+          const phaseLabel =
+            nextStatus === "failed"
+              ? prog.error || "Render failed"
+              : inPreflightPhase
+                ? "Running FFmpeg & SSIM preflight..."
+                : `Rendering frame ${framesDone}/${framesTotal}...`;
+
+          state = {
+            ...state,
+            renderProgress: {
+              renderId,
+              status: nextStatus,
+              percent: nextPct,
+              renderedFrames: framesDone,
+              totalFrames: framesTotal,
+              phaseLabel,
+              outputPath: prog.outputPath,
+              error: prog.error,
+            },
+          };
+          emit();
+
+          studioActions.upsertRenderJob({
+            renderId,
+            compositionId: `${input.compositionId} [Adobe Stock]`,
+            status: nextStatus === "failed" ? "error" : "rendering",
+            percent: nextPct,
+            renderedFrames: framesDone,
+            totalFrames: framesTotal,
+            outputPath: prog.outputPath || "output/microstock/staging/",
+            createdAt: Date.now(),
+          });
+        } catch {
+          // Ignore transient polling errors while render is running
+        } finally {
+          pollInFlight = false;
+        }
+      })();
+    }, 300);
 
     try {
       const res = await apiFetch(`${API_BASE}/render`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          renderId,
           presetId: manifest.presetId,
           codec,
           durationSec: Math.min(60, Math.max(5, input.durationSec)),
@@ -400,6 +571,9 @@ export const microstockActions = {
           height: input.height,
         }),
       });
+
+      pollStopped = true;
+      stopRenderProgressPolling();
 
       const json = (await res.json()) as {
         message?: string;
@@ -418,6 +592,11 @@ export const microstockActions = {
           checkedAt: Date.now(),
           items: failItems,
         };
+        const errMsg =
+          failItems[0]?.message ||
+          json.message ||
+          json.error ||
+          "Adobe Stock pre-render gate rejected the composition.";
         state = {
           ...state,
           isBusy: false,
@@ -426,10 +605,19 @@ export const microstockActions = {
             ...state.manifest,
             lastPreflight: failReport,
           },
+          renderProgress: {
+            renderId,
+            status: "failed",
+            percent: state.renderProgress?.percent ?? 0,
+            renderedFrames: state.renderProgress?.renderedFrames ?? 0,
+            totalFrames,
+            phaseLabel: "Render blocked by Adobe Stock preflight",
+            error: errMsg,
+          },
         };
         emit();
         studioActions.upsertRenderJob({
-          renderId: localJobId,
+          renderId,
           compositionId: `${input.compositionId} [Adobe Stock]`,
           status: "error",
           percent: 100,
@@ -440,16 +628,15 @@ export const microstockActions = {
         });
         return {
           ok: false,
-          message:
-            failItems[0]?.message ||
-            json.message ||
-            json.error ||
-            "Adobe Stock pre-render gate rejected the composition.",
+          title: "Adobe Stock Render Blocked",
+          message: errMsg,
+          details: failItems.map((item) => `[${item.code}] ${item.message}`),
           preflight: failReport,
         };
       }
 
       const { render, preflight } = json.data;
+      const preflightFailed = preflight.status === "fail";
       state = {
         ...state,
         isBusy: false,
@@ -458,13 +645,28 @@ export const microstockActions = {
           lastRender: render,
           lastPreflight: preflight,
         },
+        renderProgress: {
+          renderId,
+          status: preflightFailed ? "failed" : "completed",
+          percent: 100,
+          renderedFrames: totalFrames,
+          totalFrames,
+          phaseLabel: preflightFailed
+            ? "Preflight check failed"
+            : "Render & preflight complete",
+          outputPath: preflight.promotedPath || render.stagingPath,
+          error: preflightFailed
+            ? preflight.items.find((i) => i.severity === "fail")?.message ||
+              "Preflight QC failed"
+            : null,
+        },
       };
       emit();
 
       studioActions.upsertRenderJob({
-        renderId: localJobId,
+        renderId,
         compositionId: `${input.compositionId} [Adobe Stock]`,
-        status: preflight.status === "fail" ? "error" : "done",
+        status: preflightFailed ? "error" : "done",
         percent: 100,
         renderedFrames: totalFrames,
         totalFrames,
@@ -472,29 +674,58 @@ export const microstockActions = {
         createdAt: Date.now(),
       });
 
+      const issueDetails = preflight.items
+        .filter((i) => i.severity === "fail" || i.severity === "warn")
+        .map((i) => `[${i.code}] ${i.message}`);
+
       return {
-        ok: preflight.status !== "fail",
-        message:
-          preflight.status === "fail"
-            ? `Preflight failed (${preflight.items[0]?.code || "QC"})`
-            : `Adobe Stock render ready (${preflight.promotedPath || render.stagingPath})`,
+        ok: !preflightFailed,
+        title: preflightFailed
+          ? "Post-Render Preflight Failed"
+          : "Adobe Stock Render Complete",
+        message: preflightFailed
+          ? `Preflight rejected rendered clip (${preflight.items[0]?.code || "QC"}).`
+          : `Rendered & verified cleanly:\n${preflight.promotedPath || render.stagingPath}`,
+        details: issueDetails.length > 0 ? issueDetails : undefined,
         preflight,
       };
     } catch (err) {
-      state = { ...state, isBusy: false };
+      pollStopped = true;
+      stopRenderProgressPolling();
+      const errMsg = `Microstock render error: ${String(err)}`;
+      state = {
+        ...state,
+        isBusy: false,
+        renderProgress: {
+          renderId,
+          status: "failed",
+          percent: state.renderProgress?.percent ?? 0,
+          renderedFrames: state.renderProgress?.renderedFrames ?? 0,
+          totalFrames,
+          phaseLabel: "Render request failed",
+          error: errMsg,
+        },
+      };
       emit();
       return {
         ok: false,
-        message: `Microstock render error: ${String(err)}`,
+        title: "Render Failed",
+        message: errMsg,
       };
+    } finally {
+      pollStopped = true;
+      stopRenderProgressPolling();
     }
   },
 
   async buildPackage(slug?: string): Promise<{
     ok: boolean;
+    title: string;
     message: string;
+    details?: string[];
     result?: MicrostockPackageResult;
   }> {
+    await manifestWriteQueue;
     state = { ...state, isBusy: true };
     emit();
     try {
@@ -518,15 +749,18 @@ export const microstockActions = {
         data?: MicrostockPackageResult;
       };
       if (!res.ok || !json.data) {
+        const msg =
+          json.items?.[0]?.message ||
+          json.message ||
+          json.error ||
+          "Failed to build Adobe Stock package.";
         state = { ...state, isBusy: false, isPopoverOpen: true };
         emit();
         return {
           ok: false,
-          message:
-            json.items?.[0]?.message ||
-            json.message ||
-            json.error ||
-            "Failed to build Adobe Stock package.",
+          title: "Adobe Stock Packaging Failed",
+          message: msg,
+          details: json.items?.map((i) => `[${i.code}] ${i.message}`),
         };
       }
       state = {
@@ -537,7 +771,12 @@ export const microstockActions = {
       emit();
       return {
         ok: true,
-        message: `Adobe Stock package created: ${json.data.packageDir}`,
+        title: "Adobe Stock Package Ready",
+        message: `Created upload package with video + metadata.csv:\n${json.data.packageDir}`,
+        details: [
+          `Video: ${json.data.videoFile}`,
+          `CSV: ${json.data.csvPath}`,
+        ],
         result: json.data,
       };
     } catch (err) {
@@ -545,6 +784,7 @@ export const microstockActions = {
       emit();
       return {
         ok: false,
+        title: "Package Error",
         message: `Package error: ${String(err)}`,
       };
     }

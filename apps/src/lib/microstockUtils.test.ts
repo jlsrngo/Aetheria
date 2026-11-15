@@ -3,6 +3,7 @@ import {
   ADOBE_ALLOWED_CODECS,
   ADOBE_MVP_PRESETS,
   buildAdobeCsvContent,
+  getMissingMicrostockGateItems,
   groupPreflightItems,
   validateMicrostockSubmission,
 } from "./microstockUtils";
@@ -122,5 +123,24 @@ describe("microstockUtils", () => {
     expect(grouped.fails).toHaveLength(1);
     expect(grouped.warns).toHaveLength(1);
     expect(grouped.infos).toHaveLength(0);
+  });
+
+  it("allows everyday color words like red and enumerates missing gate requirements clearly", () => {
+    const issues = validateMicrostockSubmission({
+      filename: "christmas_loop.mp4",
+      title: "Festive Red and Gold Christmas Ribbons Background",
+      keywords: ["christmas", "red", "gold", "holiday", "loop"],
+      aiDeclared: false,
+      checklist: COMPLETE_CHECKLIST,
+    });
+    expect(issues).toEqual([]);
+
+    const missing = getMissingMicrostockGateItems(null, {
+      ...COMPLETE_CHECKLIST,
+      notUpscaled: false,
+    });
+    expect(missing).toHaveLength(2);
+    expect(missing[0]).toContain("Generative AI disclosure");
+    expect(missing[1]).toContain("Rendered natively");
   });
 });

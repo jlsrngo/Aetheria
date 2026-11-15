@@ -111,7 +111,6 @@ const BANNED_BRAND_TERMS = [
   "samsung",
   "canon",
   "nikon",
-  "red",
   "arri",
 ];
 
@@ -122,6 +121,29 @@ export function isMicrostockChecklistComplete(checklist: MicrostockChecklist): b
     checklist.ownsFullRightsAndLicenses &&
     checklist.notCopiedFromExternalReference
   );
+}
+
+export function getMissingMicrostockGateItems(
+  aiDeclared: boolean | null,
+  checklist: MicrostockChecklist
+): string[] {
+  const missing: string[] = [];
+  if (aiDeclared === null) {
+    missing.push("Select Generative AI disclosure: Yes (AI) or No (Code)");
+  }
+  if (!checklist.notUpscaled) {
+    missing.push("Confirm: Rendered natively at target resolution (never upscaled)");
+  }
+  if (!checklist.noLogosWatermarksTextOrAudio) {
+    missing.push("Confirm: No text overlays, watermarks, brand logos, or audio tracks");
+  }
+  if (!checklist.ownsFullRightsAndLicenses) {
+    missing.push("Confirm: Full commercial rights & SPDX licenses for all assets");
+  }
+  if (!checklist.notCopiedFromExternalReference) {
+    missing.push("Confirm: Original motion work (no external reference cloning)");
+  }
+  return missing;
 }
 
 export function parseKeywordsInput(raw: string): string[] {

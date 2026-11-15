@@ -13,9 +13,9 @@ import {
   ShieldCheck,
   X,
 } from "lucide-react";
-import { toast } from "sonner";
 import { useStudioStore } from "../../../hooks/useStudioStore";
 import { useMicrostockStore } from "../../../hooks/useMicrostockStore";
+import { centerNoticeActions } from "../../../hooks/useCenterNotice";
 import { cn } from "../../../lib/utils";
 import {
   ADOBE_ALLOWED_CODECS,
@@ -40,7 +40,8 @@ export function MicrostockPanel({
 }: MicrostockPanelProps) {
   const { activeComposition } = useStudioStore();
   const microstock = useMicrostockStore();
-  const { manifest, activeCodec, isBusy, lastPackage, actions } = microstock;
+  const { manifest, activeCodec, isBusy, lastPackage, renderProgress, actions } =
+    microstock;
 
   const [keywordsText, setKeywordsText] = useState<string>(
     manifest.metadata.keywords.join(", ")
@@ -55,24 +56,11 @@ export function MicrostockPanel({
   const aiDeclared = manifest.provenance.aiDeclared;
 
   const updateChecklistField = (key: keyof MicrostockChecklist, value: boolean) => {
-    void actions.updateManifest({
-      provenance: {
-        ...manifest.provenance,
-        checklist: {
-          ...checklist,
-          [key]: value,
-        },
-      },
-    });
+    void actions.updateChecklistField(key, value);
   };
 
   const setAiDeclared = (val: boolean) => {
-    void actions.updateManifest({
-      provenance: {
-        ...manifest.provenance,
-        aiDeclared: val,
-      },
-    });
+    void actions.setAiDeclared(val);
   };
 
   const handleTitleChange = (title: string) => {
@@ -127,15 +115,27 @@ export function MicrostockPanel({
         durationSec: activeComposition.duration,
       })
       .then((res) => {
-        if (res.ok) toast.success(res.message);
-        else toast.error(res.message);
+        centerNoticeActions.show({
+          severity: res.ok
+            ? "success"
+            : res.title === "Compliance Gate Incomplete"
+              ? "warning"
+              : "error",
+          title: res.title,
+          message: res.message,
+          details: res.details,
+        });
       });
   };
 
   const handleBuildPackage = () => {
     void actions.buildPackage().then((res) => {
-      if (res.ok) toast.success(res.message);
-      else toast.error(res.message);
+      centerNoticeActions.show({
+        severity: res.ok ? "success" : "error",
+        title: res.title,
+        message: res.message,
+        details: res.details,
+      });
     });
   };
 
@@ -433,6 +433,75 @@ export function MicrostockPanel({
               <FileSpreadsheet className="w-3 h-3" />
               <span>metadata.csv (Filename,Title,Keywords)</span>
             </div>
+          </div>
+        )}
+
+        {renderProgress && (
+          <div
+            data-testid="microstock-render-progress"
+            className={cn(
+              "p-2 rounded-[var(--radius-card)] bg-[var(--bg-card)] border space-y-1.5 text-[11px]",
+              renderProgress.status === "failed"
+                ? "border-rose-500/50"
+                : renderProgress.status === "completed"
+                  ? "border-[var(--border-strong)]"
+                  : "border-amber-500/40"
+            )}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-semibold text-[var(--text-primary)] flex items-center gap-1.5 min-w-0">
+                {renderProgress.status === "failed" ? (
+                  <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                ) : renderProgress.status === "completed" ? (
+                  <CheckCircle2 className="w-3.5 h-3.5 text-[var(--text-primary)] shrink-0" />
+                ) : (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400 shrink-0" />
+                )}
+                <span className="truncate">{renderProgress.phaseLabel}</span>
+              </span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span
+                  data-testid="microstock-render-progress-pct"
+                  className="font-mono text-[10px] text-[var(--text-secondary)]"
+                >
+                  {renderProgress.renderedFrames}/{renderProgress.totalFrames}f (
+                  {Math.round(renderProgress.percent)}%)
+                </span>
+                {!isBusy && (
+                  <button
+                    type="button"
+                    aria-label="Dismiss render progress"
+                    onClick={() => actions.clearRenderProgress()}
+                    className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="w-full h-2 rounded-[var(--radius-pill)] bg-[var(--bg-input)] overflow-hidden">
+              <div
+                data-testid="microstock-render-progress-bar"
+                className={cn(
+                  "h-full transition-all duration-200",
+                  renderProgress.status === "failed"
+                    ? "bg-rose-500"
+                    : renderProgress.status === "completed"
+                      ? "bg-[var(--text-primary)]"
+                      : "bg-amber-500"
+                )}
+                style={{
+                  width: `${Math.min(100, Math.max(0, renderProgress.percent))}%`,
+                }}
+              />
+            </div>
+
+            {renderProgress.outputPath && renderProgress.status === "completed" && (
+              <div className="text-[10px] font-mono text-[var(--text-secondary)] truncate">
+                {renderProgress.outputPath}
+              </div>
+            )}
           </div>
         )}
 

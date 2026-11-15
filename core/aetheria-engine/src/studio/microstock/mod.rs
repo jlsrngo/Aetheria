@@ -293,6 +293,20 @@ pub struct MicrostockRenderPayload {
     pub output_filename: Option<String>,
     pub reference_url: Option<String>,
     pub auto_preflight: Option<bool>,
+    pub render_id: Option<String>,
+}
+
+fn resolve_microstock_render_id(requested: Option<&str>) -> String {
+    requested
+        .map(str::trim)
+        .filter(|s| {
+            !s.is_empty()
+                && s.len() <= 64
+                && s.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        })
+        .map(String::from)
+        .unwrap_or_else(|| gen_id("msrnd"))
 }
 
 /// POST /api/studio/microstock/render
@@ -376,7 +390,7 @@ pub async fn handle_microstock_render(
         .map(String::from)
         .unwrap_or_else(|| build_compliant_filename(slug, &preset_id, &codec));
 
-    let render_id = gen_id("msrnd");
+    let render_id = resolve_microstock_render_id(payload.render_id.as_deref());
     let total_frames = ((duration_sec * (fps as f64)).round() as u32).max(1);
     {
         let mut jobs = get_render_jobs_store().write().unwrap_or_else(|e| e.into_inner());
@@ -612,5 +626,27 @@ pub async fn handle_microstock_package(
             )
                 .into_response()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_microstock_render_id, MicrostockRenderPayload};
+
+    #[test]
+    fn resolves_valid_caller_render_id_and_rejects_unsafe_ones() {
+        assert_eq!(
+            resolve_microstock_render_id(Some("  msrnd_test-123  ")),
+            "msrnd_test-123"
+        );
+        let fallback_empty = resolve_microstock_render_id(Some("   "));
+        assert!(fallback_empty.starts_with("msrnd_"));
+        let fallback_bad = resolve_microstock_render_id(Some("../bad/id"));
+        assert!(fallback_bad.starts_with("msrnd_"));
+        let parsed: MicrostockRenderPayload = serde_json::from_str(
+            r#"{"presetId":"1920x1080","fps":30,"renderId":"msrnd_custom_1"}"#,
+        )
+        .expect("payload deserialize");
+        assert_eq!(parsed.render_id.as_deref(), Some("msrnd_custom_1"));
     }
 }
