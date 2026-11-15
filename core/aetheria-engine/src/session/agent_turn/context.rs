@@ -198,6 +198,13 @@ pub fn assemble_system_prompt(workspace_dir: &str) -> String {
         sys_prompt.push_str(&plugin_rules);
     }
 
+    if let Some(ms_block) =
+        crate::studio::microstock::build_active_microstock_prompt_block(workspace_dir)
+    {
+        sys_prompt.push_str("\n\n");
+        sys_prompt.push_str(&ms_block);
+    }
+
     sys_prompt
 }
 

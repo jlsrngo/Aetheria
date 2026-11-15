@@ -25,6 +25,7 @@ pub mod film_static_server;
 pub mod gpu;
 pub mod html_renderer;
 pub mod media_stream;
+pub mod microstock;
 pub mod motion;
 pub mod motion_linter;
 pub mod native_canvas;
@@ -210,4 +211,29 @@ pub fn router() -> Router {
         )
         .route("/api/files/raw/*relpath", get(assets::handle_ws_asset))
         .route("/files/raw/*relpath", get(assets::handle_ws_asset))
+        // 10. Adobe Stock (Microstock) Locked Engine Mode, Preflight & CSV Packager
+        .route(
+            "/api/studio/microstock/profile",
+            get(microstock::handle_get_profile),
+        )
+        .route(
+            "/api/studio/microstock/manifest",
+            get(microstock::handle_get_manifest).post(microstock::handle_save_manifest),
+        )
+        .route(
+            "/api/studio/microstock/mode",
+            post(microstock::handle_toggle_mode),
+        )
+        .route(
+            "/api/studio/microstock/render",
+            post(microstock::handle_microstock_render),
+        )
+        .route(
+            "/api/studio/microstock/preflight",
+            post(microstock::handle_microstock_preflight),
+        )
+        .route(
+            "/api/studio/microstock/package",
+            post(microstock::handle_microstock_package),
+        )
 }
