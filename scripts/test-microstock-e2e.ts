@@ -261,6 +261,52 @@ async function main() {
     );
 
     // -------------------------------------------------------------------------
+    // F0b: Legacy /api/render-media with codec: "gif" (palettegen + paletteuse)
+    // -------------------------------------------------------------------------
+    const gifTrigger = await api("/api/render-media", {
+      method: "POST",
+      body: JSON.stringify({
+        compositionId: "BaselineGif",
+        outputName: "f0_baseline_gif",
+        ratio: "16:9",
+        codec: "gif",
+        inFrame: 0,
+        outFrame: 15,
+      }),
+    });
+    assert(gifTrigger.status === 200 && gifTrigger.json.renderId, "F0b GIF render trigger failed");
+    const gifRenderId = gifTrigger.json.renderId;
+    let gifDone: any = null;
+    const gifDeadline = Date.now() + 120000;
+    while (Date.now() < gifDeadline) {
+      const prog = await api(`/api/render-progress?renderId=${encodeURIComponent(gifRenderId)}`);
+      if (prog.json?.status === "done") {
+        gifDone = prog.json;
+        break;
+      }
+      if (prog.json?.status === "error") {
+        throw new Error(`F0b GIF render failed: ${prog.json?.error}`);
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    assert(
+      gifDone &&
+        typeof gifDone.outputPath === "string" &&
+        gifDone.outputPath.endsWith(".gif") &&
+        fs.existsSync(gifDone.outputPath),
+      `F0b GIF output file missing or not .gif: ${JSON.stringify(gifDone)}`
+    );
+    const gifBytes = fs.readFileSync(gifDone.outputPath);
+    const gifHeader = gifBytes.subarray(0, 6).toString("ascii");
+    assert(
+      gifHeader === "GIF89a" || gifHeader === "GIF87a",
+      `Expected true GIF header (GIF89a/GIF87a), got: ${JSON.stringify(gifHeader)}`
+    );
+    console.log(
+      `[PASS] F0b Legacy GIF /api/render-media: ${gifBytes.length} bytes, header=${gifHeader} (${gifDone.outputPath})`
+    );
+
+    // -------------------------------------------------------------------------
     // F1: Profile & Manifest initialization
     // -------------------------------------------------------------------------
     const profRes = await api("/api/studio/microstock/profile");

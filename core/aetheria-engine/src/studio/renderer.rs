@@ -35,8 +35,22 @@ pub async fn handle_render_media(
     let output_dir = workspace.join("output");
     let _ = std::fs::create_dir_all(&output_dir);
 
+    let codec = payload.codec.unwrap_or_else(|| "h264".to_string());
+    let default_ext = match codec.to_ascii_lowercase().as_str() {
+        "gif" => "gif",
+        "vp9" => "webm",
+        "prores" => "mov",
+        _ => "mp4",
+    };
+
     let output_file = if let Some(custom) = payload.output_name.filter(|s| !s.trim().is_empty()) {
-        let candidate = output_dir.join(custom.trim());
+        let trimmed = custom.trim();
+        let with_ext = if PathBuf::from(trimmed).extension().is_some() {
+            trimmed.to_string()
+        } else {
+            format!("{}.{}", trimmed, default_ext)
+        };
+        let candidate = output_dir.join(with_ext);
         if !crate::paths::contains_path(&output_dir, &candidate) {
             return (
                 axum::http::StatusCode::BAD_REQUEST,
@@ -49,7 +63,7 @@ pub async fn handle_render_media(
         }
         candidate
     } else {
-        output_dir.join(format!("nexus-{}.mp4", now_ms()))
+        output_dir.join(format!("nexus-{}.{}", now_ms(), default_ext))
     };
 
     let output_file_str = output_file.to_string_lossy().to_string();
@@ -57,7 +71,6 @@ pub async fn handle_render_media(
         (Some(s), Some(e)) if e >= s => Some((s, e)),
         _ => None,
     };
-    let codec = payload.codec.unwrap_or_else(|| "h264".to_string());
 
     let job = RenderJob {
         render_id: render_id.clone(),

@@ -261,14 +261,21 @@ where
         ),
     );
 
+    let out_ext = params
+        .output_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .filter(|e| !e.is_empty())
+        .unwrap_or("mp4");
     let tmp_output = params.output_path.with_file_name(format!(
-        ".tmp-{}-{}.mp4",
+        ".tmp-{}-{}.{}",
         params
             .output_path
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("render"),
-        now_ms()
+        now_ms(),
+        out_ext
     ));
 
     let mut ff_cmd = build_ffmpeg_command(

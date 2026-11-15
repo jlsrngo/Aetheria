@@ -36,25 +36,34 @@ pub fn build_ffmpeg_command(
         .arg(meta.fps.max(1).to_string())
         .args(["-i", "pipe:0"]);
 
-    let mut active_audios: Vec<(PathBuf, u64, f64, f64, f64)> = Vec::new();
-    for scene in &meta.scenes {
-        let sc_start = scene.start.max(0.0);
-        let sc_end = sc_start + scene.duration.max(0.0);
-        if sc_end <= start_sec || sc_start >= end_sec {
-            continue;
-        }
-        let trim_start = (start_sec - sc_start).max(0.0);
-        let max_dur = (end_sec - sc_start.max(start_sec)).max(0.05);
-        let delay_ms = ((sc_start - start_sec).max(0.0) * 1000.0).round() as u64;
+    let is_gif = codec.eq_ignore_ascii_case("gif")
+        || output_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("gif"))
+            .unwrap_or(false);
 
-        if let Some(ref audio_rel) = scene.audio {
-            if let Some(audio_path) = find_scene_audio_file(film_root, ws_root, audio_rel) {
-                active_audios.push((audio_path, delay_ms, trim_start, max_dur, 1.0));
+    let mut active_audios: Vec<(PathBuf, u64, f64, f64, f64)> = Vec::new();
+    if !is_gif {
+        for scene in &meta.scenes {
+            let sc_start = scene.start.max(0.0);
+            let sc_end = sc_start + scene.duration.max(0.0);
+            if sc_end <= start_sec || sc_start >= end_sec {
+                continue;
             }
-        }
-        if let Some(ref sfx_rel) = scene.sfx {
-            if let Some(sfx_path) = find_scene_audio_file(film_root, ws_root, sfx_rel) {
-                active_audios.push((sfx_path, delay_ms, trim_start, max_dur, 0.45));
+            let trim_start = (start_sec - sc_start).max(0.0);
+            let max_dur = (end_sec - sc_start.max(start_sec)).max(0.05);
+            let delay_ms = ((sc_start - start_sec).max(0.0) * 1000.0).round() as u64;
+
+            if let Some(ref audio_rel) = scene.audio {
+                if let Some(audio_path) = find_scene_audio_file(film_root, ws_root, audio_rel) {
+                    active_audios.push((audio_path, delay_ms, trim_start, max_dur, 1.0));
+                }
+            }
+            if let Some(ref sfx_rel) = scene.sfx {
+                if let Some(sfx_path) = find_scene_audio_file(film_root, ws_root, sfx_rel) {
+                    active_audios.push((sfx_path, delay_ms, trim_start, max_dur, 0.45));
+                }
             }
         }
     }
@@ -92,6 +101,14 @@ pub fn build_ffmpeg_command(
     }
 
     match codec.to_lowercase().as_str() {
+        "gif" => {
+            cmd.args([
+                "-vf",
+                "split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle",
+                "-loop",
+                "0",
+            ]);
+        }
         "h265" | "hevc" => {
             cmd.args(["-c:v", "libx265", "-pix_fmt", "yuv420p", "-preset", "fast"]);
         }
@@ -100,6 +117,16 @@ pub fn build_ffmpeg_command(
         }
         "prores" => {
             cmd.args(["-c:v", "prores_ks", "-profile:v", "3"]);
+        }
+        _ if is_gif => {
+            cmd.args([
+                "-vf",
+                "split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle",
+                "-loop",
+                "0",
+                "-f",
+                "gif",
+            ]);
         }
         _ => {
             cmd.args([
@@ -117,8 +144,11 @@ pub fn build_ffmpeg_command(
         }
     }
 
-    cmd.arg("-shortest")
-        .arg(output_path)
+    if !active_audios.is_empty() {
+        cmd.arg("-shortest");
+    }
+
+    cmd.arg(output_path)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
@@ -143,5 +173,68 @@ pub async fn format_ffmpeg_failure(
     let tail: Vec<&str> = err_txt.lines().rev().take(12).collect();
     let summary: String = tail.into_iter().rev().collect::<Vec<_>>().join("\n");
     format!("FFmpeg exited with {:?}:\n{}", status.code(), summary)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::studio::film_inspector::FilmSceneSpec;
+    use crate::studio::motion_linter::FilmLintReport;
+
+    fn sample_meta() -> FilmMeta {
+        FilmMeta {
+            exists: true,
+            engine: "html5-canvas".to_string(),
+            html_path: "index.html".to_string(),
+            title: "Test".to_string(),
+            width: 1080,
+            height: 1920,
+            fps: 30,
+            duration: 5.0,
+            total_frames: 150,
+            scenes: vec![FilmSceneSpec {
+                id: "s1".to_string(),
+                title: "Scene 1".to_string(),
+                start: 0.0,
+                duration: 5.0,
+                start_frame: 0,
+                duration_frames: 150,
+                audio: Some("audio/bgm.mp3".to_string()),
+                sfx: None,
+                words: None,
+            }],
+            lint: FilmLintReport {
+                valid: true,
+                has_render_at: true,
+                has_ready_flag: true,
+                has_film_meta: true,
+                issues: vec![],
+            },
+        }
+    }
+
+    #[test]
+    fn gif_codec_uses_palettegen_paletteuse_and_disables_audio() {
+        let meta = sample_meta();
+        let cmd = build_ffmpeg_command(
+            Path::new("ffmpeg"),
+            &meta,
+            Path::new("."),
+            Path::new("."),
+            0.0,
+            5.0,
+            "gif",
+            Path::new("output/anim.gif"),
+        );
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        assert!(args.contains(&"-an".to_string()));
+        assert!(args.contains(&"-loop".to_string()));
+        assert!(args.iter().any(|a| a.contains("palettegen") && a.contains("paletteuse")));
+        assert!(!args.contains(&"libx264".to_string()));
+    }
 }
 
