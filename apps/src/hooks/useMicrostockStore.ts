@@ -37,19 +37,10 @@ const DEFAULT_MANIFEST: MicrostockManifest = {
     },
   },
   metadata: {
-    title: "Abstract Warm Geometric Motion Background Loop",
-    keywords: [
-      "abstract",
-      "motion",
-      "background",
-      "geometric",
-      "gradient",
-      "minimal",
-      "loop",
-      "modern",
-    ],
+    title: "",
+    keywords: [],
     categoryId: 10,
-    categoryName: "Graphic Resources",
+    categoryName: "Graphic resources",
     editorialNotAllowedAck: true,
   },
   licenses: [],
@@ -111,12 +102,18 @@ function mapBackendManifestToFrontend(
     },
     metadata: {
       ...current.metadata,
-      title: dto.metadata?.title || current.metadata.title,
+      title:
+        dto.metadata && typeof dto.metadata.title === "string"
+          ? dto.metadata.title
+          : current.metadata.title,
       keywords:
-        dto.metadata?.keywords && dto.metadata.keywords.length > 0
+        dto.metadata && Array.isArray(dto.metadata.keywords)
           ? dto.metadata.keywords
           : current.metadata.keywords,
-      categoryName: dto.metadata?.category || current.metadata.categoryName,
+      categoryName:
+        dto.metadata && typeof dto.metadata.category === "string" && dto.metadata.category.trim().length > 0
+          ? dto.metadata.category
+          : current.metadata.categoryName,
     },
   };
 }
@@ -796,8 +793,38 @@ if (typeof window !== "undefined") {
     void microstockActions.syncManifest();
   }, 450);
 
+  const syncIfManifestPath = (rawPath: unknown) => {
+    if (typeof rawPath !== "string") return;
+    const normalized = rawPath.replace(/\\/g, "/").toLowerCase();
+    if (normalized.endsWith("manifest.json")) {
+      void microstockActions.syncManifest();
+    }
+  };
+
   window.addEventListener("aetheria-folder-change", () => {
     void microstockActions.syncManifest();
+  });
+
+  window.addEventListener("aetheria-film-updated", () => {
+    void microstockActions.syncManifest();
+  });
+
+  window.addEventListener("aetheria:session-idle", () => {
+    void microstockActions.syncManifest();
+  });
+
+  window.addEventListener("focus", () => {
+    void microstockActions.syncManifest();
+  });
+
+  window.addEventListener("aetheria:sse-file-edited", (event: Event) => {
+    const detail = (event as CustomEvent<{ file?: string }>).detail;
+    syncIfManifestPath(detail?.file);
+  });
+
+  window.addEventListener("aetheria:file.edited", (event: Event) => {
+    const detail = (event as CustomEvent<{ file?: string }>).detail;
+    syncIfManifestPath(detail?.file);
   });
 }
 

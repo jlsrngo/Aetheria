@@ -67,7 +67,7 @@ pub fn build_active_microstock_prompt_block(workspace_dir: &str) -> Option<Strin
          CRITICAL INSTRUCTIONS FOR THIS TURN:\n\
          1. Generate or update the HTML5+JS motion composition strictly at {}x{} ({}) and {} FPS with duration between 5 and 60 seconds.\n\
          2. Enforce ZERO text overlays (no fillText, no strokeText, no <text>, no visible DOM text), ZERO logos/trademarks, ZERO external http(s):// URLs, ZERO audio tracks, and 100% deterministic window.renderAt(t) without Math.random() or Date.now().\n\
-         3. Automatically write/update `microstock/manifest.json` with valid Adobe Stock metadata (`title` <= 70 plain chars without commas, `keywords` array of 5 to 49 unique relevant keywords, `category` from the 21 Adobe Stock categories).\n\
+         3. Automatically write/update `microstock/manifest.json` with fresh Adobe Stock metadata derived strictly from the user's requested visual theme/prompt (`metadata.title` <= 70 plain chars without commas, `metadata.keywords` array of 5 to 49 unique relevant English keywords, `metadata.category` from the 21 Adobe Stock categories). NEVER copy generic placeholder text (e.g. 'Abstract Warm Geometric...'), and preserve any existing `enabled`, `preset`, `fps`, `codec`, `provenance`, and `checklist` fields in `microstock/manifest.json`.\n\
          \n\
          {}\n\
          </adobe_stock_microstock_mode>",

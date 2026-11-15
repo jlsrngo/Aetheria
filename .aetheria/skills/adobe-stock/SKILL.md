@@ -52,7 +52,8 @@ When **Adobe Stock Mode (`M`)** or `/adobe-stock` is active, the engine and LLM 
 
 ## 2. Automatic Metadata & Manifest Generation
 
-Whenever you create or update a project in Adobe Stock mode, also write/update `microstock/manifest.json` inside the active project folder (or workspace root) with valid Adobe Stock metadata:
-- `metadata.title`: Plain English descriptive title **<= 70 characters**, no commas, no special characters, no artist/brand/IP names (e.g. `"Abstract Flowing Golden Silk Waves Seamless Loop Background"`).
-- `metadata.keywords`: Array of **5 to 49 unique lowercase keywords**, ordered by relevance (first 10 carry the highest weight), single language, no trademarks or artist names.
-- `metadata.category`: One of the 21 official Adobe Stock categories (e.g. `"Graphic resources"`, `"Technology"`, `"Business"`, `"Science"`, `"Abstract"` -> mapped to `"Graphic resources"`).
+Whenever you create or update a project in Adobe Stock mode, read any existing `microstock/manifest.json` first and update `metadata` (preserving `enabled`, `preset`, `fps`, `codec`, `provenance`, and `checklist` if already set):
+- Derive `metadata.title`, `metadata.keywords`, and `metadata.category` **directly from the user's exact requested visual theme, subject, colors, and motion** — **NEVER** reuse sample/placeholder titles or generic fallback arrays.
+- `metadata.title`: Plain English descriptive title **<= 70 characters**, no commas, no special characters, no artist/brand/IP names, tailored specifically to the generated scene.
+- `metadata.keywords`: Array of **5 to 49 unique lowercase English keywords**, ordered by relevance (first 10 carry the highest weight), matching the actual visual elements, colors, mood, and style of the requested theme, with zero trademarks or artist names.
+- `metadata.category`: One of the 21 official Adobe Stock categories (e.g. `"Graphic resources"`, `"Technology"`, `"Business"`, `"Science"`, `"Nature"`, `"Holidays"` -> mapped cleanly to the matching Adobe Stock category).

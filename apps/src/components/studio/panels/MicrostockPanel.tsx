@@ -51,6 +51,10 @@ export function MicrostockPanel({
     setKeywordsText(manifest.metadata.keywords.join(", "));
   }, [manifest.metadata.keywords]);
 
+  useEffect(() => {
+    void actions.syncManifest();
+  }, [actions]);
+
   const checklist = manifest.provenance.checklist;
   const checklistDone = isMicrostockChecklistComplete(checklist);
   const aiDeclared = manifest.provenance.aiDeclared;
@@ -84,18 +88,8 @@ export function MicrostockPanel({
 
   const validationIssues = validateMicrostockSubmission({
     filename: "stock_clip.mp4",
-    title: manifest.metadata.title || "Pure Visual Motion Graphic Background",
-    keywords:
-      manifest.metadata.keywords.length >= 5
-        ? manifest.metadata.keywords
-        : [
-            "abstract",
-            "motion",
-            "background",
-            "gradient",
-            "loop",
-            "minimal",
-          ],
+    title: manifest.metadata.title,
+    keywords: manifest.metadata.keywords,
     aiDeclared,
     checklist,
   });
@@ -348,7 +342,7 @@ export function MicrostockPanel({
             data-testid="microstock-title-input"
             value={manifest.metadata.title}
             onChange={(e) => handleTitleChange(e.target.value)}
-            placeholder="Descriptive title (max 70 chars)..."
+            placeholder="Filled automatically by AI for your prompt theme (max 70 chars)..."
             className="w-full h-7 px-2 rounded-[var(--radius-control)] bg-[var(--bg-input)] border border-[var(--border-color)] text-xs text-[var(--text-primary)] outline-none"
           />
 
@@ -359,7 +353,7 @@ export function MicrostockPanel({
             value={keywordsText}
             onChange={(e) => setKeywordsText(e.target.value)}
             onBlur={handleKeywordsBlur}
-            placeholder="5–49 comma-separated keywords ordered by importance..."
+            placeholder="5–49 theme-matched keywords generated automatically by AI..."
             className="w-full p-2 rounded-[var(--radius-control)] bg-[var(--bg-input)] border border-[var(--border-color)] text-[11px] font-mono text-[var(--text-primary)] outline-none resize-none"
           />
         </div>
@@ -373,7 +367,7 @@ export function MicrostockPanel({
             <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
             <div className="space-y-0.5">
               {validationIssues.slice(0, 2).map((issue) => (
-                <div key={issue.code}>
+                <div key={`${issue.code}:${issue.message}`}>
                   <span className="font-mono font-semibold">{issue.code}:</span>{" "}
                   {issue.message}
                 </div>
@@ -405,12 +399,12 @@ export function MicrostockPanel({
               )}
             </div>
             {groupedPreflight.fails.map((f) => (
-              <div key={f.code} className="text-rose-400 font-mono text-[10px]">
+              <div key={`${f.code}:${f.message}`} className="text-rose-400 font-mono text-[10px]">
                 [{f.code}] {f.message}
               </div>
             ))}
             {groupedPreflight.warns.map((w) => (
-              <div key={w.code} className="text-amber-400 font-mono text-[10px]">
+              <div key={`${w.code}:${w.message}`} className="text-amber-400 font-mono text-[10px]">
                 [{w.code}] {w.message}
               </div>
             ))}

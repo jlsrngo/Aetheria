@@ -298,11 +298,35 @@ function broadcastFileEditedDomEvent(rawEvent: unknown): void {
     type?: string;
     file?: string;
     after?: string;
-    data?: { file?: string; after?: string };
-    properties?: { file?: string; after?: string };
-    payload?: { type?: string; data?: { file?: string; after?: string } };
+    files?: string[];
+    data?: { file?: string; after?: string; files?: string[] };
+    properties?: { file?: string; after?: string; files?: string[] };
+    payload?: { type?: string; data?: { file?: string; after?: string; files?: string[] } };
   };
   const eventType = evt.type || evt.payload?.type;
+  if (eventType === "session.idle") {
+    window.dispatchEvent(new CustomEvent("aetheria:session-idle"));
+    return;
+  }
+  if (eventType === "patch.applied") {
+    const files =
+      evt.files ??
+      evt.data?.files ??
+      evt.properties?.files ??
+      evt.payload?.data?.files;
+    if (Array.isArray(files)) {
+      for (const f of files) {
+        if (typeof f === "string" && f.length > 0) {
+          window.dispatchEvent(
+            new CustomEvent("aetheria:sse-file-edited", {
+              detail: { file: f },
+            })
+          );
+        }
+      }
+    }
+    return;
+  }
   if (eventType !== "file.edited") return;
   const file =
     evt.file || evt.data?.file || evt.properties?.file || evt.payload?.data?.file;
