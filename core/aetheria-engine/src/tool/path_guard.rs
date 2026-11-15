@@ -51,6 +51,47 @@ pub fn resolve_isolated_path(workspace_dir: &str, raw_file: &str) -> Result<Path
     Ok(resolved)
 }
 
+/// Rejects creating or overwriting built-in offline engine runtimes inside a project's `script/`
+/// folder (`aetheria-motion.js`, `three.min.js`, `three.js`). Allows editing the repo's own
+/// bundled runtime source files (`apps/public/script/aetheria-motion.js` and `assets/script/three.min.js`).
+pub fn validate_writable_runtime_path(target: &Path) -> Result<(), String> {
+    let Some(file_name) = target.file_name().and_then(|n| n.to_str()) else {
+        return Ok(());
+    };
+    let lower_name = file_name.to_ascii_lowercase();
+    if !matches!(lower_name.as_str(), "aetheria-motion.js" | "three.min.js" | "three.js") {
+        return Ok(());
+    }
+    let parent_is_script = target
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        .map(|n| n.eq_ignore_ascii_case("script"))
+        .unwrap_or(false);
+    if !parent_is_script {
+        return Ok(());
+    }
+    let norm = target
+        .to_string_lossy()
+        .replace('\\', "/")
+        .to_ascii_lowercase();
+    if norm.ends_with("/apps/public/script/aetheria-motion.js")
+        || norm.ends_with("/assets/script/three.min.js")
+    {
+        return Ok(());
+    }
+    Err(format!(
+        "Protected Built-in Runtime Error: 'script/{}' is a built-in offline engine runtime served automatically from memory (/script/{}). Do NOT create or overwrite it. Put window.__filmMeta, window.renderAt(t), and window.__ready = true in 'script/scene1.js' (or 'script/main.js') and 'index.html' instead.",
+        file_name, file_name
+    ))
+}
+
+pub fn resolve_writable_isolated_path(workspace_dir: &str, raw_file: &str) -> Result<PathBuf, String> {
+    let resolved = resolve_isolated_path(workspace_dir, raw_file)?;
+    validate_writable_runtime_path(&resolved)?;
+    Ok(resolved)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -70,6 +111,25 @@ mod tests {
 
         let p4 = resolve_isolated_path(ws, "./workspace/src/Root.tsx").unwrap();
         assert_eq!(p4, PathBuf::from("E:\\JS\\ArunakiNexus\\workspace\\src\\Root.tsx"));
+    }
+
+    #[test]
+    fn test_resolve_writable_isolated_path_blocks_builtin_project_runtimes() {
+        let dir = std::env::temp_dir().join(format!("aetheria_rt_guard_{}", std::process::id()));
+        let ws = dir.to_string_lossy();
+
+        for blocked in [
+            "script/aetheria-motion.js",
+            "./script/three.min.js",
+            "public/script/three.js",
+            "SCRIPT/AetherIA-Motion.JS",
+        ] {
+            let err = resolve_writable_isolated_path(&ws, blocked).unwrap_err();
+            assert!(err.contains("Protected Built-in Runtime Error"), "unexpected: {}", err);
+        }
+
+        assert!(resolve_writable_isolated_path(&ws, "script/scene1.js").is_ok());
+        assert!(resolve_writable_isolated_path(&ws, "apps/public/script/aetheria-motion.js").is_ok());
     }
 }
 

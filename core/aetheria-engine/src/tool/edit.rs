@@ -8,7 +8,7 @@ use super::edit_matchers::{
     block_anchor_matches, indentation_flexible_matches, line_trimmed_matches,
     trimmed_boundary_matches, whitespace_normalized_matches,
 };
-use super::resolve_isolated_path;
+use super::resolve_writable_isolated_path;
 use crate::session::message::emit_event;
 
 pub fn edit_tool_definition() -> Value {
@@ -148,7 +148,7 @@ pub fn execute_edit(session_id: &str, workspace_dir: &str, arguments: &Value) ->
         return json!({ "ok": false, "error": "oldString (target) cannot be empty." });
     }
 
-    match resolve_isolated_path(workspace_dir, fp) {
+    match resolve_writable_isolated_path(workspace_dir, fp) {
         Ok(p) => match std::fs::read_to_string(&p) {
             Ok(content_old) => {
                 let ending = detect_line_ending(&content_old);

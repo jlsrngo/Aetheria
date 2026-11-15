@@ -4,7 +4,7 @@
 
 use serde_json::{json, Value};
 
-use super::resolve_isolated_path;
+use super::{resolve_isolated_path, validate_writable_runtime_path};
 use crate::session::message::emit_event;
 
 pub fn apply_patch_tool_definition() -> Value {
@@ -60,6 +60,7 @@ pub fn execute_apply_patch(session_id: &str, workspace_dir: &str, arguments: &Va
                 }
             }
             "add" => {
+                validate_writable_runtime_path(&target)?;
                 if let Some(parent) = target.parent() {
                     let _ = std::fs::create_dir_all(parent);
                 }
@@ -74,6 +75,7 @@ pub fn execute_apply_patch(session_id: &str, workspace_dir: &str, arguments: &Va
                 written.push(target);
             }
             "update" => {
+                validate_writable_runtime_path(&target)?;
                 let existing = std::fs::read_to_string(&target).map_err(|e| {
                     format!("Cannot read '{}' for update patch: {}", rel_path, e)
                 })?;

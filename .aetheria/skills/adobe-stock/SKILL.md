@@ -44,6 +44,10 @@ When **Adobe Stock Mode (`M`)** or `/adobe-stock` is active, the engine and LLM 
 6. **Palette via CSS Custom Properties:**
    - Define palette colors on `:root` CSS custom properties (e.g., `--pal-bg-0`, `--pal-bg-1`, `--pal-accent-0`, `--pal-accent-1`) and read them in `renderAt(t)`, without copying specific artists or copyrighted IP.
 
+7. **Built-in Runtimes & File Layout (`PROTECTED_RUNTIME`):**
+   - Put HTML markup in `index.html`, metadata in `microstock/manifest.json`, and all scene code plus `window.__filmMeta`, `window.renderAt(t)`, and `window.__ready = true` in `script/scene1.js`..`script/sceneN.js` (or `script/main.js`).
+   - **NEVER create, edit, or overwrite `script/aetheria-motion.js`, `script/three.min.js`, or `script/three.js`.** These are built-in offline engine runtimes served automatically (load `/script/aetheria-motion.js` before `/script/scene1.js` if using `window.AM`, or `/script/three.min.js` if using Three.js). Writing to `script/aetheria-motion.js` shadows `window.AM` and is ignored by the film linter (`MISSING_RENDER_AT`).
+
 ---
 
 ## 2. Automatic Metadata & Manifest Generation

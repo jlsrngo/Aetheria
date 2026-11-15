@@ -4,7 +4,7 @@
 use serde_json::{json, Value};
 
 use std::path::Path;
-use super::resolve_isolated_path;
+use super::{resolve_isolated_path, resolve_writable_isolated_path};
 use crate::session::message::emit_event;
 
 pub fn validate_root_tsx_imports(file_path: &Path, content: &str) -> Result<(), String> {
@@ -107,7 +107,7 @@ pub fn execute_write(session_id: &str, workspace_dir: &str, arguments: &Value) -
         });
     }
 
-    match resolve_isolated_path(workspace_dir, fp) {
+    match resolve_writable_isolated_path(workspace_dir, fp) {
         Ok(p) => {
             if let Err(val_err) = validate_root_tsx_imports(&p, content) {
                 return json!({ "ok": false, "error": val_err });

@@ -46,6 +46,7 @@ pub use catalog::{
     should_attach_document_tools,
 };
 pub use path_guard::resolve_isolated_path;
+pub(crate) use path_guard::{resolve_writable_isolated_path, validate_writable_runtime_path};
 
 use serde_json::{json, Value};
 
