@@ -1,12 +1,14 @@
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useStudioStore } from "../../hooks/useStudioStore";
+import { useMicrostockStore } from "../../hooks/useMicrostockStore";
 import { useTimelineFilmMeta } from "../../hooks/useTimelineFilmMeta";
 import { useTimelineActions } from "../../hooks/useTimelineActions";
 import { useTimelineInteractions } from "../../hooks/useTimelineInteractions";
 import { buildCompositionLayers, type VideoLayerSpec } from "../../types/video";
 import { ClipEditModal } from "./ClipEditModal";
 import { TimelineHeaderToolbar } from "./timeline/TimelineHeaderToolbar";
+import { MicrostockToolbarPopover } from "./timeline/MicrostockToolbarPopover";
 import { TimelineTrackSidebar } from "./timeline/TimelineTrackSidebar";
 import { TimelineClipLanes } from "./timeline/TimelineClipLanes";
 import { buildDynamicHtmlSceneLayers } from "./timeline/timelineLayerUtils";
@@ -38,6 +40,7 @@ export const Timeline: React.FC<TimelineProps> = ({
     redoStack,
     actions,
   } = useStudioStore();
+  const microstock = useMicrostockStore();
 
   const [isTimelineCollapsed, setIsTimelineCollapsed] = useState<boolean>(false);
   const [timelineZoom, setTimelineZoom] = useState<number>(0);
@@ -201,7 +204,40 @@ export const Timeline: React.FC<TimelineProps> = ({
         onDelete={timelineActions.handleDeleteSelectedLayer}
         onToggleSnap={() => setIsSnapping((s) => !s)}
         onAddLayer={timelineActions.handleAddCustomLayer}
-        onExport={() => void timelineActions.handleQuickExport()}
+        isMicrostockActive={microstock.manifest.enabled}
+        onMotionClick={() => {
+          if (!microstock.manifest.enabled) {
+            void microstock.actions.toggleMode(true).then(() => {
+              toast.success(
+                "Adobe Stock Mode Active: 16:9 (1920×1080) Rec.709 • LLM Auto-Metadata"
+              );
+            });
+          } else if (!microstock.isPopoverOpen) {
+            microstock.actions.setPopoverOpen(true);
+          } else {
+            void microstock.actions.toggleMode(false).then(() => {
+              toast.info("Adobe Stock Mode Off: Returned to 9:16 (1080×1920)");
+            });
+          }
+        }}
+        onExport={() => {
+          if (microstock.manifest.enabled) {
+            void microstock.actions
+              .runRenderAndPreflight({
+                compositionId: activeComposition.id,
+                width: activeComposition.width,
+                height: activeComposition.height,
+                fps: activeComposition.fps,
+                durationSec: activeComposition.duration,
+              })
+              .then((res) => {
+                if (res.ok) toast.success(res.message);
+                else toast.error(res.message);
+              });
+          } else {
+            void timelineActions.handleQuickExport();
+          }
+        }}
         onShare={() => {
           navigator.clipboard?.writeText(
             JSON.stringify(activeComposition.props, null, 2)
@@ -210,6 +246,54 @@ export const Timeline: React.FC<TimelineProps> = ({
         }}
         onZoomChange={setTimelineZoom}
       />
+
+      {microstock.isPopoverOpen && (
+        <MicrostockToolbarPopover
+          manifest={microstock.manifest}
+          activeCodec={microstock.activeCodec}
+          isBusy={microstock.isBusy}
+          lastPackage={microstock.lastPackage}
+          onClose={() => microstock.actions.setPopoverOpen(false)}
+          onToggleMode={(enabled, presetId) => {
+            void microstock.actions.toggleMode(enabled, presetId).then((next) => {
+              if (next) {
+                toast.success("Adobe Stock Mode Active: 16:9 (1920×1080)");
+              } else {
+                toast.info("Adobe Stock Mode Off: Returned to 9:16 (1080×1920)");
+              }
+            });
+          }}
+          onSelectPreset={(presetId) => {
+            void microstock.actions.selectPreset(presetId);
+          }}
+          onSelectCodec={(codec) => {
+            microstock.actions.setCodec(codec);
+          }}
+          onUpdateManifest={(partial) => {
+            void microstock.actions.updateManifest(partial);
+          }}
+          onRunRenderAndPreflight={() => {
+            void microstock.actions
+              .runRenderAndPreflight({
+                compositionId: activeComposition.id,
+                width: activeComposition.width,
+                height: activeComposition.height,
+                fps: activeComposition.fps,
+                durationSec: activeComposition.duration,
+              })
+              .then((res) => {
+                if (res.ok) toast.success(res.message);
+                else toast.error(res.message);
+              });
+          }}
+          onBuildPackage={() => {
+            void microstock.actions.buildPackage().then((res) => {
+              if (res.ok) toast.success(res.message);
+              else toast.error(res.message);
+            });
+          }}
+        />
+      )}
 
       {!isTimelineCollapsed && (
         <div className="flex-1 flex min-h-0 overflow-hidden">

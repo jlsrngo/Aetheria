@@ -13,6 +13,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useStudioStore } from "../../../hooks/useStudioStore";
+import { useMicrostockStore } from "../../../hooks/useMicrostockStore";
+import { ADOBE_ALLOWED_CODECS } from "../../../lib/microstockUtils";
 import { apiFetch, API_BASE } from "../../../lib/api";
 import { cn } from "../../../lib/utils";
 import type { StudioGpuTelemetry, StudioRenderJob } from "../../../types/studio";
@@ -36,6 +38,7 @@ export function RenderQueuePanel({
     gpuTelemetry,
     actions,
   } = useStudioStore();
+  const microstock = useMicrostockStore();
   const [codec, setCodec] = useState<"h264" | "h265" | "vp9" | "gif">("h264");
   const [outputName, setOutputName] = useState<string>("");
 
@@ -90,6 +93,20 @@ export function RenderQueuePanel({
   }, [renderJobs, actions]);
 
   const handleStartRender = async () => {
+    if (microstock.manifest.enabled) {
+      const res = await microstock.actions.runRenderAndPreflight({
+        compositionId: activeComposition.id,
+        width: activeComposition.width,
+        height: activeComposition.height,
+        fps: activeComposition.fps,
+        durationSec: activeComposition.duration,
+        codec: microstock.activeCodec,
+      });
+      if (res.ok) toast.success(res.message);
+      else toast.error(res.message);
+      return;
+    }
+
     const ext = codec === "vp9" ? "webm" : codec === "gif" ? "gif" : "mp4";
     const cleanName =
       outputName.trim() || `${activeComposition.id}-${Date.now().toString().slice(-4)}.${ext}`;
@@ -247,32 +264,53 @@ export function RenderQueuePanel({
 
           <div>
             <label className="text-[10px] text-[var(--text-muted)] block mb-1">
-              Codec / Format
+              Codec / Format {microstock.manifest.enabled ? "(Adobe Stock Locked)" : ""}
             </label>
-            <div className="grid grid-cols-4 gap-1">
-              {(
-                [
-                  { id: "h264", label: "H.264" },
-                  { id: "h265", label: "H.265" },
-                  { id: "vp9", label: "WebM" },
-                  { id: "gif", label: "GIF" },
-                ] as const
-              ).map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setCodec(item.id)}
-                  className={cn(
-                    "h-6 rounded-md text-[10px] font-mono border transition-colors cursor-pointer",
-                    codec === item.id
-                      ? "bg-[#be123c] border-[#e11d48] text-white font-semibold"
-                      : "bg-[var(--bg-input)] border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                  )}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
+            {microstock.manifest.enabled ? (
+              <div className="grid grid-cols-2 gap-1">
+                {ADOBE_ALLOWED_CODECS.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    data-testid={`render-queue-codec-${item.id}`}
+                    onClick={() => microstock.actions.setCodec(item.id)}
+                    className={cn(
+                      "h-6 rounded-md text-[10px] font-mono border transition-colors cursor-pointer",
+                      microstock.activeCodec === item.id
+                        ? "bg-[#be123c] border-[#e11d48] text-white font-semibold"
+                        : "bg-[var(--bg-input)] border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                    )}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="grid grid-cols-4 gap-1">
+                {(
+                  [
+                    { id: "h264", label: "H.264" },
+                    { id: "h265", label: "H.265" },
+                    { id: "vp9", label: "WebM" },
+                    { id: "gif", label: "GIF" },
+                  ] as const
+                ).map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setCodec(item.id)}
+                    className={cn(
+                      "h-6 rounded-md text-[10px] font-mono border transition-colors cursor-pointer",
+                      codec === item.id
+                        ? "bg-[#be123c] border-[#e11d48] text-white font-semibold"
+                        : "bg-[var(--bg-input)] border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                    )}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="flex justify-end">
@@ -282,7 +320,14 @@ export function RenderQueuePanel({
               className="h-7 px-3.5 rounded-lg bg-[#be123c] hover:bg-[#9f1239] border border-[#e11d48] text-white text-xs font-semibold flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap cursor-pointer transition-colors"
             >
               <Play className="w-3.5 h-3.5 fill-current shrink-0" />
-              <span>Render Video ({codec.toUpperCase()})</span>
+              <span>
+                Render Video (
+                {(microstock.manifest.enabled
+                  ? microstock.activeCodec
+                  : codec
+                ).toUpperCase()}
+                )
+              </span>
             </button>
           </div>
         </div>

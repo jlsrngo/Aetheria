@@ -69,6 +69,7 @@ export interface TimelineHeaderToolbarProps {
   onShare?: () => void;
   onZoomChange: (zoom: number) => void;
   onMotionClick?: () => void;
+  isMicrostockActive?: boolean;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
 }
@@ -107,6 +108,7 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
   onShare,
   onZoomChange,
   onMotionClick,
+  isMicrostockActive = false,
   isCollapsed = false,
   onToggleCollapse,
 }) => {
@@ -176,12 +178,15 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
   const timeFormatted = (currentFrame / fps).toFixed(2);
   const totalDurationFormatted = (durationInFrames / fps).toFixed(2);
 
-  const ratioOptions = [
-    { value: "9:16", label: "9:16 Vertical", sub: "1080×1920 (TikTok, Shorts)", icon: Smartphone },
-    { value: "1:1", label: "1:1 Square", sub: "1080×1080 (Feed, Carousel)", icon: Square },
-    { value: "16:9", label: "16:9 Landscape", sub: "1920×1080 (YouTube, Web)", icon: Monitor },
+  const allRatioOptions = [
+    { value: "9:16", label: "9:16 Vertical", sub: isMicrostockActive ? "1080×1920 / 2160×3840 (Adobe Stock)" : "1080×1920 (TikTok, Shorts)", icon: Smartphone },
+    { value: "1:1", label: "1:1 Square", sub: isMicrostockActive ? "2160×2160 / 1080×1080 (Adobe Stock)" : "1080×1080 (Feed, Carousel)", icon: Square },
+    { value: "16:9", label: "16:9 Landscape", sub: isMicrostockActive ? "1920×1080 / 3840×2160 (Adobe Stock)" : "1920×1080 (YouTube, Web)", icon: Monitor },
     { value: "4:5", label: "4:5 Portrait", sub: "1080×1350 (IG Portrait)", icon: PhonePortrait },
   ];
+  const ratioOptions = isMicrostockActive
+    ? allRatioOptions.filter((r) => r.value !== "4:5")
+    : allRatioOptions;
 
   const speedOptions: (0.5 | 1 | 1.5 | 2)[] = [0.5, 1, 1.5, 2];
   const fpsOptions: number[] = [24, 25, 30, 50, 60];
@@ -445,14 +450,28 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
         <button
           type="button"
           data-testid="timeline-motion-logo-btn"
+          data-active={isMicrostockActive ? "true" : "false"}
+          aria-pressed={isMicrostockActive}
           onClick={onMotionClick}
-          title="Motion (M)"
+          title={
+            isMicrostockActive
+              ? "Adobe Stock Microstock Mode: ACTIVE (16:9 Rec.709)"
+              : "Switch Engine to Adobe Stock Microstock Mode (M)"
+          }
           aria-label="Motion Logo"
-          className="w-9 h-9 rounded-full border border-[var(--border-color)] bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex items-center justify-center transition-all cursor-pointer shrink-0 select-none"
+          className={cn(
+            "w-9 h-9 rounded-full border flex items-center justify-center transition-all cursor-pointer shrink-0 select-none",
+            isMicrostockActive
+              ? "bg-[var(--text-primary)] border-[var(--text-primary)] text-[var(--bg-app)] shadow-sm"
+              : "border-[var(--border-color)] bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+          )}
         >
           <svg
             viewBox="0 0 24 24"
-            className="w-4 h-4 text-amber-400"
+            className={cn(
+              "w-4 h-4",
+              isMicrostockActive ? "text-[var(--bg-app)]" : "text-amber-400"
+            )}
             fill="none"
             stroke="currentColor"
             strokeWidth="2.4"
