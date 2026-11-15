@@ -50,7 +50,7 @@ async function waitForHttpOk(url, check, headers = {}, timeoutMs = 30_000, onChe
       throw new Error(`Process exited before ${url} became ready.${extra}`);
     }
     try {
-      const res = await fetch(url, { headers, signal: AbortSignal.timeout(2000) });
+      const res = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
       const txt = await res.text();
       if (check(res, txt)) return;
       lastErr = `status=${res.status} body=${txt.slice(0, 120)}`;
