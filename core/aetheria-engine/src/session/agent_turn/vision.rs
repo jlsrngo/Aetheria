@@ -100,8 +100,14 @@ pub fn process_attached_files(
                                 ])
                                 .output();
 
-                            // Extract 4 visual style keyframes at normalized ratios [10%, 35%, 60%, 85%] (default 10s span) for Vision LLM
-                            let sample_points = super::social_links::compute_relative_sample_timestamps(10.0);
+                            // Extract 4 visual style keyframes at normalized ratios [10%, 35%, 60%, 85%] of probed video duration
+                            let probed_dur = crate::studio::reference_compare::probe_video_duration_secs(
+                                ff,
+                                &vid_path,
+                            )
+                            .unwrap_or(10.0);
+                            let sample_points =
+                                super::social_links::compute_relative_sample_timestamps(probed_dur);
                             for (idx, (_ratio, ts)) in sample_points.iter().enumerate() {
                                 let frame_jpg = ref_dir.join(format!("ref_frame_{}.jpg", idx + 1));
                                 let mut ff_frame = std::process::Command::new(ff);

@@ -641,13 +641,22 @@ async fn prepare_initial_chat_messages(
         if let Some(audio_ctx) = resolve_voice_preset_command(prompt_text) {
             extra_context.push(audio_ctx);
         }
-        if lower_prompt.contains("/ref")
+        let has_media_attachments = files
+            .and_then(|f| f.as_array())
+            .is_some_and(|arr| !arr.is_empty());
+        let wants_reference = lower_prompt.contains("/ref")
             || lower_prompt.contains("reference")
             || lower_prompt.contains("referensi")
-            || lower_prompt.contains("tirukan referensi")
-            || lower_prompt.contains("sesuai referensi")
-            || lower_prompt.contains("pakai referensi")
-        {
+            || lower_prompt.contains("clone")
+            || lower_prompt.contains("mirip")
+            || lower_prompt.contains("samakan")
+            || lower_prompt.contains("tiru")
+            || lower_prompt.contains("ikuti")
+            || lower_prompt.contains("blueprint")
+            || lower_prompt.contains("video preset")
+            || has_media_attachments
+            || !social_images.is_empty();
+        if wants_reference {
             if let Some(ref_report) = resolve_reference_report(workspace_dir) {
                 extra_context.push(ref_report);
             }

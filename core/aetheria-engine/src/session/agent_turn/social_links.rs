@@ -35,6 +35,32 @@ fn unescape_html_basic(s: &str) -> String {
         .to_string()
 }
 
+fn find_first_url_with_ext(html: &str, prefixes: &[&str], exts: &[&str]) -> Option<String> {
+    for &prefix in prefixes {
+        let mut pos = 0;
+        while let Some(rel) = html[pos..].find(prefix) {
+            let start = pos + rel;
+            let tail = &html[start..];
+            let end = tail
+                .find(|c: char| {
+                    matches!(c, '"' | '\'' | '<' | '>' | '\\' | ')' | ' ' | '\n' | '\r')
+                })
+                .unwrap_or(tail.len());
+            let candidate = &tail[..end];
+            let clean = candidate
+                .split(&['?', '#'][..])
+                .next()
+                .unwrap_or(candidate)
+                .to_ascii_lowercase();
+            if exts.iter().any(|ext| clean.ends_with(ext)) {
+                return Some(candidate.to_string());
+            }
+            pos = start + prefix.len();
+        }
+    }
+    None
+}
+
 pub(crate) fn extract_pinterest_media_from_html(
     html: &str,
 ) -> (Option<String>, Option<String>, Option<String>) {
@@ -72,39 +98,23 @@ pub(crate) fn extract_pinterest_media_from_html(
     }
 
     if image_url.is_none() {
-        for tier in ["https://i.pinimg.com/originals/", "https://i.pinimg.com/736x/", "https://i.pinimg.com/564x/"] {
-            if let Some(idx) = html.find(tier) {
-                let tail = &html[idx..];
-                let end = tail
-                    .find(|c: char| matches!(c, '"' | '\'' | '<' | '>' | '\\' | ')' | ' '))
-                    .unwrap_or(tail.len());
-                let candidate = &tail[..end];
-                if candidate.ends_with(".jpg")
-                    || candidate.ends_with(".jpeg")
-                    || candidate.ends_with(".png")
-                    || candidate.ends_with(".webp")
-                {
-                    image_url = Some(candidate.to_string());
-                    break;
-                }
-            }
-        }
+        image_url = find_first_url_with_ext(
+            html,
+            &[
+                "https://i.pinimg.com/originals/",
+                "https://i.pinimg.com/736x/",
+                "https://i.pinimg.com/564x/",
+            ],
+            &[".jpg", ".jpeg", ".png", ".webp"],
+        );
     }
 
     if mp4_url.is_none() {
-        for prefix in ["https://v1.pinimg.com/", "https://v.pinimg.com/"] {
-            if let Some(idx) = html.find(prefix) {
-                let tail = &html[idx..];
-                let end = tail
-                    .find(|c: char| matches!(c, '"' | '\'' | '<' | '>' | '\\' | ' '))
-                    .unwrap_or(tail.len());
-                let candidate = &tail[..end];
-                if candidate.ends_with(".mp4") {
-                    mp4_url = Some(candidate.to_string());
-                    break;
-                }
-            }
-        }
+        mp4_url = find_first_url_with_ext(
+            html,
+            &["https://v1.pinimg.com/", "https://v.pinimg.com/"],
+            &[".mp4"],
+        );
     }
 
     (title, image_url, mp4_url)
@@ -182,6 +192,41 @@ fn is_pinterest_url(url: &str) -> bool {
             || (lower.contains("pinterest.") && lower.contains("/pin/")))
 }
 
+async fn attach_extracted_video_blueprint(
+    workspace_dir: &str,
+    video_rel_path: &str,
+    image_urls: &mut Vec<String>,
+) -> Option<String> {
+    let ext_res = crate::tool::ref_extractor::execute_ref_extractor(
+        workspace_dir,
+        &serde_json::json!({
+            "videoPath": video_rel_path,
+            "outputDir": "ref/extracted"
+        }),
+    )
+    .await;
+
+    if ext_res.get("error").is_some() {
+        return None;
+    }
+
+    if let Some(imgs) = ext_res.get("_vision_images").and_then(|v| v.as_array()) {
+        for item in imgs {
+            if let Some(url) = item.as_str() {
+                if !url.is_empty() && !image_urls.iter().any(|existing| existing == url) {
+                    image_urls.push(url.to_string());
+                }
+            }
+        }
+    }
+
+    let report_path = ext_res
+        .get("reportPath")
+        .and_then(|v| v.as_str())
+        .unwrap_or("ref/extracted/ref_report.md");
+    Some(report_path.to_string())
+}
+
 /// Automatically extracts visual keyframes & metadata if prompt contains TikTok, YouTube, or Pinterest links.
 pub async fn process_social_links(
     workspace_dir: &str,
@@ -217,73 +262,85 @@ pub async fn process_social_links(
                     let mp4_path = ref_dir.join("ref_tiktok.mp4");
                     let wav_path = ref_dir.join("ref_voice.wav");
 
+                    let mut has_mp4 = false;
                     if !play_url.is_empty() {
                         if let Ok(vid_resp) = reqwest::get(play_url).await {
                             if let Ok(vid_bytes) = vid_resp.bytes().await {
                                 if !vid_bytes.is_empty() {
-                                    let _ = std::fs::write(&mp4_path, &vid_bytes);
-                                    let ff_cmd = ffmpeg_bin
-                                        .unwrap_or_else(|| Path::new("ffmpeg"));
-                                    let mut ff_audio = std::process::Command::new(ff_cmd);
-                                    crate::paths::configure_hidden_std_command(&mut ff_audio);
-                                    let _ = ff_audio
-                                        .args([
-                                            "-y",
-                                            "-i",
-                                            &mp4_path.to_string_lossy(),
-                                            "-vn",
-                                            "-acodec",
-                                            "pcm_s16le",
-                                            "-ar",
-                                            "24000",
-                                            "-ac",
-                                            "1",
-                                            &wav_path.to_string_lossy(),
-                                        ])
-                                        .output();
-
-                                    let mut saved_frames = Vec::new();
-                                    let sample_points = compute_relative_sample_timestamps(duration as f64);
-                                    for (idx, (_ratio, ts)) in sample_points.iter().enumerate() {
-                                        let frame_name = format!("ref_tiktok_frame_{}.jpg", idx + 1);
-                                        let frame_jpg = ref_dir.join(&frame_name);
-                                        let mut ff_frame = std::process::Command::new(ff_cmd);
-                                        crate::paths::configure_hidden_std_command(&mut ff_frame);
-                                        let _ = ff_frame
+                                    if std::fs::write(&mp4_path, &vid_bytes).is_ok() {
+                                        has_mp4 = true;
+                                    }
+                                    if let Some(ff_cmd) = ffmpeg_bin {
+                                        let mut ff_audio = std::process::Command::new(ff_cmd);
+                                        crate::paths::configure_hidden_std_command(&mut ff_audio);
+                                        let _ = ff_audio
                                             .args([
                                                 "-y",
-                                                "-ss",
-                                                ts.as_str(),
                                                 "-i",
                                                 &mp4_path.to_string_lossy(),
-                                                "-frames:v",
+                                                "-vn",
+                                                "-acodec",
+                                                "pcm_s16le",
+                                                "-ar",
+                                                "24000",
+                                                "-ac",
                                                 "1",
-                                                "-q:v",
-                                                "4",
-                                                &frame_jpg.to_string_lossy(),
+                                                &wav_path.to_string_lossy(),
                                             ])
                                             .output();
-                                        if let Ok(jpg_bytes) = std::fs::read(&frame_jpg) {
-                                            if !jpg_bytes.is_empty() {
-                                                saved_frames.push(format!("ref/{}", frame_name));
-                                                let b64 = BASE64_STANDARD.encode(&jpg_bytes);
-                                                image_urls.push(format!("data:image/jpeg;base64,{}", b64));
+
+                                        let mut saved_frames = Vec::new();
+                                        let sample_points = compute_relative_sample_timestamps(duration as f64);
+                                        for (idx, (_ratio, ts)) in sample_points.iter().enumerate() {
+                                            let frame_name = format!("ref_tiktok_frame_{}.jpg", idx + 1);
+                                            let frame_jpg = ref_dir.join(&frame_name);
+                                            let mut ff_frame = std::process::Command::new(ff_cmd);
+                                            crate::paths::configure_hidden_std_command(&mut ff_frame);
+                                            let _ = ff_frame
+                                                .args([
+                                                    "-y",
+                                                    "-ss",
+                                                    ts.as_str(),
+                                                    "-i",
+                                                    &mp4_path.to_string_lossy(),
+                                                    "-frames:v",
+                                                    "1",
+                                                    "-q:v",
+                                                    "4",
+                                                    &frame_jpg.to_string_lossy(),
+                                                ])
+                                                .output();
+                                            if let Ok(jpg_bytes) = std::fs::read(&frame_jpg) {
+                                                if !jpg_bytes.is_empty() {
+                                                    saved_frames.push(format!("ref/{}", frame_name));
+                                                    let b64 = BASE64_STANDARD.encode(&jpg_bytes);
+                                                    image_urls.push(format!("data:image/jpeg;base64,{}", b64));
+                                                }
                                             }
                                         }
+                                        let _ = saved_frames;
                                     }
-                                    let _ = saved_frames;
                                 }
                             }
                         }
                     }
 
+                    let blueprint_path = if has_mp4 {
+                        attach_extracted_video_blueprint(workspace_dir, "ref/ref_tiktok.mp4", &mut image_urls).await
+                    } else {
+                        None
+                    };
+                    let blueprint_line = blueprint_path
+                        .map(|p| format!("\n                        - MotionClone Blueprint Extracted: {}, ref/extracted/style.json, ref/extracted/temporal.json", p))
+                        .unwrap_or_default();
+
                     ocr_transcriptions.push(format!(
                         "[TikTok Reference Video Extracted (@{}, duration: {}s, title: \"{}\"):\n\
                         - Reference Video Saved: ref/ref_tiktok.mp4\n\
-                        - Reference Frames Saved at normalized ratios [10%, 35%, 60%, 85%]: ref/ref_tiktok_frame_1.jpg, ref/ref_tiktok_frame_2.jpg, ref/ref_tiktok_frame_3.jpg, ref/ref_tiktok_frame_4.jpg\n\
+                        - Reference Frames Saved at normalized ratios [10%, 35%, 60%, 85%]: ref/ref_tiktok_frame_1.jpg, ref/ref_tiktok_frame_2.jpg, ref/ref_tiktok_frame_3.jpg, ref/ref_tiktok_frame_4.jpg{}\n\
                         - Reference Voice Track Extracted: ref/ref_voice.wav. When the user requests matching or using this voice sample, pass `refAudio: \"ref/ref_voice.wav\"` and `cloneVoice: true` to `voicebox_speak` so Voicebox clones the speaker's exact vocal timbre and intonation!\n\
                         - Keyframes attached to vision context: study the reference's motion language (entrance/exit choreography, camera moves, layout zones, typography hierarchy, palette) and translate it into this video's own style per the Visual Style System — inspired by, never a pixel copy.]",
-                        author, duration, title
+                        author, duration, title, blueprint_line
                     ));
                 }
             }
@@ -319,7 +376,7 @@ pub async fn process_social_links(
         if is_pinterest_url(clean_url) {
             if let Ok(client) = reqwest::Client::builder()
                 .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36")
-                .timeout(std::time::Duration::from_secs(15))
+                .timeout(std::time::Duration::from_secs(30))
                 .build()
             {
                 if let Ok(resp) = client.get(clean_url).send().await {
@@ -367,7 +424,14 @@ pub async fn process_social_links(
                                             has_mp4 = true;
                                         }
                                         if let Some(ff_cmd) = ffmpeg_bin {
-                                            let sample_points = compute_relative_sample_timestamps(8.0);
+                                            let probed_dur =
+                                                crate::studio::reference_compare::probe_video_duration_secs(
+                                                    ff_cmd,
+                                                    &mp4_path,
+                                                )
+                                                .unwrap_or(8.0);
+                                            let sample_points =
+                                                compute_relative_sample_timestamps(probed_dur);
                                             for (idx, (_ratio, ts)) in sample_points.iter().enumerate() {
                                                 let frame_jpg = ref_dir
                                                     .join(format!("ref_pinterest_frame_{}.jpg", idx + 1));
@@ -415,6 +479,18 @@ pub async fn process_social_links(
                         );
                         if has_mp4 {
                             saved_files.push("ref/ref_pinterest.mp4".to_string());
+                            if let Some(report_rel) = attach_extracted_video_blueprint(
+                                workspace_dir,
+                                "ref/ref_pinterest.mp4",
+                                &mut image_urls,
+                            )
+                            .await
+                            {
+                                saved_files.push(report_rel);
+                                if ref_dir.join("extracted").join("style.json").is_file() {
+                                    saved_files.push("ref/extracted/style.json".to_string());
+                                }
+                            }
                         }
 
                         if !saved_files.is_empty() || pin_title.is_some() {
@@ -459,6 +535,22 @@ mod tests {
         );
         assert!(is_pinterest_url("https://pin.it/4pV09EcBu"));
         assert!(!is_pinterest_url("https://example.com/foo"));
+    }
+
+    #[test]
+    fn skips_vtt_and_hls_urls_to_extract_pinterest_mp4() {
+        let html = r#"
+            <script>
+            {"captions":"https://v1.pinimg.com/videos/captions/en-us/4a/30/f3/4a30f360b9f0bc014a72962fe0bcd9ff.vtt",
+             "hls":"https://v1.pinimg.com/videos/iht/hls/4a/30/f3/4a30f360b9f0bc014a72962fe0bcd9ff.m3u8",
+             "mp4":"https://v1.pinimg.com/videos/iht/expMp4/4a/30/f3/4a30f360b9f0bc014a72962fe0bcd9ff_720w.mp4"}
+            </script>
+        "#;
+        let (_, _, mp4) = extract_pinterest_media_from_html(html);
+        assert_eq!(
+            mp4.as_deref(),
+            Some("https://v1.pinimg.com/videos/iht/expMp4/4a/30/f3/4a30f360b9f0bc014a72962fe0bcd9ff_720w.mp4")
+        );
     }
 
     #[test]

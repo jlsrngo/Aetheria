@@ -21,9 +21,10 @@ pub fn build_subagent_system_prompt(subagent_type: &str, workspace_dir: &str) ->
         "motion-designer" => {
             "You are the **Motion Designer Subagent** (Visual & Scene Specialist).\n\
              - You support ANY visual pipeline chosen by the active `/skill` or task brief — including 2D HTML5 Canvas/SVG (`window.AM` via `/script/aetheria-motion.js`) AND 3D WebGL / Three.js (`/script/three.min.js`, built-in offline in the engine) — driven deterministically by `window.renderAt(t)`.\n\
-             - NEVER lock onto, assume, or default to any unrequested style or template (such as `01-flat-vector`, generic header badges, or headline plaques). If the delegated task did not specify an active skill or concrete visual style, return immediately asking the coordinator to confirm the style/skill with the user.\n\
+             - NEVER lock onto, assume, or default to any unrequested style or template (such as `01-flat-vector`, generic header badges, or headline plaques). If the delegated task did not specify an active skill or concrete visual style AND no reference blueprint/frames were supplied, return immediately asking the coordinator to confirm the style/skill with the user.\n\
              - Keep scripts strictly modular under `script/` (`script/scene1.js` .. `script/sceneN.js` and optional helper modules) with entry at `index.html`; NEVER create React/Remotion folders (`src/`, `public/`, `Root.tsx`) and NEVER overwrite built-in engine runtimes `script/aetheria-motion.js` or `script/three.min.js`.\n\
-             - Read the active skill (`<skills>` -> `SKILL.md`, `tokens.json`, `examples/`) FIRST and strictly follow its aesthetic, resolution, HUD choices, and subtitle options.\n\
+             - Read the active skill (`<skills>` -> `SKILL.md`, `tokens.json`, `examples/`) OR active video reference (`ref/extracted/ref_report.md`, `ref/extracted/style.json`) FIRST and strictly follow its aesthetic, resolution, per-scene palette, HUD choices, and subtitle options.\n\
+             - When matching a video reference (`Active Video Reference Blueprint`), replicate its measured `SCENES` timings, per-scene `bgHex`/`surfaceHex`/`textHex`/`accentHex` palette, spatial bounding boxes, and motion cadence (`AM.evalKeyframes`, `AM.spring`, `AM.pop`, `AM.drawSVGPath`, `AM.textReveal`), then call `capture_film_preview` (`compareToReference: true`) to check RGB SSIM + `comparison_strip.jpg` and iteratively refine low-scoring scenes.\n\
              - When the active `/skill` provides `examples/index.html` and `examples/script/*-kit.js` (such as `clay-kit.js`), you MUST preserve that exact dual-canvas/WebGL architecture (`#stage-webgl` with `preserveDrawingBuffer: true` + `#stage-hud`), skill subtitle config (e.g. `style: \"neobrutalism\"`), and full kit builders (copy the kit file verbatim via `bash` or write it in full — NEVER shrink it into a minimal stub or fall back to plain 2D Canvas even if the storyboard mentions thematic mood/colors).\n\
              - If using `THREE.WebGLRenderer`, ALWAYS pass `preserveDrawingBuffer: true` so headless MP4 exports capture every WebGL frame.\n\
              - `AM.drawTopHeader`, `AM.drawHeadlinePlaque`, and dark pill `AM.drawSubtitles` are OPTIONAL — omit or customize them according to the active skill's `SKILL.md` and `tokens.json`.\n\
@@ -38,8 +39,8 @@ pub fn build_subagent_system_prompt(subagent_type: &str, workspace_dir: &str) ->
         }
         "qa-verifier" => {
             "You are the **QA Verifier Subagent** (Verification & Audit Specialist).\n\
-             - Your job is to inspect generated motion films (`index.html`, `script/scene*.js`, `audio/*.words.json`), check file existence, verify JSON/JS/HTML syntax, and fix any missing asset paths or broken script references.\n\
-             - Report verification status clearly."
+             - Your job is to inspect generated motion films (`index.html`, `script/scene*.js`, `audio/*.words.json`), check file existence, verify JSON/JS/HTML syntax, run `capture_film_preview` (with `compareToReference: true` when `ref/` keyframes exist), inspect `runtimeErrors` and RGB SSIM / `comparison_strip.jpg`, and fix any missing asset paths, broken script references, or visual mismatches.\n\
+             - Report verification status and measured metrics clearly."
         }
         _ => {
             "You are the **General Autonomous Subagent**.\n\
@@ -97,6 +98,48 @@ mod prompt_tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn subagent_directive_forwards_reference_blueprint_and_keyframes() {
+        let dir = std::env::temp_dir().join(format!("aetheria_subagent_ref_{}", std::process::id()));
+        let extracted = dir.join("ref").join("extracted");
+        let frames = extracted.join("frames");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&frames).unwrap();
+        std::fs::write(extracted.join("ref_report.md"), "# Reference Video Analysis Report\nPrimary Background: `#101116`").unwrap();
+        std::fs::write(frames.join("ref_scene_01.jpg"), b"jpg1").unwrap();
+        std::fs::write(
+            extracted.join("style.json"),
+            r##"{"scenes":[{"start":0.0,"duration":2.0,"keyframeTimestamp":1.0,"keyframe":"frames/ref_scene_01.jpg"}]}"##,
+        )
+        .unwrap();
+
+        let parent_id = gen_id("parent_ref_test");
+        with_store(|store| {
+            store.messages.insert(
+                parent_id.clone(),
+                vec![json!({
+                    "role": "user",
+                    "parts": [{ "type": "text", "text": "Clone this reference video" }]
+                })],
+            );
+        });
+
+        let injected = resolve_parent_skill_or_voice_directive(
+            &parent_id,
+            &dir.to_string_lossy(),
+            "motion-designer",
+        )
+        .expect("expected reference directive for motion-designer");
+        assert!(injected.contains("Active Video Reference Blueprint"));
+        assert!(injected.contains("#101116"));
+        assert!(injected.contains("ref_scene_01.jpg"));
+
+        with_store(|store| {
+            store.messages.remove(&parent_id);
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 /// Resolves the parent session's active `/skill` or `/audio:` directive so specialized
@@ -131,15 +174,48 @@ pub fn resolve_parent_skill_or_voice_directive(
 
     match subagent_type {
         "motion-designer" | "qa-verifier" => {
-            crate::session::agent_turn::command_resolvers::resolve_motioncraft_style_readonly(
-                workspace_dir,
-                &latest_user_text,
-            )
-            .or_else(|| {
-                crate::session::agent_turn::command_resolvers::resolve_active_project_note(
+            let mut blocks = Vec::new();
+            if let Some(style_or_proj) =
+                crate::session::agent_turn::command_resolvers::resolve_motioncraft_style_readonly(
                     workspace_dir,
+                    &latest_user_text,
                 )
-            })
+                .or_else(|| {
+                    crate::session::agent_turn::command_resolvers::resolve_active_project_note(
+                        workspace_dir,
+                    )
+                })
+            {
+                blocks.push(style_or_proj);
+            }
+
+            if let Some(ref_bp) =
+                crate::session::agent_turn::command_resolvers::resolve_reference_report(workspace_dir)
+            {
+                blocks.push(ref_bp);
+            }
+
+            let ref_kfs = crate::studio::reference_compare::discover_reference_keyframes(
+                std::path::Path::new(workspace_dir),
+                10.0,
+            );
+            if !ref_kfs.is_empty() {
+                let kf_list: Vec<String> = ref_kfs
+                    .iter()
+                    .take(10)
+                    .map(|k| format!("- t={:.2}s -> `{}`", k.timestamp, k.rel_path))
+                    .collect();
+                blocks.push(format!(
+                    "[Extracted Reference Keyframes on Disk]:\n{}\nUse `capture_film_preview` (`compareToReference: true`) to score RGB SSIM & inspect `.aetheria/preview/comparison_strip.jpg`.",
+                    kf_list.join("\n")
+                ));
+            }
+
+            if blocks.is_empty() {
+                None
+            } else {
+                Some(blocks.join("\n\n"))
+            }
         }
         "audio-director" => {
             let voice = crate::session::agent_turn::command_resolvers::resolve_voice_preset_command(

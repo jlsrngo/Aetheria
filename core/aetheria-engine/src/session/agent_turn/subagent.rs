@@ -462,8 +462,9 @@ async fn run_subagent_loop(
                 "tool_calls": completion.tool_calls
             }));
 
+            let engine_cfg = crate::provider::read_aetheria_config();
             let subagent_vision_enabled = super::runner::model_supports_vision_from_config(
-                None,
+                Some(&engine_cfg),
                 &provider_id,
                 &model_id,
             );
