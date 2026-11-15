@@ -5,6 +5,7 @@ import {
   isMicrostockChecklistComplete,
 } from "../lib/microstockUtils";
 import type {
+  MicrostockChecklist,
   MicrostockManifest,
   MicrostockPackageResult,
   MicrostockRenderRecord,
@@ -20,7 +21,7 @@ const DEFAULT_MANIFEST: MicrostockManifest = {
   projectFolder: "default-project",
   enabled: false,
   targetMarketplace: "adobe_stock",
-  presetId: "adobe_1080p_16x9_30p",
+  presetId: "1920x1080",
   isLoop: false,
   provenance: {
     aiDeclared: null,
@@ -56,6 +57,69 @@ const DEFAULT_MANIFEST: MicrostockManifest = {
   updatedAt: 0,
 };
 
+interface BackendManifestDto {
+  schemaVersion?: number;
+  enabled?: boolean;
+  preset?: string;
+  fps?: number;
+  codec?: string;
+  isLoop?: boolean;
+  provenance?: {
+    aiDeclared?: boolean | null;
+  };
+  checklist?: {
+    noLogosOrBrands?: boolean;
+    noArtistOrIpNames?: boolean;
+    noIdentifiablePeopleOrProperty?: boolean;
+    noThirdPartyFontsOrGraphicsWithoutLicense?: boolean;
+  };
+  metadata?: {
+    title?: string;
+    keywords?: string[];
+    category?: string;
+  };
+}
+
+function mapBackendManifestToFrontend(
+  dto: BackendManifestDto,
+  current: MicrostockManifest
+): MicrostockManifest {
+  const cl: MicrostockChecklist = dto.checklist
+    ? {
+        notUpscaled: Boolean(dto.checklist.noIdentifiablePeopleOrProperty),
+        noLogosWatermarksTextOrAudio: Boolean(dto.checklist.noLogosOrBrands),
+        ownsFullRightsAndLicenses: Boolean(
+          dto.checklist.noThirdPartyFontsOrGraphicsWithoutLicense
+        ),
+        notCopiedFromExternalReference: Boolean(dto.checklist.noArtistOrIpNames),
+      }
+    : current.provenance.checklist;
+
+  return {
+    ...current,
+    enabled: typeof dto.enabled === "boolean" ? dto.enabled : current.enabled,
+    presetId: dto.preset || current.presetId || "1920x1080",
+    isLoop: typeof dto.isLoop === "boolean" ? dto.isLoop : current.isLoop,
+    provenance: {
+      ...current.provenance,
+      aiDeclared:
+        dto.provenance && "aiDeclared" in dto.provenance
+          ? (dto.provenance.aiDeclared ?? null)
+          : current.provenance.aiDeclared,
+      checklist: cl,
+    },
+    metadata: {
+      ...current.metadata,
+      title: dto.metadata?.title || current.metadata.title,
+      keywords:
+        dto.metadata?.keywords && dto.metadata.keywords.length > 0
+          ? dto.metadata.keywords
+          : current.metadata.keywords,
+      categoryName: dto.metadata?.category || current.metadata.categoryName,
+    },
+  };
+}
+
 interface MicrostockStoreState {
   manifest: MicrostockManifest;
   activeCodec: "h264" | "prores";
@@ -89,7 +153,7 @@ function getSnapshot(): MicrostockStoreState {
 
 function applyPresetToStudioComposition(presetId: string) {
   const preset =
-    ADOBE_MVP_PRESETS.find((p) => p.id === presetId) ?? ADOBE_MVP_PRESETS[2];
+    ADOBE_MVP_PRESETS.find((p) => p.id === presetId) ?? ADOBE_MVP_PRESETS[0];
   studioActions.updateActiveMetadata({
     ratio: preset.ratio,
     width: preset.width,
@@ -117,24 +181,11 @@ export const microstockActions = {
     try {
       const res = await apiFetch(`${API_BASE}/manifest`);
       if (res.ok) {
-        const json = (await res.json()) as { data?: MicrostockManifest };
+        const json = (await res.json()) as { data?: BackendManifestDto };
         if (json.data) {
           state = {
             ...state,
-            manifest: {
-              ...DEFAULT_MANIFEST,
-              ...json.data,
-              metadata: {
-                ...DEFAULT_MANIFEST.metadata,
-                ...json.data.metadata,
-                title:
-                  json.data.metadata.title || DEFAULT_MANIFEST.metadata.title,
-                keywords:
-                  json.data.metadata.keywords?.length > 0
-                    ? json.data.metadata.keywords
-                    : DEFAULT_MANIFEST.metadata.keywords,
-              },
-            },
+            manifest: mapBackendManifestToFrontend(json.data, state.manifest),
           };
           emit();
         }
@@ -152,8 +203,7 @@ export const microstockActions = {
       typeof overrideEnabled === "boolean"
         ? overrideEnabled
         : !state.manifest.enabled;
-    const nextPresetId =
-      presetId || state.manifest.presetId || "adobe_1080p_16x9_30p";
+    const nextPresetId = presetId || state.manifest.presetId || "1920x1080";
 
     state = {
       ...state,
@@ -184,31 +234,20 @@ export const microstockActions = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           enabled: nextEnabled,
-          presetId: nextPresetId,
+          preset: nextPresetId,
         }),
       });
       if (res.ok) {
         const json = (await res.json()) as {
-          data?: { manifest?: MicrostockManifest };
+          data?: { manifest?: BackendManifestDto };
         };
         if (json.data?.manifest) {
           state = {
             ...state,
-            manifest: {
-              ...state.manifest,
-              ...json.data.manifest,
-              metadata: {
-                ...state.manifest.metadata,
-                ...json.data.manifest.metadata,
-                title:
-                  json.data.manifest.metadata.title ||
-                  state.manifest.metadata.title,
-                keywords:
-                  json.data.manifest.metadata.keywords?.length > 0
-                    ? json.data.manifest.metadata.keywords
-                    : state.manifest.metadata.keywords,
-              },
-            },
+            manifest: mapBackendManifestToFrontend(
+              json.data.manifest,
+              state.manifest
+            ),
           };
           emit();
         }
@@ -237,7 +276,7 @@ export const microstockActions = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           enabled: state.manifest.enabled,
-          presetId,
+          preset: presetId,
         }),
       });
     } catch {
@@ -262,23 +301,40 @@ export const microstockActions = {
     };
     emit();
 
+    const cl = nextManifest.provenance.checklist;
     try {
       const res = await apiFetch(`${API_BASE}/manifest`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           enabled: nextManifest.enabled,
-          presetId: nextManifest.presetId,
+          preset: nextManifest.presetId,
+          codec: state.activeCodec,
           isLoop: nextManifest.isLoop,
-          provenance: nextManifest.provenance,
-          metadata: nextManifest.metadata,
-          licenses: nextManifest.licenses,
+          aiDeclaredPresent: true,
+          aiDeclared: nextManifest.provenance.aiDeclared,
+          checklist: {
+            noLogosOrBrands: cl.noLogosWatermarksTextOrAudio,
+            noArtistOrIpNames: cl.notCopiedFromExternalReference,
+            noIdentifiablePeopleOrProperty: cl.notUpscaled,
+            noThirdPartyFontsOrGraphicsWithoutLicense:
+              cl.ownsFullRightsAndLicenses,
+          },
+          metadata: {
+            title: nextManifest.metadata.title,
+            keywords: nextManifest.metadata.keywords,
+            category:
+              nextManifest.metadata.categoryName || "Graphic Resources",
+          },
         }),
       });
       if (res.ok) {
-        const json = (await res.json()) as { data?: MicrostockManifest };
+        const json = (await res.json()) as { data?: BackendManifestDto };
         if (json.data) {
-          state = { ...state, manifest: json.data };
+          state = {
+            ...state,
+            manifest: mapBackendManifestToFrontend(json.data, state.manifest),
+          };
           emit();
         }
       }
@@ -342,11 +398,11 @@ export const microstockActions = {
           fps: input.fps,
           width: input.width,
           height: input.height,
-          isLoop: manifest.isLoop,
         }),
       });
 
       const json = (await res.json()) as {
+        message?: string;
         error?: string;
         items?: PreflightItem[];
         data?: {
@@ -379,13 +435,14 @@ export const microstockActions = {
           percent: 100,
           renderedFrames: 0,
           totalFrames,
-          outputPath: json.error || "Pre-render gate rejected",
+          outputPath: json.message || json.error || "Pre-render gate rejected",
           createdAt: Date.now(),
         });
         return {
           ok: false,
           message:
             failItems[0]?.message ||
+            json.message ||
             json.error ||
             "Adobe Stock pre-render gate rejected the composition.",
           preflight: failReport,
@@ -411,7 +468,7 @@ export const microstockActions = {
         percent: 100,
         renderedFrames: totalFrames,
         totalFrames,
-        outputPath: render.readyPath || render.stagingPath,
+        outputPath: preflight.promotedPath || render.stagingPath,
         createdAt: Date.now(),
       });
 
@@ -420,7 +477,7 @@ export const microstockActions = {
         message:
           preflight.status === "fail"
             ? `Preflight failed (${preflight.items[0]?.code || "QC"})`
-            : `Adobe Stock render ready (${render.readyPath || render.stagingPath})`,
+            : `Adobe Stock render ready (${preflight.promotedPath || render.stagingPath})`,
         preflight,
       };
     } catch (err) {
@@ -444,9 +501,18 @@ export const microstockActions = {
       const res = await apiFetch(`${API_BASE}/package`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slug }),
+        body: JSON.stringify({
+          project: slug,
+          metadata: {
+            title: state.manifest.metadata.title,
+            keywords: state.manifest.metadata.keywords,
+            category:
+              state.manifest.metadata.categoryName || "Graphic Resources",
+          },
+        }),
       });
       const json = (await res.json()) as {
+        message?: string;
         error?: string;
         items?: PreflightItem[];
         data?: MicrostockPackageResult;
@@ -458,6 +524,7 @@ export const microstockActions = {
           ok: false,
           message:
             json.items?.[0]?.message ||
+            json.message ||
             json.error ||
             "Failed to build Adobe Stock package.",
         };

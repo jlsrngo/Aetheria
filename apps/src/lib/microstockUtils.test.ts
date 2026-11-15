@@ -17,7 +17,7 @@ const COMPLETE_CHECKLIST = {
 describe("microstockUtils", () => {
   it("exposes locked Adobe Stock MVP presets and codecs (H.264 + ProRes only)", () => {
     expect(ADOBE_MVP_PRESETS.length).toBe(6);
-    expect(ADOBE_MVP_PRESETS.map((p) => p.id)).toContain("adobe_1080p_16x9_30p");
+    expect(ADOBE_MVP_PRESETS.map((p) => p.id)).toContain("1920x1080");
     expect(ADOBE_ALLOWED_CODECS.map((c) => c.id)).toEqual(["h264", "prores"]);
   });
 
