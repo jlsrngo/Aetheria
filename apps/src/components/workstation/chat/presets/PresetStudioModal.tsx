@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Mic, Video, Sliders, Sparkles, Upload, ArrowRight } from "lucide-react";
 import { Dialog, DialogContent } from "../../../ui/dialog";
 import { cn } from "../../../../lib/utils";
@@ -14,6 +14,7 @@ export function PresetStudioModal({
 }: PresetStudioModalProps) {
   const [step, setStep] = useState<PresetStudioStep>(initialStep);
   const [focusedSide, setFocusedSide] = useState<"audio" | "video">("audio");
+  const chooseEnteredAtRef = useRef(0);
 
   useEffect(() => {
     if (open) {
@@ -21,6 +22,12 @@ export function PresetStudioModal({
       setFocusedSide("audio");
     }
   }, [open, initialStep]);
+
+  useEffect(() => {
+    if (open && step === "choose") {
+      chooseEnteredAtRef.current = Date.now();
+    }
+  }, [open, step]);
 
   // Left / Right keyboard navigation on the initial chooser screen
   useEffect(() => {
@@ -32,7 +39,7 @@ export function PresetStudioModal({
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
         setFocusedSide("video");
-      } else if (e.key === "Enter") {
+      } else if (e.key === "Enter" && !e.repeat && Date.now() - chooseEnteredAtRef.current > 180) {
         e.preventDefault();
         setStep(focusedSide);
       }

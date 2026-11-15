@@ -67,6 +67,8 @@ export function VideoPresetPanel({
   const [uploadedBase64, setUploadedBase64] = useState("");
   const [savedVideoPath, setSavedVideoPath] = useState("");
   const [extractedReport, setExtractedReport] = useState("");
+  const [extractedReportPath, setExtractedReportPath] = useState("");
+  const [extractedStyleSummary, setExtractedStyleSummary] = useState("");
   const [isExtracting, setIsExtracting] = useState(false);
 
   // Manual Visual & Motion Tuning Knobs
@@ -94,8 +96,9 @@ export function VideoPresetPanel({
   };
 
   const handleExtractBlueprint = async () => {
-    if (!uploadedBase64 && !savedVideoPath) {
-      toast.error("Upload file video MP4 terlebih dahulu untuk diekstrak lokal.");
+    const trimmedUrl = referenceUrl.trim();
+    if (!uploadedBase64 && !savedVideoPath && !trimmedUrl) {
+      toast.error("Upload file video MP4 atau isi link referensi terlebih dahulu.");
       return;
     }
     setIsExtracting(true);
@@ -107,6 +110,7 @@ export function VideoPresetPanel({
           fileName: uploadedFileName || undefined,
           videoBase64: uploadedBase64 || undefined,
           videoPath: savedVideoPath || undefined,
+          referenceUrl: !uploadedBase64 && !savedVideoPath && trimmedUrl ? trimmedUrl : undefined,
         }),
       });
       const data = await res.json();
@@ -115,7 +119,18 @@ export function VideoPresetPanel({
         return;
       }
       setSavedVideoPath(data.videoPath || "");
-      setExtractedReport(data.reportMarkdown || "Blueprint berhasil diekstrak ke workspace/ref/extracted/ref_report.md");
+      setExtractedReportPath(data.reportPath || "ref/extracted/ref_report.md");
+      const spec = data.styleSpec;
+      if (spec && typeof spec === "object") {
+        const pal = spec.palette || {};
+        const scenesCount = Array.isArray(spec.scenes) ? spec.scenes.length : 0;
+        setExtractedStyleSummary(
+          `Palet terukur: bg=${pal.primary || "-"}, accent=${pal.accent || "-"}, text=${pal.text || "-"} | ${scenesCount} scene (${spec.totalDuration || "?"}s @ ${spec.fps || 30}fps)`
+        );
+      } else {
+        setExtractedStyleSummary("");
+      }
+      setExtractedReport(data.reportMarkdown || "Blueprint berhasil diekstrak.");
       toast.success("Blueprint visual, palet warna & keyframe berhasil diekstrak!");
     } catch (err: any) {
       toast.error(`Error ekstraksi: ${err?.message || String(err)}`);
@@ -125,8 +140,9 @@ export function VideoPresetPanel({
   };
 
   const handleSendToLlmTuning = () => {
+    const bpPath = extractedReportPath || "ref/extracted/ref_report.md";
     const refSource = savedVideoPath
-      ? `File Video Referensi Lokal: ${savedVideoPath} (Blueprint: workspace/ref/extracted/ref_report.md)`
+      ? `File Video Referensi Lokal: ${savedVideoPath} (Blueprint: ${bpPath})`
       : referenceUrl.trim()
         ? `Link Video Referensi: ${referenceUrl.trim()}`
         : uploadedFileName
@@ -135,10 +151,12 @@ export function VideoPresetPanel({
 
     const customNote =
       tuningInstruction.trim() ||
-      "Buat / tuning video HTML Motion Engine mengikuti referensi ini dengan kemiripan layout, palet warna, dan tipografi di atas 90%.";
+      "Buat / tuning video HTML Motion Engine mengikuti referensi ini dengan kemiripan layout, palet warna, ritme cut, dan tipografi di atas 90%, lalu verifikasi dengan capture_film_preview(compareToReference: true) hingga skor visual konvergen.";
+
+    const measuredLine = extractedStyleSummary ? `\n- Ringkasan Ekstraksi: ${extractedStyleSummary}` : "";
 
     const prompt = `[Video Preset & Reference Studio: ${templateName}]
-- Sumber Referensi: ${refSource}
+- Sumber Referensi: ${refSource}${measuredLine}
 - Style DNA: ${styleDna}
 - Rasio Video: ${aspectRatio} | Tempo Transisi: ${pacing}
 - Suara Narator: voice="${voicePreset}" (style="${voiceStyle}")
@@ -179,7 +197,7 @@ ${customNote}`;
       <div className="p-3 rounded-xl bg-[var(--bg-panel)] border border-[var(--border-color)] space-y-2.5">
         <div className="flex items-center justify-between">
           <span className="text-[11px] font-medium text-[var(--text-primary)]">
-            1. Upload Video Referensi (.MP4) atau Link TikTok / Reels
+            1. Upload Video Referensi (.MP4) atau Link Pinterest / TikTok
           </span>
           <div className="flex items-center gap-1.5">
             <button
@@ -190,7 +208,7 @@ ${customNote}`;
               <Upload className="w-3 h-3 text-rose-400" />
               {uploadedFileName ? "Ganti Video" : "Upload .MP4"}
             </button>
-            {uploadedBase64 && (
+            {(uploadedBase64 || savedVideoPath || referenceUrl.trim().length > 0) && (
               <button
                 type="button"
                 onClick={handleExtractBlueprint}
@@ -234,24 +252,31 @@ ${customNote}`;
           <div className="col-span-7 space-y-1">
             <label className="text-[10px] text-[var(--text-muted)] flex items-center gap-1">
               <Link2 className="w-3 h-3" />
-              Link Referensi (TikTok / YouTube Shorts / Reels)
+              Link Referensi (Pinterest / TikTok / Reels)
             </label>
             <input
               type="text"
               value={referenceUrl}
               onChange={(e) => setReferenceUrl(e.target.value)}
-              placeholder="https://www.tiktok.com/@username/video/..."
+              placeholder="https://pin.it/... atau https://www.tiktok.com/@username/video/..."
               className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-color)] text-xs text-[var(--text-primary)] focus:outline-none"
             />
           </div>
         </div>
 
         {extractedReport && (
-          <div className="p-2 rounded-lg bg-[var(--bg-card)] border border-[var(--border-strong)] flex items-center gap-2 text-[11px] text-[var(--text-primary)]">
-            <CheckCircle2 className="w-4 h-4 text-[var(--text-primary)] shrink-0" />
-            <span className="truncate">
-              Blueprint terekstrak ke <code>workspace/ref/extracted/ref_report.md</code>
-            </span>
+          <div className="p-2 rounded-lg bg-[var(--bg-card)] border border-[var(--border-strong)] flex flex-col gap-0.5 text-[11px] text-[var(--text-primary)]">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-[var(--text-primary)] shrink-0" />
+              <span className="truncate">
+                Blueprint terekstrak ke <code>{extractedReportPath || "ref/extracted/ref_report.md"}</code>
+              </span>
+            </div>
+            {extractedStyleSummary && (
+              <span className="text-[10px] font-mono text-[var(--text-secondary)] pl-6 truncate">
+                {extractedStyleSummary}
+              </span>
+            )}
           </div>
         )}
       </div>
