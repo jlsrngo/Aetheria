@@ -14,7 +14,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useStudioStore } from "../../../hooks/useStudioStore";
+import { useStudioCurrentFrame, useStudioStore } from "../../../hooks/useStudioStore";
 import { apiFetch, API_BASE } from "../../../lib/api";
 import { cn } from "../../../lib/utils";
 import type { NexusVideoProps } from "../../../types/video";
@@ -61,8 +61,9 @@ export function InspectorPanel({
   onClose,
   isFloating = false,
 }: InspectorPanelProps) {
-  const { activeComposition, durationInFrames, currentFrame, assets, undoStack, redoStack, actions } =
+  const { activeComposition, durationInFrames, assets, undoStack, redoStack, actions } =
     useStudioStore();
+  const currentFrame = useStudioCurrentFrame();
   const isHtmlFilm = isHtmlMotionComposition(activeComposition.id);
   const filmMeta = useTimelineFilmMeta(activeComposition.id);
   const [editorMode, setEditorMode] = useState<"schema" | "json">("schema");

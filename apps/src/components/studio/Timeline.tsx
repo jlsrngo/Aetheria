@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { useStudioStore } from "../../hooks/useStudioStore";
+import { useStudioCurrentFrame, useStudioStore } from "../../hooks/useStudioStore";
 import { useMicrostockStore } from "../../hooks/useMicrostockStore";
 import { useTimelineFilmMeta } from "../../hooks/useTimelineFilmMeta";
 import { useTimelineActions } from "../../hooks/useTimelineActions";
@@ -16,7 +16,7 @@ interface TimelineProps {
   compositionId: string;
   durationInFrames: number;
   fps: number;
-  currentFrame: number;
+  currentFrame?: number;
   isPlaying: boolean;
   onSeek: (frame: number) => void;
   onTogglePlay: () => void;
@@ -25,11 +25,13 @@ interface TimelineProps {
 export const Timeline: React.FC<TimelineProps> = ({
   durationInFrames,
   fps,
-  currentFrame,
+  currentFrame: currentFrameProp,
   isPlaying,
   onSeek,
   onTogglePlay,
 }) => {
+  const storeFrame = useStudioCurrentFrame();
+  const currentFrame = currentFrameProp ?? storeFrame;
   const {
     activeComposition,
     canvas,

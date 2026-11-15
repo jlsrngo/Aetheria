@@ -37,7 +37,6 @@ export const StudioPreview: React.FC = () => {
   const {
     activeComposition,
     durationInFrames,
-    currentFrame,
     isPlaying,
     canvas,
     actions,
@@ -130,7 +129,6 @@ export const StudioPreview: React.FC = () => {
     stageWidth,
     stageHeight,
     durationInFrames,
-    currentFrame,
     canvas,
     updateCanvas: actions.updateCanvas,
     updateActiveProps: actions.updateActiveProps,
@@ -342,7 +340,6 @@ export const StudioPreview: React.FC = () => {
           compositionId={activeComposition.id}
           durationInFrames={workspaceDuration ?? durationInFrames}
           fps={workspaceDims?.fps ?? activeComposition.fps}
-          currentFrame={currentFrame}
           isPlaying={isPlaying}
           onSeek={handleSeek}
           onTogglePlay={handleTogglePlay}

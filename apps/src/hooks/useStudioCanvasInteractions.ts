@@ -20,7 +20,7 @@ interface UseStudioCanvasInteractionsArgs {
   stageWidth?: number;
   stageHeight?: number;
   durationInFrames: number;
-  currentFrame: number;
+  currentFrame?: number;
   canvas: StudioCanvasSettings;
   updateCanvas: (partial: Partial<StudioCanvasSettings>) => void;
   updateActiveProps: (
@@ -42,7 +42,6 @@ export function useStudioCanvasInteractions({
   stageWidth,
   stageHeight,
   durationInFrames,
-  currentFrame,
   canvas,
   updateCanvas,
   updateActiveProps,
@@ -161,7 +160,7 @@ export function useStudioCanvasInteractions({
     updateBoundingBox();
     const frameId = requestAnimationFrame(updateBoundingBox);
     return () => cancelAnimationFrame(frameId);
-  }, [updateBoundingBox, numericZoom, panX, panY, currentFrame, activeComposition.props]);
+  }, [updateBoundingBox, numericZoom, panX, panY, activeComposition.props]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

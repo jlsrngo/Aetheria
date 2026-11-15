@@ -2,6 +2,7 @@ import React, {
   Component,
   forwardRef,
   useImperativeHandle,
+  useMemo,
   useRef,
   type ErrorInfo,
 } from "react";
@@ -147,6 +148,38 @@ export const HtmlMotionPlayer = forwardRef<
     [playback]
   );
 
+  const effectiveVolume = clampAudioVolume(volumeProp ?? playback.volume);
+  const effectiveMuted = isMutedProp ?? playback.isMuted;
+  const safeFps = Math.max(1, fps);
+  const safeDurationInFrames = Math.max(1, durationInFrames);
+
+  const motionContextValue = useMemo(
+    () => ({
+      getCurrentFrame: playback.getCurrentFrame,
+      subscribeFrame: playback.subscribeFrame,
+      fps: safeFps,
+      durationInFrames: safeDurationInFrames,
+      width: compositionWidth,
+      height: compositionHeight,
+      isPlaying: playback.isPlaying,
+      playbackRate,
+      volume: effectiveVolume,
+      isMuted: effectiveMuted,
+    }),
+    [
+      playback.getCurrentFrame,
+      playback.subscribeFrame,
+      safeFps,
+      safeDurationInFrames,
+      compositionWidth,
+      compositionHeight,
+      playback.isPlaying,
+      playbackRate,
+      effectiveVolume,
+      effectiveMuted,
+    ]
+  );
+
   return (
     <div
       ref={containerRef}
@@ -160,19 +193,7 @@ export const HtmlMotionPlayer = forwardRef<
       }}
     >
       <StageErrorBoundary>
-        <MotionProvider
-          value={{
-            currentFrame: playback.currentFrame,
-            fps: Math.max(1, fps),
-            durationInFrames: Math.max(1, durationInFrames),
-            width: compositionWidth,
-            height: compositionHeight,
-            isPlaying: playback.isPlaying,
-            playbackRate,
-            volume: clampAudioVolume(volumeProp ?? playback.volume),
-            isMuted: isMutedProp ?? playback.isMuted,
-          }}
-        >
+        <MotionProvider value={motionContextValue}>
           <div className="w-full h-full relative">
             <StageComponent {...(inputProps ?? {})} />
           </div>

@@ -21,7 +21,8 @@ export const CompositionMenu = memo(function CompositionMenu({
   onMouseEnter,
   onClose,
 }: BaseMenuProps) {
-  const { activeComposition, currentFrame, actions } = useStudioStore();
+  const { activeComposition, actions } = useStudioStore();
+  const currentFrame = isOpen ? actions.getCurrentFrame() : 0;
 
   const setRatio = (ratio: "9:16" | "1:1" | "16:9") => {
     const dims =

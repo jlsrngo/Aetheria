@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Film, FolderOpen } from "lucide-react";
-import { useMotionConfig, useMotionFrame } from "./MotionContext";
+import { useMotionConfig, useMotionFrameSubscription } from "./MotionContext";
 import { SceneAudioSync } from "./SceneAudioSync";
 import {
   type HtmlFilmDescriptor,
@@ -58,7 +58,7 @@ export const HtmlFilmStage: React.FC<HtmlFilmStageProps> = ({
     },
     [onRuntimeError]
   );
-  const frame = useMotionFrame();
+  const { subscribeFrame, getCurrentFrame } = useMotionFrameSubscription();
   const { fps, width, height } = useMotionConfig();
   const stageBoxRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -96,9 +96,7 @@ export const HtmlFilmStage: React.FC<HtmlFilmStageProps> = ({
     setIframeReady(false);
   }, [srcDoc]);
 
-  const frameRef = useRef(frame);
   const fpsRef = useRef(fps);
-  frameRef.current = frame;
   fpsRef.current = fps;
 
   useEffect(() => {
@@ -114,7 +112,7 @@ export const HtmlFilmStage: React.FC<HtmlFilmStageProps> = ({
         targetWin?.postMessage(
           {
             type: STAGE_MSG_RENDER_AT,
-            timeSec: frameRef.current / Math.max(1, fpsRef.current),
+            timeSec: getCurrentFrame() / Math.max(1, fpsRef.current),
           },
           "*",
         );
@@ -184,14 +182,19 @@ export const HtmlFilmStage: React.FC<HtmlFilmStageProps> = ({
 
   useEffect(() => {
     if (!iframeReady) return;
-    iframeRef.current?.contentWindow?.postMessage(
-      {
-        type: STAGE_MSG_RENDER_AT,
-        timeSec: frame / Math.max(1, fps),
-      },
-      "*",
-    );
-  }, [frame, fps, iframeReady]);
+    const safeFps = Math.max(1, fps);
+    const dispatchFrame = (nextFrame: number) => {
+      iframeRef.current?.contentWindow?.postMessage(
+        {
+          type: STAGE_MSG_RENDER_AT,
+          timeSec: nextFrame / safeFps,
+        },
+        "*",
+      );
+    };
+    dispatchFrame(getCurrentFrame());
+    return subscribeFrame(dispatchFrame);
+  }, [fps, iframeReady, subscribeFrame, getCurrentFrame]);
 
   useEffect(() => {
     const pushHotSwap = (rawFile: unknown, code: unknown) => {
@@ -206,7 +209,7 @@ export const HtmlFilmStage: React.FC<HtmlFilmStageProps> = ({
           type: STAGE_MSG_HOT_SWAP_SCRIPT,
           name: clean.split("/").pop() || clean,
           code,
-          timeSec: frameRef.current / Math.max(1, fpsRef.current),
+          timeSec: getCurrentFrame() / Math.max(1, fpsRef.current),
         },
         "*",
       );
@@ -228,7 +231,7 @@ export const HtmlFilmStage: React.FC<HtmlFilmStageProps> = ({
       window.removeEventListener("aetheria:live-code-change", onLiveCodeChange);
       window.removeEventListener("aetheria:sse-file-edited", onSseFileEdited);
     };
-  }, [reportStageError]);
+  }, [reportStageError, getCurrentFrame]);
 
   const safeW = Math.max(1, width);
   const safeH = Math.max(1, height);
@@ -250,6 +253,7 @@ export const HtmlFilmStage: React.FC<HtmlFilmStageProps> = ({
           height: `${safeH}px`,
           transform: `scale(${stageScale})`,
           transformOrigin: "center center",
+          willChange: "transform",
           flexShrink: 0,
         }}
       >

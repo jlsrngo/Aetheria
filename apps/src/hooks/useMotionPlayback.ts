@@ -59,7 +59,6 @@ export function useMotionPlayback(opts: UseMotionPlaybackOptions) {
     onEnded,
   } = opts;
 
-  const [currentFrame, setCurrentFrame] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [volume, setVolume] = useState(1);
@@ -68,6 +67,7 @@ export function useMotionPlayback(opts: UseMotionPlaybackOptions) {
   const lastEmitFrameRef = useRef(0);
   const isPlayingRef = useRef(false);
   const lastTsRef = useRef<number | null>(null);
+  const frameListenersRef = useRef<Set<(frame: number) => void>>(new Set());
 
   const callbacksRef = useRef({
     onFrameUpdate,
@@ -76,6 +76,19 @@ export function useMotionPlayback(opts: UseMotionPlaybackOptions) {
     onEnded,
   });
   callbacksRef.current = { onFrameUpdate, onPlayChange, onSeeked, onEnded };
+
+  const emitFrame = useCallback((frame: number) => {
+    lastEmitFrameRef.current = frame;
+    frameListenersRef.current.forEach((listener) => listener(frame));
+    callbacksRef.current.onFrameUpdate?.(frame);
+  }, []);
+
+  const subscribeFrame = useCallback((listener: (frame: number) => void) => {
+    frameListenersRef.current.add(listener);
+    return () => {
+      frameListenersRef.current.delete(listener);
+    };
+  }, []);
 
   const setPlayingState = useCallback((next: boolean) => {
     isPlayingRef.current = next;
@@ -92,12 +105,10 @@ export function useMotionPlayback(opts: UseMotionPlaybackOptions) {
         outFrame
       );
       frameFloatRef.current = clamped;
-      lastEmitFrameRef.current = clamped;
-      setCurrentFrame(clamped);
-      callbacksRef.current.onFrameUpdate?.(clamped);
+      emitFrame(clamped);
       callbacksRef.current.onSeeked?.(clamped);
     },
-    [durationInFrames, inFrame, outFrame]
+    [durationInFrames, inFrame, outFrame, emitFrame]
   );
 
   const play = useCallback(() => {
@@ -109,13 +120,11 @@ export function useMotionPlayback(opts: UseMotionPlaybackOptions) {
     );
     if (frameFloatRef.current >= maxFrame) {
       frameFloatRef.current = minFrame;
-      lastEmitFrameRef.current = minFrame;
-      setCurrentFrame(minFrame);
-      callbacksRef.current.onFrameUpdate?.(minFrame);
+      emitFrame(minFrame);
     }
     lastTsRef.current = null;
     setPlayingState(true);
-  }, [durationInFrames, inFrame, outFrame, setPlayingState]);
+  }, [durationInFrames, inFrame, outFrame, emitFrame, setPlayingState]);
 
   const pause = useCallback(() => {
     lastTsRef.current = null;
@@ -139,11 +148,9 @@ export function useMotionPlayback(opts: UseMotionPlaybackOptions) {
     );
     if (clamped !== lastEmitFrameRef.current) {
       frameFloatRef.current = clamped;
-      lastEmitFrameRef.current = clamped;
-      setCurrentFrame(clamped);
-      callbacksRef.current.onFrameUpdate?.(clamped);
+      emitFrame(clamped);
     }
-  }, [durationInFrames, inFrame, outFrame]);
+  }, [durationInFrames, inFrame, outFrame, emitFrame]);
 
   useEffect(() => {
     if (!isPlaying) return;
@@ -173,9 +180,7 @@ export function useMotionPlayback(opts: UseMotionPlaybackOptions) {
             nextFloat = minFrame + ((nextFloat - minFrame) % span);
           } else {
             frameFloatRef.current = maxFrame;
-            lastEmitFrameRef.current = maxFrame;
-            setCurrentFrame(maxFrame);
-            callbacksRef.current.onFrameUpdate?.(maxFrame);
+            emitFrame(maxFrame);
             setPlayingState(false);
             callbacksRef.current.onEnded?.();
             return;
@@ -184,9 +189,7 @@ export function useMotionPlayback(opts: UseMotionPlaybackOptions) {
         frameFloatRef.current = nextFloat;
         const rounded = Math.max(minFrame, Math.min(maxFrame, Math.floor(nextFloat)));
         if (rounded !== lastEmitFrameRef.current) {
-          lastEmitFrameRef.current = rounded;
-          setCurrentFrame(rounded);
-          callbacksRef.current.onFrameUpdate?.(rounded);
+          emitFrame(rounded);
         }
       }
       rafId = requestAnimationFrame(tick);
@@ -194,10 +197,10 @@ export function useMotionPlayback(opts: UseMotionPlaybackOptions) {
 
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [isPlaying, fps, playbackRate, durationInFrames, inFrame, outFrame, loop, setPlayingState]);
+  }, [isPlaying, fps, playbackRate, durationInFrames, inFrame, outFrame, loop, emitFrame, setPlayingState]);
 
   return {
-    currentFrame,
+    subscribeFrame,
     isPlaying,
     isMuted,
     setIsMuted,

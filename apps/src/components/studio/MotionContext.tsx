@@ -1,7 +1,11 @@
-import React, { createContext, useContext } from "react";
+import React, { createContext, useCallback, useContext, useSyncExternalStore } from "react";
+
+export type FrameListener = (frame: number) => void;
+export type SubscribeFrameFn = (listener: FrameListener) => () => void;
 
 export interface MotionPlaybackConfig {
-  currentFrame: number;
+  getCurrentFrame: () => number;
+  subscribeFrame: SubscribeFrameFn;
   fps: number;
   durationInFrames: number;
   width: number;
@@ -12,8 +16,11 @@ export interface MotionPlaybackConfig {
   isMuted: boolean;
 }
 
+const noopSubscribe: SubscribeFrameFn = () => () => {};
+
 const DEFAULT_CONFIG: MotionPlaybackConfig = {
-  currentFrame: 0,
+  getCurrentFrame: () => 0,
+  subscribeFrame: noopSubscribe,
   fps: 30,
   durationInFrames: 1,
   width: 1080,
@@ -34,7 +41,20 @@ export const MotionProvider: React.FC<{
 );
 
 export function useMotionFrame(): number {
-  return useContext(MotionContext).currentFrame;
+  const { subscribeFrame, getCurrentFrame } = useContext(MotionContext);
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => subscribeFrame(() => onStoreChange()),
+    [subscribeFrame]
+  );
+  return useSyncExternalStore(subscribe, getCurrentFrame, getCurrentFrame);
+}
+
+export function useMotionFrameSubscription(): {
+  subscribeFrame: SubscribeFrameFn;
+  getCurrentFrame: () => number;
+} {
+  const { subscribeFrame, getCurrentFrame } = useContext(MotionContext);
+  return { subscribeFrame, getCurrentFrame };
 }
 
 export function useMotionConfig(): MotionPlaybackConfig {

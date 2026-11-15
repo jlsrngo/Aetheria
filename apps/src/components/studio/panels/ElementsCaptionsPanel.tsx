@@ -13,7 +13,7 @@ import {
   Layers,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useStudioStore } from "../../../hooks/useStudioStore";
+import { useStudioCurrentFrame, useStudioStore } from "../../../hooks/useStudioStore";
 import { apiFetch, API_BASE } from "../../../lib/api";
 import { cn } from "../../../lib/utils";
 import type { StudioSubtitleCue } from "../../../types/studio";
@@ -74,11 +74,11 @@ export function ElementsCaptionsPanel({
   const {
     activeComposition,
     durationInFrames,
-    currentFrame,
     subtitleCues,
     captionStyle,
     actions,
   } = useStudioStore();
+  const currentFrame = useStudioCurrentFrame();
   const isHtmlFilm = isHtmlMotionComposition(activeComposition.id);
   const filmMeta = useTimelineFilmMeta(activeComposition.id);
   const [isGenerating, setIsGenerating] = useState(false);

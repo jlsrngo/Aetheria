@@ -57,3 +57,12 @@ Whenever you create or update a project in Adobe Stock mode, read any existing `
 - `metadata.title`: Plain English descriptive title **<= 70 characters**, no commas, no special characters, no artist/brand/IP names, tailored specifically to the generated scene.
 - `metadata.keywords`: Array of **5 to 49 unique lowercase English keywords**, ordered by relevance (first 10 carry the highest weight), matching the actual visual elements, colors, mood, and style of the requested theme, with zero trademarks or artist names.
 - `metadata.category`: One of the 21 official Adobe Stock categories (e.g. `"Graphic resources"`, `"Technology"`, `"Business"`, `"Science"`, `"Nature"`, `"Holidays"` -> mapped cleanly to the matching Adobe Stock category).
+
+---
+
+## 3. 60fps Canvas2D Rendering Performance (CRITICAL FOR SMOOTH PREVIEW)
+
+To keep live Stage preview running smoothly at 30–60fps (especially at 1920×1080 and 4K) AND speed up headless rendering:
+1. **ZERO per-frame `ctx.shadowBlur` inside draw loops:** Canvas2D `shadowBlur` runs a costly multi-pass blur per stroke/path. Pre-render glowing strokes or halos ONCE onto an offscreen sprite canvas, or layer 2–3 cheap semi-transparent wider strokes (`globalAlpha` + wide `lineWidth`) instead of `shadowBlur`.
+2. **Pre-bake radial glows, bokeh, and sparkles ONCE at init:** NEVER call `ctx.createRadialGradient(...)` dozens or hundreds of times per frame inside loops (`bokeh`, `sparkles`, particles). Create reusable offscreen `<canvas>` glow sprites (`document.createElement("canvas")`) once at startup and stamp them inside `renderAt(t)` with `ctx.globalAlpha = ...; ctx.drawImage(sprite, x - r, y - r, r * 2, r * 2)`.
+3. **Minimize `ctx.save()` / `ctx.restore()` churn and keep background static gradients minimal:** Reuse module-level constants/lookup tables (`Float32Array`) seeded deterministically (`hash(i)`) instead of recomputing heavy math inside inner loops.

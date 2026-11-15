@@ -25,7 +25,6 @@ export { DEFAULT_WORKSPACE_COMPOSITION, isStaleComposition };
 interface StudioStoreState {
   compositions: StudioComposition[];
   activeCompositionId: string;
-  currentFrame: number;
   isPlaying: boolean;
   canvas: StudioCanvasSettings;
   assets: StudioStaticAsset[];
@@ -52,7 +51,6 @@ const initialCompositions = loadStoredCompositions();
 let state: StudioStoreState = {
   compositions: initialCompositions,
   activeCompositionId: initialCompositions[0]?.id || DEFAULT_WORKSPACE_COMPOSITION.id,
-  currentFrame: 0,
   isPlaying: false,
   canvas: {
     zoom: "fit",
@@ -83,6 +81,8 @@ let state: StudioStoreState = {
 };
 
 const listeners = new Set<() => void>();
+const frameListeners = new Set<() => void>();
+let frameState = 0;
 let storageTimer: ReturnType<typeof setTimeout> | null = null;
 let backendSyncTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -94,13 +94,26 @@ function emit() {
   }, 250);
 }
 
+function emitFrame() {
+  frameListeners.forEach((l) => l());
+}
+
 function subscribe(listener: () => void) {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
 
+function subscribeFrame(listener: () => void) {
+  frameListeners.add(listener);
+  return () => frameListeners.delete(listener);
+}
+
 function getSnapshot(): StudioStoreState {
   return state;
+}
+
+function getFrameSnapshot(): number {
+  return frameState;
 }
 
 export const studioActions = {
@@ -109,17 +122,24 @@ export const studioActions = {
     state = {
       ...state,
       activeCompositionId: id,
-      currentFrame: 0,
       undoStack: [],
       redoStack: [],
     };
+    if (frameState !== 0) {
+      frameState = 0;
+      emitFrame();
+    }
     emit();
   },
 
+  getCurrentFrame(): number {
+    return frameState;
+  },
+
   setCurrentFrame(frame: number) {
-    if (state.currentFrame === frame) return;
-    state = { ...state, currentFrame: frame };
-    listeners.forEach((l) => l());
+    if (frameState === frame) return;
+    frameState = frame;
+    emitFrame();
   },
 
   setIsPlaying(isPlaying: boolean) {
@@ -290,8 +310,11 @@ export const studioActions = {
       ...state,
       compositions: [...state.compositions, created],
       activeCompositionId: created.id,
-      currentFrame: 0,
     };
+    if (frameState !== 0) {
+      frameState = 0;
+      emitFrame();
+    }
     emit();
     return created;
   },
@@ -424,6 +447,14 @@ if (typeof window !== "undefined") {
   window.addEventListener("aetheria-folder-change", () => {
     void studioActions.syncFromBackend();
   });
+}
+
+export function subscribeStudioFrame(listener: () => void): () => void {
+  return subscribeFrame(listener);
+}
+
+export function useStudioCurrentFrame(): number {
+  return useSyncExternalStore(subscribeFrame, getFrameSnapshot, getFrameSnapshot);
 }
 
 export function useStudioStore() {

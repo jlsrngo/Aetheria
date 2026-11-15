@@ -30,11 +30,6 @@ export const SceneAudioSync: React.FC<SceneAudioSyncProps> = ({
   activeDir,
   onAudioError,
 }) => {
-  const frame = useMotionFrame();
-  const { fps, isPlaying, playbackRate, volume, isMuted } = useMotionConfig();
-  const audioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
-  const failedTracksRef = useRef<Map<string, string>>(new Map());
-
   const authToken = useSyncExternalStore(
     subscribeEngineMediaAuth,
     getEngineMediaAuthToken,
@@ -50,14 +45,44 @@ export const SceneAudioSync: React.FC<SceneAudioSyncProps> = ({
     void initEngineMediaAuth();
   }, []);
 
-  const latestClockRef = useRef({ frame, fps, isPlaying, playbackRate, volume, isMuted });
-  latestClockRef.current = { frame, fps, isPlaying, playbackRate, volume, isMuted };
-
   const resolvedTracks = useMemo(() => {
     // Re-resolve track URLs once Tauri runtimeAuthToken arrives.
     void authToken;
     return resolveSceneAudioTracks(scenes, activeDir, authSettled);
   }, [scenes, activeDir, authSettled, authToken]);
+
+  useEffect(() => {
+    if (resolvedTracks.length === 0) {
+      onAudioError?.(null);
+    }
+  }, [resolvedTracks.length, onAudioError]);
+
+  if (resolvedTracks.length === 0) return null;
+
+  return (
+    <SceneAudioSyncTracks
+      resolvedTracks={resolvedTracks}
+      onAudioError={onAudioError}
+    />
+  );
+};
+
+interface SceneAudioSyncTracksProps {
+  resolvedTracks: ReturnType<typeof resolveSceneAudioTracks>;
+  onAudioError?: (error: string | null) => void;
+}
+
+const SceneAudioSyncTracks: React.FC<SceneAudioSyncTracksProps> = ({
+  resolvedTracks,
+  onAudioError,
+}) => {
+  const frame = useMotionFrame();
+  const { fps, isPlaying, playbackRate, volume, isMuted } = useMotionConfig();
+  const audioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
+  const failedTracksRef = useRef<Map<string, string>>(new Map());
+
+  const latestClockRef = useRef({ frame, fps, isPlaying, playbackRate, volume, isMuted });
+  latestClockRef.current = { frame, fps, isPlaying, playbackRate, volume, isMuted };
 
   const emitFirstTrackError = useCallback(() => {
     const first = failedTracksRef.current.values().next();
