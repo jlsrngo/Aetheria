@@ -51,7 +51,7 @@ pub fn read_tool_definition() -> Value {
                 "type": "object",
                 "properties": {
                     "filePath": { "type": "string", "description": "Path to the file or directory inside the workspace." },
-                    "offset": { "type": "number", "description": "Optional line offset to begin reading from." },
+                    "offset": { "type": "number", "description": "Optional 1-indexed line number to begin reading from (1 = first line)." },
                     "limit": { "type": "number", "description": "Optional maximum number of lines to read." }
                 },
                 "required": ["filePath"]
@@ -118,7 +118,13 @@ pub fn execute_read(workspace_dir: &str, arguments: &Value) -> Value {
             } else {
                 match std::fs::read_to_string(&p) {
                     Ok(content) => {
-                        let offset = arguments.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                        // `offset` is a 1-indexed line number (see prompt/read.txt); 0 and 1 both
+                        // mean the first line. Treating it as 0-based hid line 1 from agents.
+                        let offset = arguments
+                            .get("offset")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0)
+                            .saturating_sub(1) as usize;
                         let limit = arguments.get("limit").and_then(|v| v.as_u64()).map(|n| n as usize);
 
                         let lines: Vec<&str> = content.lines().collect();
@@ -132,7 +138,7 @@ pub fn execute_read(workspace_dir: &str, arguments: &Value) -> Value {
                             json!({
                                 "content": sliced,
                                 "linesTotal": total_lines,
-                                "offset": start,
+                                "offset": start + 1,
                                 "linesReturned": end - start
                             })
                         } else {
@@ -188,6 +194,29 @@ mod tests {
             .expect("vision images array");
         assert_eq!(imgs.len(), 1);
         assert!(imgs[0].as_str().unwrap().starts_with("data:image/png;base64,"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_read_offset_is_one_indexed_and_never_hides_first_line() {
+        let dir = std::env::temp_dir().join(format!("aetheria_read_offset_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.js"), "(function(){\n  'use strict';\n  run();\n})();").unwrap();
+        let ws = dir.to_string_lossy();
+
+        for first in [0, 1] {
+            let res = execute_read(&ws, &json!({ "filePath": "a.js", "offset": first, "limit": 2000 }));
+            let content = res.get("content").and_then(|v| v.as_str()).unwrap();
+            assert!(content.starts_with("(function(){"), "offset {} hid line 1: {}", first, content);
+            assert_eq!(res.get("offset"), Some(&json!(1)));
+            assert_eq!(res.get("linesReturned"), Some(&json!(4)));
+        }
+
+        let res = execute_read(&ws, &json!({ "filePath": "a.js", "offset": 3, "limit": 1 }));
+        assert_eq!(res.get("content"), Some(&json!("  run();")));
+        assert_eq!(res.get("offset"), Some(&json!(3)));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
