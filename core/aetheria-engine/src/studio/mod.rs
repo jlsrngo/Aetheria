@@ -32,6 +32,7 @@ pub mod native_renderer;
 pub mod presets;
 pub mod preview_capture;
 pub mod project_registry;
+pub mod reference_compare;
 pub mod renderer;
 pub mod scheduler;
 pub mod script_generator;

@@ -31,6 +31,9 @@ pub struct FilmPreviewCaptureResult {
     pub duration: f64,
     pub fps: u32,
     pub frames: Vec<PreviewFrameCapture>,
+    pub runtime_errors: Vec<String>,
+    pub reference_comparison: Option<Value>,
+    pub comparison_strip_data_url: Option<String>,
 }
 
 pub(crate) fn compute_relative_ratio(timestamp: f64, duration: f64) -> f64 {
@@ -115,6 +118,17 @@ pub async fn capture_film_preview_frames(
     workspace_dir: &str,
     requested_timestamps: Vec<f64>,
 ) -> Result<FilmPreviewCaptureResult, String> {
+    capture_film_preview_with_options(workspace_dir, requested_timestamps, None, None).await
+}
+
+/// Captures preview frames and optionally runs MotionClone-style RGB SSIM + side-by-side comparison
+/// against extracted `ref/` keyframes.
+pub async fn capture_film_preview_with_options(
+    workspace_dir: &str,
+    requested_timestamps: Vec<f64>,
+    compare_to_reference: Option<bool>,
+    pass_threshold: Option<f64>,
+) -> Result<FilmPreviewCaptureResult, String> {
     let html_path = resolve_active_html_film_path(Some(workspace_dir))
         .ok_or_else(|| "No index.html found in active project folder".to_string())?;
     let film_root = html_path
@@ -148,6 +162,14 @@ pub async fn capture_film_preview_frames(
     let _ = cdp.call("Runtime.enable", json!({})).await?;
     let _ = cdp
         .call(
+            "Page.addScriptToEvaluateOnNewDocument",
+            json!({
+                "source": "window.__aetheriaErrors = []; window.addEventListener('error', e => window.__aetheriaErrors.push(String(e.message || e.error || 'Script error'))); window.addEventListener('unhandledrejection', e => window.__aetheriaErrors.push(String(e.reason || 'Unhandled promise rejection')));"
+            }),
+        )
+        .await;
+    let _ = cdp
+        .call(
             "Emulation.setDeviceMetricsOverride",
             json!({
                 "width": meta.width,
@@ -162,7 +184,32 @@ pub async fn capture_film_preview_frames(
     let _ = cdp.call("Page.navigate", json!({ "url": target_url })).await?;
     wait_for_film_ready(&mut cdp, &mut meta).await?;
 
-    let timestamps = normalize_preview_timestamps(&requested_timestamps, meta.duration);
+    let ref_root = if super::reference_compare::discover_reference_keyframes(&ws_root, meta.duration).is_empty()
+        && film_root != ws_root
+    {
+        film_root.clone()
+    } else {
+        ws_root.clone()
+    };
+    let has_reference = !super::reference_compare::discover_reference_keyframes(&ref_root, meta.duration).is_empty();
+    let should_compare = compare_to_reference.unwrap_or(has_reference);
+
+    let effective_requested = if requested_timestamps.is_empty() && should_compare {
+        let aligned = super::reference_compare::recommended_reference_timestamps(
+            &ref_root,
+            meta.duration,
+            MAX_PREVIEW_FRAMES,
+        );
+        if aligned.is_empty() {
+            requested_timestamps
+        } else {
+            aligned
+        }
+    } else {
+        requested_timestamps
+    };
+
+    let timestamps = normalize_preview_timestamps(&effective_requested, meta.duration);
     let preview_dir = resolve_isolated_path(&film_root_str, ".aetheria/preview")
         .unwrap_or_else(|_| film_root.join(".aetheria").join("preview"));
     let _ = tokio::fs::create_dir_all(&preview_dir).await;
@@ -170,7 +217,7 @@ pub async fn capture_film_preview_frames(
     let mut frames = Vec::with_capacity(timestamps.len());
     for (idx, ts) in timestamps.iter().enumerate() {
         let eval_expr = format!(
-            "(() => {{ if (typeof window.renderAt !== 'function') {{ return {{ ok: false, error: 'HTML film does not expose window.renderAt(t)' }}; }} window.renderAt({:.6}); return new Promise(r => requestAnimationFrame(() => r({{ ok: true }}))); }})()",
+            "(() => {{ if (typeof window.renderAt !== 'function') {{ return {{ ok: false, error: 'HTML film does not expose window.renderAt(t)' }}; }} window.renderAt({:.6}); return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r({{ ok: true }})))); }})()",
             ts
         );
         let eval_resp = cdp
@@ -209,7 +256,47 @@ pub async fn capture_film_preview_frames(
         });
     }
 
+    let mut runtime_errors = Vec::new();
+    if let Ok(err_eval) = cdp
+        .call(
+            "Runtime.evaluate",
+            json!({ "expression": "Array.isArray(window.__aetheriaErrors) ? window.__aetheriaErrors.slice(0, 8) : []", "returnByValue": true }),
+        )
+        .await
+    {
+        if let Some(arr) = err_eval.pointer("/result/value").and_then(Value::as_array) {
+            for item in arr {
+                if let Some(s) = item.as_str().filter(|v| !v.trim().is_empty()) {
+                    runtime_errors.push(s.to_string());
+                }
+            }
+        }
+    }
+
     validate_non_identical_frames(&frames)?;
+
+    let (reference_comparison, comparison_strip_data_url) = if should_compare {
+        match super::reference_compare::compare_preview_to_reference(
+            &ref_root,
+            &film_root,
+            meta.duration,
+            &frames,
+            pass_threshold.unwrap_or(0.72),
+        )
+        .await
+        {
+            Ok((cmp_json, strip_url)) => (Some(cmp_json), strip_url),
+            Err(err) => (
+                Some(json!({
+                    "ok": false,
+                    "error": err,
+                })),
+                None,
+            ),
+        }
+    } else {
+        (None, None)
+    };
 
     Ok(FilmPreviewCaptureResult {
         width: meta.width,
@@ -217,6 +304,9 @@ pub async fn capture_film_preview_frames(
         duration: meta.duration,
         fps: meta.fps,
         frames,
+        runtime_errors,
+        reference_comparison,
+        comparison_strip_data_url,
     })
 }
 

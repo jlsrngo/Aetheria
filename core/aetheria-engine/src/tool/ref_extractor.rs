@@ -119,9 +119,20 @@ pub async fn execute_ref_extractor(workspace_dir: &str, arguments: &Value) -> Va
 
         if let Ok(res) = cmd.output().await {
             let stdout = String::from_utf8_lossy(&res.stdout).to_string();
-            if let Some(idx) = stdout.rfind('{') {
-                if let Ok(parsed) = serde_json::from_str::<Value>(&stdout[idx..]) {
+            if let Some(idx) = stdout.find('{') {
+                if let Ok(mut parsed) = serde_json::from_str::<Value>(&stdout[idx..]) {
                     if parsed.get("error").is_none() {
+                        let frames_dir = out_dir.join("frames");
+                        let vision_bundle = collect_extracted_frames_response(&ws, &frames_dir, "opencv");
+                        if let Some(obj) = parsed.as_object_mut() {
+                            obj.insert("ok".to_string(), json!(true));
+                            if let Some(imgs) = vision_bundle.get("_vision_images").cloned() {
+                                obj.insert("_vision_images".to_string(), imgs);
+                            }
+                            if let Some(frames) = vision_bundle.get("frames").cloned() {
+                                obj.insert("extractedFrames".to_string(), frames);
+                            }
+                        }
                         return parsed;
                     }
                 }
@@ -135,31 +146,37 @@ pub async fn execute_ref_extractor(workspace_dir: &str, arguments: &Value) -> Va
         }
     }
 
-    // Fallback: extract reference frames via FFmpeg (`-vf fps=1/2.5 -frames:v 4`) without Python/cv2
+    // Fallback: extract reference frames via FFmpeg at normalized [10%, 35%, 60%, 85%] of real video duration
     let frames_dir = out_dir.join("frames");
     let _ = std::fs::create_dir_all(&frames_dir);
     let ff_bin = crate::paths::locate_ffmpeg_binary().unwrap_or_else(|| PathBuf::from("ffmpeg"));
-    let pattern = frames_dir.join("thumb_%03d.jpg");
-    let mut ff_cmd = Command::new(&ff_bin);
-    crate::paths::configure_hidden_tokio_command(&mut ff_cmd);
-    let _ = ff_cmd
-        .args([
-            "-y",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-i",
-            &video_path.to_string_lossy(),
-            "-vf",
-            "fps=1/2.5",
-            "-frames:v",
-            "4",
-            "-q:v",
-            "4",
-            &pattern.to_string_lossy(),
-        ])
-        .output()
-        .await;
+    let probed_dur = crate::studio::reference_compare::probe_video_duration_secs(&ff_bin, &video_path)
+        .unwrap_or(10.0);
+    let sample_points = crate::session::agent_turn::social_links::compute_relative_sample_timestamps(probed_dur);
+
+    for (idx, (_ratio, ts)) in sample_points.iter().enumerate() {
+        let thumb_path = frames_dir.join(format!("thumb_{:03}.jpg", idx + 1));
+        let mut ff_cmd = Command::new(&ff_bin);
+        crate::paths::configure_hidden_tokio_command(&mut ff_cmd);
+        let _ = ff_cmd
+            .args([
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-ss",
+                ts.as_str(),
+                "-i",
+                &video_path.to_string_lossy(),
+                "-frames:v",
+                "1",
+                "-q:v",
+                "4",
+                &thumb_path.to_string_lossy(),
+            ])
+            .output()
+            .await;
+    }
 
     let fallback_res = collect_extracted_frames_response(&ws, &frames_dir, "ffmpeg");
     if fallback_res

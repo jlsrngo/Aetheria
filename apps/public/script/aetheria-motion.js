@@ -1259,6 +1259,130 @@
     ctx.restore();
   }
 
+  // ============================================================================
+  // 8. MotionClone-Grade Keyframe Track, Reveal & SVG Path Helpers
+  // ============================================================================
+
+  function _easeModeValue(p, mode) {
+    const u = clamp(p, 0, 1);
+    if (mode === "step") return 0;
+    if (mode === "smooth") return u * u * (3 - 2 * u);
+    if (mode === "out") return 1 - Math.pow(1 - u, 3);
+    return u;
+  }
+
+  function evalKeyframes(frames, t, easingMode = "linear") {
+    if (!Array.isArray(frames) || frames.length === 0) {
+      return { t: 0, x: 0, y: 0, w: 0, h: 0, opacity: 1, rotation: 0, blur: 0, reveal: 1 };
+    }
+    const sorted = frames.length > 1
+      ? frames.slice().sort((a, b) => (a.t || 0) - (b.t || 0))
+      : frames;
+    if (t <= (sorted[0].t || 0) || sorted.length === 1) {
+      const f = sorted[0];
+      return {
+        t,
+        x: f.x ?? 0,
+        y: f.y ?? 0,
+        w: f.w ?? 0,
+        h: f.h ?? 0,
+        opacity: f.opacity ?? 1,
+        rotation: f.rotation ?? 0,
+        blur: f.blur ?? 0,
+        reveal: f.reveal ?? 1,
+      };
+    }
+    const last = sorted[sorted.length - 1];
+    if (t >= (last.t || 0)) {
+      return {
+        t,
+        x: last.x ?? 0,
+        y: last.y ?? 0,
+        w: last.w ?? 0,
+        h: last.h ?? 0,
+        opacity: last.opacity ?? 1,
+        rotation: last.rotation ?? 0,
+        blur: last.blur ?? 0,
+        reveal: last.reveal ?? 1,
+      };
+    }
+    let a = sorted[0];
+    let b = last;
+    for (let i = 0; i < sorted.length - 1; i++) {
+      if ((sorted[i].t || 0) <= t && t <= (sorted[i + 1].t || 0)) {
+        a = sorted[i];
+        b = sorted[i + 1];
+        break;
+      }
+    }
+    const span = Math.max(1e-6, (b.t || 0) - (a.t || 0));
+    const k = _easeModeValue((t - (a.t || 0)) / span, easingMode);
+    return {
+      t,
+      x: lerp(a.x ?? 0, b.x ?? a.x ?? 0, k),
+      y: lerp(a.y ?? 0, b.y ?? a.y ?? 0, k),
+      w: lerp(a.w ?? 0, b.w ?? a.w ?? 0, k),
+      h: lerp(a.h ?? 0, b.h ?? a.h ?? 0, k),
+      opacity: lerp(a.opacity ?? 1, b.opacity ?? a.opacity ?? 1, k),
+      rotation: lerp(a.rotation ?? 0, b.rotation ?? a.rotation ?? 0, k),
+      blur: lerp(a.blur ?? 0, b.blur ?? a.blur ?? 0, k),
+      reveal: lerp(a.reveal ?? 1, b.reveal ?? a.reveal ?? 1, k),
+    };
+  }
+
+  function textReveal(text, reveal = 1) {
+    const str = String(text || "");
+    const p = clamp(reveal, 0, 1);
+    if (p <= 0) return "";
+    if (p >= 1) return str;
+    return str.slice(0, Math.max(1, Math.ceil(str.length * p)));
+  }
+
+  function clipWipe(ctx, x, y, w, h, reveal, drawFn) {
+    const p = clamp(reveal, 0, 1);
+    if (p <= 0 || typeof drawFn !== "function") return;
+    ctx.save();
+    if (p < 1) {
+      ctx.beginPath();
+      ctx.rect(x, y, w * p, h);
+      ctx.clip();
+    }
+    drawFn();
+    ctx.restore();
+  }
+
+  function drawSVGPath(ctx, pathStr, x, y, w, h, opts = {}) {
+    if (!pathStr || typeof Path2D !== "function") return;
+    const viewW = opts.viewBoxW || 100;
+    const viewH = opts.viewBoxH || 100;
+    const sx = w / Math.max(1e-3, viewW);
+    const sy = h / Math.max(1e-3, viewH);
+    const p2d = new Path2D(pathStr);
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(sx, sy);
+    if (opts.fill) {
+      ctx.fillStyle = opts.fill;
+      ctx.fill(p2d);
+    }
+    if (opts.stroke) {
+      const progress = clamp(opts.progress ?? 1, 0, 1);
+      if (progress > 0) {
+        ctx.strokeStyle = opts.stroke;
+        ctx.lineWidth = (opts.lineWidth ?? 4) / Math.max(0.01, Math.min(sx, sy));
+        ctx.lineCap = opts.lineCap || "round";
+        ctx.lineJoin = opts.lineJoin || "round";
+        if (progress < 1) {
+          const approxLen = opts.approxLength || 420;
+          ctx.setLineDash([approxLen * progress, approxLen]);
+        }
+        ctx.stroke(p2d);
+      }
+    }
+    ctx.restore();
+  }
+
   const API = {
     TAU,
     clamp,
@@ -1307,6 +1431,10 @@
     drawHeadlinePlaque,
     drawElectricBolt,
     drawSubtitles,
+    evalKeyframes,
+    textReveal,
+    clipWipe,
+    drawSVGPath,
   };
 
   global.AetheriaMotion = API;
