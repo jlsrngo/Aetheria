@@ -1,7 +1,9 @@
 //! Headless Edge/Chrome CDP Frame Capture & Render Orchestrator (Zero Node.js / Zero Remotion).
 
 use super::cdp_ws::CdpWebSocket;
-use super::ffmpeg_pipeline::{build_ffmpeg_command, format_ffmpeg_failure};
+use super::ffmpeg_pipeline::{
+    build_ffmpeg_command, format_ffmpeg_failure_from_task, spawn_stderr_drain,
+};
 use super::film_inspector::{inspect_workspace_film, FilmMeta};
 use super::film_static_server::{pick_ephemeral_port, start_ephemeral_film_server};
 use super::motion::resolve_active_html_film_path;
@@ -305,7 +307,7 @@ where
         .stdin
         .take()
         .ok_or_else(|| "Failed capturing FFmpeg stdin".to_string())?;
-    let ff_stderr = ff_child.stderr.take();
+    let ff_stderr_task = spawn_stderr_drain(ff_child.stderr.take());
 
     let mut last_percent = 999u32;
     let mut pipe_res: Result<(), String> = Ok(());
@@ -376,7 +378,7 @@ where
 
     if !status.success() {
         let _ = tokio::fs::remove_file(&tmp_output).await;
-        return Err(format_ffmpeg_failure(status, ff_stderr).await);
+        return Err(format_ffmpeg_failure_from_task(status, ff_stderr_task).await);
     }
 
     tokio::fs::rename(&tmp_output, &params.output_path)

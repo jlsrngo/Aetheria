@@ -284,6 +284,45 @@ pub fn build_ffmpeg_command(
     cmd
 }
 
+/// Drains FFmpeg's stderr pipe concurrently so Windows pipe buffers never fill up and deadlock.
+pub fn spawn_stderr_drain(
+    ff_stderr: Option<tokio::process::ChildStderr>,
+) -> tokio::task::JoinHandle<String> {
+    tokio::spawn(async move {
+        let mut err_txt = String::new();
+        if let Some(mut se) = ff_stderr {
+            let mut buf = [0u8; 8192];
+            loop {
+                match se.read(&mut buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        let chunk = String::from_utf8_lossy(&buf[..n]);
+                        err_txt.push_str(&chunk);
+                        if err_txt.len() > 64 * 1024 {
+                            let mut trim_at = err_txt.len() - 32 * 1024;
+                            while trim_at < err_txt.len() && !err_txt.is_char_boundary(trim_at) {
+                                trim_at += 1;
+                            }
+                            err_txt.drain(..trim_at);
+                        }
+                    }
+                }
+            }
+        }
+        err_txt
+    })
+}
+
+pub async fn format_ffmpeg_failure_from_task(
+    status: std::process::ExitStatus,
+    stderr_task: tokio::task::JoinHandle<String>,
+) -> String {
+    let err_txt = stderr_task.await.unwrap_or_default();
+    let tail: Vec<&str> = err_txt.lines().rev().take(12).collect();
+    let summary: String = tail.into_iter().rev().collect::<Vec<_>>().join("\n");
+    format!("FFmpeg exited with {:?}:\n{}", status.code(), summary)
+}
+
 pub async fn format_ffmpeg_failure(
     status: std::process::ExitStatus,
     ff_stderr: Option<tokio::process::ChildStderr>,
@@ -357,6 +396,47 @@ mod tests {
         assert!(args.contains(&"-loop".to_string()));
         assert!(args.iter().any(|a| a.contains("palettegen") && a.contains("paletteuse")));
         assert!(!args.contains(&"libx264".to_string()));
+    }
+
+    #[tokio::test]
+    async fn stderr_drain_prevents_pipe_deadlock_on_large_output() {
+        #[cfg(target_os = "windows")]
+        let mut cmd = {
+            let mut c = tokio::process::Command::new("cmd");
+            c.args([
+                "/C",
+                "for /L %i in (1,1,2000) do @echo 1234567890123456789012345678901234567890123456789012345678901234567890 >&2",
+            ]);
+            c
+        };
+        #[cfg(not(target_os = "windows"))]
+        let mut cmd = {
+            let mut c = tokio::process::Command::new("sh");
+            c.args([
+                "-c",
+                "i=0; while [ $i -lt 2000 ]; do echo 1234567890123456789012345678901234567890123456789012345678901234567890 >&2; i=$((i+1)); done",
+            ]);
+            c
+        };
+
+        let mut child = cmd
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn stderr producer");
+        let drain_task = spawn_stderr_drain(child.stderr.take());
+        let status = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            child.wait(),
+        )
+        .await
+        .expect("child should not deadlock on full stderr pipe")
+        .expect("wait status");
+        assert!(status.success());
+        let drained = drain_task.await.expect("drain join");
+        assert!(!drained.is_empty());
+        assert!(drained.len() <= 64 * 1024);
     }
 }
 

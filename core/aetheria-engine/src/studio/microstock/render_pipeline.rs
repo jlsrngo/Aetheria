@@ -5,7 +5,7 @@ use super::loop_check::{compare_images_psnr_ssim, FrameSimilarityMetrics};
 use super::manifest::PreflightItem;
 use crate::paths::{detect_browser_executable, locate_ffmpeg_binary, now_ms};
 use crate::studio::cdp_ws::CdpWebSocket;
-use crate::studio::ffmpeg_pipeline::format_ffmpeg_failure;
+use crate::studio::ffmpeg_pipeline::{format_ffmpeg_failure_from_task, spawn_stderr_drain};
 use crate::studio::film_inspector::inspect_workspace_film;
 use crate::studio::film_static_server::{pick_ephemeral_port, start_ephemeral_film_server};
 use crate::studio::html_renderer::spawn_headless_browser;
@@ -406,7 +406,7 @@ where
         message: "Failed capturing FFmpeg stdin".to_string(),
         source: URL_REFUSAL.to_string(),
     })?;
-    let ff_stderr = ff_child.stderr.take();
+    let ff_stderr_task = spawn_stderr_drain(ff_child.stderr.take());
 
     let mut sample_frame0_png: Option<Vec<u8>> = None;
     let mut pipe_err: Option<String> = None;
@@ -484,7 +484,7 @@ where
     })?;
     if !status.success() {
         let _ = tokio::fs::remove_file(&tmp_output).await;
-        let msg = format_ffmpeg_failure(status, ff_stderr).await;
+        let msg = format_ffmpeg_failure_from_task(status, ff_stderr_task).await;
         return Err(PreflightItem {
             code: "MOTION_LINT_ERRORS".to_string(),
             severity: RuleSeverity::Fail,
