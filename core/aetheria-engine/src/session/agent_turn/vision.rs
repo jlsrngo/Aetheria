@@ -288,34 +288,65 @@ pub fn process_attached_files(
                     ));
                     s
                 } else {
-                    decoded_text
+                    decoded_text.clone()
                 };
 
                 if is_standalone_html_or_svg_attachment(&lower_name, uri, mime) {
-                    let target_prefix = if !workspace_dir.trim().is_empty() {
+                    let (target_prefix, target_dir) = if !workspace_dir.trim().is_empty() {
                         let ws_path = Path::new(workspace_dir);
                         let state = crate::studio::project_registry::list_studio_projects(ws_path);
-                        state
-                            .active_project
-                            .map(|slug| format!("projects/{}/", slug))
-                            .unwrap_or_default()
+                        match state.active_project {
+                            Some(slug) => (
+                                format!("projects/{}/", slug),
+                                ws_path.join("projects").join(slug),
+                            ),
+                            None => (String::new(), ws_path.to_path_buf()),
+                        }
                     } else {
-                        String::new()
+                        (String::new(), PathBuf::from("."))
                     };
-                    ocr_transcriptions.push(format!(
-                        "[Attached Standalone HTML/SVG Source File: '{}'{}]\n\
-                         TARGET OUTPUT LOCATION: Write the cleaned stage directly to `{prefix}index.html` and `{prefix}script/scene1.js` (and `{prefix}microstock/manifest.json` when Microstock Mode 'M' is active).\n\
-                         STRICT ISOLATION RULE: Use ONLY this attached source code below. Do NOT read or inspect unrelated files in workspace root, `ref/`, or other `projects/*` folders, and do NOT call `glob` or `explore` to search for other projects. Preserve all original vector `<svg>` artwork, gradients, filters, and characters verbatim while stripping UI control panels/buttons/sliders, external CDNs, `<text>`/`<tspan>` (when Microstock Mode 'M' is active), and converting animations into deterministic `window.renderAt(t)`.\n\
-                         ```html\n{}\n```",
-                        file_name,
-                        if saved_rel.is_empty() {
-                            String::new()
-                        } else {
-                            format!(" (saved at {})", saved_rel)
-                        },
-                        inline_snippet,
-                        prefix = target_prefix
-                    ));
+                    let pre_extracted = if !workspace_dir.trim().is_empty() {
+                        crate::studio::stage_extractor::extract_and_write_uploaded_stage(
+                            workspace_dir,
+                            &target_dir,
+                            &decoded_text,
+                        )
+                    } else {
+                        None
+                    };
+                    if pre_extracted.is_some() {
+                        ocr_transcriptions.push(format!(
+                            "[Attached Standalone HTML/SVG Source File: '{}'{} — STAGE ALREADY MOVED 1:1 BY ENGINE]\n\
+                             The engine has ALREADY deterministically extracted and moved the exact visual stage (`<svg>`, `<canvas>`, CSS `@keyframes`, and original JS functions including particle/rocket loops) 1:1 into `{prefix}index.html` and `{prefix}script/scene1.js` (and initialized `{prefix}microstock/manifest.json`).\n\
+                             CRITICAL RULE (MOVE, DO NOT RECREATE):\n\
+                             - DO NOT overwrite or recreate `{prefix}index.html` or `{prefix}script/scene1.js` from scratch, and DO NOT spawn `motion-designer` to rewrite them! The original SVG/Canvas stage and rocket/particle animations are already in place.\n\
+                             - Simply call `capture_film_preview` once to verify the extracted stage renders cleanly, optionally refine `{prefix}microstock/manifest.json` keywords if needed, and report completion to the user.\n\
+                             ```html\n{}\n```",
+                            file_name,
+                            if saved_rel.is_empty() {
+                                String::new()
+                            } else {
+                                format!(" (saved at {})", saved_rel)
+                            },
+                            inline_snippet,
+                            prefix = target_prefix
+                        ));
+                    } else {
+                        ocr_transcriptions.push(format!(
+                            "[Attached Standalone HTML/SVG Source File: '{}'{}]\n\
+                             TARGET OUTPUT LOCATION: Write the cleaned stage directly to `{prefix}index.html` and `{prefix}script/scene1.js` (and `{prefix}microstock/manifest.json` when Microstock Mode 'M' is active).\n\
+                             STRICT ISOLATION RULE: Use ONLY this attached source code below. Do NOT read or inspect unrelated files in workspace root, `ref/`, or other `projects/*` folders, and do NOT call `glob` or `explore` to search for other projects. Preserve all original vector `<svg>` artwork, gradients, filters, and characters verbatim while stripping UI control panels/buttons/sliders and converting animations into deterministic `window.renderAt(t)`.\n\
+                             ```html\n{}\n```",
+                            file_name,
+                            if saved_rel.is_empty() {
+                                String::new()
+                            } else {
+                                format!(" (saved at {})", saved_rel)
+                            },
+                            inline_snippet,
+                            prefix = target_prefix
+                        ));
+                    }
                 } else {
                     ocr_transcriptions.push(format!(
                         "[Attached Code/Text File: '{}'{}]:\n```\n{}\n```",

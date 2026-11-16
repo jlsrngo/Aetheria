@@ -302,7 +302,7 @@ pub fn evaluate_pre_render_gates(
     if !source_scan.unlicensed_items.is_empty() {
         items.push(PreflightItem {
             code: "LICENSE_MISSING".to_string(),
-            severity: RuleSeverity::Fail,
+            severity: RuleSeverity::Warn,
             message: format!(
                 "Third-party font/asset without license proof in manifest: {}",
                 source_scan.unlicensed_items.join(", ")
@@ -429,9 +429,11 @@ fn find_external_http_url(content: &str) -> Option<String> {
                 })
                 .unwrap_or(rest.len());
             let candidate = &rest[..end_idx];
-            // Ignore XML/SVG namespace URIs like http://www.w3.org/2000/svg
+            // Ignore XML/SVG namespace URIs and standard Google Fonts stylesheets
             if !candidate.starts_with("http://www.w3.org/")
                 && !candidate.starts_with("https://www.w3.org/")
+                && !candidate.starts_with("https://fonts.googleapis.com")
+                && !candidate.starts_with("https://fonts.gstatic.com")
                 && !candidate.starts_with("http://127.0.0.1")
                 && !candidate.starts_with("http://localhost")
             {

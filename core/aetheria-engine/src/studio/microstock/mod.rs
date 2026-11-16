@@ -233,7 +233,15 @@ pub async fn handle_save_manifest(
         manifest.checklist = cl;
     }
     if let Some(meta) = payload.metadata {
-        manifest.metadata = meta;
+        if !meta.title.trim().is_empty() || manifest.metadata.title.trim().is_empty() {
+            manifest.metadata.title = meta.title;
+        }
+        if !meta.keywords.is_empty() || manifest.metadata.keywords.is_empty() {
+            manifest.metadata.keywords = meta.keywords;
+        }
+        if !meta.category.trim().is_empty() || manifest.metadata.category.trim().is_empty() {
+            manifest.metadata.category = meta.category;
+        }
     }
     if let Some(lic) = payload.licenses {
         manifest.licenses = lic;

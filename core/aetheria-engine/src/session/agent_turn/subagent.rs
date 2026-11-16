@@ -398,7 +398,7 @@ async fn run_subagent_loop(
     let mut final_text = String::new();
     let mut tools_executed: Vec<String> = Vec::new();
     let mut steps_run: usize = 0;
-    let max_steps: usize = 12;
+    let max_steps: usize = 24;
     let mut output_limit_continuations: usize = 0;
     let mut doom_detector = DoomLoopDetector::default();
     let mut exit_outcome = SubagentExitOutcome::Completed;

@@ -172,6 +172,9 @@ pub fn is_revision_or_style_adjustment_prompt(prompt: &str) -> bool {
         "restyle",
         "fix ",
         "ini aja",
+        "lanjut",
+        "continue",
+        "teruskan",
     ]
     .iter()
     .any(|kw| lower.contains(kw))

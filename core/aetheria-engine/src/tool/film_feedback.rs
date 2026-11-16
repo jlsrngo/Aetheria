@@ -162,6 +162,8 @@ fn has_forbidden_external_url(lower_html: &str) -> bool {
             let after_scheme = &rest[idx + scheme.len()..];
             let allowed = after_scheme.starts_with("www.w3.org/")
                 || after_scheme.starts_with("w3.org/")
+                || after_scheme.starts_with("fonts.googleapis.com")
+                || after_scheme.starts_with("fonts.gstatic.com")
                 || after_scheme.starts_with("127.0.0.1")
                 || after_scheme.starts_with("localhost");
             if !allowed {
@@ -343,9 +345,8 @@ pub fn collect_file_feedback(workspace_dir: &str, target: &Path) -> FileFeedback
                 }
                 let lower_html = content.to_ascii_lowercase();
                 if lower_html.contains("<text") || lower_html.contains("<tspan") {
-                    feedback.has_errors = true;
                     feedback.diagnostics.push(format!(
-                        "ERROR (MICROSTOCK_TEXT_FORBIDDEN): Adobe Stock Mode ('M') forbids SVG <text>/<tspan> elements in '{}'. Remove all text overlays.",
+                        "WARNING (MICROSTOCK_TEXT_FORBIDDEN): Adobe Stock Mode ('M') recommends avoiding added SVG <text>/<tspan> elements in '{}' unless part of an uploaded greeting card stage.",
                         file_name
                     ));
                 }

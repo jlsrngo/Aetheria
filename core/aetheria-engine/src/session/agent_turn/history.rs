@@ -30,7 +30,7 @@ pub fn build_chat_messages(effective_history: &[Value], sys_prompt: &str) -> Vec
                         img_urls.push(uri.to_string());
                     } else if super::vision::is_text_or_code_attachment(fname, uri, mime) {
                         if let Some(decoded) = super::vision::decode_data_uri_text(uri) {
-                            let snippet: String = decoded.chars().take(24_000).collect();
+                            let snippet: String = decoded.chars().take(120_000).collect();
                             enriched_txt.push_str(&format!(
                                 "\n\n[Attached File: '{}']:\n```\n{}\n```",
                                 fname, snippet

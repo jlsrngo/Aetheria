@@ -38,6 +38,7 @@ pub mod reference_compare;
 pub mod renderer;
 pub mod scheduler;
 pub mod script_generator;
+pub mod stage_extractor;
 pub mod styles;
 pub mod subtitles;
 pub mod timeline;

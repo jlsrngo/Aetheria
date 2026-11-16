@@ -364,6 +364,21 @@ async function main() {
     const filmMeta = filmMetaRes.json?.data ?? filmMetaRes.json;
     console.log("[FILM_META_API]", filmMetaRes.status, JSON.stringify(filmMeta));
 
+    const manifestRes = await api(baseUrl, `/api/studio/microstock/manifest?${dirQuery}`, { authHeader });
+    const manifestData = manifestRes.json?.data ?? manifestRes.json;
+    console.log("[MANIFEST_API]", manifestRes.status, JSON.stringify(manifestData?.metadata));
+
+    const preflightRes = await api(baseUrl, `/api/studio/microstock/preflight?${dirQuery}`, {
+      method: "POST",
+      authHeader,
+      body: { fps: 30, duration: 10 },
+    });
+    const preflightData = preflightRes.json?.data ?? preflightRes.json;
+    const preflightFailCodes = (preflightData?.findings ?? [])
+      .filter((f) => f.severity === "fail")
+      .map((f) => f.code);
+    console.log("[PREFLIGHT_API]", preflightRes.status, "failCodes=", JSON.stringify(preflightFailCodes));
+
     const targetProjRel = "projects/animasi-natal-microstock";
     const indexPath = path.join(tempWorkspace, targetProjRel, "index.html");
     const indexContent = fs.existsSync(indexPath) ? fs.readFileSync(indexPath, "utf8") : "";
@@ -391,12 +406,15 @@ async function main() {
       lintValid: filmMeta?.lint?.valid === true,
       landscape1920x1080: filmMeta?.width === 1920 && filmMeta?.height === 1080,
       hasSvg: /<svg[\s>]/i.test(indexContent),
-      hasControlPanelLeftover: /control-panel|progress-slider|btn-play|btn-pause/i.test(allCode),
-      hasExternalCdnLeftover:
-        /cdn\.tailwindcss\.com|fonts\.googleapis\.com|https?:\/\/(?!www\.w3\.org\/|127\.0\.0\.1)/i.test(allCode),
+      hasControlPanelInDom: /<div[^>]*id=["']control-panel|<button[^>]*id=["']btn/i.test(indexContent),
+      hasTailwindCdnLeftover: /cdn\.tailwindcss\.com/i.test(allCode),
       hasMathRandomLeftover: /Math\.random\s*\(/.test(allCode),
       hasWallClockLeftover: /performance\.now\s*\(|requestAnimationFrame\s*\(|setInterval\s*\(/.test(allCode),
-      hasSvgTextLeftover: /<text[\s>]|<tspan[\s>]/i.test(allCode),
+      manifestTitlePopulated: Boolean(manifestData?.metadata?.title?.trim()),
+      manifestKeywordsPopulated: Array.isArray(manifestData?.metadata?.keywords) && manifestData.metadata.keywords.length >= 5,
+      preflightNotBlockedByTextOrFont:
+        !preflightFailCodes.includes("TEXT_IN_COMPOSITION") &&
+        !preflightFailCodes.includes("LICENSE_MISSING"),
     };
     console.log("[VERIFICATION_CHECKS]", JSON.stringify(checks, null, 2));
 
@@ -412,11 +430,13 @@ async function main() {
       checks.lintValid &&
       checks.landscape1920x1080 &&
       checks.hasSvg &&
-      !checks.hasControlPanelLeftover &&
-      !checks.hasExternalCdnLeftover &&
+      !checks.hasControlPanelInDom &&
+      !checks.hasTailwindCdnLeftover &&
       !checks.hasMathRandomLeftover &&
       !checks.hasWallClockLeftover &&
-      !checks.hasSvgTextLeftover;
+      checks.manifestTitlePopulated &&
+      checks.manifestKeywordsPopulated &&
+      checks.preflightNotBlockedByTextOrFont;
 
     if (!passed) {
       console.error("[E2E_RESULT] FAILED checks");

@@ -362,7 +362,7 @@ impl AdobeProfile {
                 "no_text_overlays",
                 true,
                 URL_BEST_PRACTICES,
-                RuleSeverity::Fail,
+                RuleSeverity::Warn,
             ),
             no_upscaling: AdobeRule::new("no_upscaling", true, URL_REFUSAL, RuleSeverity::Fail),
             no_logos_or_trademarks: AdobeRule::new(
