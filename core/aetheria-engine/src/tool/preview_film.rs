@@ -20,7 +20,7 @@ pub fn capture_film_preview_tool_definition() -> Value {
                     },
                     "compareToReference": {
                         "type": "boolean",
-                        "description": "Whether to compute RGB SSIM, color/edge similarity, and side-by-side comparison strip against extracted ref/ keyframes. Auto-enabled when ref/ frames exist."
+                        "description": "Whether to compute RGB SSIM, color/edge similarity, and side-by-side comparison strip against extracted ref/ keyframes. Auto-enabled and mandatory whenever ref/ frames exist (false is overridden when ref/ frames are present)."
                     },
                     "passThreshold": {
                         "type": "number",
@@ -72,6 +72,16 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
             for f in &res.frames {
                 vision_images.push(Value::String(f.data_url.clone()));
             }
+            let unchanged_warning = if res.changed_since_last_capture == Some(false) {
+                Some("WARNING: Captured frames are byte-identical to the previous preview capture. No code/visual change took effect — check whether recent edit calls failed or target different elements.")
+            } else {
+                None
+            };
+            let ref_override_note = if res.compare_to_reference_overridden {
+                Some("compareToReference=false was overridden because ref/ keyframes exist for this project.")
+            } else {
+                None
+            };
             let summary_extra = match &res.reference_comparison {
                 Some(cmp) if cmp.get("ok").and_then(Value::as_bool) == Some(true) => format!(
                     " Reference comparison: RGB SSIM mean={}, color={}, edge={}, overall={}, passed={}. Inspect side-by-side strip + frames and refine any low-scoring scenes.",
@@ -83,22 +93,32 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
                 ),
                 _ => String::new(),
             };
+            let extra_notices: String = [unchanged_warning, ref_override_note]
+                .into_iter()
+                .flatten()
+                .map(|s| format!(" {}", s))
+                .collect();
             json!({
                 "ok": true,
                 "width": res.width,
                 "height": res.height,
                 "duration": res.duration,
                 "fps": res.fps,
+                "changedSinceLastCapture": res.changed_since_last_capture,
+                "compareToReferenceOverridden": res.compare_to_reference_overridden,
+                "unchangedWarning": unchanged_warning,
+                "compareToReferenceNote": ref_override_note,
                 "captured": captured,
                 "runtimeErrors": res.runtime_errors,
                 "referenceComparison": res.reference_comparison,
                 "output": format!(
-                    "Captured {} visual preview frame(s) ({}x{} @ {}fps).{} Attached screenshots to vision context.",
+                    "Captured {} visual preview frame(s) ({}x{} @ {}fps).{}{} Attached screenshots to vision context.",
                     res.frames.len(),
                     res.width,
                     res.height,
                     res.fps,
-                    summary_extra
+                    summary_extra,
+                    extra_notices
                 ),
                 "_vision_images": vision_images
             })

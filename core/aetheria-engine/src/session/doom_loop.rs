@@ -4,7 +4,30 @@
 //! (e.g. failing to edit a document and retrying with the exact same arguments 25 times),
 //! preserving user tokens, API budget, and system responsiveness.
 
+use serde_json::Value;
 use std::collections::HashMap;
+
+const FAILURE_ESCALATION_THRESHOLD: usize = 3;
+const FAILURE_HARD_BLOCK_THRESHOLD: usize = 5;
+
+fn extract_target_file_key(args_val: &Value) -> String {
+    for key in ["filePath", "path", "file", "target"] {
+        if let Some(raw) = args_val.get(key).and_then(Value::as_str) {
+            let trimmed = raw.trim();
+            if !trimmed.is_empty() {
+                return trimmed.replace('\\', "/").to_ascii_lowercase();
+            }
+        }
+    }
+    String::new()
+}
+
+fn extract_target_from_canonical(args_canonical: &str) -> String {
+    serde_json::from_str::<Value>(args_canonical)
+        .ok()
+        .map(|val| extract_target_file_key(&val))
+        .unwrap_or_default()
+}
 
 /// Tracks tool calls within an agent turn and detects doom loops.
 #[derive(Debug, Clone)]
@@ -14,6 +37,7 @@ pub struct DoomLoopDetector {
     consecutive_count: usize,
     shell_read_count: usize,
     file_read_counts: HashMap<String, usize>,
+    failure_streaks: HashMap<(String, String), usize>,
     threshold: usize,
 }
 
@@ -32,6 +56,7 @@ impl DoomLoopDetector {
             consecutive_count: 0,
             shell_read_count: 0,
             file_read_counts: HashMap::new(),
+            failure_streaks: HashMap::new(),
             threshold: threshold.max(2),
         }
     }
@@ -67,16 +92,21 @@ impl DoomLoopDetector {
             return None;
         }
 
-        // 3. When a workspace-mutating tool runs (`write`, `edit`, `apply_patch`, `codemode`),
-        // reset `call_counts` for visual verification tools (`capture_film_preview`, `render_video`)
-        // because the underlying scene/HTML code on disk has changed.
-        if matches!(
-            t_norm.as_str(),
-            "write" | "edit" | "apply_patch" | "codemode"
-        ) {
-            self.call_counts.retain(|(tool, _), _| {
-                !matches!(tool.as_str(), "capture_film_preview" | "render_video")
-            });
+        // 3. Hard-block when the same tool has failed repeatedly on the same target file
+        //    even if arguments like `oldString` keep varying.
+        let target_key = extract_target_from_canonical(args_canonical);
+        if let Some(&streak) = self.failure_streaks.get(&(t_norm.clone(), target_key.clone())) {
+            if streak >= FAILURE_HARD_BLOCK_THRESHOLD {
+                let target_label = if target_key.is_empty() {
+                    "(current target)"
+                } else {
+                    target_key.as_str()
+                };
+                return Some(format!(
+                    "Tool execution blocked: '{}' failed {} consecutive times on '{}'. Stop guessing edits. Read unread line ranges with 'read' (offset/limit), use 'grep' to locate symbols, pass 'startLine'/'endLine', or rewrite cleanly with 'write'.",
+                    tool_name, streak, target_label
+                ));
+            }
         }
 
         let key = (
@@ -112,6 +142,62 @@ impl DoomLoopDetector {
         }
     }
 
+    /// Records whether an executed tool call succeeded or failed.
+    ///
+    /// Verification counters (`capture_film_preview`, `render_video`) are reset ONLY after a
+    /// workspace mutation actually succeeds, preventing failed edits from disguising preview loops.
+    /// Returns an escalation message once consecutive failures for `(tool, target)` reach 3+.
+    pub fn record_outcome(
+        &mut self,
+        tool_name: &str,
+        args_val: &Value,
+        is_failed: bool,
+    ) -> Option<String> {
+        let t_norm = tool_name.trim().to_lowercase();
+        let target_key = extract_target_file_key(args_val);
+        let key = (t_norm.clone(), target_key.clone());
+
+        if !is_failed {
+            self.failure_streaks.remove(&key);
+            if matches!(t_norm.as_str(), "write" | "apply_patch" | "film_scaffold")
+                && !target_key.is_empty()
+            {
+                self.failure_streaks
+                    .remove(&("edit".to_string(), target_key.clone()));
+            }
+            if matches!(
+                t_norm.as_str(),
+                "write" | "edit" | "apply_patch" | "codemode" | "film_scaffold"
+            ) {
+                self.call_counts.retain(|(tool, _), _| {
+                    !matches!(tool.as_str(), "capture_film_preview" | "render_video")
+                });
+                if let Some((prev_tool, _)) = &self.consecutive_call {
+                    if matches!(prev_tool.as_str(), "capture_film_preview" | "render_video") {
+                        self.consecutive_call = None;
+                        self.consecutive_count = 0;
+                    }
+                }
+            }
+            return None;
+        }
+
+        let streak = self.failure_streaks.entry(key).or_insert(0);
+        *streak += 1;
+        if *streak >= FAILURE_ESCALATION_THRESHOLD {
+            let target_label = if target_key.is_empty() {
+                "(current target)"
+            } else {
+                target_key.as_str()
+            };
+            return Some(format!(
+                "HARNESS FAILURE-STREAK ESCALATION ({} consecutive '{}' failures on '{}'): stop retrying guessed text blobs. Use 'grep' to locate symbols, 'read' with offset/limit on unread regions, pass explicit 'startLine'/'endLine', or call 'write' to replace cleanly.",
+                *streak, tool_name, target_label
+            ));
+        }
+        None
+    }
+
     /// Resets detector counters between turns.
     pub fn reset(&mut self) {
         self.call_counts.clear();
@@ -119,6 +205,7 @@ impl DoomLoopDetector {
         self.consecutive_count = 0;
         self.shell_read_count = 0;
         self.file_read_counts.clear();
+        self.failure_streaks.clear();
     }
 }
 
@@ -173,13 +260,70 @@ mod tests {
         let preview_args = r#"{"timestamps":[1,5,10,18]}"#;
 
         for idx in 1..=5 {
-            let write_args = format!(r#"{{"filePath":"script/scene{}.js","content":"// v{}"}}"#, idx, idx);
-            assert!(detector.check_and_record("write", &write_args).is_none());
+            let write_args_str =
+                format!(r#"{{"filePath":"script/scene{}.js","content":"// v{}"}}"#, idx, idx);
+            let write_val: Value = serde_json::from_str(&write_args_str).unwrap();
+            assert!(detector.check_and_record("write", &write_args_str).is_none());
+            assert!(detector.record_outcome("write", &write_val, false).is_none());
             assert!(
                 detector.check_and_record("capture_film_preview", preview_args).is_none(),
-                "capture_film_preview after a file write must not be blocked by prior preview counts"
+                "capture_film_preview after a successful file write must not be blocked by prior preview counts"
             );
         }
+    }
+
+    #[test]
+    fn test_failed_edit_does_not_reset_capture_film_preview_loop() {
+        let mut detector = DoomLoopDetector::new(3);
+        let preview_args = r#"{"timestamps":[0,1.5,4.5,7]}"#;
+
+        // With alternating failed edits, total preview calls are NOT reset,
+        // so the (threshold + 1) = 4th identical capture_film_preview is blocked.
+        for i in 1..=3 {
+            let edit_str = format!(r#"{{"filePath":"script/scene1.js","oldString":"bad_{}"}}"#, i);
+            let edit_val: Value = serde_json::from_str(&edit_str).unwrap();
+            assert!(detector.check_and_record("edit", &edit_str).is_none());
+            detector.record_outcome("edit", &edit_val, true);
+            assert!(detector.check_and_record("capture_film_preview", preview_args).is_none());
+        }
+
+        let edit4_str = r#"{"filePath":"script/scene1.js","oldString":"bad_4"}"#;
+        let edit4_val: Value = serde_json::from_str(edit4_str).unwrap();
+        assert!(detector.check_and_record("edit", edit4_str).is_none());
+        detector.record_outcome("edit", &edit4_val, true);
+
+        let blocked = detector.check_and_record("capture_film_preview", preview_args);
+        assert!(blocked.is_some());
+        assert!(blocked.unwrap().contains("capture_film_preview"));
+    }
+
+    #[test]
+    fn test_failure_streak_escalates_at_3_and_blocks_at_5_and_write_resets_it() {
+        let mut detector = DoomLoopDetector::new(3);
+        for i in 1..=5 {
+            let args_str = format!(r#"{{"filePath":"script/scene1.js","oldString":"guess_{}"}}"#, i);
+            let args_val: Value = serde_json::from_str(&args_str).unwrap();
+            assert!(detector.check_and_record("edit", &args_str).is_none());
+            let esc = detector.record_outcome("edit", &args_val, true);
+            if i < 3 {
+                assert!(esc.is_none());
+            } else {
+                let msg = esc.expect("should escalate from 3rd failure");
+                assert!(msg.contains("HARNESS FAILURE-STREAK ESCALATION"));
+                assert!(msg.contains("script/scene1.js"));
+            }
+        }
+
+        let args6 = r#"{"filePath":"script/scene1.js","oldString":"guess_6"}"#;
+        let hard_blocked = detector.check_and_record("edit", args6);
+        assert!(hard_blocked.is_some());
+        assert!(hard_blocked.unwrap().contains("Stop guessing edits"));
+
+        // Successful write on the same file clears edit failure streak
+        let write_val: Value =
+            serde_json::from_str(r#"{"filePath":"script/scene1.js","content":"ok"}"#).unwrap();
+        assert!(detector.record_outcome("write", &write_val, false).is_none());
+        assert!(detector.check_and_record("edit", args6).is_none());
     }
 }
 

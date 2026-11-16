@@ -126,6 +126,13 @@ pub(crate) async fn execute_subagent_tool_calls(
         if was_executed {
             let is_err = tool_result.get("error").is_some()
                 || tool_result.get("ok").and_then(|v| v.as_bool()) == Some(false);
+            if let Some(intervention) =
+                doom_detector.record_outcome(&pc.fn_name, &pc.parsed_args, is_err)
+            {
+                if let Some(obj) = tool_result.as_object_mut() {
+                    obj.insert("harnessIntervention".to_string(), json!(intervention));
+                }
+            }
             let done_label = format_tool_step_label(&pc.fn_name, &pc.parsed_args, !is_err);
             emit_event(
                 workspace_dir,

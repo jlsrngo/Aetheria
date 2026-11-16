@@ -135,6 +135,15 @@ pub(crate) async fn execute_tool_batch(
         let fn_name = pc.fn_name;
         let args_val = pc.args_val;
         let tool_start = pc.tool_start;
+        if pc.loop_warning.is_none() && !tools_disabled {
+            if let Some(intervention) =
+                doom_loop_detector.record_outcome(&fn_name, &args_val, is_failed)
+            {
+                if let Some(obj) = tool_out.as_object_mut() {
+                    obj.insert("harnessIntervention".to_string(), json!(intervention));
+                }
+            }
+        }
         if tool_out.get("aborted").and_then(|v| v.as_bool()) == Some(true) {
             was_interrupted = true;
         }

@@ -163,6 +163,7 @@ pub async fn run_agent_turn(
     let mut doom_loop_detector = crate::session::doom_loop::DoomLoopDetector::default();
     let mut length_continuation_count = 0usize;
     let mut premature_announce_retries = 0usize;
+    let mut verification_gate_retries = 0usize;
     let mut unknown_finish_retries = 0usize;
     let mut reached_max_steps = false;
     let mut usage_acc = TurnUsageAccumulator::default();
@@ -478,6 +479,7 @@ pub async fn run_agent_turn(
                 &msg,
                 &mut length_continuation_count,
                 &mut premature_announce_retries,
+                &mut verification_gate_retries,
                 &mut content_parts,
                 &mut chat_messages,
                 &usage_acc,
@@ -500,6 +502,7 @@ pub async fn run_agent_turn(
 
         length_continuation_count = 0;
         premature_announce_retries = 0;
+        verification_gate_retries = 0;
         super::turn_finalize::persist_tool_checkpoint(
             session_id,
             &assistant_msg_id,
@@ -1368,6 +1371,7 @@ fn handle_no_tool_calls(
     msg: &Value,
     length_continuation_count: &mut usize,
     premature_announce_retries: &mut usize,
+    verification_gate_retries: &mut usize,
     content_parts: &mut Vec<Value>,
     chat_messages: &mut Vec<Value>,
     usage_acc: &TurnUsageAccumulator,
@@ -1450,6 +1454,24 @@ fn handle_no_tool_calls(
             "content": "You stopped right after announcing your next action without emitting any tool calls. Emit the actual tool calls (`write`, `edit`, or `task`) right now to complete the files — or write the files one by one if output size is large."
         }));
         return NoToolCallAction::Continue;
+    }
+
+    if step_finish == FinishReason::Stop && *verification_gate_retries < 1 {
+        let unresolved =
+            super::history::collect_unresolved_mutating_or_verify_failures(content_parts);
+        if !unresolved.is_empty() {
+            *verification_gate_retries += 1;
+            emit_step_ended_event(target, step_finish, Some(true), step_usage);
+            chat_messages.push(msg.clone());
+            chat_messages.push(json!({
+                "role": "user",
+                "content": format!(
+                    "COMPLETION BLOCKED BY VERIFICATION GATE: This turn has unresolved tool failure(s): {}. Do NOT claim the changes succeeded. Inspect the unread lines/errors, apply the fix (e.g. via 'write' or 'edit' with 'startLine'/'endLine'), and re-verify — or report honestly what failed.",
+                    unresolved.join("; ")
+                )
+            }));
+            return NoToolCallAction::Continue;
+        }
     }
 
     NoToolCallAction::Break {

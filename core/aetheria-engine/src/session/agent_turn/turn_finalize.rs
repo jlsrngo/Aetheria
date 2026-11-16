@@ -136,6 +136,34 @@ fn maybe_update_session_title(
     }
 }
 
+fn emit_and_append_text_part(
+    workspace_dir: &str,
+    session_id: &str,
+    assistant_msg_id: &str,
+    text: &str,
+    content_parts: &mut Vec<Value>,
+) {
+    let txt_part_id = gen_id("txt");
+    emit_event(
+        workspace_dir,
+        "session.next.text.started",
+        json!({ "sessionID": session_id, "messageID": assistant_msg_id, "id": txt_part_id }),
+    );
+    if !text.is_empty() {
+        emit_event(
+            workspace_dir,
+            "session.next.text.delta",
+            json!({ "sessionID": session_id, "messageID": assistant_msg_id, "id": txt_part_id, "delta": text }),
+        );
+    }
+    emit_event(
+        workspace_dir,
+        "session.next.text.ended",
+        json!({ "sessionID": session_id, "messageID": assistant_msg_id, "id": txt_part_id, "text": text }),
+    );
+    content_parts.push(json!({ "type": "text", "id": txt_part_id, "text": text }));
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn finalize_agent_turn(
     client: &reqwest::Client,
@@ -204,27 +232,48 @@ pub(crate) async fn finalize_agent_turn(
         }
     }
 
+    let unresolved = super::history::collect_unresolved_mutating_or_verify_failures(&content_parts);
+    let unresolved_notice = if unresolved.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "[Verification notice: unresolved tool failure(s) remained in this turn — {}.]",
+            unresolved.join("; ")
+        ))
+    };
+
     if emit_text_events {
-        let txt_part_id = gen_id("txt");
-        emit_event(
+        if let Some(ref notice) = unresolved_notice {
+            if final_text.trim().is_empty() {
+                final_text = notice.clone();
+            } else if !final_text.contains("unresolved tool failure(s)") {
+                final_text.push_str("\n\n");
+                final_text.push_str(notice);
+            }
+        }
+        emit_and_append_text_part(
             workspace_dir,
-            "session.next.text.started",
-            json!({ "sessionID": session_id, "messageID": assistant_msg_id, "id": txt_part_id }),
+            session_id,
+            assistant_msg_id,
+            &final_text,
+            &mut content_parts,
         );
-        if !final_text.is_empty() {
-            emit_event(
+    } else if let Some(ref notice) = unresolved_notice {
+        if !final_text.contains("unresolved tool failure(s)") {
+            let delta = if final_text.trim().is_empty() {
+                notice.clone()
+            } else {
+                format!("\n\n{}", notice)
+            };
+            final_text.push_str(&delta);
+            emit_and_append_text_part(
                 workspace_dir,
-                "session.next.text.delta",
-                json!({ "sessionID": session_id, "messageID": assistant_msg_id, "id": txt_part_id, "delta": final_text }),
+                session_id,
+                assistant_msg_id,
+                &delta,
+                &mut content_parts,
             );
         }
-        emit_event(
-            workspace_dir,
-            "session.next.text.ended",
-            json!({ "sessionID": session_id, "messageID": assistant_msg_id, "id": txt_part_id, "text": final_text }),
-        );
-
-        content_parts.push(json!({ "type": "text", "id": txt_part_id, "text": final_text }));
     }
 
     let completed_ms = now_ms();

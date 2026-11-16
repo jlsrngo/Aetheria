@@ -2,6 +2,110 @@
 
 use serde_json::{json, Value};
 
+fn normalize_tool_failure_bucket(name: &str, input: &Value) -> Option<(String, String)> {
+    let lower = name.trim().to_ascii_lowercase();
+    if matches!(
+        lower.as_str(),
+        "edit" | "write" | "apply_patch" | "film_scaffold" | "codemode"
+    ) {
+        let target = ["filePath", "path", "file", "target", "project"]
+            .iter()
+            .find_map(|k| input.get(*k).and_then(Value::as_str))
+            .map(|s| s.trim().replace('\\', "/").to_ascii_lowercase())
+            .unwrap_or_default();
+        return Some(("mutate".to_string(), target));
+    }
+    if matches!(lower.as_str(), "capture_film_preview" | "render_video") {
+        return Some((lower, String::new()));
+    }
+    None
+}
+
+pub(crate) fn collect_unresolved_mutating_or_verify_failures(parts: &[Value]) -> Vec<String> {
+    let mut order: Vec<(String, String)> = Vec::new();
+    let mut latest: std::collections::HashMap<(String, String), Option<String>> =
+        std::collections::HashMap::new();
+
+    for p in parts {
+        if p.get("type").and_then(Value::as_str) != Some("tool") {
+            continue;
+        }
+        let name = p.get("name").and_then(Value::as_str).unwrap_or("");
+        let input = p.pointer("/state/input").unwrap_or(&Value::Null);
+        let Some(bucket) = normalize_tool_failure_bucket(name, input) else {
+            continue;
+        };
+        let status = p
+            .pointer("/state/status")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+
+        if !latest.contains_key(&bucket) {
+            order.push(bucket.clone());
+        }
+        if status == "completed" {
+            latest.insert(bucket, None);
+        } else if status == "error" {
+            let err_raw = p
+                .pointer("/state/structured/error")
+                .or_else(|| p.pointer("/state/error/message"))
+                .or_else(|| p.pointer("/state/structured/message"))
+                .and_then(Value::as_str)
+                .unwrap_or("tool error");
+            let snippet: String = err_raw.trim().chars().take(120).collect();
+            let desc = if bucket.1.is_empty() {
+                format!("{}: {}", name, snippet)
+            } else {
+                format!("{}({}): {}", name, bucket.1, snippet)
+            };
+            latest.insert(bucket, Some(desc));
+        }
+    }
+
+    order
+        .into_iter()
+        .filter_map(|k| latest.remove(&k).flatten())
+        .collect()
+}
+
+pub(crate) fn build_historical_turn_warning(msg: &Value, unresolved: &[String]) -> Option<String> {
+    let mut notes = Vec::new();
+
+    if let Some(err) = msg.get("error") {
+        let err_type = err
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("provider.error");
+        let err_msg = err
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown turn error");
+        let snippet: String = err_msg.trim().chars().take(180).collect();
+        notes.push(format!(
+            "[FAILED TURN ({}: {}): this turn aborted with an error; do NOT treat its text claims or partial plans as completed work.]",
+            err_type, snippet
+        ));
+    } else if msg.get("finish").and_then(Value::as_str) == Some("interrupted") {
+        notes.push(
+            "[INTERRUPTED TURN: the previous turn stopped before completion; verify workspace files before continuing.]"
+                .to_string(),
+        );
+    }
+
+    if !unresolved.is_empty() {
+        notes.push(format!(
+            "[UNRESOLVED TOOL ERRORS IN TURN: {} — do NOT assume these edits or verifications succeeded.]",
+            unresolved.join("; ")
+        ));
+    }
+
+    if notes.is_empty() {
+        None
+    } else {
+        Some(notes.join("\n"))
+    }
+}
+
 /// Converts session history into formatted OpenAI-compatible chat messages
 pub fn build_chat_messages(effective_history: &[Value], sys_prompt: &str) -> Vec<Value> {
     let mut chat_messages = vec![json!({ "role": "system", "content": sys_prompt })];
@@ -137,6 +241,18 @@ pub fn build_chat_messages(effective_history: &[Value], sys_prompt: &str) -> Vec
                 }
             }
 
+            let unresolved_errors = parts
+                .map(|arr| collect_unresolved_mutating_or_verify_failures(arr))
+                .unwrap_or_default();
+            if let Some(turn_warning) = build_historical_turn_warning(m, &unresolved_errors) {
+                if clean_txt.is_empty() {
+                    clean_txt = turn_warning;
+                } else {
+                    clean_txt.push_str("\n\n");
+                    clean_txt.push_str(&turn_warning);
+                }
+            }
+
             // Standard OpenCode / OpenAI Message Structure:
             // 1. Assistant message with tool_calls (if any tools were invoked)
             // 2. Tool response messages for each tool call
@@ -163,5 +279,61 @@ pub fn build_chat_messages(effective_history: &[Value], sys_prompt: &str) -> Vec
     }
 
     chat_messages
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn marks_failed_and_unresolved_turns_in_chat_history() {
+        let hist = vec![json!({
+            "type": "assistant",
+            "finish": null,
+            "error": { "type": "provider.auth", "message": "401 invalid key" },
+            "content": [
+                { "type": "text", "text": "Siap. Ganti total ke konsep baru." },
+                {
+                    "type": "tool",
+                    "id": "call_1",
+                    "name": "edit",
+                    "state": {
+                        "status": "error",
+                        "input": { "filePath": "script/scene1.js", "oldString": "x" },
+                        "structured": { "error": "Could not find oldString" }
+                    }
+                }
+            ]
+        })];
+
+        let msgs = build_chat_messages(&hist, "sys");
+        let last = msgs.last().unwrap().get("content").and_then(Value::as_str).unwrap();
+        assert!(last.contains("FAILED TURN (provider.auth: 401 invalid key)"));
+        assert!(last.contains("UNRESOLVED TOOL ERRORS IN TURN"));
+    }
+
+    #[test]
+    fn clears_edit_failure_once_later_write_on_same_file_succeeds() {
+        let parts = vec![
+            json!({
+                "type": "tool",
+                "name": "edit",
+                "state": {
+                    "status": "error",
+                    "input": { "filePath": "script/scene1.js" },
+                    "structured": { "error": "Could not find oldString" }
+                }
+            }),
+            json!({
+                "type": "tool",
+                "name": "write",
+                "state": {
+                    "status": "completed",
+                    "input": { "filePath": "script/scene1.js" }
+                }
+            }),
+        ];
+        assert!(collect_unresolved_mutating_or_verify_failures(&parts).is_empty());
+    }
 }
 

@@ -11,10 +11,55 @@ use crate::paths::detect_browser_executable;
 use crate::tool::path_guard::resolve_isolated_path;
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
 
 const MAX_PREVIEW_FRAMES: usize = 4;
 pub const RELATIVE_PREVIEW_POSITIONS: [f64; 4] = [0.10, 0.35, 0.60, 0.85];
+
+static PREVIOUS_PREVIEW_DIGESTS: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
+
+fn previous_preview_digests_store() -> &'static Mutex<HashMap<String, Vec<String>>> {
+    PREVIOUS_PREVIEW_DIGESTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn normalize_preview_project_key(film_root: &std::path::Path) -> String {
+    film_root
+        .canonicalize()
+        .unwrap_or_else(|_| film_root.to_path_buf())
+        .to_string_lossy()
+        .replace('\\', "/")
+        .to_ascii_lowercase()
+}
+
+pub(crate) fn compute_frame_digest(timestamp: f64, bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("{:.2}:{:x}", timestamp, hasher.finalize())
+}
+
+pub(crate) fn resolve_reference_comparison_policy(
+    has_reference: bool,
+    compare_to_reference: Option<bool>,
+) -> (bool, bool) {
+    let overridden_false = has_reference && compare_to_reference == Some(false);
+    let should_compare = has_reference || compare_to_reference.unwrap_or(false);
+    (should_compare, overridden_false)
+}
+
+pub(crate) fn record_and_check_preview_changed(
+    store: &mut HashMap<String, Vec<String>>,
+    project_key: &str,
+    digests: Vec<String>,
+) -> Option<bool> {
+    let changed = store
+        .get(project_key)
+        .map(|prev| *prev != digests);
+    store.insert(project_key.to_string(), digests);
+    changed
+}
 
 #[derive(Clone, Debug)]
 pub struct PreviewFrameCapture {
@@ -34,6 +79,8 @@ pub struct FilmPreviewCaptureResult {
     pub runtime_errors: Vec<String>,
     pub reference_comparison: Option<Value>,
     pub comparison_strip_data_url: Option<String>,
+    pub changed_since_last_capture: Option<bool>,
+    pub compare_to_reference_overridden: bool,
 }
 
 pub(crate) fn compute_relative_ratio(timestamp: f64, duration: f64) -> f64 {
@@ -192,7 +239,8 @@ pub async fn capture_film_preview_with_options(
         ws_root.clone()
     };
     let has_reference = !super::reference_compare::discover_reference_keyframes(&ref_root, meta.duration).is_empty();
-    let should_compare = compare_to_reference.unwrap_or(has_reference);
+    let (should_compare, compare_to_reference_overridden) =
+        resolve_reference_comparison_policy(has_reference, compare_to_reference);
 
     let effective_requested = if requested_timestamps.is_empty() && should_compare {
         let aligned = super::reference_compare::recommended_reference_timestamps(
@@ -215,6 +263,7 @@ pub async fn capture_film_preview_with_options(
     let _ = tokio::fs::create_dir_all(&preview_dir).await;
 
     let mut frames = Vec::with_capacity(timestamps.len());
+    let mut frame_digests = Vec::with_capacity(timestamps.len());
     for (idx, ts) in timestamps.iter().enumerate() {
         let eval_expr = format!(
             "(() => {{ if (typeof window.renderAt !== 'function') {{ return {{ ok: false, error: 'HTML film does not expose window.renderAt(t)' }}; }} window.renderAt({:.6}); return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r({{ ok: true }})))); }})()",
@@ -248,6 +297,7 @@ pub async fn capture_film_preview_with_options(
             .await
             .map_err(|e| format!("Failed writing preview screenshot {}: {}", rel_path, e))?;
 
+        frame_digests.push(compute_frame_digest(*ts, &jpeg_bytes));
         frames.push(PreviewFrameCapture {
             timestamp: *ts,
             relative_ratio: compute_relative_ratio(*ts, meta.duration),
@@ -274,6 +324,14 @@ pub async fn capture_film_preview_with_options(
     }
 
     validate_non_identical_frames(&frames)?;
+
+    let project_key = normalize_preview_project_key(&film_root);
+    let changed_since_last_capture = {
+        let mut guard = previous_preview_digests_store()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        record_and_check_preview_changed(&mut guard, &project_key, frame_digests)
+    };
 
     let (reference_comparison, comparison_strip_data_url) = if should_compare {
         match super::reference_compare::compare_preview_to_reference(
@@ -307,6 +365,8 @@ pub async fn capture_film_preview_with_options(
         runtime_errors,
         reference_comparison,
         comparison_strip_data_url,
+        changed_since_last_capture,
+        compare_to_reference_overridden,
     })
 }
 
@@ -384,5 +444,31 @@ mod tests {
             },
         ];
         assert!(validate_non_identical_frames(&distinct).is_ok());
+    }
+
+    #[test]
+    fn enforces_reference_comparison_when_refs_exist_and_tracks_capture_changes() {
+        assert_eq!(resolve_reference_comparison_policy(true, Some(false)), (true, true));
+        assert_eq!(resolve_reference_comparison_policy(true, None), (true, false));
+        assert_eq!(resolve_reference_comparison_policy(false, Some(false)), (false, false));
+
+        let mut store = HashMap::new();
+        let d1 = vec![
+            compute_frame_digest(0.0, b"frame0_v1"),
+            compute_frame_digest(1.5, b"frame1_v1"),
+        ];
+        assert_eq!(record_and_check_preview_changed(&mut store, "/proj", d1.clone()), None);
+        assert_eq!(
+            record_and_check_preview_changed(&mut store, "/proj", d1),
+            Some(false)
+        );
+        let d2 = vec![
+            compute_frame_digest(0.0, b"frame0_v2"),
+            compute_frame_digest(1.5, b"frame1_v1"),
+        ];
+        assert_eq!(
+            record_and_check_preview_changed(&mut store, "/proj", d2),
+            Some(true)
+        );
     }
 }
