@@ -1456,7 +1456,11 @@ fn handle_no_tool_calls(
         return NoToolCallAction::Continue;
     }
 
-    if step_finish == FinishReason::Stop && *verification_gate_retries < 1 {
+    if matches!(
+        step_finish,
+        FinishReason::Stop | FinishReason::ToolCalls | FinishReason::Unknown
+    ) && *verification_gate_retries < 1
+    {
         let unresolved =
             super::history::collect_unresolved_mutating_or_verify_failures(content_parts);
         if !unresolved.is_empty() {

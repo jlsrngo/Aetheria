@@ -2,26 +2,48 @@
 
 use serde_json::{json, Value};
 
-fn normalize_tool_failure_bucket(name: &str, input: &Value) -> Option<(String, String)> {
+fn normalize_tool_failure_buckets(name: &str, input: &Value) -> Vec<(String, String)> {
     let lower = name.trim().to_ascii_lowercase();
     if matches!(
         lower.as_str(),
         "edit" | "write" | "apply_patch" | "film_scaffold" | "codemode"
     ) {
-        let target = ["filePath", "path", "file", "target", "project"]
-            .iter()
-            .find_map(|k| input.get(*k).and_then(Value::as_str))
-            .map(|s| s.trim().replace('\\', "/").to_ascii_lowercase())
-            .unwrap_or_default();
-        return Some(("mutate".to_string(), target));
+        return crate::session::doom_loop::extract_tool_target_keys(&lower, input)
+            .into_iter()
+            .map(|target| ("mutate".to_string(), target))
+            .collect();
     }
     if matches!(lower.as_str(), "capture_film_preview" | "render_video") {
-        return Some((lower, String::new()));
+        return vec![(lower, String::new())];
     }
-    None
+    if matches!(lower.as_str(), "task" | "subagent") {
+        return crate::session::doom_loop::extract_tool_target_keys(&lower, input)
+            .into_iter()
+            .map(|target| ("subagent".to_string(), target))
+            .collect();
+    }
+    Vec::new()
 }
 
-pub(crate) fn collect_unresolved_mutating_or_verify_failures(parts: &[Value]) -> Vec<String> {
+fn partner_resolved_buckets(tool_lower: &str, bucket: &(String, String)) -> Vec<(String, String)> {
+    let mut extras = Vec::new();
+    if bucket.0 == "mutate" {
+        if matches!(tool_lower, "write" | "edit" | "apply_patch")
+            && (bucket.1 == "index.html" || bucket.1.ends_with("/index.html"))
+        {
+            extras.push(("mutate".to_string(), "__workspace__".to_string()));
+        } else if matches!(tool_lower, "film_scaffold" | "codemode")
+            && bucket.1 == "__workspace__"
+        {
+            extras.push(("mutate".to_string(), "index.html".to_string()));
+        }
+    }
+    extras
+}
+
+pub(crate) fn collect_unresolved_failures_with_buckets(
+    parts: &[Value],
+) -> Vec<((String, String), String)> {
     let mut order: Vec<(String, String)> = Vec::new();
     let mut latest: std::collections::HashMap<(String, String), Option<String>> =
         std::collections::HashMap::new();
@@ -30,41 +52,62 @@ pub(crate) fn collect_unresolved_mutating_or_verify_failures(parts: &[Value]) ->
         if p.get("type").and_then(Value::as_str) != Some("tool") {
             continue;
         }
-        let name = p.get("name").and_then(Value::as_str).unwrap_or("");
-        let input = p.pointer("/state/input").unwrap_or(&Value::Null);
-        let Some(bucket) = normalize_tool_failure_bucket(name, input) else {
+        if p.pointer("/state/structured/syntaxError").and_then(Value::as_bool) == Some(true) {
             continue;
-        };
+        }
+        let name = p.get("name").and_then(Value::as_str).unwrap_or("");
+        let lower = name.trim().to_ascii_lowercase();
+        let input = p.pointer("/state/input").unwrap_or(&Value::Null);
+        let buckets = normalize_tool_failure_buckets(name, input);
+        if buckets.is_empty() {
+            continue;
+        }
         let status = p
             .pointer("/state/status")
             .and_then(Value::as_str)
             .unwrap_or("");
+        let structured_failed =
+            p.pointer("/state/structured/ok").and_then(Value::as_bool) == Some(false);
+        let is_completed_ok = status == "completed" && !structured_failed;
+        let is_failed = status == "error" || (status == "completed" && structured_failed);
 
-        if !latest.contains_key(&bucket) {
-            order.push(bucket.clone());
-        }
-        if status == "completed" {
-            latest.insert(bucket, None);
-        } else if status == "error" {
-            let err_raw = p
-                .pointer("/state/structured/error")
-                .or_else(|| p.pointer("/state/error/message"))
-                .or_else(|| p.pointer("/state/structured/message"))
-                .and_then(Value::as_str)
-                .unwrap_or("tool error");
-            let snippet: String = err_raw.trim().chars().take(120).collect();
-            let desc = if bucket.1.is_empty() {
-                format!("{}: {}", name, snippet)
-            } else {
-                format!("{}({}): {}", name, bucket.1, snippet)
-            };
-            latest.insert(bucket, Some(desc));
+        for bucket in buckets {
+            if !latest.contains_key(&bucket) {
+                order.push(bucket.clone());
+            }
+            if is_completed_ok {
+                for partner in partner_resolved_buckets(&lower, &bucket) {
+                    latest.insert(partner, None);
+                }
+                latest.insert(bucket, None);
+            } else if is_failed {
+                let err_raw = p
+                    .pointer("/state/structured/error")
+                    .or_else(|| p.pointer("/state/error/message"))
+                    .or_else(|| p.pointer("/state/structured/message"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("tool error");
+                let snippet: String = err_raw.trim().chars().take(120).collect();
+                let desc = if bucket.1.is_empty() {
+                    format!("{}: {}", name, snippet)
+                } else {
+                    format!("{}({}): {}", name, bucket.1, snippet)
+                };
+                latest.insert(bucket, Some(desc));
+            }
         }
     }
 
     order
         .into_iter()
-        .filter_map(|k| latest.remove(&k).flatten())
+        .filter_map(|k| latest.remove(&k).flatten().map(|desc| (k, desc)))
+        .collect()
+}
+
+pub(crate) fn collect_unresolved_mutating_or_verify_failures(parts: &[Value]) -> Vec<String> {
+    collect_unresolved_failures_with_buckets(parts)
+        .into_iter()
+        .map(|(_, desc)| desc)
         .collect()
 }
 
@@ -110,7 +153,60 @@ pub(crate) fn build_historical_turn_warning(msg: &Value, unresolved: &[String]) 
 pub fn build_chat_messages(effective_history: &[Value], sys_prompt: &str) -> Vec<Value> {
     let mut chat_messages = vec![json!({ "role": "system", "content": sys_prompt })];
 
-    for m in effective_history {
+    // Pre-scan clean assistant turns so buckets resolved in a later turn j > i
+    // do not keep carrying stale `[UNRESOLVED TOOL ERRORS IN TURN]` warnings on turn i.
+    let mut latest_resolved_turn_by_bucket: std::collections::HashMap<(String, String), usize> =
+        std::collections::HashMap::new();
+    for (idx, m) in effective_history.iter().enumerate() {
+        if m.get("type").and_then(|v| v.as_str()) != Some("assistant") {
+            continue;
+        }
+        if m.get("error").is_some()
+            || m.get("finish").and_then(|v| v.as_str()) == Some("interrupted")
+        {
+            continue;
+        }
+        if let Some(parts) = m.get("content").and_then(|v| v.as_array()) {
+            let unresolved_in_turn: std::collections::HashSet<(String, String)> =
+                collect_unresolved_failures_with_buckets(parts)
+                    .into_iter()
+                    .map(|(b, _)| b)
+                    .collect();
+            for p in parts {
+                if p.get("type").and_then(Value::as_str) != Some("tool") {
+                    continue;
+                }
+                if p.pointer("/state/structured/syntaxError")
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                {
+                    continue;
+                }
+                let status = p
+                    .pointer("/state/status")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let structured_failed =
+                    p.pointer("/state/structured/ok").and_then(Value::as_bool) == Some(false);
+                if status != "completed" || structured_failed {
+                    continue;
+                }
+                let name = p.get("name").and_then(Value::as_str).unwrap_or("");
+                let lower = name.trim().to_ascii_lowercase();
+                let input = p.pointer("/state/input").unwrap_or(&Value::Null);
+                for bucket in normalize_tool_failure_buckets(name, input) {
+                    if !unresolved_in_turn.contains(&bucket) {
+                        for partner in partner_resolved_buckets(&lower, &bucket) {
+                            latest_resolved_turn_by_bucket.insert(partner, idx);
+                        }
+                        latest_resolved_turn_by_bucket.insert(bucket, idx);
+                    }
+                }
+            }
+        }
+    }
+
+    for (turn_idx, m) in effective_history.iter().enumerate() {
         let mtype = m.get("type").and_then(|v| v.as_str()).unwrap_or("");
         if mtype == "synthetic" {
             let txt = m.get("text").and_then(|v| v.as_str()).unwrap_or("");
@@ -241,8 +337,20 @@ pub fn build_chat_messages(effective_history: &[Value], sys_prompt: &str) -> Vec
                 }
             }
 
-            let unresolved_errors = parts
-                .map(|arr| collect_unresolved_mutating_or_verify_failures(arr))
+            let unresolved_errors: Vec<String> = parts
+                .map(|arr| {
+                    collect_unresolved_failures_with_buckets(arr)
+                        .into_iter()
+                        .filter(|(bucket, _)| {
+                            latest_resolved_turn_by_bucket
+                                .get(bucket)
+                                .copied()
+                                .map(|resolved_idx| resolved_idx <= turn_idx)
+                                .unwrap_or(true)
+                        })
+                        .map(|(_, desc)| desc)
+                        .collect()
+                })
                 .unwrap_or_default();
             if let Some(turn_warning) = build_historical_turn_warning(m, &unresolved_errors) {
                 if clean_txt.is_empty() {
@@ -334,6 +442,82 @@ mod tests {
             }),
         ];
         assert!(collect_unresolved_mutating_or_verify_failures(&parts).is_empty());
+    }
+
+    #[test]
+    fn skips_syntax_error_pollution_and_clears_apply_patch_and_cross_turn_recovery() {
+        let hist = vec![
+            json!({
+                "type": "assistant",
+                "finish": "stop",
+                "content": [
+                    {
+                        "type": "tool",
+                        "id": "call_syn",
+                        "name": "edit",
+                        "state": {
+                            "status": "error",
+                            "input": {},
+                            "structured": { "ok": false, "syntaxError": true, "error": "Invalid JSON" }
+                        }
+                    },
+                    {
+                        "type": "tool",
+                        "id": "call_patch_err",
+                        "name": "apply_patch",
+                        "state": {
+                            "status": "error",
+                            "input": { "patchText": "*** Update File: script/scene1.js\n@@\n-x\n+y" },
+                            "structured": { "ok": false, "error": "patch hunk failed" }
+                        }
+                    },
+                    {
+                        "type": "tool",
+                        "id": "call_task_err",
+                        "name": "task",
+                        "state": {
+                            "status": "completed",
+                            "input": { "subagent_type": "motion-designer", "description": "fix scene1" },
+                            "structured": { "ok": false, "state": "incomplete", "error": "missing preview" }
+                        }
+                    }
+                ]
+            }),
+            json!({
+                "type": "assistant",
+                "finish": "stop",
+                "content": [
+                    {
+                        "type": "tool",
+                        "id": "call_write_fix",
+                        "name": "write",
+                        "state": {
+                            "status": "completed",
+                            "input": { "filePath": "script/scene1.js", "content": "ok" },
+                            "structured": { "ok": true }
+                        }
+                    }
+                ]
+            }),
+        ];
+
+        // Syntax error part is never reported as an unresolved edit failure.
+        let turn0_parts = hist[0]["content"].as_array().unwrap();
+        let unresolved0 = collect_unresolved_mutating_or_verify_failures(turn0_parts);
+        assert_eq!(unresolved0.len(), 2);
+        assert!(unresolved0.iter().any(|s| s.contains("script/scene1.js")));
+        assert!(unresolved0.iter().any(|s| s.contains("task(subagent:motion-designer:fix scene1)")));
+
+        // Cross-turn resolution suppresses resolved script/scene1.js on turn 0, while leaving unresolved task warning.
+        let msgs = build_chat_messages(&hist, "sys");
+        let assistant_texts: Vec<&str> = msgs
+            .iter()
+            .filter(|m| m.get("role").and_then(Value::as_str) == Some("assistant"))
+            .filter_map(|m| m.get("content").and_then(Value::as_str))
+            .collect();
+        let turn0_warn = assistant_texts[0];
+        assert!(!turn0_warn.contains("script/scene1.js"));
+        assert!(turn0_warn.contains("task(subagent:motion-designer:fix scene1)"));
     }
 }
 

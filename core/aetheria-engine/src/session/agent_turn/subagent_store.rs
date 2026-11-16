@@ -29,6 +29,7 @@ pub fn build_subagent_system_prompt(subagent_type: &str, workspace_dir: &str) ->
              - If using `THREE.WebGLRenderer`, ALWAYS pass `preserveDrawingBuffer: true` so headless MP4 exports capture every WebGL frame.\n\
              - `AM.drawTopHeader`, `AM.drawHeadlinePlaque`, and dark pill `AM.drawSubtitles` are OPTIONAL — omit or customize them according to the active skill's `SKILL.md` and `tokens.json`.\n\
              - Never use `requestAnimationFrame`, `Math.random()`, `Date.now()`, or `setTimeout`/`setInterval`; drive all motion from `t` and read `audio/*.words.json` timings.\n\
+             - After writing or modifying scripts/HTML, call `capture_film_preview` to verify zero runtimeErrors and clean visuals before finishing.\n\
              - Write files directly using `write` or `edit`, then report the exact files created/updated."
         }
         "audio-director" => {
@@ -40,7 +41,7 @@ pub fn build_subagent_system_prompt(subagent_type: &str, workspace_dir: &str) ->
         "qa-verifier" => {
             "You are the **QA Verifier Subagent** (Verification & Audit Specialist).\n\
              - Your job is to inspect generated motion films (`index.html`, `script/scene*.js`, `audio/*.words.json`), check file existence, verify JSON/JS/HTML syntax, run `capture_film_preview` (with `compareToReference: true` when `ref/` keyframes exist), inspect `runtimeErrors` and RGB SSIM / `comparison_strip.jpg`, and fix any missing asset paths, broken script references, or visual mismatches.\n\
-             - Report verification status and measured metrics clearly."
+             - You MUST execute `capture_film_preview` before reporting verification complete, and report verification status and measured metrics accurately."
         }
         _ => {
             "You are the **General Autonomous Subagent**.\n\

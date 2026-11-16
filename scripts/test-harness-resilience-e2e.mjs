@@ -73,19 +73,20 @@ function extractMessages(msgPayload) {
 function isTurnFinished(messages) {
   const assistants = messages.filter((m) => (m.info?.role ?? m.role) === "assistant");
   if (assistants.length === 0) return false;
-  const last = assistants[assistants.length - 1];
-  const info = last.info ?? last;
-  if (!info.time?.completed && !info.error) return false;
-  const parts = Array.isArray(last.parts)
-    ? last.parts
-    : Array.isArray(last.content)
-      ? last.content
-      : [];
-  return !parts.some(
-    (p) =>
-      (p.type === "tool" || p.type === "tool_use") &&
-      (p.state?.status === "running" || p.state?.status === "pending")
-  );
+  return assistants.every((m) => {
+    const info = m.info ?? m;
+    if (!info.time?.completed && !info.error) return false;
+    const parts = Array.isArray(m.parts)
+      ? m.parts
+      : Array.isArray(m.content)
+        ? m.content
+        : [];
+    return !parts.some(
+      (p) =>
+        (p.type === "tool" || p.type === "tool_use") &&
+        (p.state?.status === "running" || p.state?.status === "pending")
+    );
+  });
 }
 
 async function sendAndWaitTurn(baseUrl, authHeader, dirQuery, sessionID, text, modelObj, timeoutMs = 90_000) {
@@ -131,7 +132,10 @@ function writeSseToolCalls(res, toolCalls) {
     type: "function",
     function: {
       name: tc.name,
-      arguments: JSON.stringify(tc.arguments),
+      arguments:
+        typeof tc.rawArguments === "string"
+          ? tc.rawArguments
+          : JSON.stringify(tc.arguments),
     },
   }));
   res.write(
@@ -148,7 +152,7 @@ function writeSseToolCalls(res, toolCalls) {
   res.end();
 }
 
-function writeSseText(res, text) {
+function writeSseText(res, text, finishReason = "stop") {
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
@@ -161,7 +165,7 @@ function writeSseText(res, text) {
   );
   res.write(
     `data: ${JSON.stringify({
-      choices: [{ delta: {}, finish_reason: "stop" }],
+      choices: [{ delta: {}, finish_reason: finishReason }],
     })}\n\n`
   );
   res.write("data: [DONE]\n\n");
@@ -308,7 +312,8 @@ async function main() {
   );
 
   const recordedRequests = [];
-  let scenarioStep = 0;
+  let coordStep = 0;
+  let subagentStep = 0;
 
   const mockServer = http.createServer((req, res) => {
     const chunks = [];
@@ -320,11 +325,53 @@ async function main() {
       } catch {
         // ignore
       }
-      recordedRequests.push({ step: scenarioStep, url: req.url, body });
-      scenarioStep += 1;
+      const sysPrompt = String(body?.messages?.[0]?.content || "");
+      const isMotionSubagent = sysPrompt.includes("Motion Designer Subagent");
 
-      if (scenarioStep === 1) {
+      if (isMotionSubagent) {
+        subagentStep += 1;
+        recordedRequests.push({ role: "subagent", step: subagentStep, url: req.url, body });
+
+        if (subagentStep === 1) {
+          return writeSseToolCalls(res, [
+            {
+              id: "sub_call_write_1",
+              name: "write",
+              arguments: { filePath: "script/scene1.js", content: buildUpdatedSceneCode() },
+            },
+          ]);
+        }
+        if (subagentStep === 2) {
+          // Premature exit without capture_film_preview -> blocked by Subagent Verification Gate
+          return writeSseText(res, "Updated scene1 cleanly without running preview.");
+        }
+        if (subagentStep === 3) {
+          // Still refuses preview -> subagent exits Incomplete (ok: false)
+          return writeSseText(res, "Still skipping preview capture.");
+        }
+        if (subagentStep === 4) {
+          // Recovery subagent runs capture_film_preview cleanly
+          return writeSseToolCalls(res, [
+            {
+              id: "sub_call_prev_ok",
+              name: "capture_film_preview",
+              arguments: { timestamps: [0.5, 2.0], compareToReference: false },
+            },
+          ]);
+        }
+        return writeSseText(res, "Subagent verified scene1 via capture_film_preview.");
+      }
+
+      coordStep += 1;
+      recordedRequests.push({ role: "coordinator", step: coordStep, url: req.url, body });
+
+      if (coordStep === 1) {
         return writeSseToolCalls(res, [
+          {
+            id: "call_syntax_err",
+            name: "edit",
+            rawArguments: "{broken_json_scene1",
+          },
           {
             id: "call_edit_1",
             name: "edit",
@@ -337,7 +384,7 @@ async function main() {
           },
         ]);
       }
-      if (scenarioStep === 2) {
+      if (coordStep === 2) {
         return writeSseToolCalls(res, [
           {
             id: "call_edit_2",
@@ -351,7 +398,7 @@ async function main() {
           },
         ]);
       }
-      if (scenarioStep === 3) {
+      if (coordStep === 3) {
         return writeSseToolCalls(res, [
           {
             id: "call_edit_3",
@@ -365,7 +412,7 @@ async function main() {
           },
         ]);
       }
-      if (scenarioStep === 4) {
+      if (coordStep === 4) {
         return writeSseToolCalls(res, [
           {
             id: "call_edit_4",
@@ -379,11 +426,11 @@ async function main() {
           },
         ]);
       }
-      if (scenarioStep === 5) {
-        // Model tries to falsely claim completion while edit failures remain unresolved!
-        return writeSseText(res, "Semua perbaikan sudah diterapkan dengan sempurna.");
+      if (coordStep === 5) {
+        // Model tries to falsely claim completion with finish_reason="tool_calls" (empty tool_calls)!
+        return writeSseText(res, "Semua perbaikan sudah diterapkan dengan sempurna.", "tool_calls");
       }
-      if (scenarioStep === 6) {
+      if (coordStep === 6) {
         // After verification gate bounces it back, model recovers by writing script/scene1.js cleanly
         return writeSseToolCalls(res, [
           {
@@ -393,7 +440,7 @@ async function main() {
           },
         ]);
       }
-      if (scenarioStep === 7) {
+      if (coordStep === 7) {
         return writeSseToolCalls(res, [
           {
             id: "call_prev_5",
@@ -402,16 +449,58 @@ async function main() {
           },
         ]);
       }
-      if (scenarioStep === 8) {
+      if (coordStep === 8) {
         return writeSseText(res, "Fixed cleanly via write and verified changed preview.");
       }
-      if (scenarioStep === 9) {
+      if (coordStep === 9) {
         // Turn 2 simulates 401 provider auth error after failing!
         res.writeHead(401, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: { message: "401 invalid key in test" } }));
         return;
       }
-      return writeSseText(res, "Acknowledged prior failed turn.");
+      if (coordStep === 10) {
+        return writeSseText(res, "Acknowledged prior failed turn.");
+      }
+      if (coordStep === 11) {
+        // Turn 4: delegate motion-designer task without running preview inside subagent
+        return writeSseToolCalls(res, [
+          {
+            id: "call_sub_incomplete",
+            name: "task",
+            arguments: {
+              subagent_type: "motion-designer",
+              description: "Update film",
+              prompt: "Update script/scene1.js and run preview.",
+              background: false,
+            },
+          },
+        ]);
+      }
+      if (coordStep === 12) {
+        return writeSseText(res, "Subagent reported done.");
+      }
+      if (coordStep === 13) {
+        return writeSseText(res, "Reporting honestly: subagent stopped incomplete without preview.");
+      }
+      if (coordStep === 14) {
+        // Turn 5: recover same subagent bucket cleanly with capture_film_preview
+        return writeSseToolCalls(res, [
+          {
+            id: "call_sub_recover",
+            name: "task",
+            arguments: {
+              subagent_type: "motion-designer",
+              description: "Update film",
+              prompt: "Run capture_film_preview to verify scene1.",
+              background: false,
+            },
+          },
+        ]);
+      }
+      if (coordStep === 15) {
+        return writeSseText(res, "Recovered motion-designer task cleanly.");
+      }
+      return writeSseText(res, "Cross-turn history confirmed clean.");
     });
   });
 
@@ -514,13 +603,27 @@ async function main() {
     }
     console.log("[FAILED_EDIT_NO_LOOP_RESET] ok");
 
-    // Verify Verification Gate intercepted step 5's fake completion & injected guidance before step 6
-    const gateReq = recordedRequests.find((r) => r.step === 5);
+    // Verify Verification Gate intercepted step 5's fake completion (even with finish_reason="tool_calls")
+    const gateReq = recordedRequests.find((r) => r.role === "coordinator" && r.step === 6);
     const gateSerialized = JSON.stringify(gateReq?.body?.messages || []);
     if (!gateSerialized.includes("COMPLETION BLOCKED BY VERIFICATION GATE")) {
       throw new Error(`Expected verification gate prompt before step 6, got: ${gateSerialized.slice(-800)}`);
     }
-    console.log("[VERIFICATION_GATE] ok");
+    console.log("[VERIFICATION_GATE_&_TOOL_CALLS_FINISH_GUARD] ok");
+
+    // Verify invalid-JSON syntax error did NOT leave a sticky false-positive verification notice after write succeeded
+    const syntaxOut = byId.get("call_syntax_err")?.state?.structured;
+    if (syntaxOut?.syntaxError !== true) {
+      throw new Error(`Expected syntaxError=true on call_syntax_err, got: ${JSON.stringify(syntaxOut)}`);
+    }
+    const turn1FinalText = parts1
+      .filter((p) => p.type === "text")
+      .map((p) => String(p.text || ""))
+      .join("\n");
+    if (turn1FinalText.includes("unresolved tool failure(s)")) {
+      throw new Error(`Unexpected false-positive verification notice in Turn 1 after write recovery: ${turn1FinalText}`);
+    }
+    console.log("[SYNTAX_ERROR_NO_FALSE_GATE] ok");
 
     const prev5Out = byId.get("call_prev_5")?.state?.structured;
     if (prev5Out?.ok !== true || prev5Out?.changedSinceLastCapture !== true) {
@@ -533,15 +636,74 @@ async function main() {
 
     // Turn 3: check history.rs marked failed Turn 2 explicitly
     await sendAndWaitTurn(engineUrl, authHeader, dirQuery, sessionID, "Continue after failure", modelObj);
-    const finalReq = recordedRequests[recordedRequests.length - 1];
-    const histSerialized = JSON.stringify(finalReq?.body?.messages || []);
+    const turn3Req = recordedRequests.find((r) => r.role === "coordinator" && r.step === 10);
+    const histSerialized = JSON.stringify(turn3Req?.body?.messages || []);
     if (!histSerialized.includes("FAILED TURN")) {
       throw new Error(`Expected [FAILED TURN ...] marker in Turn 3 history, got: ${histSerialized.slice(-1000)}`);
     }
     console.log("[FAILED_TURN_HISTORY_MARKER] ok");
+
+    // Turn 4: subagent motion-designer skips capture_film_preview -> blocked by Subagent Verification Gate -> Incomplete
+    const msgs4 = await sendAndWaitTurn(
+      engineUrl,
+      authHeader,
+      dirQuery,
+      sessionID,
+      "Delegate motion task to subagent",
+      modelObj
+    );
+    const subGateReq = recordedRequests.find((r) => r.role === "subagent" && r.step === 3);
+    const subGateSerialized = JSON.stringify(subGateReq?.body?.messages || []);
+    if (!subGateSerialized.includes("SUBAGENT VERIFICATION GATE")) {
+      throw new Error(`Expected SUBAGENT VERIFICATION GATE before subagent step 3, got: ${subGateSerialized.slice(-800)}`);
+    }
+    const allParts4 = msgs4
+      .filter((m) => (m.info?.role ?? m.role) === "assistant")
+      .flatMap((m) => m.parts ?? m.content ?? []);
+    const subIncompleteOut = allParts4.find(
+      (p) => p.type === "tool" && p.id === "call_sub_incomplete"
+    )?.state?.structured;
+    if (subIncompleteOut?.ok !== false || subIncompleteOut?.state !== "incomplete") {
+      throw new Error(
+        `Expected incomplete subagent result when preview omitted, got: ${JSON.stringify(subIncompleteOut)}`
+      );
+    }
+    console.log("[SUBAGENT_VERIFICATION_GATE] ok");
+
+    // Turn 5: recover same subagent bucket cleanly with capture_film_preview
+    const msgs5 = await sendAndWaitTurn(
+      engineUrl,
+      authHeader,
+      dirQuery,
+      sessionID,
+      "Recover motion subagent",
+      modelObj
+    );
+    const allParts5 = msgs5
+      .filter((m) => (m.info?.role ?? m.role) === "assistant")
+      .flatMap((m) => m.parts ?? m.content ?? []);
+    const subRecoverOut = allParts5.find(
+      (p) => p.type === "tool" && p.id === "call_sub_recover"
+    )?.state?.structured;
+    if (subRecoverOut?.ok !== true || subRecoverOut?.state !== "completed") {
+      throw new Error(`Expected completed subagent recovery, got: ${JSON.stringify(subRecoverOut)}`);
+    }
+
+    // Turn 6: verify Turn 4's stale UNRESOLVED TOOL ERRORS marker was cleared once Turn 5 recovered the bucket
+    await sendAndWaitTurn(engineUrl, authHeader, dirQuery, sessionID, "Check cleaned history", modelObj);
+    const turn6Req = recordedRequests[recordedRequests.length - 1];
+    const turn6Messages = turn6Req?.body?.messages || [];
+    const staleTaskWarnings = turn6Messages.filter((m) => {
+      const txt = typeof m?.content === "string" ? m.content : "";
+      return txt.includes("UNRESOLVED TOOL ERRORS IN TURN") && txt.includes("subagent:motion-designer:update film");
+    });
+    if (staleTaskWarnings.length > 0) {
+      throw new Error(`Expected cross-turn recovery to suppress stale unresolved subagent marker, found: ${JSON.stringify(staleTaskWarnings)}`);
+    }
+    console.log("[CROSS_TURN_UNRESOLVED_SUPPRESSION] ok");
     console.log("[E2E_RESULT] PASSED");
   } catch (err) {
-    console.error("[E2E_DEBUG] scenarioStep=", scenarioStep, "recorded=", recordedRequests.length);
+    console.error("[E2E_DEBUG] coordStep=", coordStep, "subagentStep=", subagentStep, "recorded=", recordedRequests.length);
     console.error("[E2E_ENGINE_LOGS]", engineLogs.join("").slice(-3000));
     throw err;
   } finally {

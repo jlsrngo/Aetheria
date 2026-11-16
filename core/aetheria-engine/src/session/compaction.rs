@@ -139,6 +139,7 @@ fn synthesize_compact_summary(messages: &[Value]) -> String {
     let mut objective = String::from("(General workspace automation and document processing)");
     let mut files_touched = Vec::new();
     let mut completed_actions = Vec::new();
+    let mut failed_items = Vec::new();
     let mut key_findings = Vec::new();
 
     // Look for original user objective in the earliest user messages
@@ -159,39 +160,111 @@ fn synthesize_compact_summary(messages: &[Value]) -> String {
     for msg in messages {
         let mtype = msg.get("type").and_then(|v| v.as_str()).unwrap_or("");
         if mtype == "assistant" {
-            if let Some(parts) = msg.get("content").and_then(|v| v.as_array()) {
-                for p in parts {
-                    let ptype = p.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                    if ptype == "tool" {
-                        let name = p.get("name").and_then(|v| v.as_str()).unwrap_or("tool");
-                        let input = p.pointer("/state/input");
+            let parts_slice = msg
+                .get("content")
+                .and_then(|v| v.as_array())
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]);
+            let unresolved_in_turn =
+                crate::session::agent_turn::history::collect_unresolved_mutating_or_verify_failures(
+                    parts_slice,
+                );
+            if let Some(err) = msg.get("error") {
+                let etype = err.get("type").and_then(|v| v.as_str()).unwrap_or("error");
+                let emsg = err
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("turn failed");
+                let snippet: String = emsg.trim().chars().take(120).collect();
+                let entry = format!("Turn aborted with error ({}: {})", etype, snippet);
+                if !failed_items.contains(&entry) && failed_items.len() < 12 {
+                    failed_items.push(entry);
+                }
+            } else if msg.get("finish").and_then(|v| v.as_str()) == Some("interrupted") {
+                let entry = "Turn interrupted before completion".to_string();
+                if !failed_items.contains(&entry) && failed_items.len() < 12 {
+                    failed_items.push(entry);
+                }
+            }
+            for u in &unresolved_in_turn {
+                let entry = format!("Unresolved tool failure: {}", u);
+                if !failed_items.contains(&entry) && failed_items.len() < 12 {
+                    failed_items.push(entry);
+                }
+            }
 
-                        // Extract file path if available
-                        if let Some(inp) = input {
-                            for key in &["filePath", "path", "file", "target"] {
-                                if let Some(fp) = inp.get(*key).and_then(|v| v.as_str()) {
-                                    if !files_touched.contains(&fp.to_string()) {
-                                        files_touched.push(fp.to_string());
-                                    }
-                                }
-                            }
-                        }
+            let turn_trustworthy = msg.get("error").is_none()
+                && msg.get("finish").and_then(|v| v.as_str()) != Some("interrupted")
+                && unresolved_in_turn.is_empty();
 
-                        let status = p.pointer("/state/status").and_then(|v| v.as_str()).unwrap_or("");
-                        if status == "completed" {
-                            let action_entry = format!("Executed '{}' successfully", name);
-                            if !completed_actions.contains(&action_entry) && completed_actions.len() < 12 {
-                                completed_actions.push(action_entry);
-                            }
+            for p in parts_slice {
+                let ptype = p.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                if ptype == "tool" {
+                    let name = p.get("name").and_then(|v| v.as_str()).unwrap_or("tool");
+                    let input = p.pointer("/state/input").unwrap_or(&Value::Null);
+
+                    for target in crate::session::doom_loop::extract_tool_target_keys(name, input) {
+                        if !target.is_empty()
+                            && target != "__workspace__"
+                            && !target.starts_with("subagent:")
+                            && !files_touched.contains(&target)
+                        {
+                            files_touched.push(target);
                         }
-                    } else if ptype == "text" {
-                        if let Some(txt) = p.get("text").and_then(|v| v.as_str()) {
-                            let clean = txt.trim();
-                            if !clean.is_empty() && !clean.starts_with('{') && key_findings.len() < 6 {
-                                let bullet: String = clean.lines().next().unwrap_or("").chars().take(150).collect();
-                                if !bullet.is_empty() && !key_findings.contains(&bullet) {
-                                    key_findings.push(bullet);
-                                }
+                    }
+
+                    let status = p.pointer("/state/status").and_then(|v| v.as_str()).unwrap_or("");
+                    let structured_failed =
+                        p.pointer("/state/structured/ok").and_then(|v| v.as_bool()) == Some(false);
+                    if status == "completed" && !structured_failed {
+                        let action_entry = format!("Executed '{}' successfully", name);
+                        if !completed_actions.contains(&action_entry) && completed_actions.len() < 12
+                        {
+                            completed_actions.push(action_entry);
+                        }
+                    } else if status == "error"
+                        && p.pointer("/state/structured/syntaxError").and_then(|v| v.as_bool())
+                            != Some(true)
+                        && !matches!(
+                            name.trim().to_ascii_lowercase().as_str(),
+                            "edit"
+                                | "write"
+                                | "apply_patch"
+                                | "film_scaffold"
+                                | "codemode"
+                                | "capture_film_preview"
+                                | "render_video"
+                                | "task"
+                                | "subagent"
+                        )
+                    {
+                        let snippet: String = p
+                            .pointer("/state/structured/error")
+                            .or_else(|| p.pointer("/state/error/message"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("tool error")
+                            .trim()
+                            .chars()
+                            .take(100)
+                            .collect();
+                        let entry = format!("Tool '{}' failed: {}", name, snippet);
+                        if !failed_items.contains(&entry) && failed_items.len() < 12 {
+                            failed_items.push(entry);
+                        }
+                    }
+                } else if ptype == "text" && turn_trustworthy {
+                    if let Some(txt) = p.get("text").and_then(|v| v.as_str()) {
+                        let clean = txt.trim();
+                        if !clean.is_empty()
+                            && !clean.starts_with('{')
+                            && !clean.contains("[FAILED TURN")
+                            && !clean.contains("[INTERRUPTED TURN")
+                            && key_findings.len() < 6
+                        {
+                            let bullet: String =
+                                clean.lines().next().unwrap_or("").chars().take(150).collect();
+                            if !bullet.is_empty() && !key_findings.contains(&bullet) {
+                                key_findings.push(bullet);
                             }
                         }
                     }
@@ -221,6 +294,16 @@ fn synthesize_compact_summary(messages: &[Value]) -> String {
             .join("\n")
     };
 
+    let failed_rendered = if failed_items.is_empty() {
+        "- (none)".to_string()
+    } else {
+        failed_items
+            .iter()
+            .map(|f| format!("- {}", f))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
     let findings_rendered = if key_findings.is_empty() {
         "- (none)".to_string()
     } else {
@@ -240,10 +323,12 @@ fn synthesize_compact_summary(messages: &[Value]) -> String {
          ## Work State\n\
          ### Completed\n\
          {}\n\n\
+         ### Failed / Unverified\n\
+         {}\n\n\
          ### Key Decisions & Findings\n\
          {}\n\n\
          *Note: Earlier messages were summarized to conserve context window. Recent turns follow intact.*",
-        objective, files_rendered, completed_rendered, findings_rendered
+        objective, files_rendered, completed_rendered, failed_rendered, findings_rendered
     )
 }
 
@@ -296,5 +381,43 @@ mod tests {
         assert!(summary_text.contains("## Objective"));
         assert!(summary_text.contains("sales.xlsx"));
         assert!(summary_text.contains("## Work State"));
+        assert!(summary_text.contains("### Failed / Unverified"));
+    }
+
+    #[test]
+    fn test_compact_summary_preserves_failures_and_drops_untrusted_claims() {
+        let mut history = vec![
+            json!({ "type": "user", "text": "Perbaiki scene1.js" }),
+            json!({
+                "type": "assistant",
+                "error": { "type": "provider.timeout", "message": "upstream timed out" },
+                "content": [
+                    {
+                        "type": "tool",
+                        "name": "edit",
+                        "state": {
+                            "status": "error",
+                            "input": { "filePath": "script/scene1.js" },
+                            "structured": { "ok": false, "error": "oldString missing" }
+                        }
+                    },
+                    { "type": "text", "text": "Semua edit sudah selesai sempurna!" }
+                ]
+            }),
+        ];
+        for i in 1..=15 {
+            history.push(json!({ "type": "user", "text": format!("Pesan {}", i) }));
+            history.push(json!({
+                "type": "assistant",
+                "content": [{ "type": "text", "text": format!("Balasan {}", i) }]
+            }));
+        }
+        let (compacted, did_compact) = compact_session_history(&history, 900);
+        assert!(did_compact);
+        let summary = compacted[0]["text"].as_str().unwrap();
+        assert!(summary.contains("### Failed / Unverified"));
+        assert!(summary.contains("provider.timeout"));
+        assert!(summary.contains("script/scene1.js"));
+        assert!(!summary.contains("Semua edit sudah selesai sempurna!"));
     }
 }

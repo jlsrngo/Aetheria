@@ -184,11 +184,23 @@ pub(crate) async fn finalize_agent_turn(
     mut last_step_usage: Option<RecordedUsage>,
     mut last_finish: FinishReason,
 ) {
+    let unresolved = super::history::collect_unresolved_mutating_or_verify_failures(&content_parts);
+    let unresolved_notice = if unresolved.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "[Verification notice: unresolved tool failure(s) remained in this turn — {}.]",
+            unresolved.join("; ")
+        ))
+    };
+
     let mut emit_text_events = !final_text_streamed;
     if final_text.trim().is_empty() {
         emit_text_events = true;
         let synthesis_prompt = if reached_max_steps {
             crate::session::coordinator::MAX_STEPS_PROMPT
+        } else if unresolved_notice.is_some() {
+            "Some tool operations failed and remain unresolved in this turn. Summarize accurately what succeeded, what failed, and do NOT claim overall completion."
         } else {
             "All requested Aetheria Studio and code operations have completed execution. Provide a clear, concise final summary and answer to the user."
         };
@@ -228,19 +240,14 @@ pub(crate) async fn finalize_agent_turn(
             }
         }
         if final_text.trim().is_empty() {
-            final_text = "All requested operations have been completed successfully.".to_string();
+            final_text = if unresolved_notice.is_some() {
+                "Turn ended without a model summary; see the unresolved verification notice below."
+                    .to_string()
+            } else {
+                "All requested operations have been completed successfully.".to_string()
+            };
         }
     }
-
-    let unresolved = super::history::collect_unresolved_mutating_or_verify_failures(&content_parts);
-    let unresolved_notice = if unresolved.is_empty() {
-        None
-    } else {
-        Some(format!(
-            "[Verification notice: unresolved tool failure(s) remained in this turn — {}.]",
-            unresolved.join("; ")
-        ))
-    };
 
     if emit_text_events {
         if let Some(ref notice) = unresolved_notice {

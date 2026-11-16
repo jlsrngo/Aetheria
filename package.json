@@ -20,6 +20,7 @@
     "test:e2e": "playwright test",
     "test:smoke": "npx tsx scripts/smoke-local-cli.ts",
     "test:knowledge": "npx tsx scripts/test-knowledge-e2e.ts",
+    "test:harness": "node scripts/test-harness-resilience-e2e.mjs",
     "test:parity": "node scripts/parity/run-conformance.mjs",
     "test:parity:golden": "node scripts/parity/record-golden.mjs",
     "test:parity:self": "node scripts/parity/self-test.mjs",

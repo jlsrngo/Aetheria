@@ -272,14 +272,33 @@ fn spawn_background_subagent_task(
         let state_str = out.get("state").and_then(|v| v.as_str()).unwrap_or("completed");
         let output_xml = out.get("output").and_then(|v| v.as_str()).unwrap_or("");
         let safe_desc = spec.desc.replace('"', "'").replace(['<', '>', '\n', '\r'], " ");
+        let is_success_state =
+            state_str == "completed" && out.get("ok").and_then(Value::as_bool) != Some(false);
+        let status_summary = if is_success_state {
+            "finished cleanly".to_string()
+        } else {
+            format!("stopped in state '{}'", state_str)
+        };
         let standby_note = if remaining > 0 {
-            format!(
-                "\n<standby-status pending=\"{}\">Subagent finished above. {} sibling subagent(s) remain queued or active in standby. Report this completed subagent's findings concisely to the user now (e.g. 'Laporan {} (selesai)') and END YOUR TURN cleanly WITHOUT calling tools, sleeping, or polling — the next queued subagent will notify you when it finishes.</standby-status>",
-                remaining, remaining, spec.sub_type
+            if is_success_state {
+                format!(
+                    "\n<standby-status pending=\"{}\">Subagent {}. {} sibling subagent(s) remain queued or active in standby. Report this completed subagent's findings concisely to the user now (e.g. 'Laporan {} (selesai)') and END YOUR TURN cleanly WITHOUT calling tools, sleeping, or polling — the next queued subagent will notify you when it finishes.</standby-status>",
+                    remaining, status_summary, remaining, spec.sub_type
+                )
+            } else {
+                format!(
+                    "\n<standby-status pending=\"{}\">Subagent {} (NOT completed). {} sibling subagent(s) remain queued or active in standby. Report this incomplete/failed status accurately without claiming completion, and wait for remaining sibling notifications before taking recovery action.</standby-status>",
+                    remaining, status_summary, remaining
+                )
+            }
+        } else if is_success_state {
+            String::from(
+                "\n<standby-status pending=\"0\">All background subagents have finished cleanly. Deliver a clear final summary or synthesis to the user.</standby-status>",
             )
         } else {
-            String::from(
-                "\n<standby-status pending=\"0\">All background subagents have finished. Deliver a clear final summary or synthesis to the user.</standby-status>"
+            format!(
+                "\n<standby-status pending=\"0\">Background subagent {} (NOT completed). Do NOT claim completion to the user. Inspect the diagnostic above and resume/fix the failed subtask or report honestly what failed.</standby-status>",
+                status_summary
             )
         };
         let notification = format!(
@@ -397,6 +416,8 @@ async fn run_subagent_loop(
 
     let mut final_text = String::new();
     let mut tools_executed: Vec<String> = Vec::new();
+    let mut executed_tool_parts: Vec<Value> = Vec::new();
+    let mut verification_retries: usize = 0;
     let mut steps_run: usize = 0;
     let max_steps: usize = 24;
     let mut output_limit_continuations: usize = 0;
@@ -489,6 +510,7 @@ async fn run_subagent_loop(
                 &completion.tool_calls,
                 &mut doom_detector,
                 &mut tools_executed,
+                &mut executed_tool_parts,
                 &mut chat_messages,
             ).await {
                 exit_outcome = SubagentExitOutcome::Incomplete(doom_reason);
@@ -531,6 +553,23 @@ async fn run_subagent_loop(
                 chat_messages.push(json!({ "role": "user", "content": steer.text }));
             }
             continue;
+        }
+        if let Some(gate_issue) =
+            evaluate_subagent_verification_gate(subagent_type, &executed_tool_parts)
+        {
+            if verification_retries < 1 && steps_run < max_steps {
+                verification_retries += 1;
+                chat_messages.push(json!({
+                    "role": "user",
+                    "content": format!(
+                        "SUBAGENT VERIFICATION GATE: Cannot complete task yet — {}. Fix unresolved tool/runtime failures or run 'capture_film_preview' cleanly before finishing.",
+                        gate_issue
+                    )
+                }));
+                continue;
+            }
+            exit_outcome = SubagentExitOutcome::Incomplete(gate_issue);
+            break;
         }
         exit_outcome = SubagentExitOutcome::Completed;
         break;
@@ -590,6 +629,72 @@ async fn run_subagent_loop(
     result
 }
 
+/// Checks whether a subagent has unresolved tool/verify failures or skipped required visual preview.
+pub(crate) fn evaluate_subagent_verification_gate(
+    subagent_type: &str,
+    executed_tool_parts: &[Value],
+) -> Option<String> {
+    let mut issues = super::history::collect_unresolved_mutating_or_verify_failures(executed_tool_parts);
+
+    let sub_lower = subagent_type.trim().to_ascii_lowercase();
+    let mut touched_mutation = false;
+    let mut preview_ok_after_last_mutation = false;
+    let mut any_preview_ok = false;
+
+    for p in executed_tool_parts {
+        if p.get("type").and_then(Value::as_str) != Some("tool") {
+            continue;
+        }
+        if p.pointer("/state/structured/syntaxError")
+            .and_then(Value::as_bool)
+            == Some(true)
+        {
+            continue;
+        }
+        let name = p
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        let status = p
+            .pointer("/state/status")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let structured_ok =
+            p.pointer("/state/structured/ok").and_then(Value::as_bool) != Some(false);
+        let ok = status == "completed" && structured_ok;
+
+        if ok
+            && matches!(
+                name.as_str(),
+                "edit" | "write" | "apply_patch" | "film_scaffold" | "codemode"
+            )
+        {
+            touched_mutation = true;
+            preview_ok_after_last_mutation = false;
+        } else if ok && name == "capture_film_preview" {
+            any_preview_ok = true;
+            preview_ok_after_last_mutation = true;
+        }
+    }
+
+    if sub_lower == "motion-designer" && touched_mutation && !preview_ok_after_last_mutation {
+        issues.push(
+            "Missing clean 'capture_film_preview' verification after modifying workspace files"
+                .to_string(),
+        );
+    } else if sub_lower == "qa-verifier" && !any_preview_ok {
+        issues.push("'qa-verifier' did not complete a clean 'capture_film_preview'".to_string());
+    }
+
+    if issues.is_empty() {
+        None
+    } else {
+        Some(issues.join("; "))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -633,5 +738,51 @@ mod tests {
         assert_eq!(resumed_id, unique_child_id);
         assert!(is_resumed);
         assert_eq!(resumed_msgs.len(), 4);
+    }
+
+    #[test]
+    fn subagent_verification_gate_flags_unresolved_failures_and_missing_preview() {
+        let unresolved_parts = vec![json!({
+            "type": "tool",
+            "name": "edit",
+            "state": {
+                "status": "error",
+                "input": { "filePath": "script/scene1.js" },
+                "structured": { "ok": false, "error": "oldString not found" }
+            }
+        })];
+        let gate_err = evaluate_subagent_verification_gate("general", &unresolved_parts)
+            .expect("unresolved edit should trigger gate");
+        assert!(gate_err.contains("script/scene1.js"));
+
+        let missing_preview_parts = vec![json!({
+            "type": "tool",
+            "name": "write",
+            "state": {
+                "status": "completed",
+                "input": { "filePath": "script/scene1.js" },
+                "structured": { "ok": true }
+            }
+        })];
+        let preview_err =
+            evaluate_subagent_verification_gate("motion-designer", &missing_preview_parts)
+                .expect("motion-designer without capture_film_preview must fail gate");
+        assert!(preview_err.contains("capture_film_preview"));
+
+        let verified_parts = vec![
+            missing_preview_parts[0].clone(),
+            json!({
+                "type": "tool",
+                "name": "capture_film_preview",
+                "state": {
+                    "status": "completed",
+                    "input": {},
+                    "structured": { "ok": true }
+                }
+            }),
+        ];
+        assert!(evaluate_subagent_verification_gate("motion-designer", &verified_parts).is_none());
+        assert!(evaluate_subagent_verification_gate("qa-verifier", &verified_parts).is_none());
+        assert!(evaluate_subagent_verification_gate("qa-verifier", &[]).is_some());
     }
 }

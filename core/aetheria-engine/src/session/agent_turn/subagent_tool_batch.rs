@@ -30,6 +30,7 @@ pub(crate) async fn execute_subagent_tool_calls(
     tool_calls: &[Value],
     doom_detector: &mut DoomLoopDetector,
     tools_executed: &mut Vec<String>,
+    executed_tool_parts: &mut Vec<Value>,
     chat_messages: &mut Vec<Value>,
 ) -> Option<String> {
     let mut prepared = Vec::with_capacity(tool_calls.len());
@@ -95,7 +96,7 @@ pub(crate) async fn execute_subagent_tool_calls(
 
     let futures = prepared.iter().map(|pc| async move {
         if let Some(err) = &pc.syntax_error {
-            return (json!({ "ok": false, "error": err }), false);
+            return (json!({ "ok": false, "error": err, "syntaxError": true }), false);
         }
         if let Some(reason) = &pc.loop_error {
             return (json!({ "ok": false, "error": reason }), false);
@@ -123,9 +124,10 @@ pub(crate) async fn execute_subagent_tool_calls(
             }
         }
         super::vision::extract_tool_vision_images(&mut tool_result, &mut collected_vision_images);
+        let is_err = !was_executed
+            || tool_result.get("error").is_some()
+            || tool_result.get("ok").and_then(|v| v.as_bool()) == Some(false);
         if was_executed {
-            let is_err = tool_result.get("error").is_some()
-                || tool_result.get("ok").and_then(|v| v.as_bool()) == Some(false);
             if let Some(intervention) =
                 doom_detector.record_outcome(&pc.fn_name, &pc.parsed_args, is_err)
             {
@@ -151,6 +153,16 @@ pub(crate) async fn execute_subagent_tool_calls(
                 }),
             );
         }
+        executed_tool_parts.push(json!({
+            "type": "tool",
+            "id": pc.call_id,
+            "name": pc.fn_name,
+            "state": {
+                "status": if is_err { "error" } else { "completed" },
+                "input": pc.parsed_args,
+                "structured": tool_result
+            }
+        }));
         let serialized = serde_json::to_string(&tool_result).unwrap_or_else(|_| "{}".to_string());
         let (bounded_content, _) = bound_tool_output(&pc.fn_name, &serialized);
         chat_messages.push(json!({

@@ -67,10 +67,12 @@ pub(crate) async fn execute_tool_batch(
             &format!("🔧 Executing tool '{}' with input: {}", display_name, args_str),
         );
 
-        let loop_warning = if tools_disabled {
+        let loop_warning = if tools_disabled || syntax_error.is_some() {
             None
         } else {
-            doom_loop_detector.check_and_record(&fn_name, &args_str)
+            let args_canonical =
+                serde_json::to_string(&args_val).unwrap_or_else(|_| args_str.clone());
+            doom_loop_detector.check_and_record(&fn_name, &args_canonical)
         };
         prepared_calls.push(PreparedCall {
             call_id,
@@ -96,7 +98,10 @@ pub(crate) async fn execute_tool_batch(
                     pc.fn_name, err_msg
                 ),
             );
-            (json!({ "error": err_msg, "blocked": true }), true)
+            (
+                json!({ "ok": false, "error": err_msg, "blocked": true, "syntaxError": true }),
+                true,
+            )
         } else if let Some(warning) = &pc.loop_warning {
             crate::paths::log_engine(
                 "tool",
@@ -135,7 +140,7 @@ pub(crate) async fn execute_tool_batch(
         let fn_name = pc.fn_name;
         let args_val = pc.args_val;
         let tool_start = pc.tool_start;
-        if pc.loop_warning.is_none() && !tools_disabled {
+        if pc.syntax_error.is_none() && pc.loop_warning.is_none() && !tools_disabled {
             if let Some(intervention) =
                 doom_loop_detector.record_outcome(&fn_name, &args_val, is_failed)
             {

@@ -98,8 +98,25 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
                 .flatten()
                 .map(|s| format!(" {}", s))
                 .collect();
-            json!({
-                "ok": true,
+            let has_runtime_errors = !res.runtime_errors.is_empty();
+            let runtime_err_msg = if has_runtime_errors {
+                Some(format!(
+                    "Film runtime errors detected: {}",
+                    res.runtime_errors.join(" | ")
+                ))
+            } else {
+                None
+            };
+            let runtime_note = if has_runtime_errors {
+                format!(
+                    " Runtime errors detected ({} error(s)); fix script errors before finishing.",
+                    res.runtime_errors.len()
+                )
+            } else {
+                String::new()
+            };
+            let mut result = json!({
+                "ok": !has_runtime_errors,
                 "width": res.width,
                 "height": res.height,
                 "duration": res.duration,
@@ -112,16 +129,23 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
                 "runtimeErrors": res.runtime_errors,
                 "referenceComparison": res.reference_comparison,
                 "output": format!(
-                    "Captured {} visual preview frame(s) ({}x{} @ {}fps).{}{} Attached screenshots to vision context.",
+                    "Captured {} visual preview frame(s) ({}x{} @ {}fps).{}{}{} Attached screenshots to vision context.",
                     res.frames.len(),
                     res.width,
                     res.height,
                     res.fps,
                     summary_extra,
-                    extra_notices
+                    extra_notices,
+                    runtime_note
                 ),
                 "_vision_images": vision_images
-            })
+            });
+            if let Some(err_msg) = runtime_err_msg {
+                if let Some(obj) = result.as_object_mut() {
+                    obj.insert("error".to_string(), json!(err_msg));
+                }
+            }
+            result
         }
         Err(err) => json!({
             "ok": false,
