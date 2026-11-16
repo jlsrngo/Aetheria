@@ -28,6 +28,7 @@ mod subagent_e2e_tests;
 pub mod tool_batch;
 pub mod turn_finalize;
 pub mod vision;
+pub mod vision_caption;
 pub mod xml_tool_parser;
 
 pub use context::{discover_workspace_plugin_rules, discover_workspace_skills};

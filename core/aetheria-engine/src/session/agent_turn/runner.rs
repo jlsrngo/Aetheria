@@ -720,7 +720,7 @@ async fn prepare_initial_chat_messages(
         }
     }
 
-    let user_msg = build_user_message_with_attachments(
+    let user_msg = build_user_message_with_vision_fallback(
         workspace_dir,
         provider_id,
         model_id,
@@ -730,38 +730,31 @@ async fn prepare_initial_chat_messages(
         ffmpeg_bin.as_deref(),
         extra_context,
         social_images,
-    );
+    )
+    .await;
     chat_messages.push(user_msg);
 
     (chat_messages, is_greeting)
 }
 
-fn build_user_message_with_attachments(
-    workspace_dir: &str,
+fn assemble_user_message_from_parts(
     provider_id: &str,
     model_id: &str,
     cfg: &Value,
     prompt_text: &str,
-    files: Option<&Value>,
-    ffmpeg_bin: Option<&std::path::Path>,
-    extra_context: Vec<String>,
-    extra_image_urls: Vec<String>,
+    mut context_additions: Vec<String>,
+    image_urls: Vec<String>,
+    has_auto_vision_caption: bool,
 ) -> Value {
-    let (file_transcriptions, mut image_urls) =
-        process_attached_files(workspace_dir, files, ffmpeg_bin);
-    image_urls.extend(extra_image_urls);
-    let mut context_additions = file_transcriptions;
-    context_additions.extend(extra_context);
-
     let model_supports_vision = model_supports_vision_from_config(Some(cfg), provider_id, model_id);
 
-    if !image_urls.is_empty() && !model_supports_vision {
+    if !image_urls.is_empty() && !model_supports_vision && !has_auto_vision_caption {
         context_additions.push(format!(
             "[SYSTEM NOTICE: Active model '{model_id}' is text-only and CANNOT receive raw image attachments directly. \
              Instead of giving up or guessing, use `codemode` to numerically inspect the saved reference image(s) in `ref/` \
              (extract dimensions, 5 dominant hex colors, and average brightness/contrast) and report the measured palette \
              before translating it into procedural Canvas/WebGL code. Also inform the user they can switch to a vision-capable model \
-             (e.g. Gemini, Claude, GPT-4o/5, GLM-4.6V, Kimi, Qwen-VL) for full semantic visual inspection.]"
+             (e.g. Gemini, Claude, GPT-4o/5, GLM-4.6V, Kimi, Qwen-VL, or Kiro Auto) for full semantic visual inspection.]"
         ));
     }
 
@@ -780,6 +773,74 @@ fn build_user_message_with_attachments(
     } else {
         json!({ "role": "user", "content": enriched_user_text })
     }
+}
+
+fn build_user_message_with_attachments(
+    workspace_dir: &str,
+    provider_id: &str,
+    model_id: &str,
+    cfg: &Value,
+    prompt_text: &str,
+    files: Option<&Value>,
+    ffmpeg_bin: Option<&std::path::Path>,
+    extra_context: Vec<String>,
+    extra_image_urls: Vec<String>,
+) -> Value {
+    let (file_transcriptions, mut image_urls) =
+        process_attached_files(workspace_dir, files, ffmpeg_bin);
+    image_urls.extend(extra_image_urls);
+    let mut context_additions = file_transcriptions;
+    context_additions.extend(extra_context);
+    assemble_user_message_from_parts(
+        provider_id,
+        model_id,
+        cfg,
+        prompt_text,
+        context_additions,
+        image_urls,
+        false,
+    )
+}
+
+async fn build_user_message_with_vision_fallback(
+    workspace_dir: &str,
+    provider_id: &str,
+    model_id: &str,
+    cfg: &Value,
+    prompt_text: &str,
+    files: Option<&Value>,
+    ffmpeg_bin: Option<&std::path::Path>,
+    extra_context: Vec<String>,
+    extra_image_urls: Vec<String>,
+) -> Value {
+    let (file_transcriptions, mut image_urls) =
+        process_attached_files(workspace_dir, files, ffmpeg_bin);
+    image_urls.extend(extra_image_urls);
+    let mut context_additions = file_transcriptions;
+    context_additions.extend(extra_context);
+
+    let mut has_caption = false;
+    if !image_urls.is_empty() && !model_supports_vision_from_config(Some(cfg), provider_id, model_id)
+    {
+        if let Some((vision_model, caption)) =
+            super::vision_caption::describe_images_with_available_vision_model(&image_urls).await
+        {
+            has_caption = true;
+            context_additions.push(format!(
+                "[AUTO VISION INSPECTION (model: {vision_model}) — Use this exact visual breakdown of the attached reference image(s) to build the requested subject/shapes accurately rather than guessing from colors alone]:\n{caption}"
+            ));
+        }
+    }
+
+    assemble_user_message_from_parts(
+        provider_id,
+        model_id,
+        cfg,
+        prompt_text,
+        context_additions,
+        image_urls,
+        has_caption,
+    )
 }
 
 fn find_model_config<'a>(cfg: &'a Value, provider_id: &str, model_id: &str) -> Option<&'a Value> {
@@ -837,7 +898,13 @@ pub(crate) fn model_supports_vision_from_config(
             || lower.ends_with(&format!("/{prefix}"))
     });
 
-    lower.contains("vl")
+    let is_kiro_auto = lower == "kiro/auto"
+        || ((provider_id.eq_ignore_ascii_case("kiro")
+            || provider_id.eq_ignore_ascii_case("local-cli"))
+            && lower == "auto");
+
+    is_kiro_auto
+        || lower.contains("vl")
         || lower.contains("vision")
         || lower.contains("gemini")
         || lower.contains("claude")
@@ -1514,5 +1581,15 @@ mod tests {
         assert!(!is_premature_tool_announcement(
             "Desain motion graphics telah selesai dibuat dan diverifikasi."
         ));
+    }
+
+    #[test]
+    fn kiro_auto_is_vision_capable_while_text_only_models_are_not() {
+        let cfg = json!({});
+        assert!(model_supports_vision_from_config(Some(&cfg), "local-cli", "kiro/auto"));
+        assert!(model_supports_vision_from_config(Some(&cfg), "kiro", "auto"));
+        assert!(model_supports_vision_from_config(Some(&cfg), "local-cli", "kiro/claude-sonnet-4.5"));
+        assert!(!model_supports_vision_from_config(Some(&cfg), "local-cli", "kiro/deepseek-3.2"));
+        assert!(!model_supports_vision_from_config(Some(&cfg), "local-cli", "kiro/glm-5"));
     }
 }

@@ -211,6 +211,47 @@ async fn send_kiro_post_with_retry(
     Err(last_err)
 }
 
+fn parse_kiro_image_part(part: &Value) -> Option<Value> {
+    let url = part
+        .pointer("/image_url/url")
+        .or_else(|| part.get("image_url"))
+        .and_then(|v| v.as_str())?
+        .trim();
+    let rest = url.strip_prefix("data:image/")?;
+    let (meta, b64) = rest.split_once(',')?;
+    let b64_clean = b64.trim();
+    if b64_clean.is_empty() {
+        return None;
+    }
+    let raw_fmt = meta.split(';').next().unwrap_or("png").trim().to_ascii_lowercase();
+    let fmt = match raw_fmt.as_str() {
+        "jpg" | "jpeg" => "jpeg",
+        "png" => "png",
+        "webp" => "webp",
+        "gif" => "gif",
+        _ => "png",
+    };
+    Some(json!({
+        "format": fmt,
+        "source": { "bytes": b64_clean }
+    }))
+}
+
+fn extract_content_text_and_images(content: Option<&Value>) -> (String, Vec<Value>) {
+    let text = extract_content_text(content);
+    let mut images = Vec::new();
+    if let Some(Value::Array(arr)) = content {
+        for part in arr {
+            if part.get("type").and_then(|v| v.as_str()) == Some("image_url") {
+                if let Some(img) = parse_kiro_image_part(part) {
+                    images.push(img);
+                }
+            }
+        }
+    }
+    (text, images)
+}
+
 pub(crate) async fn handle_kiro_request(body: Value, model: &str, is_stream: bool) -> Response {
     let cred = match ensure_fresh_credential("kiro").await {
         Some(c) => c,
@@ -315,11 +356,15 @@ pub(crate) async fn handle_kiro_request(body: Value, model: &str, is_stream: boo
             }));
             continue;
         }
-        let text = extract_content_text(m.get("content"));
-        raw_turns.push(json!({
+        let (text, images) = extract_content_text_and_images(m.get("content"));
+        let mut turn = json!({
             "role": "user",
             "content": text
-        }));
+        });
+        if !images.is_empty() {
+            turn["images"] = Value::Array(images);
+        }
+        raw_turns.push(turn);
     }
 
     let mut kiro_tools = Vec::new();
@@ -375,6 +420,11 @@ pub(crate) async fn handle_kiro_request(body: Value, model: &str, is_stream: boo
                 "modelId": kiro_model_id,
                 "origin": "AI_EDITOR"
             });
+            if let Some(imgs) = turn.get("images").and_then(|v| v.as_array()) {
+                if !imgs.is_empty() {
+                    u_msg["images"] = Value::Array(imgs.clone());
+                }
+            }
             if let Some(trs) = turn.get("toolResults").and_then(|v| v.as_array()) {
                 if !trs.is_empty() {
                     u_msg["userInputMessageContext"] = json!({ "toolResults": trs });
@@ -426,6 +476,11 @@ pub(crate) async fn handle_kiro_request(body: Value, model: &str, is_stream: boo
         "modelId": kiro_model_id,
         "origin": "AI_EDITOR"
     });
+    if let Some(imgs) = current_turn.get("images").and_then(|v| v.as_array()) {
+        if !imgs.is_empty() {
+            cur_user_msg["images"] = Value::Array(imgs.clone());
+        }
+    }
     if !cur_ctx.is_empty() {
         cur_user_msg["userInputMessageContext"] = Value::Object(cur_ctx);
     }
@@ -511,5 +566,21 @@ mod tests {
     fn kiro_clients_initialize_cleanly() {
         let _ = kiro_primary_client();
         let _ = kiro_http1_client();
+    }
+
+    #[test]
+    fn extracts_data_uri_images_for_kiro_user_message() {
+        let content = json!([
+            { "type": "text", "text": "Describe this image" },
+            { "type": "image_url", "image_url": { "url": "data:image/jpg;base64,QUJD" } },
+            { "type": "image_url", "image_url": { "url": "data:image/png;base64,WFla" } }
+        ]);
+        let (text, imgs) = extract_content_text_and_images(Some(&content));
+        assert!(text.contains("Describe this image"));
+        assert_eq!(imgs.len(), 2);
+        assert_eq!(imgs[0]["format"], "jpeg");
+        assert_eq!(imgs[0]["source"]["bytes"], "QUJD");
+        assert_eq!(imgs[1]["format"], "png");
+        assert_eq!(imgs[1]["source"]["bytes"], "WFla");
     }
 }
