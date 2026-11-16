@@ -237,11 +237,22 @@ pub async fn handle_prompt(
     }
 
     let lock = get_session_lock(&sid_c);
+    let uid_c = user_msg_id.clone();
     tokio::spawn(async move {
         let _turn_guard = lock.lock().await;
-        // Fetch up-to-date history from store in case another turn just settled before us
+        // Fetch up-to-date history from store in case another turn just settled before us,
+        // excluding the user_msg just pushed for this turn so prepare_initial_chat_messages appends it once.
         let current_history = with_store(|store| {
-            store.messages.get(&sid_c).cloned().unwrap_or_default()
+            let mut list = store.messages.get(&sid_c).cloned().unwrap_or_default();
+            if list
+                .last()
+                .and_then(|m| m.get("id"))
+                .and_then(|v| v.as_str())
+                == Some(uid_c.as_str())
+            {
+                list.pop();
+            }
+            list
         });
         run_agent_turn(
             &sid_c,

@@ -594,6 +594,26 @@ pub async fn run_agent_turn(
     .await;
 }
 
+fn first_html_or_svg_attachment_name(files: Option<&Value>) -> Option<String> {
+    let arr = files?.as_array()?;
+    for item in arr {
+        let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        let uri = item
+            .get("uri")
+            .or_else(|| item.get("url"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let mime = item.get("mime").and_then(|v| v.as_str()).unwrap_or("");
+        if super::vision::is_standalone_html_or_svg_attachment(name, uri, mime) {
+            if !name.trim().is_empty() {
+                return Some(name.trim().to_string());
+            }
+            return Some("uploaded-stage.html".to_string());
+        }
+    }
+    None
+}
+
 async fn prepare_initial_chat_messages(
     session_id: &str,
     workspace_dir: &str,
@@ -604,6 +624,29 @@ async fn prepare_initial_chat_messages(
     model_id: &str,
     cfg: &Value,
 ) -> (Vec<Value>, bool) {
+    if !workspace_dir.trim().is_empty() {
+        let ws_path = std::path::Path::new(workspace_dir);
+        let is_first_session_turn = !history
+            .iter()
+            .any(|m| m.get("type").and_then(|v| v.as_str()) == Some("assistant"));
+        if crate::studio::project_registry::has_active_project_selection(ws_path) {
+            if let Some(html_name) = first_html_or_svg_attachment_name(files) {
+                let _ = crate::studio::project_registry::ensure_project_for_uploaded_file(
+                    ws_path, &html_name,
+                );
+            } else if is_first_session_turn
+                && !is_greeting_prompt(prompt_text)
+                && !crate::studio::project_registry::is_revision_or_style_adjustment_prompt(
+                    prompt_text,
+                )
+            {
+                let _ = crate::studio::project_registry::ensure_project_for_prompt(
+                    ws_path,
+                    prompt_text,
+                );
+            }
+        }
+    }
     let sys_prompt = assemble_system_prompt(workspace_dir);
     let (effective_history, was_compacted) = crate::session::compaction::compact_session_history(
         history,
@@ -646,7 +689,18 @@ async fn prepare_initial_chat_messages(
         }
         let has_media_attachments = files
             .and_then(|f| f.as_array())
-            .is_some_and(|arr| !arr.is_empty());
+            .is_some_and(|arr| {
+                arr.iter().any(|item| {
+                    let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                    let uri = item
+                        .get("uri")
+                        .or_else(|| item.get("url"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let mime = item.get("mime").and_then(|v| v.as_str()).unwrap_or("");
+                    !super::vision::is_text_or_code_attachment(name, uri, mime)
+                })
+            });
         let wants_reference = lower_prompt.contains("/ref")
             || lower_prompt.contains("reference")
             || lower_prompt.contains("referensi")

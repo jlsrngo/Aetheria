@@ -445,6 +445,43 @@ pub fn ensure_project_for_prompt(ws_root: &Path, prompt: &str) -> Result<StudioP
     create_studio_project(ws_root, &title)
 }
 
+/// Returns true when the workspace has an active project selection or existing `projects/` subfolders.
+pub fn has_active_project_selection(ws_root: &Path) -> bool {
+    if read_active_project_slug(ws_root).is_some() {
+        return true;
+    }
+    let state = list_studio_projects(ws_root);
+    !state.projects.is_empty()
+}
+
+/// Creates or reuses an isolated `projects/<slug>/` folder derived from an uploaded HTML/SVG filename
+/// and selects it as active so new file uploads never collide with a previous session's active project.
+pub fn ensure_project_for_uploaded_file(
+    ws_root: &Path,
+    file_name: &str,
+) -> Result<StudioProjectInfo, String> {
+    let stem = Path::new(file_name)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or("uploaded-stage");
+    let base_slug = slugify_project_title(stem);
+    let ws_str = ws_root.to_string_lossy();
+    let rel = format!("{}/{}", PROJECTS_DIR_NAME, base_slug);
+    let existing = resolve_isolated_path(&ws_str, &rel)?;
+    if existing.is_dir() && !existing.join("index.html").is_file() {
+        for sub in ["script", "audio", "output"] {
+            let sub_path = resolve_isolated_path(&ws_str, &format!("{}/{}", rel, sub))?;
+            std::fs::create_dir_all(&sub_path).map_err(|e| {
+                format!("Failed creating project subfolder '{}': {}", sub_path.display(), e)
+            })?;
+        }
+        write_active_project_slug(ws_root, Some(&base_slug))?;
+        return Ok(inspect_project_dir(&existing, &base_slug));
+    }
+    create_studio_project(ws_root, stem)
+}
+
 /// Selects an existing project subfolder (or `"__root__"` to clear selection to legacy root).
 pub fn select_studio_project(ws_root: &Path, slug: &str) -> Result<Option<String>, String> {
     let trimmed = slug.trim();
@@ -664,6 +701,35 @@ mod tests {
             .join("projects")
             .join("pakai-style-ini-aja-buat-rapih-dan-rasionya-buat-lanscape")
             .exists());
+
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn uploaded_html_file_switches_away_from_stale_active_project() {
+        let ws = make_temp_ws("aetheria_proj_uploaded_html");
+        let stale = create_studio_project(
+            &ws,
+            "pakai style ini aja buat rapih dan rasionya buat lanscap",
+        )
+        .unwrap();
+        assert_eq!(
+            stale.id,
+            "pakai-style-ini-aja-buat-rapih-dan-rasionya-buat-lanscap"
+        );
+        assert!(has_active_project_selection(&ws));
+
+        let switched = ensure_project_for_uploaded_file(
+            &ws,
+            "animasi_happy_new_year_2027_city_skyline_fireworks_microstock.html",
+        )
+        .unwrap();
+        assert_eq!(
+            switched.id,
+            "animasi-happy-new-year-2027-city-skyline-fireworks-micro"
+        );
+        let state = list_studio_projects(&ws);
+        assert_eq!(state.active_project.as_deref(), Some(switched.id.as_str()));
 
         let _ = std::fs::remove_dir_all(&ws);
     }

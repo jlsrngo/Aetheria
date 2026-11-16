@@ -258,6 +258,28 @@ async function main() {
     }
     console.log("[NEGATIVE_CHECK]", `unauth=${unauthRes.status} badJson=${badJsonRes.status}`);
 
+    // Pre-seed stale active project (`clay-kit.js`) and stale `ref/ref_report.md` to verify isolation on file upload
+    const staleProjDir = path.join(
+      tempWorkspace,
+      "projects",
+      "pakai-style-ini-aja-buat-rapih-dan-rasionya-buat-lanscap",
+      "script"
+    );
+    fs.mkdirSync(staleProjDir, { recursive: true });
+    fs.writeFileSync(path.join(staleProjDir, "clay-kit.js"), "// Stale SpongeBob ClayKit\n", "utf8");
+    fs.mkdirSync(path.join(tempWorkspace, ".aetheria"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tempWorkspace, ".aetheria", "active-project.json"),
+      JSON.stringify({ project: "pakai-style-ini-aja-buat-rapih-dan-rasionya-buat-lanscap" }, null, 2),
+      "utf8"
+    );
+    fs.mkdirSync(path.join(tempWorkspace, "ref"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tempWorkspace, "ref", "ref_report.md"),
+      "# Stale Reference (ref_pinterest.jpg): Flat vector nightscape lake cabin",
+      "utf8"
+    );
+
     // Enable Microstock Mode 'M' (1920x1080 @ 30fps)
     const microRes = await api(baseUrl, `/api/studio/microstock/mode?${dirQuery}`, {
       method: "POST",
@@ -287,23 +309,24 @@ async function main() {
     createdSessionId = sessionID;
     console.log("[SESSION_CREATED]", sessionID);
 
-    const promptText = [
-      "Tolong rapihkan dan pisahkan hanya bagian visual stage yang dibutuhkan dari kode HTML animasi Natal berikut agar bisa langsung dirender dengan halus di Studio (ikuti mode yang aktif).",
-      "Buang control panel / tombol / CDN eksternal, dan konversi animasinya menjadi deterministik `window.renderAt(t)`.",
-      "",
-      "```html",
-      sampleHtml,
-      "```",
-    ].join("\n");
+    const promptText = "rapihkan buat di render nanti";
+    const htmlBase64 = Buffer.from(sampleHtml, "utf8").toString("base64");
+    const attachedFiles = [
+      {
+        name: "animasi_natal_microstock.html",
+        uri: `data:text/html;base64,${htmlBase64}`,
+        mime: "text/html",
+      },
+    ];
 
-    const sendRes = await api(baseUrl, `/api/session/${sessionID}/message?${dirQuery}`, {
+    const sendRes = await api(baseUrl, `/api/session/${sessionID}/prompt?${dirQuery}`, {
       method: "POST",
       authHeader,
       body: {
-        model: { providerID: chosen.providerID, id: chosen.modelID },
-        parts: [{ type: "text", text: promptText }],
-        prompt: { text: promptText },
-        text: promptText,
+        prompt: {
+          text: promptText,
+          files: attachedFiles,
+        },
       },
     });
     if (!sendRes.ok && sendRes.status >= 400) {
@@ -341,17 +364,27 @@ async function main() {
     const filmMeta = filmMetaRes.json?.data ?? filmMetaRes.json;
     console.log("[FILM_META_API]", filmMetaRes.status, JSON.stringify(filmMeta));
 
-    const indexPath = path.join(tempWorkspace, "index.html");
+    const targetProjRel = "projects/animasi-natal-microstock";
+    const indexPath = path.join(tempWorkspace, targetProjRel, "index.html");
     const indexContent = fs.existsSync(indexPath) ? fs.readFileSync(indexPath, "utf8") : "";
-    const scriptFiles = files.filter((f) => f.startsWith("script/") && f.endsWith(".js"));
+    const scriptFiles = files.filter(
+      (f) => f.startsWith(`${targetProjRel}/script/`) && f.endsWith(".js")
+    );
     const allCode = [
       indexContent,
       ...scriptFiles.map((f) => fs.readFileSync(path.join(tempWorkspace, f), "utf8")),
     ].join("\n");
+    const staleIndexCreated = fs.existsSync(
+      path.join(
+        tempWorkspace,
+        "projects/pakai-style-ini-aja-buat-rapih-dan-rasionya-buat-lanscap/index.html"
+      )
+    );
 
     const checks = {
       settled,
       hasIndexHtml: fs.existsSync(indexPath),
+      staleProjectUntouched: !staleIndexCreated,
       hasRenderAt: /window\.renderAt\s*=|function\s+renderAt/.test(allCode),
       hasReadyFlag: /window\.__ready\s*=/.test(allCode),
       hasFilmMetaInCode: /window\.__filmMeta\s*=/.test(allCode),
@@ -373,6 +406,7 @@ async function main() {
     const passed =
       checks.settled &&
       checks.hasIndexHtml &&
+      checks.staleProjectUntouched &&
       checks.hasRenderAt &&
       checks.hasReadyFlag &&
       checks.lintValid &&

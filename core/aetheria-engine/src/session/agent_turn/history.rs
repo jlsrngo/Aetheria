@@ -15,25 +15,34 @@ pub fn build_chat_messages(effective_history: &[Value], sys_prompt: &str) -> Vec
             }
         } else if mtype == "user" {
             let txt = m.get("text").and_then(|v| v.as_str()).unwrap_or("");
-            let img_urls: Vec<String> = m
-                .get("files")
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|f| {
-                            f.get("uri")
-                                .or_else(|| f.get("url"))
-                                .and_then(|v| v.as_str())
-                                .filter(|u| u.starts_with("data:image/"))
-                                .map(str::to_string)
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+            let mut enriched_txt = txt.to_string();
+            let mut img_urls: Vec<String> = Vec::new();
+            if let Some(arr) = m.get("files").and_then(|v| v.as_array()) {
+                for f in arr {
+                    let fname = f.get("name").and_then(|v| v.as_str()).unwrap_or("attached_file");
+                    let uri = f
+                        .get("uri")
+                        .or_else(|| f.get("url"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let mime = f.get("mime").and_then(|v| v.as_str()).unwrap_or("");
+                    if uri.starts_with("data:image/") && !uri.starts_with("data:image/svg") {
+                        img_urls.push(uri.to_string());
+                    } else if super::vision::is_text_or_code_attachment(fname, uri, mime) {
+                        if let Some(decoded) = super::vision::decode_data_uri_text(uri) {
+                            let snippet: String = decoded.chars().take(24_000).collect();
+                            enriched_txt.push_str(&format!(
+                                "\n\n[Attached File: '{}']:\n```\n{}\n```",
+                                fname, snippet
+                            ));
+                        }
+                    }
+                }
+            }
             if img_urls.is_empty() {
-                chat_messages.push(json!({ "role": "user", "content": txt }));
+                chat_messages.push(json!({ "role": "user", "content": enriched_txt }));
             } else {
-                let mut parts = vec![json!({ "type": "text", "text": txt })];
+                let mut parts = vec![json!({ "type": "text", "text": enriched_txt })];
                 for u in img_urls {
                     parts.push(json!({ "type": "image_url", "image_url": { "url": u } }));
                 }

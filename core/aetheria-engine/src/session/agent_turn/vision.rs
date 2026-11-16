@@ -20,7 +20,62 @@ fn resolve_workspace_ref_dir(workspace_dir: &str) -> PathBuf {
     dir
 }
 
-/// Ingests attached files from chat payload (images, videos, audio)
+/// Returns true when an attached file item is a text/code document (`.html`, `.svg`, `.js`, `.css`, `.json`, `.txt`, `.md`).
+pub fn is_text_or_code_attachment(file_name: &str, uri: &str, mime: &str) -> bool {
+    let lower_name = file_name.trim().to_ascii_lowercase();
+    let lower_mime = mime.trim().to_ascii_lowercase();
+    let lower_uri = uri.trim().to_ascii_lowercase();
+    if [
+        ".html", ".htm", ".svg", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".css", ".json", ".txt",
+        ".md", ".xml",
+    ]
+    .iter()
+    .any(|ext| lower_name.ends_with(ext))
+    {
+        return true;
+    }
+    lower_mime.starts_with("text/")
+        || lower_mime == "image/svg+xml"
+        || lower_mime == "application/json"
+        || lower_mime == "application/javascript"
+        || lower_uri.starts_with("data:text/")
+        || lower_uri.starts_with("data:image/svg+xml")
+        || lower_uri.starts_with("data:application/json")
+        || lower_uri.starts_with("data:application/javascript")
+}
+
+/// Returns true when an attached file is a standalone HTML or SVG stage file.
+pub fn is_standalone_html_or_svg_attachment(file_name: &str, uri: &str, mime: &str) -> bool {
+    let lower_name = file_name.trim().to_ascii_lowercase();
+    let lower_mime = mime.trim().to_ascii_lowercase();
+    let lower_uri = uri.trim().to_ascii_lowercase();
+    lower_name.ends_with(".html")
+        || lower_name.ends_with(".htm")
+        || lower_name.ends_with(".svg")
+        || lower_mime == "text/html"
+        || lower_mime == "image/svg+xml"
+        || lower_uri.starts_with("data:text/html")
+        || lower_uri.starts_with("data:image/svg+xml")
+}
+
+/// Decodes a `data:...;base64,...` or plain `data:...,...` URI into UTF-8 text.
+pub fn decode_data_uri_text(uri: &str) -> Option<String> {
+    let trimmed = uri.trim();
+    if !trimmed.starts_with("data:") {
+        return None;
+    }
+    let comma_pos = trimmed.find(',')?;
+    let header = &trimmed[..comma_pos].to_ascii_lowercase();
+    let payload = &trimmed[comma_pos + 1..];
+    if header.contains(";base64") {
+        let bytes = BASE64_STANDARD.decode(payload.trim()).ok()?;
+        Some(String::from_utf8_lossy(&bytes).into_owned())
+    } else {
+        Some(crate::files::urlencoding_decode(payload))
+    }
+}
+
+/// Ingests attached files from chat payload (images, videos, audio, and text/HTML/SVG code)
 pub fn process_attached_files(
     workspace_dir: &str,
     files: Option<&Value>,
@@ -44,9 +99,16 @@ pub fn process_attached_files(
             .or_else(|| file_item.get("url"))
             .and_then(|v| v.as_str())
             .unwrap_or("");
+        let mime = file_item
+            .get("mime")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         let lower_name = file_name.to_lowercase();
 
-        if uri.starts_with("data:image/") {
+        if uri.starts_with("data:image/")
+            && !uri.starts_with("data:image/svg")
+            && !lower_name.ends_with(".svg")
+        {
             image_urls.push(uri.to_string());
             if let Some(comma_pos) = uri.find(',') {
                 let b64_data = &uri[comma_pos + 1..];
@@ -192,6 +254,81 @@ pub fn process_attached_files(
                     }
                 }
             }
+        } else if is_text_or_code_attachment(&lower_name, uri, mime) {
+            let decoded_opt = decode_data_uri_text(uri).or_else(|| {
+                if !uri.is_empty() && !uri.starts_with("data:") {
+                    crate::tool::path_guard::resolve_isolated_path(workspace_dir, uri)
+                        .ok()
+                        .and_then(|p| std::fs::read_to_string(p).ok())
+                } else {
+                    None
+                }
+            });
+            if let Some(decoded_text) = decoded_opt {
+                let clean_name = file_name
+                    .replace(|c: char| !c.is_alphanumeric() && c != '.' && c != '_' && c != '-', "_");
+                let mut saved_rel = String::new();
+                if !workspace_dir.trim().is_empty() {
+                    if let Ok(upload_dir) =
+                        crate::tool::path_guard::resolve_isolated_path(workspace_dir, ".aetheria/uploads")
+                    {
+                        let _ = std::fs::create_dir_all(&upload_dir);
+                        let target_file = upload_dir.join(&clean_name);
+                        if std::fs::write(&target_file, decoded_text.as_bytes()).is_ok() {
+                            saved_rel = format!(".aetheria/uploads/{}", clean_name);
+                        }
+                    }
+                }
+                let max_inline_chars = 120_000usize;
+                let inline_snippet: String = if decoded_text.chars().count() > max_inline_chars {
+                    let mut s: String = decoded_text.chars().take(max_inline_chars).collect();
+                    s.push_str(&format!(
+                        "\n... [truncated inline at {} chars; full file saved at {}]",
+                        max_inline_chars, saved_rel
+                    ));
+                    s
+                } else {
+                    decoded_text
+                };
+
+                if is_standalone_html_or_svg_attachment(&lower_name, uri, mime) {
+                    let target_prefix = if !workspace_dir.trim().is_empty() {
+                        let ws_path = Path::new(workspace_dir);
+                        let state = crate::studio::project_registry::list_studio_projects(ws_path);
+                        state
+                            .active_project
+                            .map(|slug| format!("projects/{}/", slug))
+                            .unwrap_or_default()
+                    } else {
+                        String::new()
+                    };
+                    ocr_transcriptions.push(format!(
+                        "[Attached Standalone HTML/SVG Source File: '{}'{}]\n\
+                         TARGET OUTPUT LOCATION: Write the cleaned stage directly to `{prefix}index.html` and `{prefix}script/scene1.js` (and `{prefix}microstock/manifest.json` when Microstock Mode 'M' is active).\n\
+                         STRICT ISOLATION RULE: Use ONLY this attached source code below. Do NOT read or inspect unrelated files in workspace root, `ref/`, or other `projects/*` folders, and do NOT call `glob` or `explore` to search for other projects. Preserve all original vector `<svg>` artwork, gradients, filters, and characters verbatim while stripping UI control panels/buttons/sliders, external CDNs, `<text>`/`<tspan>` (when Microstock Mode 'M' is active), and converting animations into deterministic `window.renderAt(t)`.\n\
+                         ```html\n{}\n```",
+                        file_name,
+                        if saved_rel.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" (saved at {})", saved_rel)
+                        },
+                        inline_snippet,
+                        prefix = target_prefix
+                    ));
+                } else {
+                    ocr_transcriptions.push(format!(
+                        "[Attached Code/Text File: '{}'{}]:\n```\n{}\n```",
+                        file_name,
+                        if saved_rel.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" (saved at {})", saved_rel)
+                        },
+                        inline_snippet
+                    ));
+                }
+            }
         } else if !uri.is_empty() {
             if let Ok(candidate) = crate::tool::path_guard::resolve_isolated_path(workspace_dir, uri) {
                 if candidate.exists() {
@@ -283,6 +420,34 @@ mod tests {
         let mut text_only_msgs = Vec::new();
         append_tool_vision_message(&mut text_only_msgs, false, collected);
         assert!(text_only_msgs.is_empty());
+    }
+
+    #[test]
+    fn decodes_attached_html_file_and_saves_upload_copy() {
+        let dir = std::env::temp_dir().join(format!(
+            "aetheria_vision_html_test_{}",
+            crate::paths::now_ms()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let html_raw = "<!DOCTYPE html><html><body><svg id=\"main-svg\"></svg><div id=\"control-panel\"></div></body></html>";
+        let b64 = BASE64_STANDARD.encode(html_raw.as_bytes());
+        let files_val = serde_json::json!([
+            {
+                "name": "animasi_happy_new_year_2027_microstock.html",
+                "uri": format!("data:text/html;base64,{}", b64),
+                "mime": "text/html"
+            }
+        ]);
+        let (transcriptions, images) =
+            process_attached_files(&dir.to_string_lossy(), Some(&files_val), None);
+        assert!(images.is_empty());
+        assert_eq!(transcriptions.len(), 1);
+        assert!(transcriptions[0].contains("Attached Standalone HTML/SVG Source File"));
+        assert!(transcriptions[0].contains("<svg id=\"main-svg\"></svg>"));
+        assert!(dir
+            .join(".aetheria/uploads/animasi_happy_new_year_2027_microstock.html")
+            .is_file());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 
