@@ -211,7 +211,13 @@ async function main() {
     console.log("[ACTIVE_PROJ_EXISTS]", fs.existsSync(activeProjFile), "filmDir=", filmDir);
     const hasFilmJson = fs.existsSync(path.join(filmDir, "film.json"));
     const hasManagedHtml = fs.existsSync(path.join(filmDir, "index.html"));
-    const noRootLeak = !fs.existsSync(path.join(tempWorkspace, "script")) && !fs.existsSync(path.join(tempWorkspace, "index.html"));
+    const rootScriptDir = path.join(tempWorkspace, "script");
+    const rootScripts = fs.existsSync(rootScriptDir) ? fs.readdirSync(rootScriptDir) : [];
+    const noRootLeak =
+      rootScripts.length === 0 &&
+      !fs.existsSync(path.join(tempWorkspace, "index.html")) &&
+      !fs.existsSync(path.join(tempWorkspace, "film.json"));
+    console.log("[ROOT_LEAK_CHECK]", { noRootLeak, rootScripts });
     const scene1Text = fs.readFileSync(path.join(filmDir, "script", "scene1.js"), "utf8");
     const scene2Text = fs.readFileSync(path.join(filmDir, "script", "scene2.js"), "utf8");
     const scene3Text = fs.readFileSync(path.join(filmDir, "script", "scene3.js"), "utf8");
