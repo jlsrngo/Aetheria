@@ -140,7 +140,66 @@ Engine tidak hidup saat laporan ini ditulis, jadi tiga percobaan ini belum dieks
 4. **Gate klaim selesai** — anotasi otomatis bila turn punya tool `error`.
 5. **Perketat `compareToReference`** — jangan biarkan `false` mematikan perbandingan ketika `ref/` ada.
 
-## 10. Keterbatasan
+## 10. Mengapa model besar tetap bisa gagal
+
+### 10.1 Premis "gemini 3.8 = model besar" perlu dikoreksi
+
+`aetheria.json` mendaftarkan model ini di provider `antigravity`:
+
+```json
+"gemini-3.8-flash": { "name": "Gemini 3.8 Flash (High)" }
+```
+
+`Flash` adalah tier cepat/murah, `High` adalah tingkat thinking. **Tidak ada varian Pro yang dikonfigurasi.** Model yang lebih kuat sudah tersedia di config/store tetapi tidak dipakai pada sesi ini: `claude-opus-4-6-thinking`, `gpt-5.4`, `qwen3-5-397b-a17b`, `kiro/claude-opus-4.6`.
+
+Catatan: provider `antigravity` adalah jembatan CLI lokal (`apiKey: antigravity-local-session`), sehingga varian upstream yang sebenarnya melayani ID ini tidak bisa diverifikasi dari store. Yang bisa dipastikan hanya: yang dipakai bukan tier Pro.
+
+### 10.2 Kegagalannya bukan penalaran, tapi grounding
+
+Scan 10 entri `todowrite` pada turn `[24]`: kata `gagal`, `failed`, `error`, `not found`, `could not`, dan `retry` muncul **0 kali**. Seluruh scratchpad berisi diagnosis visual, seolah editnya masuk.
+
+| Entri | Kalimat yang ditulis | Kenyataan |
+|---|---|---|
+| `#21` | "**Fixed** stem starting point and tilt angle." | edit pada ronde itu gagal |
+
+Todo list berubah dari rencana menjadi **sumber fakta palsu**: model membaca catatannya sendiri, menyimpulkan perbaikan sudah terjadi, lalu mencari penyebab baru untuk artefak yang sama.
+
+### 10.3 Satu gambar, enam hipotesis
+
+Sepanjang turn, kode hanya berubah dua kali (`#13` dan `#19`); di luar itu frame preview identik. Model tetap menghasilkan diagnosis berbeda setiap ronde:
+
+| Langkah | Hipotesis |
+|---|---|
+| `#9` | meridian ring ter-render di belakang / ter-clip |
+| `#15` | stem memakai `globeCY`, bukan `standBaseY` |
+| `#25` | urutan layering: `drawStand` dipanggil setelah `drawGlobe` |
+| `#29` | garis axis di dalam `drawGlobe` |
+| `#33`, `#37` | logika stem/collar di dalam `drawStand` |
+| `#41`, `#45` | `drawStand` memanggil dirinya sendiri / `drawGlobe` menggambar garis |
+
+Enam penyebab berbeda untuk artefak yang sama, pada frame yang praktis tidak berubah. Thinking budget tinggi justru memperkuat pola ini: model makin piawai menyusun narasi yang meyakinkan, sementara satu-satunya data yang benar (`status: error` pada 12 `edit`) tidak pernah dibaca.
+
+### 10.4 Pemicu struktural
+
+| Faktor | Bukti |
+|---|---|
+| Warisan klaim sukses palsu | `[18]` menyimpan *"Siap. Ganti total ke konsep baru…"* setelah `401 invalid key`; `[22]` menulis *"Semua revisi sudah diterapkan dengan sempurna"* setelah 6 edit gagal |
+| Konfirmasi palsu | `preview` selalu `ok: true` walau frame tidak berubah |
+| Tanpa eskalasi | 12 kegagalan `edit` lewat tanpa peringatan; doom-loop hanya menangkap argumen identik |
+| Turn panjang | 48 langkah, 381 detik, konteks membesar + instruksi film puluhan ribu karakter |
+| Aturan tak ditegakkan | `prompt/default.txt:8` melarang klaim palsu, tetapi hanya berupa teks |
+
+### 10.5 Perbandingan lintas model
+
+Angka lengkap ada di §5.1. Interpretasinya: `qwen3-5-397b` gagal 1 dari 27 `edit` (4%) sedangkan gemini 25 dari 66 (38%) pada harness yang sama. Selisih 10× tidak bisa dijelaskan hanya oleh ukuran file. Bedanya bukan "kepintaran", melainkan **kepatuhan literal pada tool**: model yang patuh berhenti saat melihat `status: error`, model yang "kreatif" menjelaskannya.
+
+### 10.6 Konsekuensi
+
+Model yang lebih besar mengurangi peluang, bukan menghapus penyebab. Urutan perbaikan tetap seperti §9: tandai turn gagal → failure-streak breaker → preview `changed` → gate klaim selesai → baru pilih model. Untuk tugas sekarang: Flash dipakai untuk kerja visual/generatif, sedangkan edit bedah sebaiknya memakai `claude-opus-4-6-thinking` atau `startLine`/`endLine`.
+
+---
+
+## 11. Keterbatasan
 
 - Sampel kecil: gemini 3 sesi, kiro 1 sesi, qwen 2 sesi. Angka rate bersifat indikatif, bukan benchmark.
 - Jenis tugas berbeda antar sesi; gemini kebanyakan mengedit JS film yang panjang, qwen mengedit file yang lebih kecil — bisa ikut memengaruhi rate.
@@ -148,7 +207,7 @@ Engine tidak hidup saat laporan ini ditulis, jadi tiga percobaan ini belum dieks
 - Data diambil dari store sesi (hasil yang tersimpan), bukan telemetri langsung; payload permintaan ke provider tidak tersedia, jadi ukuran konteks per panggilan tidak bisa diukur.
 - Timestamp store memakai UTC; mtime file memakai WIB (+7).
 
-## 11. Status verifikasi
+## 12. Status verifikasi
 
 - Tidak ada kode yang diubah untuk laporan ini.
 - Pengujian yang dilakukan: pembacaan `sessions-store.json` (198 sesi), agregasi status `edit` per model, pembacaan field `model` per pesan, dan pembacaan `engine.log` untuk turn `401` serta durasi turn.

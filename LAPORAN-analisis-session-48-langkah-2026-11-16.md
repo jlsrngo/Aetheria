@@ -157,7 +157,7 @@ Kegagalan "Could not find oldString" bukan fenomena satu model, tetapi frekuensi
 
 Distribusi seluruh store: 24× "Could not find oldString", 2× `oldString` kosong, 2× `oldString == newString`, 1× `edit_idx` tidak dikenal — 29 kegagalan dari 100 panggilan `edit` (29%). Dua puluh satu dari 24 "Could not find" berasal dari gemini, 3 dari kiro/auto.
 
-Kesimpulan dari tabel ini: tool yang sama **bisa** dipakai dengan benar (qwen 1/27), jadi kegagalan bukan sifat inheren tool. Tetapi ambang kegagalan 29% untuk semua model menunjukkan kontraknya memang perlu diperbaiki — dan di situ letak porsi ±30% tadi.
+Kesimpulan dari tabel ini: tool yang sama **bisa** dipakai dengan benar (qwen 1/27), jadi kegagalan bukan sifat inheren tool. Tetapi ambang kegagalan 29% untuk semua model menunjukkan kontraknya memang perlu diperbaiki — dan di situ letak porsi ±30% tadi. Analisis lanjutan tentang pemilihan model ada di `LAPORAN-model-vs-harness-2026-11-16.md` §10.
 
 ---
 
