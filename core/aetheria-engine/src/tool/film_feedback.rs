@@ -155,6 +155,24 @@ fn summarize_film_meta(meta: &FilmMeta) -> Value {
     })
 }
 
+fn has_forbidden_external_url(lower_html: &str) -> bool {
+    for scheme in ["http://", "https://"] {
+        let mut rest = lower_html;
+        while let Some(idx) = rest.find(scheme) {
+            let after_scheme = &rest[idx + scheme.len()..];
+            let allowed = after_scheme.starts_with("www.w3.org/")
+                || after_scheme.starts_with("w3.org/")
+                || after_scheme.starts_with("127.0.0.1")
+                || after_scheme.starts_with("localhost");
+            if !allowed {
+                return true;
+            }
+            rest = after_scheme;
+        }
+    }
+    false
+}
+
 fn check_microstock_js_diagnostics(
     workspace_dir: &str,
     file_name: &str,
@@ -322,6 +340,21 @@ pub fn collect_file_feedback(workspace_dir: &str, target: &Path) -> FileFeedback
                         "ERROR (MICROSTOCK_AUDIO_FORBIDDEN): Adobe Stock Mode ('M') requires silent video (-an). Remove all `audio` and `sfx` entries from SCENES."
                             .to_string(),
                     );
+                }
+                let lower_html = content.to_ascii_lowercase();
+                if lower_html.contains("<text") || lower_html.contains("<tspan") {
+                    feedback.has_errors = true;
+                    feedback.diagnostics.push(format!(
+                        "ERROR (MICROSTOCK_TEXT_FORBIDDEN): Adobe Stock Mode ('M') forbids SVG <text>/<tspan> elements in '{}'. Remove all text overlays.",
+                        file_name
+                    ));
+                }
+                if has_forbidden_external_url(&lower_html) {
+                    feedback.has_errors = true;
+                    feedback.diagnostics.push(format!(
+                        "ERROR (MICROSTOCK_EXTERNAL_URL): Adobe Stock Mode ('M') forbids external http(s):// URLs (CDNs, Google Fonts) in '{}'. Remove external links and use inline CSS/offline scripts.",
+                        file_name
+                    ));
                 }
             }
 
@@ -536,7 +569,7 @@ mod tests {
         let html_path = dir.join("index.html");
         std::fs::write(
             &html_path,
-            r#"<!DOCTYPE html><html><head><script src="/script/scene1.js"></script></head><body><canvas width="1080" height="1920"></canvas><script>
+            r#"<!DOCTYPE html><html><head><script src="https://cdn.tailwindcss.com"></script><script src="/script/scene1.js"></script></head><body><svg xmlns="http://www.w3.org/2000/svg"><text>Merry</text></svg><canvas width="1080" height="1920"></canvas><script>
             var SCENES = [{ id: "scene1", duration: 6, audio: "audio/scene1.wav" }];
             window.__filmMeta = { title: "Bad", width: 1080, height: 1920, fps: 30, duration: 6, scenes: SCENES };
             window.renderAt = function(t){}; window.__ready = true;
@@ -553,6 +586,14 @@ mod tests {
             .diagnostics
             .iter()
             .any(|d| d.contains("MICROSTOCK_AUDIO_FORBIDDEN")));
+        assert!(fb_html
+            .diagnostics
+            .iter()
+            .any(|d| d.contains("MICROSTOCK_TEXT_FORBIDDEN")));
+        assert!(fb_html
+            .diagnostics
+            .iter()
+            .any(|d| d.contains("MICROSTOCK_EXTERNAL_URL")));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
