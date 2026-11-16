@@ -13,8 +13,191 @@ use std::process::Command;
 pub struct FileFeedback {
     pub syntax_error: Option<String>,
     pub has_errors: bool,
+    pub wiring_error: bool,
     pub diagnostics: Vec<String>,
     pub film_meta: Option<Value>,
+}
+
+fn load_film_json(film_dir: &Path) -> Option<super::film_scaffold::FilmManifestJson> {
+    let raw = std::fs::read_to_string(film_dir.join("film.json")).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+/// Extracts literal scene IDs passed to `registerScene("id", ...)` and detects dynamic calls.
+fn extract_registered_scene_ids(js_content: &str) -> (Vec<String>, bool) {
+    let mut ids = Vec::new();
+    let mut has_dynamic = false;
+    let needle = "registerScene(";
+    let mut offset = 0usize;
+    while let Some(rel) = js_content[offset..].find(needle) {
+        let pos = offset + rel + needle.len();
+        let rest = js_content[pos..].trim_start();
+        if let Some(first) = rest.chars().next() {
+            if first == '"' || first == '\'' {
+                if let Some(end) = rest[1..].find(first) {
+                    let id = rest[1..1 + end].trim();
+                    if !id.is_empty() {
+                        ids.push(id.to_string());
+                    }
+                }
+            } else {
+                has_dynamic = true;
+            }
+        }
+        offset = pos;
+    }
+    (ids, has_dynamic)
+}
+
+fn check_js_scene_wiring(
+    target: &Path,
+    file_name: &str,
+    content: &str,
+    feedback: &mut FileFeedback,
+) {
+    let script_dir = match target.parent() {
+        Some(p)
+            if p.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.eq_ignore_ascii_case("script"))
+                .unwrap_or(false) =>
+        {
+            p
+        }
+        _ => return,
+    };
+    let film_dir = match script_dir.parent() {
+        Some(d) => d,
+        None => return,
+    };
+    let (registered_ids, has_dynamic) = extract_registered_scene_ids(content);
+    let rel_script = format!("script/{}", file_name);
+    let is_scene_file = file_name.to_ascii_lowercase().starts_with("scene");
+
+    if let Some(manifest) = load_film_json(film_dir) {
+        let valid_scripts: Vec<&str> = manifest.scenes.iter().map(|s| s.script.as_str()).collect();
+        let valid_ids: Vec<&str> = manifest.scenes.iter().map(|s| s.id.as_str()).collect();
+
+        if (is_scene_file || !registered_ids.is_empty())
+            && !valid_scripts
+                .iter()
+                .any(|s| s.eq_ignore_ascii_case(&rel_script))
+        {
+            feedback.has_errors = true;
+            feedback.wiring_error = true;
+            feedback.diagnostics.push(format!(
+                "ERROR (UNREGISTERED_SCENE_FILE): '{}' is not registered in film.json (registered scene scripts: [{}]). Add scenes via film_scaffold or edit one of the listed files.",
+                rel_script,
+                valid_scripts.join(", ")
+            ));
+            return;
+        }
+
+        for reg_id in &registered_ids {
+            if !valid_ids.iter().any(|id| id == reg_id) {
+                feedback.has_errors = true;
+                feedback.wiring_error = true;
+                feedback.diagnostics.push(format!(
+                    "ERROR (SCENE_ID_MISMATCH): AM.registerScene(\"{}\") in '{}' does not match any scene id in film.json (expected one of: [{}]).",
+                    reg_id,
+                    rel_script,
+                    valid_ids.join(", ")
+                ));
+            }
+        }
+        return;
+    }
+
+    if !has_dynamic && !registered_ids.is_empty() {
+        let index_path = film_dir.join("index.html");
+        if index_path.is_file() {
+            let html_raw = std::fs::read_to_string(&index_path).unwrap_or_default();
+            if html_raw.contains("SCENES") {
+                let meta = inspect_workspace_film(&index_path);
+                let valid_ids: Vec<&str> = meta.scenes.iter().map(|s| s.id.as_str()).collect();
+                if !valid_ids.is_empty() {
+                    for reg_id in &registered_ids {
+                        if !valid_ids.iter().any(|id| id == reg_id) {
+                            feedback.has_errors = true;
+                            feedback.wiring_error = true;
+                            feedback.diagnostics.push(format!(
+                                "ERROR (SCENE_ID_MISMATCH): AM.registerScene(\"{}\") in '{}' does not match any scene id in index.html SCENES (expected one of: [{}]).",
+                                reg_id,
+                                rel_script,
+                                valid_ids.join(", ")
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn check_html_scene_wiring(
+    film_dir: &Path,
+    ws_root: &Path,
+    content: &str,
+    meta: &FilmMeta,
+    feedback: &mut FileFeedback,
+) {
+    let manifest_opt = load_film_json(film_dir);
+    let is_managed = manifest_opt.as_ref().map(|m| m.manage_index_html).unwrap_or(false);
+    if is_managed && !meta.lint.has_render_at {
+        feedback.has_errors = true;
+        feedback.wiring_error = true;
+        feedback.diagnostics.push(
+            "ERROR (MANAGED_INDEX_HTML_BROKEN): Do not remove window.renderAt from film_scaffold-managed index.html. Regenerate with film_scaffold or set manageIndexHtml: false.".to_string(),
+        );
+    }
+
+    let explicit_scenes = content.contains("SCENES") || manifest_opt.is_some();
+    if !explicit_scenes || meta.scenes.is_empty() {
+        return;
+    }
+
+    let script_srcs: Vec<String> = extract_local_script_srcs(content)
+        .into_iter()
+        .filter(|rel| {
+            !rel.eq_ignore_ascii_case("script/aetheria-motion.js")
+                && !crate::studio::builtin_runtime::is_builtin_three_path(rel)
+        })
+        .collect();
+
+    if script_srcs.is_empty() {
+        return;
+    }
+
+    let mut all_present = true;
+    let mut all_registered = Vec::new();
+    let mut any_dynamic = false;
+    for rel in &script_srcs {
+        if let Some(full) = [film_dir.join(rel), ws_root.join(rel)]
+            .into_iter()
+            .find(|p| (contains_path(film_dir, p) || contains_path(ws_root, p)) && p.is_file())
+        {
+            if let Ok(js) = std::fs::read_to_string(full) {
+                let (ids, dyn_call) = extract_registered_scene_ids(&js);
+                all_registered.extend(ids);
+                any_dynamic |= dyn_call;
+            }
+        } else {
+            all_present = false;
+        }
+    }
+
+    if all_present && !any_dynamic && !all_registered.is_empty() {
+        for sc in &meta.scenes {
+            if !all_registered.iter().any(|r| r == &sc.id) {
+                feedback.has_errors = true;
+                feedback.wiring_error = true;
+                feedback.diagnostics.push(format!(
+                    "ERROR (UNREGISTERED_SCENE_ID): Scene '{}' in SCENES has no matching AM.registerScene(\"{}\", ...) in the loaded scene scripts.",
+                    sc.id, sc.id
+                ));
+            }
+        }
+    }
 }
 
 fn check_js_syntax(target: &Path) -> Option<String> {
@@ -284,6 +467,7 @@ pub fn collect_file_feedback(workspace_dir: &str, target: &Path) -> FileFeedback
                 .extend(find_short_hex_mix_warnings(&content));
             check_webgl_diagnostics(&content, file_name, &mut feedback);
             check_microstock_js_diagnostics(workspace_dir, file_name, &content, &mut feedback);
+            check_js_scene_wiring(target, file_name, &content, &mut feedback);
         }
         "html" | "htm" => {
             check_webgl_diagnostics(&content, file_name, &mut feedback);
@@ -395,12 +579,23 @@ pub fn collect_file_feedback(workspace_dir: &str, target: &Path) -> FileFeedback
                     continue;
                 }
                 if !workspace_asset_exists(film_dir, ws_root, &script_rel) {
-                    feedback.diagnostics.push(format!(
-                        "WARNING (MISSING_SCRIPT_FILE): Referenced script '{}' does not exist on disk yet.",
-                        script_rel
-                    ));
+                    if load_film_json(film_dir).is_some() {
+                        feedback.has_errors = true;
+                        feedback.wiring_error = true;
+                        feedback.diagnostics.push(format!(
+                            "ERROR (MISSING_SCRIPT_FILE): Referenced script '{}' does not exist on disk.",
+                            script_rel
+                        ));
+                    } else {
+                        feedback.diagnostics.push(format!(
+                            "WARNING (MISSING_SCRIPT_FILE): Referenced script '{}' does not exist on disk yet.",
+                            script_rel
+                        ));
+                    }
                 }
             }
+
+            check_html_scene_wiring(film_dir, ws_root, &content, &meta, &mut feedback);
 
             if (content.contains("id=\"loading\"") || content.contains("id='loading'"))
                 && !meta.lint.has_ready_flag
@@ -426,6 +621,9 @@ pub fn attach_post_write_feedback(result: &mut Value, workspace_dir: &str, targe
         }
         if !feedback.diagnostics.is_empty() {
             obj.insert("diagnostics".to_string(), json!(feedback.diagnostics));
+            if feedback.wiring_error {
+                obj.insert("ok".to_string(), json!(false));
+            }
             if feedback.has_errors {
                 obj.insert(
                     "actionRequired".to_string(),
@@ -595,6 +793,54 @@ mod tests {
             .diagnostics
             .iter()
             .any(|d| d.contains("MICROSTOCK_EXTERNAL_URL")));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_wiring_flags_mismatched_scene_id_and_unregistered_scene_file() {
+        let dir = std::env::temp_dir().join(format!("aetheria_fb_wiring_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ws = dir.to_string_lossy().to_string();
+
+        let scaffold_res = super::super::film_scaffold::execute_film_scaffold(
+            "ses_w",
+            &ws,
+            &json!({
+                "title": "Wiring Test",
+                "preset": "landscape",
+                "scenes": [
+                    { "id": "scene1_intro", "duration": 5.0 }
+                ]
+            }),
+        );
+        assert_eq!(scaffold_res["ok"], true);
+        let film_root = dir.join(scaffold_res["filmRoot"].as_str().unwrap());
+
+        // 1. Write unregistered script/scene9.js -> must fail wiring with UNREGISTERED_SCENE_FILE
+        let s9 = film_root.join("script").join("scene9.js");
+        std::fs::write(&s9, "AM.registerScene('scene9', function(){});").unwrap();
+        let fb9 = collect_file_feedback(&ws, &s9);
+        assert!(fb9.wiring_error);
+        assert!(fb9
+            .diagnostics
+            .iter()
+            .any(|d| d.contains("UNREGISTERED_SCENE_FILE") && d.contains("scene9.js")));
+
+        // 2. Write script/scene1.js with wrong ID -> SCENE_ID_MISMATCH + ok: false via attach_post_write_feedback
+        let s1 = film_root.join("script").join("scene1.js");
+        std::fs::write(&s1, "AM.registerScene('wrong_id', function(){});").unwrap();
+        let mut tool_res = json!({ "ok": true });
+        attach_post_write_feedback(&mut tool_res, &ws, &s1);
+        assert_eq!(tool_res["ok"], false);
+        let diags_str = tool_res["diagnostics"].to_string();
+        assert!(diags_str.contains("SCENE_ID_MISMATCH"));
+
+        // 3. Fix scene1.js with matching ID -> no wiring error
+        std::fs::write(&s1, "AM.registerScene('scene1_intro', function(ctx){ ctx.fillRect(0,0,10,10); });").unwrap();
+        let fb_ok = collect_file_feedback(&ws, &s1);
+        assert!(!fb_ok.wiring_error, "unexpected wiring error: {:?}", fb_ok.diagnostics);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

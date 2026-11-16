@@ -40,7 +40,26 @@ pub fn resolve_isolated_path(workspace_dir: &str, raw_file: &str) -> Result<Path
     let resolved = if candidate.is_absolute() {
         candidate.to_path_buf()
     } else {
-        base.join(clean_raw)
+        let mut clean_norm = clean_raw.replace('\\', "/");
+        while let Some(stripped) = clean_norm.strip_prefix("./") {
+            clean_norm = stripped.to_string();
+        }
+        let trimmed_norm = clean_norm.trim_start_matches('/');
+        if is_film_artifact_rel(trimmed_norm) {
+            if let Some(film_root) =
+                crate::studio::project_registry::resolve_active_project_or_film_root(base)
+            {
+                if contains_path(base, &film_root) {
+                    film_root.join(trimmed_norm)
+                } else {
+                    base.join(clean_raw)
+                }
+            } else {
+                base.join(clean_raw)
+            }
+        } else {
+            base.join(clean_raw)
+        }
     };
     if !contains_path(base, &resolved) {
         return Err(format!(
@@ -49,6 +68,34 @@ pub fn resolve_isolated_path(workspace_dir: &str, raw_file: &str) -> Result<Path
         ));
     }
     Ok(resolved)
+}
+
+fn is_film_artifact_rel(norm_rel: &str) -> bool {
+    let lower = norm_rel.to_ascii_lowercase();
+    if lower == "index.html" || lower == "film.json" || lower == "microstock/manifest.json" {
+        return true;
+    }
+    ["script/", "audio/", "img/", "images/"]
+        .iter()
+        .any(|prefix| lower.starts_with(prefix))
+}
+
+/// Computes the workspace-relative `resolvedPath` and optional active `filmRoot` for tool outputs.
+pub fn resolve_film_display_info(workspace_dir: &str, resolved: &Path) -> (String, Option<String>) {
+    let ws = Path::new(workspace_dir);
+    let resolved_rel = resolved
+        .strip_prefix(ws)
+        .ok()
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| resolved.to_string_lossy().replace('\\', "/"));
+
+    let film_root = crate::studio::project_registry::resolve_active_project_or_film_root(ws)
+        .and_then(|root| root.strip_prefix(ws).ok().map(|p| p.to_path_buf()))
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .filter(|s| !s.is_empty());
+
+    (resolved_rel, film_root)
 }
 
 /// Rejects creating or overwriting built-in offline engine runtimes inside a project's `script/`
@@ -130,6 +177,34 @@ mod tests {
 
         assert!(resolve_writable_isolated_path(&ws, "script/scene1.js").is_ok());
         assert!(resolve_writable_isolated_path(&ws, "apps/public/script/aetheria-motion.js").is_ok());
+    }
+
+    #[test]
+    fn test_film_artifacts_resolve_into_active_project_subfolder() {
+        let dir = std::env::temp_dir().join(format!("aetheria_pg_film_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let proj = crate::studio::project_registry::create_studio_project(&dir, "Globe Hero").unwrap();
+        let ws = dir.to_string_lossy().to_string();
+
+        let scene_p = resolve_isolated_path(&ws, "script/scene1.js").unwrap();
+        assert_eq!(
+            scene_p,
+            dir.join("projects").join(&proj.id).join("script").join("scene1.js")
+        );
+
+        let html_p = resolve_isolated_path(&ws, "./index.html").unwrap();
+        assert_eq!(html_p, dir.join("projects").join(&proj.id).join("index.html"));
+
+        let ref_p = resolve_isolated_path(&ws, "ref/ref_report.md").unwrap();
+        assert_eq!(ref_p, dir.join("ref").join("ref_report.md"));
+
+        let (rel, film_root) = resolve_film_display_info(&ws, &scene_p);
+        assert_eq!(rel, format!("projects/{}/script/scene1.js", proj.id));
+        assert_eq!(film_root.as_deref(), Some(format!("projects/{}", proj.id).as_str()));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

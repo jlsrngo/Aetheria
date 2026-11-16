@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-const PROJECTS_DIR_NAME: &str = "projects";
+pub(crate) const PROJECTS_DIR_NAME: &str = "projects";
 const ACTIVE_PROJECT_REL: &str = ".aetheria/active-project.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -367,6 +367,18 @@ pub fn resolve_active_film_root(ws_root: &Path) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// Returns the active project directory (`<ws_root>/projects/<slug>`) even before `index.html` exists,
+/// falling back to `resolve_active_film_root` for legacy workspace-root projects.
+pub fn resolve_active_project_or_film_root(ws_root: &Path) -> Option<PathBuf> {
+    if let Some(slug) = read_active_project_slug(ws_root) {
+        let proj_dir = ws_root.join(PROJECTS_DIR_NAME).join(&slug);
+        if contains_path(ws_root, &proj_dir) && proj_dir.is_dir() {
+            return Some(proj_dir);
+        }
+    }
+    resolve_active_film_root(ws_root)
 }
 
 /// Creates `<ws_root>/projects/<slug>/` with standard subdirectories and selects it as active.

@@ -289,14 +289,16 @@ pub fn execute_edit(session_id: &str, workspace_dir: &str, arguments: &Value) ->
                         if let Err(val_err) = super::write::validate_root_tsx_imports(&p, &updated) {
                             return json!({ "ok": false, "error": val_err });
                         }
-                        crate::files::record_document_change(workspace_dir, fp, &content_old, &updated);
+                        let (resolved_rel, film_root_rel) =
+                            super::path_guard::resolve_film_display_info(workspace_dir, &p);
+                        crate::files::record_document_change(workspace_dir, &resolved_rel, &content_old, &updated);
                         match std::fs::write(&p, &updated) {
                             Ok(_) => {
                                 emit_event(
                                     workspace_dir,
                                     "file.edited",
                                     json!({
-                                        "file": fp,
+                                        "file": resolved_rel,
                                         "sessionID": session_id,
                                         "before": content_old,
                                         "after": updated
@@ -305,8 +307,12 @@ pub fn execute_edit(session_id: &str, workspace_dir: &str, arguments: &Value) ->
                                 let mut res = json!({
                                     "ok": true,
                                     "output": "Edit applied successfully.",
-                                    "occurrencesReplaced": count
+                                    "occurrencesReplaced": count,
+                                    "resolvedPath": resolved_rel
                                 });
+                                if let Some(fr) = film_root_rel {
+                                    res["filmRoot"] = json!(fr);
+                                }
                                 super::film_feedback::attach_post_write_feedback(
                                     &mut res,
                                     workspace_dir,

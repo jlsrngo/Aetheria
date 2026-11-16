@@ -9,6 +9,7 @@ pub mod edit;
 pub mod edit_matchers;
 pub mod fetch_web_image;
 pub mod film_feedback;
+pub mod film_scaffold;
 pub mod glob;
 pub mod grep;
 pub mod json_repair;
@@ -211,6 +212,9 @@ async fn execute_tool_call_inner(
     workspace_dir: &str,
 ) -> Value {
     match name {
+        "film_scaffold" | "scaffold_film" | "init_film" => {
+            film_scaffold::execute_film_scaffold(session_id, workspace_dir, arguments)
+        }
         "produce_video" | "storyboard_video" | "build_storyboard_video" => {
             storyboard::execute_produce_video(
                 session_id,

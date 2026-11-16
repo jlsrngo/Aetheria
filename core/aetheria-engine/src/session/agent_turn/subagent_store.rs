@@ -268,7 +268,8 @@ pub fn build_subagent_tools(subagent_type: &str, current_depth: usize) -> Vec<Va
             ),
             "motion-designer" => matches!(
                 name,
-                "read"
+                "film_scaffold"
+                    | "read"
                     | "write"
                     | "edit"
                     | "apply_patch"

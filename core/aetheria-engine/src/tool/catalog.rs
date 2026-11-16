@@ -6,9 +6,9 @@
 use serde_json::{json, Value};
 
 use super::{
-    apply_patch, bash, codemode, edit, fetch_web_image, glob, grep, lsp, preview_film, question,
-    read, ref_extractor, render, sfx, skill_manager, snapshot, storyboard, tasks, todo, voicebox,
-    webfetch, websearch, write,
+    apply_patch, bash, codemode, edit, fetch_web_image, film_scaffold, glob, grep, lsp,
+    preview_film, question, read, ref_extractor, render, sfx, skill_manager, snapshot, storyboard,
+    tasks, todo, voicebox, webfetch, websearch, write,
 };
 
 pub fn is_greeting_prompt(prompt_text: &str) -> bool {
@@ -61,6 +61,7 @@ pub fn should_attach_document_tools(prompt_text: &str, _history: &[Value]) -> bo
 
 pub fn build_tool_definitions() -> Vec<Value> {
     let mut tools = vec![
+        film_scaffold::film_scaffold_tool_definition(),
         storyboard::produce_video_tool_definition(),
         render::render_video_tool_definition(),
         preview_film::capture_film_preview_tool_definition(),

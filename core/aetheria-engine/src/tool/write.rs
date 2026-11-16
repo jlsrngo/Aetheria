@@ -116,7 +116,9 @@ pub fn execute_write(session_id: &str, workspace_dir: &str, arguments: &Value) -
             if let Some(parent) = p.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-            crate::files::record_document_change(workspace_dir, fp, &before_content, content);
+            let (resolved_rel, film_root_rel) =
+                super::path_guard::resolve_film_display_info(workspace_dir, &p);
+            crate::files::record_document_change(workspace_dir, &resolved_rel, &before_content, content);
             let write_res = std::fs::write(&p, content);
             match write_res {
                 Ok(_) => {
@@ -124,13 +126,20 @@ pub fn execute_write(session_id: &str, workspace_dir: &str, arguments: &Value) -
                         workspace_dir,
                         "file.edited",
                         json!({
-                            "file": fp,
+                            "file": resolved_rel,
                             "sessionID": session_id,
                             "before": before_content,
                             "after": content
                         }),
                     );
-                    let mut res = json!({ "ok": true, "bytesWritten": content.len() });
+                    let mut res = json!({
+                        "ok": true,
+                        "bytesWritten": content.len(),
+                        "resolvedPath": resolved_rel
+                    });
+                    if let Some(fr) = film_root_rel {
+                        res["filmRoot"] = json!(fr);
+                    }
                     super::film_feedback::attach_post_write_feedback(&mut res, workspace_dir, &p);
                     res
                 }
