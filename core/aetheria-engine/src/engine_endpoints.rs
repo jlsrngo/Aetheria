@@ -200,7 +200,29 @@ mod tests {
             Some("aetheria_en")
         );
 
-        // 5. Voice Preset Test Synthesis Endpoint (Zero-LLM preview)
+        // 5. Voice Preset Test Synthesis Endpoint validation (offline deterministic contract)
+        let (status, _, body) = handle_local_request(
+            "POST",
+            "/api/studio/voice-presets/test",
+            json_headers,
+            Some(
+                r#"{"text":"   ","voice":"id-ID-ArdiNeural","lang":"id"}"#
+                    .as_bytes()
+                    .to_vec(),
+            ),
+        )
+        .await;
+        assert_eq!(status, 200);
+        let test_resp: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(test_resp["success"], false);
+        assert!(test_resp["error"].is_string());
+    }
+
+    #[tokio::test]
+    #[ignore = "requires Python edge-tts runtime and external network access"]
+    async fn test_voice_preset_live_tts_synthesis() {
+        let mut json_headers = auth_headers();
+        json_headers.push(("content-type".to_string(), "application/json".to_string()));
         let (status, _, body) = handle_local_request(
             "POST",
             "/api/studio/voice-presets/test",
