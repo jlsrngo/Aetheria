@@ -341,8 +341,11 @@ pub fn list_studio_projects(ws_root: &Path) -> StudioProjectsState {
 pub fn resolve_active_film_root(ws_root: &Path) -> Option<PathBuf> {
     if let Some(slug) = read_active_project_slug(ws_root) {
         let proj_dir = ws_root.join(PROJECTS_DIR_NAME).join(&slug);
-        if contains_path(ws_root, &proj_dir) && proj_dir.join("index.html").is_file() {
-            return Some(proj_dir);
+        if contains_path(ws_root, &proj_dir) && proj_dir.is_dir() {
+            if proj_dir.join("index.html").is_file() {
+                return Some(proj_dir);
+            }
+            return None;
         }
     }
 
@@ -733,6 +736,32 @@ mod tests {
         );
         let state = list_studio_projects(&ws);
         assert_eq!(state.active_project.as_deref(), Some(switched.id.as_str()));
+
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn empty_active_project_does_not_leak_legacy_root_index_html() {
+        let ws = make_temp_ws("aetheria_proj_no_root_leak");
+        std::fs::write(
+            ws.join("index.html"),
+            "<html><title>Legacy Root Film</title></html>",
+        )
+        .unwrap();
+
+        let created = create_studio_project(&ws, "Fresh Project").unwrap();
+        assert_eq!(created.id, "fresh-project");
+        assert!(resolve_active_film_root(&ws).is_none());
+
+        std::fs::write(
+            ws.join("projects").join(&created.id).join("index.html"),
+            "<html><title>Fresh Film</title></html>",
+        )
+        .unwrap();
+        assert_eq!(
+            resolve_active_film_root(&ws).unwrap(),
+            ws.join("projects").join("fresh-project")
+        );
 
         let _ = std::fs::remove_dir_all(&ws);
     }

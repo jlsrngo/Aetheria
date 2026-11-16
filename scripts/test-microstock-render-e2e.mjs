@@ -199,6 +199,19 @@ async function main() {
       throw new Error("Negative checks did not return expected 401/4xx");
     }
 
+    // Verify an empty active project folder never falls back to legacy ws_root/index.html
+    const emptySlug = "pending-empty-project";
+    fs.mkdirSync(path.join(tempWorkspace, "projects", emptySlug), { recursive: true });
+    fs.writeFileSync(path.join(tempWorkspace, "index.html"), "<html><title>Legacy Root Leak</title></html>", "utf8");
+    fs.writeFileSync(path.join(tempWorkspace, ".aetheria", "active-project.json"), JSON.stringify({ project: emptySlug }), "utf8");
+    const emptyMetaRes = await api(baseUrl, `/api/studio/film-meta?${dirQuery}`, { authHeader });
+    const emptyMeta = emptyMetaRes.json?.data ?? emptyMetaRes.json;
+    console.log("[ROOT_LEAK_CHECK]", `exists=${emptyMeta?.exists}`, `title=${emptyMeta?.title}`);
+    if (emptyMeta?.exists !== false) {
+      throw new Error(`Empty active project leaked legacy root index.html: ${JSON.stringify(emptyMeta)}`);
+    }
+    fs.writeFileSync(path.join(tempWorkspace, ".aetheria", "active-project.json"), JSON.stringify({ project: projectSlug }), "utf8");
+
     const t0 = Date.now();
     const renderRes = await api(baseUrl, `/api/studio/microstock/render?${dirQuery}`, {
       method: "POST",
