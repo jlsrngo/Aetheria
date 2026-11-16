@@ -185,10 +185,63 @@ pub fn manifest_file_path(ws_root: &Path, project_dir: &Path) -> Result<PathBuf,
     Ok(path)
 }
 
+const WORKSPACE_MODE_REL: &str = ".aetheria/microstock-mode.json";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MicrostockWorkspaceMode {
+    pub enabled: bool,
+    pub preset: String,
+    pub fps: u32,
+}
+
+fn workspace_mode_file_path(ws_root: &Path) -> Result<PathBuf, String> {
+    let path = ws_root.join(".aetheria").join("microstock-mode.json");
+    if !contains_path(ws_root, &path) {
+        return Err("Access Denied: microstock mode path escapes workspace".to_string());
+    }
+    Ok(path)
+}
+
+pub fn load_workspace_mode(ws_root: &Path) -> Option<MicrostockWorkspaceMode> {
+    let path = workspace_mode_file_path(ws_root).ok()?;
+    let raw = std::fs::read_to_string(&path).ok()?;
+    serde_json::from_str::<MicrostockWorkspaceMode>(&raw).ok()
+}
+
+pub fn save_workspace_mode(
+    ws_root: &Path,
+    enabled: bool,
+    preset: &str,
+    fps: u32,
+) -> Result<(), String> {
+    let path = workspace_mode_file_path(ws_root)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed creating {}: {}", parent.display(), e))?;
+    }
+    let payload = MicrostockWorkspaceMode {
+        enabled,
+        preset: preset.to_string(),
+        fps,
+    };
+    let serialized = serde_json::to_string_pretty(&payload)
+        .map_err(|e| format!("Failed serializing {}: {}", WORKSPACE_MODE_REL, e))?;
+    std::fs::write(&path, serialized)
+        .map_err(|e| format!("Failed writing {}: {}", path.display(), e))?;
+    Ok(())
+}
+
 pub fn load_manifest(ws_root: &Path, project_dir: &Path) -> Result<MicrostockManifest, String> {
     let path = manifest_file_path(ws_root, project_dir)?;
     if !path.is_file() {
-        return Ok(MicrostockManifest::default());
+        let mut fallback = MicrostockManifest::default();
+        if let Some(ws_mode) = load_workspace_mode(ws_root) {
+            fallback.enabled = ws_mode.enabled;
+            fallback.preset = ws_mode.preset;
+            fallback.fps = ws_mode.fps;
+        }
+        return Ok(fallback);
     }
     let raw = std::fs::read_to_string(&path)
         .map_err(|e| format!("Failed reading manifest {}: {}", path.display(), e))?;

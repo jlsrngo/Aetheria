@@ -137,6 +137,17 @@ pub fn execute_subagent<'a>(
             sys_prompt.push_str("\n\n");
             sys_prompt.push_str(&active_directive);
         }
+        if matches!(
+            subagent_type.trim().to_ascii_lowercase().as_str(),
+            "motion-designer" | "qa-verifier"
+        ) {
+            if let Some(ms_override) =
+                crate::studio::microstock::build_microstock_hard_override_block(workspace_dir)
+            {
+                sys_prompt.push_str("\n\n");
+                sys_prompt.push_str(&ms_override);
+            }
+        }
         let (child_session_id, chat_messages, is_resumed) = load_or_init_child_session(
             parent_session_id,
             requested_session_id,

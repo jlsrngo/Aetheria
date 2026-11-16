@@ -19,7 +19,7 @@ use super::antigravity_safety::{
 use super::schema::sanitize_gemini_schema;
 use super::{
     extract_content_text, make_completion_response_with_reasoning,
-    make_sse_response_with_reasoning,
+    make_sse_response_with_reasoning_and_finish,
 };
 use crate::cred_store::{ensure_fresh_credential, refresh_credential_source, CredentialEntry};
 use crate::paths::gen_id;
@@ -283,7 +283,7 @@ async fn handle_antigravity_with_cred(
     }
 
     let mut gen_cfg = json!({
-        "maxOutputTokens": body.get("max_tokens").and_then(|v| v.as_u64()).unwrap_or(8192),
+        "maxOutputTokens": body.get("max_tokens").and_then(|v| v.as_u64()).unwrap_or(16384),
         "temperature": body.get("temperature").and_then(|v| v.as_f64()).unwrap_or(1.0)
     });
     if let Some(lvl) = thinking_level {
@@ -411,6 +411,7 @@ async fn handle_antigravity_with_cred(
     let mut thought_text = String::new();
     let mut tool_calls = Vec::new();
     let mut last_sig = String::new();
+    let mut upstream_finish: Option<&'static str> = None;
 
     for line in sse_text.lines() {
         let trimmed = line.trim();
@@ -423,6 +424,18 @@ async fn handle_antigravity_with_cred(
         }
         if let Ok(evt) = serde_json::from_str::<Value>(json_str) {
             let root = evt.get("response").unwrap_or(&evt);
+            if let Some(raw_finish) = root
+                .pointer("/candidates/0/finishReason")
+                .and_then(|v| v.as_str())
+            {
+                match raw_finish.trim().to_ascii_uppercase().as_str() {
+                    "MAX_TOKENS" => upstream_finish = Some("length"),
+                    "SAFETY" | "RECITATION" | "BLOCKLIST" | "PROHIBITED_CONTENT" => {
+                        upstream_finish = Some("content_filter")
+                    }
+                    _ => {}
+                }
+            }
             if let Some(parts) = root
                 .pointer("/candidates/0/content/parts")
                 .and_then(|v| v.as_array())
@@ -478,7 +491,13 @@ async fn handle_antigravity_with_cred(
     }
 
     if is_stream {
-        make_sse_response_with_reasoning(model, full_text, thought_text, tool_calls)
+        make_sse_response_with_reasoning_and_finish(
+            model,
+            full_text,
+            thought_text,
+            tool_calls,
+            upstream_finish,
+        )
     } else {
         make_completion_response_with_reasoning(model, full_text, thought_text, tool_calls)
     }

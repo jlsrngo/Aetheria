@@ -155,6 +155,42 @@ fn summarize_film_meta(meta: &FilmMeta) -> Value {
     })
 }
 
+fn check_microstock_js_diagnostics(
+    workspace_dir: &str,
+    file_name: &str,
+    content: &str,
+    feedback: &mut FileFeedback,
+) {
+    let Some(lock) = crate::studio::microstock::active_microstock_lock(workspace_dir) else {
+        return;
+    };
+    let lower_name = file_name.to_ascii_lowercase();
+    if lower_name == "aetheria-motion.js" || lower_name == "three.min.js" {
+        return;
+    }
+    if content.contains("fillText(")
+        || content.contains("strokeText(")
+        || content.contains("drawSubtitles(")
+    {
+        feedback.has_errors = true;
+        feedback.diagnostics.push(format!(
+            "ERROR (MICROSTOCK_TEXT_FORBIDDEN): Adobe Stock Mode ('M') forbids text/subtitle rendering in '{}' (found fillText/strokeText/drawSubtitles). Remove all text overlays.",
+            file_name
+        ));
+    }
+    if lock.width > lock.height
+        && (content.contains("1080 / 1920")
+            || content.contains("1080/1920")
+            || content.contains("1080, 1920"))
+    {
+        feedback.has_errors = true;
+        feedback.diagnostics.push(format!(
+            "ERROR (MICROSTOCK_RATIO_MISMATCH): Adobe Stock Mode ('M') is locked to {}x{} ({}), but '{}' still references Portrait 1080x1920 dimensions/aspect.",
+            lock.width, lock.height, lock.ratio, file_name
+        ));
+    }
+}
+
 fn check_webgl_diagnostics(content: &str, file_name: &str, feedback: &mut FileFeedback) {
     if crate::studio::builtin_runtime::is_vendor_script_name(file_name) {
         return;
@@ -227,6 +263,7 @@ pub fn collect_file_feedback(workspace_dir: &str, target: &Path) -> FileFeedback
                 .diagnostics
                 .extend(find_short_hex_mix_warnings(&content));
             check_webgl_diagnostics(&content, file_name, &mut feedback);
+            check_microstock_js_diagnostics(workspace_dir, file_name, &content, &mut feedback);
         }
         "html" | "htm" => {
             check_webgl_diagnostics(&content, file_name, &mut feedback);
@@ -265,6 +302,27 @@ pub fn collect_file_feedback(workspace_dir: &str, target: &Path) -> FileFeedback
                     "ERROR (SUSPICIOUS_DIMENSIONS): Engine parsed film dimensions as {}x{}. Ensure window.__filmMeta specifies explicit integer width and height (e.g. 1080x1920).",
                     meta.width, meta.height
                 ));
+            }
+
+            if let Some(lock) = crate::studio::microstock::active_microstock_lock(workspace_dir) {
+                if meta.width != lock.width || meta.height != lock.height {
+                    feedback.has_errors = true;
+                    feedback.diagnostics.push(format!(
+                        "ERROR (MICROSTOCK_RATIO_MISMATCH): Adobe Stock Mode ('M') is locked to {}x{} ({}), but {} declares {}x{}. Update <canvas> width/height, CSS stage dimensions, and window.__filmMeta to width={}, height={} immediately.",
+                        lock.width, lock.height, lock.ratio, file_name, meta.width, meta.height, lock.width, lock.height
+                    ));
+                }
+                if meta
+                    .scenes
+                    .iter()
+                    .any(|s| s.audio.is_some() || s.sfx.is_some())
+                {
+                    feedback.has_errors = true;
+                    feedback.diagnostics.push(
+                        "ERROR (MICROSTOCK_AUDIO_FORBIDDEN): Adobe Stock Mode ('M') requires silent video (-an). Remove all `audio` and `sfx` entries from SCENES."
+                            .to_string(),
+                    );
+                }
             }
 
             let audio_files_on_disk = count_audio_files_on_disk(film_dir, ws_root);
@@ -450,6 +508,51 @@ mod tests {
             "builtin /script/three.min.js should never report MISSING_SCRIPT_FILE: {:?}",
             fb_html.diagnostics
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn microstock_lock_flags_portrait_mismatch_audio_and_text() {
+        let dir = std::env::temp_dir().join(format!("aetheria_fb_ms_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("script")).unwrap();
+        crate::studio::microstock::manifest::save_workspace_mode(&dir, true, "1920x1080", 30)
+            .unwrap();
+
+        let js_path = dir.join("script").join("scene1.js");
+        std::fs::write(
+            &js_path,
+            "function r(ctx,w){ AM.drawSubtitles(ctx, w, 0); }\n",
+        )
+        .unwrap();
+        let fb_js = collect_file_feedback(&dir.to_string_lossy(), &js_path);
+        assert!(fb_js.has_errors);
+        assert!(fb_js
+            .diagnostics
+            .iter()
+            .any(|d| d.contains("MICROSTOCK_TEXT_FORBIDDEN")));
+
+        let html_path = dir.join("index.html");
+        std::fs::write(
+            &html_path,
+            r#"<!DOCTYPE html><html><head><script src="/script/scene1.js"></script></head><body><canvas width="1080" height="1920"></canvas><script>
+            var SCENES = [{ id: "scene1", duration: 6, audio: "audio/scene1.wav" }];
+            window.__filmMeta = { title: "Bad", width: 1080, height: 1920, fps: 30, duration: 6, scenes: SCENES };
+            window.renderAt = function(t){}; window.__ready = true;
+            </script></body></html>"#,
+        )
+        .unwrap();
+        let fb_html = collect_file_feedback(&dir.to_string_lossy(), &html_path);
+        assert!(fb_html.has_errors);
+        assert!(fb_html
+            .diagnostics
+            .iter()
+            .any(|d| d.contains("MICROSTOCK_RATIO_MISMATCH")));
+        assert!(fb_html
+            .diagnostics
+            .iter()
+            .any(|d| d.contains("MICROSTOCK_AUDIO_FORBIDDEN")));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

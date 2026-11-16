@@ -162,6 +162,7 @@ pub async fn run_agent_turn(
     let mut final_text_streamed = false;
     let mut doom_loop_detector = crate::session::doom_loop::DoomLoopDetector::default();
     let mut length_continuation_count = 0usize;
+    let mut premature_announce_retries = 0usize;
     let mut unknown_finish_retries = 0usize;
     let mut reached_max_steps = false;
     let mut usage_acc = TurnUsageAccumulator::default();
@@ -476,6 +477,7 @@ pub async fn run_agent_turn(
                 had_streamed_text,
                 &msg,
                 &mut length_continuation_count,
+                &mut premature_announce_retries,
                 &mut content_parts,
                 &mut chat_messages,
                 &usage_acc,
@@ -497,6 +499,7 @@ pub async fn run_agent_turn(
         }
 
         length_continuation_count = 0;
+        premature_announce_retries = 0;
         super::turn_finalize::persist_tool_checkpoint(
             session_id,
             &assistant_msg_id,
@@ -1210,6 +1213,28 @@ fn maybe_spawn_background_precompute(
     }
 }
 
+fn is_premature_tool_announcement(msg_text: &str) -> bool {
+    let trimmed = msg_text.trim();
+    if trimmed.is_empty() || trimmed.len() > 600 {
+        return false;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    let ends_expecting_action = trimmed.ends_with(':') || trimmed.ends_with("...");
+    let announces_parallel_or_write = [
+        "secara paralel",
+        "in parallel",
+        "sekarang saya akan membuat",
+        "saya akan membuat",
+        "i will now create",
+        "let me create",
+        "creating the files",
+        "membuat semua file",
+    ]
+    .iter()
+    .any(|p| lower.contains(p));
+    ends_expecting_action && announces_parallel_or_write
+}
+
 fn handle_no_tool_calls(
     target: &TurnTarget<'_>,
     provider_id: &str,
@@ -1221,6 +1246,7 @@ fn handle_no_tool_calls(
     had_streamed_text: bool,
     msg: &Value,
     length_continuation_count: &mut usize,
+    premature_announce_retries: &mut usize,
     content_parts: &mut Vec<Value>,
     chat_messages: &mut Vec<Value>,
     usage_acc: &TurnUsageAccumulator,
@@ -1288,6 +1314,20 @@ fn handle_no_tool_calls(
             Vec::new(),
         );
         chat_messages.push(next_msg);
+        return NoToolCallAction::Continue;
+    }
+
+    if step_finish == FinishReason::Stop
+        && *premature_announce_retries < 2
+        && is_premature_tool_announcement(&msg_text)
+    {
+        *premature_announce_retries += 1;
+        emit_step_ended_event(target, step_finish, Some(true), step_usage);
+        chat_messages.push(msg.clone());
+        chat_messages.push(json!({
+            "role": "user",
+            "content": "You stopped right after announcing your next action without emitting any tool calls. Emit the actual tool calls (`write`, `edit`, or `task`) right now to complete the files — or write the files one by one if output size is large."
+        }));
         return NoToolCallAction::Continue;
     }
 
@@ -1410,5 +1450,15 @@ mod tests {
         assert!(!names.iter().any(|n| n == "voicebox_speak"));
         assert!(!names.iter().any(|n| n == "generate_smart_sfx"));
         assert!(names.iter().any(|n| n == "task"));
+    }
+
+    #[test]
+    fn detects_premature_parallel_announcement_without_tools() {
+        assert!(is_premature_tool_announcement(
+            "Sekarang saya akan membuat scene1.js dengan desain 3D Soft-Clay, lalu index.html dan manifest secara paralel:"
+        ));
+        assert!(!is_premature_tool_announcement(
+            "Desain motion graphics telah selesai dibuat dan diverifikasi."
+        ));
     }
 }

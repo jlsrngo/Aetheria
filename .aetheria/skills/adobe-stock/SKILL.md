@@ -36,7 +36,7 @@ When **Adobe Stock Mode (`M`)** or `/adobe-stock` is active, the engine and LLM 
    - **REQUIRED:** Multi-layered continuous motion from `t = 0` to `t = duration` with smooth color gradients, anti-band dithering/grain, and balanced contrast.
 
 5. **Locked Adobe Stock Format & Silent Stream (`HAS_AUDIO` = FAIL):**
-   - **Resolution:** Default `1920x1080` (`16:9` Landscape). Allowed Adobe Stock presets: `1920x1080`, `3840x2160`, `1080x1920`, `2160x3840`, `1080x1080`, `2160x2160`.
+   - **Resolution:** Strictly match the active locked preset in `<adobe_stock_microstock_mode>` (default `1920x1080`, `16:9` Landscape). Do NOT output `1080x1920` Portrait unless the active locked preset explicitly specifies `1080x1920`. (Supported presets when selected: `1920x1080`, `3840x2160`, `1080x1920`, `2160x3840`, `1080x1080`, `2160x2160`.)
    - **Frame Rate (FPS):** Integer in `{24, 25, 30, 50, 60}` (default `30`).
    - **Duration:** `5` to `60` seconds (default `8` or `10` seconds).
    - **Audio:** Strictly **NO audio** (`-an`). Do NOT attach `audio` or `sfx` properties to scenes in `window.__filmMeta`, and do NOT generate voiceover/music tracks.

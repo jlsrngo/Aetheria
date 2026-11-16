@@ -91,6 +91,16 @@ pub(crate) fn make_sse_response_with_reasoning(
     reasoning: String,
     tool_calls: Vec<Value>,
 ) -> Response {
+    make_sse_response_with_reasoning_and_finish(model, text, reasoning, tool_calls, None)
+}
+
+pub(crate) fn make_sse_response_with_reasoning_and_finish(
+    model: &str,
+    text: String,
+    reasoning: String,
+    tool_calls: Vec<Value>,
+    upstream_finish: Option<&str>,
+) -> Response {
     let chat_id = gen_id("chatcmpl");
     let created = now_ms() / 1000;
     let mut chunks = Vec::new();
@@ -164,6 +174,8 @@ pub(crate) fn make_sse_response_with_reasoning(
 
     let finish = if !tool_calls.is_empty() {
         "tool_calls"
+    } else if matches!(upstream_finish, Some("length" | "content_filter")) {
+        upstream_finish.unwrap_or("stop")
     } else {
         "stop"
     };

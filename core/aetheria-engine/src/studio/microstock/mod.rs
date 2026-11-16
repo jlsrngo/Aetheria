@@ -16,8 +16,8 @@ use axum::{
     Json,
 };
 use manifest::{
-    load_manifest, resolve_microstock_project_dir, save_manifest, set_ai_declaration,
-    MicrostockChecklist, MicrostockLicenseEntry, MicrostockMetadata,
+    load_manifest, resolve_microstock_project_dir, save_manifest, save_workspace_mode,
+    set_ai_declaration, MicrostockChecklist, MicrostockLicenseEntry, MicrostockMetadata,
 };
 use packager::build_adobe_package;
 use policy::{build_compliant_filename, evaluate_pre_render_gates, PreRenderRequest};
@@ -41,8 +41,19 @@ fn resolve_ws_root(q: &HashMap<String, String>, headers: &HeaderMap, dir_opt: Op
         .unwrap_or_else(|| crate::paths::aetheria_dot_dir().join("scratch"))
 }
 
-/// Builds the `<adobe_stock_microstock_mode>` system prompt injection when Microstock mode (`M`) is active.
-pub fn build_active_microstock_prompt_block(workspace_dir: &str) -> Option<String> {
+#[derive(Debug, Clone)]
+pub struct ActiveMicrostockLock {
+    pub preset_id: String,
+    pub width: u32,
+    pub height: u32,
+    pub ratio: String,
+    pub fps: u32,
+    pub codec: String,
+    pub project_dir: std::path::PathBuf,
+}
+
+/// Returns the active Adobe Stock Microstock lock spec if `'M'` mode is enabled for the workspace/project.
+pub fn active_microstock_lock(workspace_dir: &str) -> Option<ActiveMicrostockLock> {
     if workspace_dir.trim().is_empty() {
         return None;
     }
@@ -52,11 +63,42 @@ pub fn build_active_microstock_prompt_block(workspace_dir: &str) -> Option<Strin
     if !manifest.enabled {
         return None;
     }
-
     let profile = AdobeProfile::default_profile();
     let preset = profile
         .find_preset(&manifest.preset)
         .unwrap_or(&profile.presets[0]);
+    Some(ActiveMicrostockLock {
+        preset_id: preset.id.clone(),
+        width: preset.width,
+        height: preset.height,
+        ratio: preset.ratio.clone(),
+        fps: manifest.fps,
+        codec: manifest.codec,
+        project_dir,
+    })
+}
+
+/// Builds a brief hard-override block placed after any `/mg-*` skill block so Microstock ratio & rules win.
+pub fn build_microstock_hard_override_block(workspace_dir: &str) -> Option<String> {
+    let lock = active_microstock_lock(workspace_dir)?;
+    Some(format!(
+        "<microstock_hard_override>\n\
+         HARD RATIO & SPECIFICATION LOCK ACTIVE ('M' Toggle ON):\n\
+         - STRICT CANVAS & `window.__filmMeta` RESOLUTION: width={w}, height={h} (aspect ratio {r}, {fps} FPS).\n\
+         - THIS LOCK OVERRIDES ANY `/mg-*` SKILL DEFAULT (such as `1080x1920` Portrait in `/mg-soft-clay-story`) AND OVERRIDES `default.txt`.\n\
+         - Use `camera.aspect = {w} / {h}` in Three.js and compose horizontally for {w}x{h} ({r}) — NEVER output Portrait `1080x1920` unless the user explicitly selected `1080x1920` in the Microstock panel.\n\
+         - STRICT SILENT & PURE VISUALS: ZERO audio/voiceover/SFX tracks (`-an`), ZERO `AM.drawSubtitles`, ZERO `fillText`/`strokeText`/DOM text.\n\
+         </microstock_hard_override>",
+        w = lock.width,
+        h = lock.height,
+        r = lock.ratio,
+        fps = lock.fps,
+    ))
+}
+
+/// Builds the `<adobe_stock_microstock_mode>` system prompt injection when Microstock mode (`M`) is active.
+pub fn build_active_microstock_prompt_block(workspace_dir: &str) -> Option<String> {
+    let lock = active_microstock_lock(workspace_dir)?;
     let skill_md = include_str!("../../../../../.aetheria/skills/adobe-stock/SKILL.md");
 
     Some(format!(
@@ -65,24 +107,29 @@ pub fn build_active_microstock_prompt_block(workspace_dir: &str) -> Option<Strin
          Locked Preset: {} ({}x{}, aspect ratio {}, {} FPS, codec {}, silent -an).\n\
          Target Project Folder: {}\n\
          CRITICAL INSTRUCTIONS FOR THIS TURN:\n\
-         1. Generate or update the HTML5+JS motion composition strictly at {}x{} ({}) and {} FPS with duration between 5 and 60 seconds.\n\
-         2. Enforce ZERO text overlays (no fillText, no strokeText, no <text>, no visible DOM text), ZERO logos/trademarks, ZERO external http(s):// URLs, ZERO audio tracks, and 100% deterministic window.renderAt(t) without Math.random() or Date.now().\n\
+         1. STRICTLY LOCK `index.html`, `<canvas>`, Three.js `camera.aspect = {}/{}`, and `window.__filmMeta` to `width: {}, height: {}` ({}) and `{} FPS` with duration between 5 and 60 seconds. If a `/mg-*` visual style skill (such as `/mg-soft-clay-story`) is also active, ONLY adopt its visual craft/3D shaders/ClayKit aesthetic adapted to {}x{} ({}) — its portrait `1080x1920`, audio, and subtitle rules are OVERRIDDEN by this lock.\n\
+         2. Enforce ZERO text overlays (no fillText, no strokeText, no AM.drawSubtitles, no <text>, no visible DOM text), ZERO logos/trademarks, ZERO external http(s):// URLs, ZERO audio/voiceover/SFX tracks (`audio-director` MUST NOT be called), and 100% deterministic window.renderAt(t) without Math.random() or Date.now().\n\
          3. Automatically write/update `microstock/manifest.json` with fresh Adobe Stock metadata derived strictly from the user's requested visual theme/prompt (`metadata.title` <= 70 plain chars without commas, `metadata.keywords` array of 5 to 49 unique relevant English keywords, `metadata.category` from the 21 Adobe Stock categories). NEVER copy generic placeholder text (e.g. 'Abstract Warm Geometric...'), and preserve any existing `enabled`, `preset`, `fps`, `codec`, `provenance`, and `checklist` fields in `microstock/manifest.json`.\n\
          4. **60fps Canvas2D Performance:** NEVER call `ctx.shadowBlur > 0` inside multi-stroke/particle loops or allocate hundreds of `ctx.createRadialGradient(...)` objects inside `renderAt(t)`. Pre-bake glow orbs, bokeh circles, and soft particles ONCE at script init onto small offscreen `<canvas>` sprites and stamp them via fast `ctx.drawImage(sprite, ...)`.\n\
          \n\
          {}\n\
          </adobe_stock_microstock_mode>",
-        preset.id,
-        preset.width,
-        preset.height,
-        preset.ratio,
-        manifest.fps,
-        manifest.codec,
-        project_dir.display(),
-        preset.width,
-        preset.height,
-        preset.ratio,
-        manifest.fps,
+        lock.preset_id,
+        lock.width,
+        lock.height,
+        lock.ratio,
+        lock.fps,
+        lock.codec,
+        lock.project_dir.display(),
+        lock.width,
+        lock.height,
+        lock.width,
+        lock.height,
+        lock.ratio,
+        lock.fps,
+        lock.width,
+        lock.height,
+        lock.ratio,
         skill_md.trim()
     ))
 }
@@ -260,6 +307,13 @@ pub async fn handle_toggle_mode(
         .unwrap_or_else(|| profile.presets[0].clone());
 
     if let Err(e) = save_manifest(&ws_root, &project_dir, &manifest) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "success": false, "error": e })),
+        )
+            .into_response();
+    }
+    if let Err(e) = save_workspace_mode(&ws_root, manifest.enabled, &manifest.preset, manifest.fps) {
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({ "success": false, "error": e })),

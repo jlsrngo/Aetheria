@@ -107,14 +107,13 @@ pub fn is_valid_project_slug(slug: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
-/// Extracts a human-readable video title from a user prompt or storyboard text.
-pub fn extract_video_title_from_prompt(prompt: &str) -> Option<String> {
+/// Extracts an explicit video title prefix (`Storyboard:`, `Judul:`, `Title:`, `Topic:`, `Topik:`).
+pub fn extract_explicit_video_title(prompt: &str) -> Option<String> {
     for raw_line in prompt.lines() {
         let line = raw_line.trim();
         if line.is_empty() {
             continue;
         }
-        // Strip leading slash commands like `/mg-soft-clay-story /audio:mystery`
         let without_cmds: Vec<&str> = line
             .split_whitespace()
             .skip_while(|tok| tok.starts_with('/'))
@@ -133,6 +132,71 @@ pub fn extract_video_title_from_prompt(prompt: &str) -> Option<String> {
                 }
             }
         }
+    }
+    None
+}
+
+/// Returns true when the prompt is an instruction to edit/restyle/fix the current active project
+/// rather than starting a brand-new named video project.
+pub fn is_revision_or_style_adjustment_prompt(prompt: &str) -> bool {
+    if extract_explicit_video_title(prompt).is_some() {
+        return false;
+    }
+    let lower = prompt.to_ascii_lowercase();
+    if [
+        "video baru",
+        "new video",
+        "proyek baru",
+        "project baru",
+        "new project",
+    ]
+    .iter()
+    .any(|kw| lower.contains(kw))
+    {
+        return false;
+    }
+    [
+        "pakai style",
+        "style ini",
+        "buat rapih",
+        "rapih",
+        "rapikan",
+        "rasio",
+        "landscape",
+        "lanscape",
+        "portrait",
+        "potrait",
+        "ubah ",
+        "perbaiki",
+        "ganti ",
+        "restyle",
+        "fix ",
+        "ini aja",
+    ]
+    .iter()
+    .any(|kw| lower.contains(kw))
+}
+
+/// Extracts a human-readable video title from a user prompt or storyboard text.
+pub fn extract_video_title_from_prompt(prompt: &str) -> Option<String> {
+    if let Some(explicit) = extract_explicit_video_title(prompt) {
+        return Some(explicit);
+    }
+    for raw_line in prompt.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        // Strip leading slash commands like `/mg-soft-clay-story /audio:mystery`
+        let without_cmds: Vec<&str> = line
+            .split_whitespace()
+            .skip_while(|tok| tok.starts_with('/'))
+            .collect();
+        if without_cmds.is_empty() {
+            continue;
+        }
+        let cleaned_line = without_cmds.join(" ");
+        let lower = cleaned_line.to_ascii_lowercase();
         if !lower.starts_with("format:") && !lower.starts_with("musik") && !lower.starts_with("detik")
         {
             let unquoted = cleaned_line
@@ -327,17 +391,45 @@ pub fn create_studio_project(ws_root: &Path, title: &str) -> Result<StudioProjec
 }
 
 /// Ensures an isolated project subfolder exists for a new video/storyboard prompt and selects it.
-/// Reuses an existing empty (no `index.html`) project with the matching slug, or creates a new one.
+/// Reuses the current active project for restyle/revision prompts (without explicit `Storyboard:` /
+/// `Judul:` / `Title:`), or reuses an empty project with matching slug, or creates a new subfolder.
 pub fn ensure_project_for_prompt(ws_root: &Path, prompt: &str) -> Result<StudioProjectInfo, String> {
-    let title = extract_video_title_from_prompt(prompt).unwrap_or_else(|| {
+    let ws_str = ws_root.to_string_lossy();
+    if is_revision_or_style_adjustment_prompt(prompt) {
+        if let Some(active_slug) = read_active_project_slug(ws_root) {
+            let rel = format!("{}/{}", PROJECTS_DIR_NAME, active_slug);
+            let active_dir = resolve_isolated_path(&ws_str, &rel)?;
+            if active_dir.is_dir() {
+                return Ok(inspect_project_dir(&active_dir, &active_slug));
+            }
+        }
+        let state = list_studio_projects(ws_root);
+        if let Some(first) = state.projects.into_iter().next() {
+            let rel = format!("{}/{}", PROJECTS_DIR_NAME, first.id);
+            let proj_dir = resolve_isolated_path(&ws_str, &rel)?;
+            if proj_dir.is_dir() {
+                write_active_project_slug(ws_root, Some(&first.id))?;
+                return Ok(first);
+            }
+        }
+    }
+
+    let title = if is_revision_or_style_adjustment_prompt(prompt) {
         let ts = std::time::SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
         format!("video-{}", ts)
-    });
+    } else {
+        extract_video_title_from_prompt(prompt).unwrap_or_else(|| {
+            let ts = std::time::SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            format!("video-{}", ts)
+        })
+    };
     let base_slug = slugify_project_title(&title);
-    let ws_str = ws_root.to_string_lossy();
     let rel = format!("{}/{}", PROJECTS_DIR_NAME, base_slug);
     let existing = resolve_isolated_path(&ws_str, &rel)?;
     if existing.is_dir() && !existing.join("index.html").is_file() {
@@ -552,6 +644,26 @@ mod tests {
 
         // Path traversal must be rejected
         assert!(delete_studio_project(&ws, "../outside").is_err());
+
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn restyle_prompt_reuses_active_project_instead_of_creating_bogus_slug() {
+        let ws = make_temp_ws("aetheria_proj_restyle");
+        let existing = create_studio_project(&ws, "Abstract Landscape").unwrap();
+        assert_eq!(existing.id, "abstract-landscape");
+
+        let reused = ensure_project_for_prompt(
+            &ws,
+            "/mg-soft-clay-story pakai style ini aja buat rapih dan rasionya buat lanscape",
+        )
+        .unwrap();
+        assert_eq!(reused.id, "abstract-landscape");
+        assert!(!ws
+            .join("projects")
+            .join("pakai-style-ini-aja-buat-rapih-dan-rasionya-buat-lanscape")
+            .exists());
 
         let _ = std::fs::remove_dir_all(&ws);
     }

@@ -273,6 +273,32 @@ fn resolve_dynamic_style_or_skill_command_inner(
                                 )
                             };
 
+                            let microstock_override =
+                                crate::studio::microstock::build_microstock_hard_override_block(
+                                    workspace_dir,
+                                );
+                            let rules_block = if let Some(ref ms_override) = microstock_override {
+                                format!(
+                                    "MANDATORY RULES FOR THIS GENERATION (MICROSTOCK MODE 'M' LOCKED):\n\
+                                    1. Delegate modular scene scripts (`{project_rel_prefix}script/scene1.js`..`sceneN.js`) + `{project_rel_prefix}index.html` to `task(subagent_type: \"motion-designer\")`. DO NOT call `audio-director`, `voicebox_speak`, or `generate_smart_sfx` (Adobe Stock requires silent `-an` streams).\n\
+                                    2. Pass the active skill path (`{path_display}`) and target project subfolder (`{project_rel_prefix}`) to `motion-designer`, keeping ONLY its 3D Three.js + `ClayKit` / lighting / pastel material aesthetic adapted cleanly to the locked Microstock canvas dimensions.\n\
+                                    3. If `script/*-kit.js` (e.g. `clay-kit.js`) is already seeded in `{project_rel_prefix}script/`, DO NOT overwrite it — load it alongside `/script/three.min.js` and `/script/aetheria-motion.js`, and pass the Microstock-locked `width, height` to `ClayKit.initStage(canvas, width, height)`.\n\
+                                    4. Enforce ZERO subtitles (`AM.drawSubtitles`), ZERO `fillText`/`strokeText`/DOM text, and update `{project_rel_prefix}microstock/manifest.json` metadata.\n\n\
+                                    {ms_override}",
+                                    path_display = path.display()
+                                )
+                            } else {
+                                format!(
+                                    "MANDATORY RULES FOR THIS GENERATION:\n\
+                                    1. Coordinate via the 3-Track Subagent Pipeline: delegate voiceover/SFX synthesis to `task(subagent_type: \"audio-director\")` and delegate modular per-scene scripts (`{project_rel_prefix}script/scene1.js`..`sceneN.js`) + `{project_rel_prefix}index.html` to `task(subagent_type: \"motion-designer\")`.\n\
+                                    2. Pass the active skill path (`{path_display}`), target project subfolder (`{project_rel_prefix}`), and `examples/` kit instructions directly in your prompt to `motion-designer` and `audio-director`. The active skill's rendering architecture (e.g., 3D Three.js + `ClayKit` dual-canvas `#stage-webgl` with `preserveDrawingBuffer: true` + `#stage-hud`, smooth outlines, Neobrutalism subtitles) is NON-NEGOTIABLE — adapt storyboard mood/props *inside* the skill's architecture rather than falling back to plain 2D Canvas.\n\
+                                    3. If `script/*-kit.js` (e.g. `clay-kit.js`) is already seeded in `{project_rel_prefix}script/`, DO NOT overwrite it — load it in `{project_rel_prefix}index.html` alongside `/script/three.min.js` and `/script/aetheria-motion.js`, preserve `examples/index.html`'s dual-canvas + `AM.drawSubtitles(..., {{ style: \"neobrutalism\", ... }})` structure, and build real 3D meshes in `scene3D` inside `{project_rel_prefix}script/scene1.js`..`sceneN.js`.\n\
+                                    4. Strictly apply these exact colors, fonts, camera movement rules, scale law (`u(refPx)`), and motion curves (`AM.spring`, `AM.anticipation`, `AM.stagger`).\n\
+                                    5. Follow the Do's and Don'ts from the skill guidelines and exact brief specifications.",
+                                    path_display = path.display()
+                                )
+                            };
+
                             return Some(format!(
                                 "[Active Motion Skill Triggered: /{name}]:\n\"\"\"\n\
                                 SKILL DIRECTIVES (from {path_display}/SKILL.md):\n{skill_md}\n\n\
@@ -282,12 +308,7 @@ fn resolve_dynamic_style_or_skill_command_inner(
                                 {project_note}\
                                 {seeded_note}\
                                 \"\"\"\n\
-                                MANDATORY RULES FOR THIS GENERATION:\n\
-                                1. Coordinate via the 3-Track Subagent Pipeline: delegate voiceover/SFX synthesis to `task(subagent_type: \"audio-director\")` and delegate modular per-scene scripts (`{project_rel_prefix}script/scene1.js`..`sceneN.js`) + `{project_rel_prefix}index.html` to `task(subagent_type: \"motion-designer\")`.\n\
-                                2. Pass the active skill path (`{path_display}`), target project subfolder (`{project_rel_prefix}`), and `examples/` kit instructions directly in your prompt to `motion-designer` and `audio-director`. The active skill's rendering architecture (e.g., 3D Three.js + `ClayKit` dual-canvas `#stage-webgl` with `preserveDrawingBuffer: true` + `#stage-hud`, smooth outlines, Neobrutalism subtitles) is NON-NEGOTIABLE — adapt storyboard mood/props *inside* the skill's architecture rather than falling back to plain 2D Canvas.\n\
-                                3. If `script/*-kit.js` (e.g. `clay-kit.js`) is already seeded in `{project_rel_prefix}script/`, DO NOT overwrite it — load it in `{project_rel_prefix}index.html` alongside `/script/three.min.js` and `/script/aetheria-motion.js`, preserve `examples/index.html`'s dual-canvas + `AM.drawSubtitles(..., {{ style: \"neobrutalism\", ... }})` structure, and build real 3D meshes in `scene3D` inside `{project_rel_prefix}script/scene1.js`..`sceneN.js`.\n\
-                                4. Strictly apply these exact colors, fonts, camera movement rules, scale law (`u(refPx)`), and motion curves (`AM.spring`, `AM.anticipation`, `AM.stagger`).\n\
-                                5. Follow the Do's and Don'ts from the skill guidelines and exact brief specifications.",
+                                {rules_block}",
                                 path_display = path.display()
                             ));
                         }
