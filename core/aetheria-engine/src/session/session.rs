@@ -1,4 +1,5 @@
 //! Session data model, persistent store & run lifecycle.
+#[cfg(not(test))]
 use crate::paths::aetheria_data_dir;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
