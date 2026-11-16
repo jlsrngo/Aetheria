@@ -241,6 +241,16 @@ where
         )
         .await?;
 
+    let is_proxy = params.codec.eq_ignore_ascii_case("proxy");
+    if is_proxy {
+        let _ = cdp
+            .call(
+                "Page.addScriptToEvaluateOnNewDocument",
+                json!({ "source": "window.__AETHERIA_PREVIEW_STAGE__ = true;" }),
+            )
+            .await;
+    }
+
     let target_url = format!("http://127.0.0.1:{}/index.html", http_port);
     let _ = cdp.call("Page.navigate", json!({ "url": target_url })).await?;
     wait_for_film_ready(&mut cdp, &mut meta).await?;
@@ -313,10 +323,11 @@ where
             break;
         }
 
+        let jpeg_quality = if is_proxy { 75 } else { 92 };
         let shot = match cdp
             .call(
                 "Page.captureScreenshot",
-                json!({ "format": "jpeg", "quality": 92, "optimizeForSpeed": true }),
+                json!({ "format": "jpeg", "quality": jpeg_quality, "optimizeForSpeed": true }),
             )
             .await
         {

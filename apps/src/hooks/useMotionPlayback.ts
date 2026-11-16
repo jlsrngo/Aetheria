@@ -68,6 +68,9 @@ export function useMotionPlayback(opts: UseMotionPlaybackOptions) {
   const isPlayingRef = useRef(false);
   const lastTsRef = useRef<number | null>(null);
   const frameListenersRef = useRef<Set<(frame: number) => void>>(new Set());
+  const timeListenersRef = useRef<Set<(timeSec: number) => void>>(new Set());
+  const fpsRef = useRef(Math.max(1, fps));
+  fpsRef.current = Math.max(1, fps);
 
   const callbacksRef = useRef({
     onFrameUpdate,
@@ -77,16 +80,35 @@ export function useMotionPlayback(opts: UseMotionPlaybackOptions) {
   });
   callbacksRef.current = { onFrameUpdate, onPlayChange, onSeeked, onEnded };
 
-  const emitFrame = useCallback((frame: number) => {
-    lastEmitFrameRef.current = frame;
-    frameListenersRef.current.forEach((listener) => listener(frame));
-    callbacksRef.current.onFrameUpdate?.(frame);
+  const emitTime = useCallback((timeSec: number) => {
+    timeListenersRef.current.forEach((listener) => listener(timeSec));
   }, []);
+
+  const emitFrame = useCallback(
+    (frame: number, exactTimeSec?: number) => {
+      lastEmitFrameRef.current = frame;
+      const tSec =
+        typeof exactTimeSec === "number"
+          ? exactTimeSec
+          : frame / Math.max(1, fpsRef.current);
+      emitTime(tSec);
+      frameListenersRef.current.forEach((listener) => listener(frame));
+      callbacksRef.current.onFrameUpdate?.(frame);
+    },
+    [emitTime]
+  );
 
   const subscribeFrame = useCallback((listener: (frame: number) => void) => {
     frameListenersRef.current.add(listener);
     return () => {
       frameListenersRef.current.delete(listener);
+    };
+  }, []);
+
+  const subscribeTime = useCallback((listener: (timeSec: number) => void) => {
+    timeListenersRef.current.add(listener);
+    return () => {
+      timeListenersRef.current.delete(listener);
     };
   }, []);
 
@@ -187,9 +209,12 @@ export function useMotionPlayback(opts: UseMotionPlaybackOptions) {
           }
         }
         frameFloatRef.current = nextFloat;
+        const exactTimeSec = nextFloat / safeFps;
         const rounded = Math.max(minFrame, Math.min(maxFrame, Math.floor(nextFloat)));
         if (rounded !== lastEmitFrameRef.current) {
-          emitFrame(rounded);
+          emitFrame(rounded, exactTimeSec);
+        } else {
+          emitTime(exactTimeSec);
         }
       }
       rafId = requestAnimationFrame(tick);
@@ -197,10 +222,11 @@ export function useMotionPlayback(opts: UseMotionPlaybackOptions) {
 
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [isPlaying, fps, playbackRate, durationInFrames, inFrame, outFrame, loop, emitFrame, setPlayingState]);
+  }, [isPlaying, fps, playbackRate, durationInFrames, inFrame, outFrame, loop, emitFrame, emitTime, setPlayingState]);
 
   return {
     subscribeFrame,
+    subscribeTime,
     isPlaying,
     isMuted,
     setIsMuted,
@@ -211,6 +237,7 @@ export function useMotionPlayback(opts: UseMotionPlaybackOptions) {
     pause,
     toggle,
     getCurrentFrame: () => lastEmitFrameRef.current,
+    getCurrentTimeSec: () => frameFloatRef.current / Math.max(1, fpsRef.current),
     getIsPlaying: () => isPlayingRef.current,
   };
 }

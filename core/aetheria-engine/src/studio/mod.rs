@@ -33,6 +33,7 @@ pub mod native_renderer;
 pub mod presets;
 pub mod preview_capture;
 pub mod project_registry;
+pub mod proxy_preview;
 pub mod reference_compare;
 pub mod renderer;
 pub mod scheduler;
@@ -194,6 +195,14 @@ pub fn router() -> Router {
         .route(
             "/api/studio/projects/delete",
             post(project_registry::handle_delete_project),
+        )
+        .route(
+            "/api/studio/proxy-preview",
+            get(proxy_preview::handle_get_proxy_preview),
+        )
+        .route(
+            "/api/studio/proxy-preview/build",
+            post(proxy_preview::handle_build_proxy_preview),
         )
         .route(
             "/api/studio/film-meta",

@@ -87,10 +87,57 @@ export function buildSandboxStageBridgeScript(): string {
 (function(){
   if (window.__aetheriaStageBridgeInstalled) return;
   window.__aetheriaStageBridgeInstalled = true;
+  window.__AETHERIA_PREVIEW_STAGE__ = true;
+  var nativeRAF = typeof window.requestAnimationFrame === "function"
+    ? window.requestAnimationFrame.bind(window)
+    : function(cb) { return setTimeout(cb, 16); };
   // Block rogue free-running requestAnimationFrame loops inside film HTML so the canvas
   // never advances on its own while the Studio timeline playhead is paused.
   window.requestAnimationFrame = function() { return 0; };
   window.cancelAnimationFrame = function() {};
+
+  function patchThreePreviewRenderer(threeObj) {
+    if (!threeObj || !threeObj.WebGLRenderer || threeObj.__aetheriaPatched) return;
+    threeObj.__aetheriaPatched = true;
+    var OrigRenderer = threeObj.WebGLRenderer;
+    function PatchedWebGLRenderer(params) {
+      var opts = Object.assign({}, params || {}, {
+        antialias: false,
+        preserveDrawingBuffer: false,
+        powerPreference: "high-performance"
+      });
+      var inst = new OrigRenderer(opts);
+      try {
+        if (typeof inst.setPixelRatio === "function") {
+          inst.setPixelRatio(0.5);
+          var origSetPR = inst.setPixelRatio.bind(inst);
+          inst.setPixelRatio = function(r) {
+            return origSetPR(Math.min(0.65, Number(r) || 0.5));
+          };
+        }
+        if (inst.shadowMap && typeof threeObj.BasicShadowMap !== "undefined") {
+          inst.shadowMap.type = threeObj.BasicShadowMap;
+        }
+      } catch (_) {}
+      return inst;
+    }
+    PatchedWebGLRenderer.prototype = OrigRenderer.prototype;
+    Object.setPrototypeOf(PatchedWebGLRenderer, OrigRenderer);
+    threeObj.WebGLRenderer = PatchedWebGLRenderer;
+  }
+  if (window.THREE) patchThreePreviewRenderer(window.THREE);
+  try {
+    var _threeVal = window.THREE;
+    Object.defineProperty(window, "THREE", {
+      configurable: true,
+      enumerable: true,
+      get: function() { return _threeVal; },
+      set: function(v) {
+        _threeVal = v;
+        patchThreePreviewRenderer(v);
+      }
+    });
+  } catch (_) {}
   var pendingAssets = Object.create(null);
   var reqCounter = 0;
   var repaintTimer = null;
@@ -307,10 +354,16 @@ export function buildSandboxStageBridgeScript(): string {
       return;
     }
     if (ev.data.type === "${STAGE_MSG_RENDER_AT}") {
+      var nextTime = Number(ev.data.timeSec) || 0;
+      window.__aetheriaHostTime = nextTime;
+      if (window.__aetheriaRenderBusy) {
+        window.__aetheriaQueuedTime = nextTime;
+        return;
+      }
+      window.__aetheriaRenderBusy = true;
+      window.__aetheriaQueuedTime = null;
       try {
         if (typeof window.renderAt === "function") {
-          var nextTime = Number(ev.data.timeSec) || 0;
-          window.__aetheriaHostTime = nextTime;
           window.__aetheriaInHostCall = true;
           try {
             window.renderAt(nextTime);
@@ -322,6 +375,23 @@ export function buildSandboxStageBridgeScript(): string {
         var msg = err && err.message ? err.message : String(err);
         window.parent.postMessage({ type: "${STAGE_MSG_ERROR}", message: msg }, "*");
       }
+      nativeRAF(function() {
+        window.__aetheriaRenderBusy = false;
+        if (typeof window.__aetheriaQueuedTime === "number") {
+          var qt = window.__aetheriaQueuedTime;
+          window.__aetheriaQueuedTime = null;
+          if (typeof window.renderAt === "function" && qt !== nextTime) {
+            window.__aetheriaHostTime = qt;
+            window.__aetheriaInHostCall = true;
+            try {
+              window.renderAt(qt);
+            } catch (_) {
+            } finally {
+              window.__aetheriaInHostCall = false;
+            }
+          }
+        }
+      });
     }
   });
 

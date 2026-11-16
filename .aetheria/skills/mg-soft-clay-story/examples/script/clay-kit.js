@@ -388,17 +388,22 @@
     camera.position.set(0, 2.2, 13.5);
     camera.lookAt(0, 1.35, 0);
 
+    var isPreviewStage = typeof window !== "undefined" && !!window.__AETHERIA_PREVIEW_STAGE__;
     var renderer = new THREE.WebGLRenderer({
       canvas: canvas,
-      antialias: true,
+      antialias: !isPreviewStage,
       alpha: true,
-      preserveDrawingBuffer: true
+      powerPreference: "high-performance",
+      preserveDrawingBuffer: !isPreviewStage
     });
+    if (typeof renderer.setPixelRatio === "function") {
+      renderer.setPixelRatio(isPreviewStage ? 0.5 : 1);
+    }
     renderer.setSize(width, height, false);
     renderer.outputEncoding = THREE.sRGBEncoding;
     renderer.toneMapping = THREE.NoToneMapping;
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = isPreviewStage ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
 
     scene.add(new THREE.AmbientLight(0xffffff, 0.62));
     var sunLight = new THREE.DirectionalLight(0xfffbeb, 0.48);

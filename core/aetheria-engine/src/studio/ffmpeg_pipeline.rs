@@ -2,9 +2,85 @@
 
 use super::film_inspector::FilmMeta;
 use crate::paths::contains_path;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::{Mutex, OnceLock};
 use tokio::io::AsyncReadExt;
+
+fn select_h264_encoder(ffmpeg_bin: &Path) -> &'static str {
+    if !ffmpeg_bin.is_file() {
+        return "libx264";
+    }
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, &'static str>>> = OnceLock::new();
+    let map = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(guard) = map.lock() {
+        if let Some(&cached) = guard.get(ffmpeg_bin) {
+            return cached;
+        }
+    }
+    let mut enc_cmd = std::process::Command::new(ffmpeg_bin);
+    enc_cmd
+        .args(["-hide_banner", "-encoders"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        enc_cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let encoders_out = enc_cmd
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .unwrap_or_default();
+
+    let mut chosen: &'static str = "libx264";
+    if !encoders_out.contains("libx264") {
+        for cand in ["h264_nvenc", "h264_amf", "h264_qsv", "h264_mf"] {
+            if !encoders_out.contains(cand) {
+                continue;
+            }
+            let mut probe = std::process::Command::new(ffmpeg_bin);
+            probe
+                .args([
+                    "-hide_banner",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=black:s=128x128:r=30",
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    "format=nv12",
+                    "-c:v",
+                    cand,
+                    "-f",
+                    "null",
+                    "-",
+                ])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                const CREATE_NO_WINDOW: u32 = 0x08000000;
+                probe.creation_flags(CREATE_NO_WINDOW);
+            }
+            if probe.status().map(|s| s.success()).unwrap_or(false) {
+                chosen = cand;
+                break;
+            }
+        }
+    }
+    if let Ok(mut guard) = map.lock() {
+        guard.insert(ffmpeg_bin.to_path_buf(), chosen);
+    }
+    chosen
+}
 
 fn find_scene_audio_file(film_root: &Path, ws_root: &Path, raw_audio: &str) -> Option<PathBuf> {
     let clean = raw_audio.trim().trim_start_matches('/').replace('\\', "/");
@@ -118,6 +194,38 @@ pub fn build_ffmpeg_command(
         "prores" => {
             cmd.args(["-c:v", "prores_ks", "-profile:v", "3"]);
         }
+        "proxy" => {
+            let enc = select_h264_encoder(ffmpeg_bin);
+            if enc == "libx264" {
+                cmd.args([
+                    "-vf",
+                    "scale=trunc(iw/4)*2:trunc(ih/4)*2",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-preset",
+                    "ultrafast",
+                    "-crf",
+                    "26",
+                    "-g",
+                    "15",
+                    "-movflags",
+                    "+faststart",
+                ]);
+            } else {
+                cmd.args([
+                    "-vf",
+                    "scale=trunc(iw/4)*2:trunc(ih/4)*2,format=nv12",
+                    "-c:v",
+                    enc,
+                    "-b:v",
+                    "2500k",
+                    "-movflags",
+                    "+faststart",
+                ]);
+            }
+        }
         _ if is_gif => {
             cmd.args([
                 "-vf",
@@ -129,18 +237,32 @@ pub fn build_ffmpeg_command(
             ]);
         }
         _ => {
-            cmd.args([
-                "-c:v",
-                "libx264",
-                "-pix_fmt",
-                "yuv420p",
-                "-preset",
-                "fast",
-                "-crf",
-                "18",
-                "-movflags",
-                "+faststart",
-            ]);
+            let enc = select_h264_encoder(ffmpeg_bin);
+            if enc == "libx264" {
+                cmd.args([
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-preset",
+                    "fast",
+                    "-crf",
+                    "18",
+                    "-movflags",
+                    "+faststart",
+                ]);
+            } else {
+                cmd.args([
+                    "-vf",
+                    "format=nv12",
+                    "-c:v",
+                    enc,
+                    "-b:v",
+                    "8000k",
+                    "-movflags",
+                    "+faststart",
+                ]);
+            }
         }
     }
 

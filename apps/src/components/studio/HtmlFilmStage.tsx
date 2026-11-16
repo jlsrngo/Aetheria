@@ -58,7 +58,8 @@ export const HtmlFilmStage: React.FC<HtmlFilmStageProps> = ({
     },
     [onRuntimeError]
   );
-  const { subscribeFrame, getCurrentFrame } = useMotionFrameSubscription();
+  const { subscribeFrame, getCurrentFrame, subscribeTime, getCurrentTimeSec } =
+    useMotionFrameSubscription();
   const { fps, width, height } = useMotionConfig();
   const stageBoxRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -183,18 +184,25 @@ export const HtmlFilmStage: React.FC<HtmlFilmStageProps> = ({
   useEffect(() => {
     if (!iframeReady) return;
     const safeFps = Math.max(1, fps);
-    const dispatchFrame = (nextFrame: number) => {
+    const dispatchTime = (timeSec: number) => {
       iframeRef.current?.contentWindow?.postMessage(
         {
           type: STAGE_MSG_RENDER_AT,
-          timeSec: nextFrame / safeFps,
+          timeSec,
         },
         "*",
       );
     };
-    dispatchFrame(getCurrentFrame());
-    return subscribeFrame(dispatchFrame);
-  }, [fps, iframeReady, subscribeFrame, getCurrentFrame]);
+    const initialSec =
+      typeof getCurrentTimeSec === "function"
+        ? getCurrentTimeSec()
+        : getCurrentFrame() / safeFps;
+    dispatchTime(initialSec);
+    if (typeof subscribeTime === "function") {
+      return subscribeTime(dispatchTime);
+    }
+    return subscribeFrame((nextFrame: number) => dispatchTime(nextFrame / safeFps));
+  }, [fps, iframeReady, subscribeFrame, subscribeTime, getCurrentFrame, getCurrentTimeSec]);
 
   useEffect(() => {
     const pushHotSwap = (rawFile: unknown, code: unknown) => {

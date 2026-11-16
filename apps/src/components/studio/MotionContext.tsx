@@ -2,10 +2,14 @@ import React, { createContext, useCallback, useContext, useSyncExternalStore } f
 
 export type FrameListener = (frame: number) => void;
 export type SubscribeFrameFn = (listener: FrameListener) => () => void;
+export type TimeListener = (timeSec: number) => void;
+export type SubscribeTimeFn = (listener: TimeListener) => () => void;
 
 export interface MotionPlaybackConfig {
   getCurrentFrame: () => number;
   subscribeFrame: SubscribeFrameFn;
+  getCurrentTimeSec?: () => number;
+  subscribeTime?: SubscribeTimeFn;
   fps: number;
   durationInFrames: number;
   width: number;
@@ -21,6 +25,8 @@ const noopSubscribe: SubscribeFrameFn = () => () => {};
 const DEFAULT_CONFIG: MotionPlaybackConfig = {
   getCurrentFrame: () => 0,
   subscribeFrame: noopSubscribe,
+  getCurrentTimeSec: () => 0,
+  subscribeTime: noopSubscribe,
   fps: 30,
   durationInFrames: 1,
   width: 1080,
@@ -52,9 +58,12 @@ export function useMotionFrame(): number {
 export function useMotionFrameSubscription(): {
   subscribeFrame: SubscribeFrameFn;
   getCurrentFrame: () => number;
+  subscribeTime?: SubscribeTimeFn;
+  getCurrentTimeSec?: () => number;
 } {
-  const { subscribeFrame, getCurrentFrame } = useContext(MotionContext);
-  return { subscribeFrame, getCurrentFrame };
+  const { subscribeFrame, getCurrentFrame, subscribeTime, getCurrentTimeSec } =
+    useContext(MotionContext);
+  return { subscribeFrame, getCurrentFrame, subscribeTime, getCurrentTimeSec };
 }
 
 export function useMotionConfig(): MotionPlaybackConfig {

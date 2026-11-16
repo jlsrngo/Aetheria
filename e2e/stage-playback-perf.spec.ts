@@ -13,7 +13,7 @@ function writePerfInstrumentedFilm(dir: string) {
 <body style="margin:0;overflow:hidden;background:#090d16;">
 <canvas id="stage" width="1920" height="1080"></canvas>
 <script>
-window.AETHERIA_FILM = { title: "Smooth Perf Test", width: 1920, height: 1080, fps: 30, duration: 5 };
+window.AETHERIA_FILM = { title: "Smooth Perf Test", width: 1920, height: 1080, fps: 30, duration: 1.5 };
 const c = document.getElementById("stage");
 const ctx = c.getContext("2d");
 window.__renderCallCount = 0;
@@ -34,11 +34,48 @@ window.__ready = true;
   );
 }
 
+function findHostFfmpeg(): string | undefined {
+  if (process.env.AETHERIA_FFMPEG && fs.existsSync(process.env.AETHERIA_FFMPEG)) {
+    return process.env.AETHERIA_FFMPEG;
+  }
+  const localApp = process.env.LOCALAPPDATA || "";
+  const capcutRoot = path.join(localApp, "CapCut", "Apps");
+  if (fs.existsSync(capcutRoot)) {
+    for (const ent of fs.readdirSync(capcutRoot, { withFileTypes: true })) {
+      if (ent.isDirectory()) {
+        const candidate = path.join(capcutRoot, ent.name, "ffmpeg.exe");
+        if (fs.existsSync(candidate)) return candidate;
+      }
+    }
+  }
+  const pkgRoot = path.join(localApp, "Microsoft", "WinGet", "Packages");
+  if (fs.existsSync(pkgRoot)) {
+    for (const pkg of fs.readdirSync(pkgRoot)) {
+      if (!pkg.toLowerCase().includes("ffmpeg")) continue;
+      const stack = [path.join(pkgRoot, pkg)];
+      while (stack.length > 0) {
+        const cur = stack.pop()!;
+        for (const ent of fs.readdirSync(cur, { withFileTypes: true })) {
+          const full = path.join(cur, ent.name);
+          if (ent.isDirectory()) stack.push(full);
+          else if (ent.isFile() && ent.name.toLowerCase() === "ffmpeg.exe") {
+            return full;
+          }
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
 test.describe("Studio Stage Imperative Frame Playback Optimization E2E", () => {
   let stack: LiveStack;
 
   test.beforeEach(async () => {
-    stack = await startLiveStack();
+    const ffmpegBin = findHostFfmpeg();
+    stack = await startLiveStack({
+      env: ffmpegBin ? { AETHERIA_FFMPEG: ffmpegBin } : {},
+    });
     writePerfInstrumentedFilm(stack.workspaceDir);
   });
 
@@ -97,11 +134,62 @@ test.describe("Studio Stage Imperative Frame Playback Optimization E2E", () => {
       .evaluate(() => ({
         count: (window as unknown as { __renderCallCount?: number }).__renderCallCount ?? 0,
         t: (window as unknown as { __lastRenderedTime?: number }).__lastRenderedTime ?? 0,
+        previewFlag: Boolean(
+          (window as unknown as { __AETHERIA_PREVIEW_STAGE__?: boolean }).__AETHERIA_PREVIEW_STAGE__
+        ),
       }));
 
-    // Multiple frames delivered cleanly & time progressed continuously
+    // Multiple frames delivered cleanly, preview stage flag active, & time progressed continuously
+    expect(after.previewFlag).toBe(true);
     expect(after.count - before.count).toBeGreaterThanOrEqual(8);
     expect(after.t).toBeGreaterThan(before.t + 0.3);
+
+    // Part B: Build Rust Proxy MP4 preview and verify hardware <video> stage activates
+    const proxyBtn = page.getByTestId("studio-proxy-preview-btn");
+    await expect(proxyBtn).toBeVisible();
+    await proxyBtn.click();
+
+    await expect
+      .poll(
+        async () => {
+          const r = await fetch(
+            `${stack.engineUrl}/api/studio/proxy-preview?directory=${encodeURIComponent(stack.workspaceDir)}`,
+            { headers: { Authorization: stack.authHeader } }
+          );
+          const j = (await r.json()) as { data?: { state?: string; message?: string } };
+          if (j.data?.state === "error") {
+            throw new Error(`Proxy build failed on engine: ${j.data.message}`);
+          }
+          return j.data?.state;
+        },
+        { timeout: 45_000 }
+      )
+      .toBe("ready");
+
+    const proxyVideo = page.getByTestId("studio-proxy-video");
+    await expect(proxyVideo).toBeVisible({ timeout: 15_000 });
+    expect(
+      fs.existsSync(path.join(stack.workspaceDir, ".aetheria", "proxy_preview.mp4"))
+    ).toBe(true);
+
+    // Negative / failure path: building proxy in an empty folder without index.html returns HTTP 400
+    const emptyDir = path.join(stack.workspaceDir, "empty-no-film");
+    fs.mkdirSync(emptyDir, { recursive: true });
+    const badRes = await fetch(
+      `${stack.engineUrl}/api/studio/proxy-preview/build?directory=${encodeURIComponent(emptyDir)}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: stack.authHeader,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ directory: emptyDir }),
+      }
+    );
+    expect(badRes.status).toBe(400);
+    const badJson = (await badRes.json()) as { error?: string };
+    expect(badJson.error).toContain("No index.html found");
+
     expect(appErrors).toEqual([]);
   });
 });

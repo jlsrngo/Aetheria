@@ -10,6 +10,7 @@ import { CanvasMinimap } from "./CanvasMinimap";
 import { ClipEditModal } from "./ClipEditModal";
 import { EmptyHtmlStage } from "./HtmlFilmStage";
 import { HtmlMotionPlayer, type MotionPlayerHandle } from "./HtmlMotionPlayer";
+import { ProxyVideoStage } from "./ProxyVideoStage";
 import {
   CanvasGridOverlay,
   HorizontalRuler,
@@ -33,6 +34,7 @@ export const StudioPreview: React.FC = () => {
   const playerRef = useRef<MotionPlayerHandle>(null);
   const lastFrameSyncRef = useRef<number>(0);
   const [modalLayer, setModalLayer] = useState<VideoLayerSpec | null>(null);
+  const [proxyStreamUrl, setProxyStreamUrl] = useState<string | null>(null);
 
   const {
     activeComposition,
@@ -70,7 +72,7 @@ export const StudioPreview: React.FC = () => {
     (frame: number) => {
       if (playerRef.current?.isPlaying()) {
         const now = performance.now();
-        if (now - lastFrameSyncRef.current >= 50) {
+        if (now - lastFrameSyncRef.current >= 80) {
           lastFrameSyncRef.current = now;
           actions.setCurrentFrame(frame);
         }
@@ -169,9 +171,11 @@ export const StudioPreview: React.FC = () => {
         onUpdateCanvas={actions.updateCanvas}
         onRequestFullscreen={() => playerRef.current?.requestFullscreen()}
         onProjectChanged={() => {
+          setProxyStreamUrl(null);
           void actions.syncFromBackend();
           reloadFilm();
         }}
+        onProxyStreamChange={setProxyStreamUrl}
       />
 
       {canvas.showRulers && (
@@ -231,11 +235,17 @@ export const StudioPreview: React.FC = () => {
               <HtmlMotionPlayer
                 key={`${activeComposition.id}-${workspaceDims?.width ?? activeComposition.width}x${workspaceDims?.height ?? activeComposition.height}-${workspaceDims?.fps ?? activeComposition.fps}`}
                 ref={playerRef}
-                component={workspaceComponent ?? EmptyHtmlStage}
+                component={
+                  proxyStreamUrl && workspaceComponent
+                    ? (ProxyVideoStage as unknown as React.ComponentType<Record<string, unknown>>)
+                    : (workspaceComponent ?? EmptyHtmlStage)
+                }
                 inputProps={
-                  workspaceComponent
-                    ? activeComposition.props
-                    : { activeFolder: activeDirectory() ?? null }
+                  proxyStreamUrl && workspaceComponent
+                    ? { streamUrl: proxyStreamUrl }
+                    : workspaceComponent
+                      ? activeComposition.props
+                      : { activeFolder: activeDirectory() ?? null }
                 }
                 durationInFrames={workspaceDuration ?? durationInFrames}
                 fps={workspaceDims?.fps ?? activeComposition.fps}

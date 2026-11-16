@@ -13,6 +13,7 @@ import {
 import { cn } from "../../../lib/utils";
 import type { StudioCanvasSettings, StudioComposition } from "../../../types/studio";
 import { StudioProjectSelector } from "./StudioProjectSelector";
+import { StudioProxyControl } from "./StudioProxyControl";
 
 const GRID_PRESETS = [
   { label: "2×2", cols: 2, rows: 2 },
@@ -36,6 +37,7 @@ export interface StudioPreviewHeaderProps {
   onUpdateCanvas: (partial: Partial<StudioCanvasSettings>) => void;
   onRequestFullscreen: () => void;
   onProjectChanged: () => void;
+  onProxyStreamChange?: (streamUrl: string | null) => void;
 }
 
 export const StudioPreviewHeader: React.FC<StudioPreviewHeaderProps> = ({
@@ -47,6 +49,7 @@ export const StudioPreviewHeader: React.FC<StudioPreviewHeaderProps> = ({
   onUpdateCanvas,
   onRequestFullscreen,
   onProjectChanged,
+  onProxyStreamChange,
 }) => (
   <div className="border-b border-[var(--border-color)] bg-[var(--bg-panel)] flex flex-col text-[11px] shrink-0">
     {/* Row 1: Active composition title and resolution */}
@@ -63,6 +66,7 @@ export const StudioPreviewHeader: React.FC<StudioPreviewHeaderProps> = ({
       </div>
       <div className="flex items-center gap-2 shrink-0">
         <StudioProjectSelector onProjectChanged={onProjectChanged} />
+        <StudioProxyControl onProxyStreamChange={onProxyStreamChange} />
         <span className="px-1.5 py-0.5 rounded bg-[var(--bg-card)] border border-[var(--border-color)] font-mono text-[10px] text-amber-400 font-semibold shrink-0 whitespace-nowrap">
           {activeComposition.width}×{activeComposition.height} ({activeComposition.ratio})
         </span>

@@ -157,6 +157,8 @@ export const HtmlMotionPlayer = forwardRef<
     () => ({
       getCurrentFrame: playback.getCurrentFrame,
       subscribeFrame: playback.subscribeFrame,
+      getCurrentTimeSec: playback.getCurrentTimeSec,
+      subscribeTime: playback.subscribeTime,
       fps: safeFps,
       durationInFrames: safeDurationInFrames,
       width: compositionWidth,
@@ -169,6 +171,8 @@ export const HtmlMotionPlayer = forwardRef<
     [
       playback.getCurrentFrame,
       playback.subscribeFrame,
+      playback.getCurrentTimeSec,
+      playback.subscribeTime,
       safeFps,
       safeDurationInFrames,
       compositionWidth,

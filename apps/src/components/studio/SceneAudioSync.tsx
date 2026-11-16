@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
-import { useMotionConfig, useMotionFrame } from "./MotionContext";
+import { useMotionConfig, useMotionFrameSubscription } from "./MotionContext";
 import { type HtmlFilmScene } from "./htmlStageBundle";
 import {
   getEngineMediaAuthToken,
@@ -76,13 +76,27 @@ const SceneAudioSyncTracks: React.FC<SceneAudioSyncTracksProps> = ({
   resolvedTracks,
   onAudioError,
 }) => {
-  const frame = useMotionFrame();
+  const { subscribeFrame, getCurrentFrame } = useMotionFrameSubscription();
   const { fps, isPlaying, playbackRate, volume, isMuted } = useMotionConfig();
   const audioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
   const failedTracksRef = useRef<Map<string, string>>(new Map());
 
-  const latestClockRef = useRef({ frame, fps, isPlaying, playbackRate, volume, isMuted });
-  latestClockRef.current = { frame, fps, isPlaying, playbackRate, volume, isMuted };
+  const latestClockRef = useRef({
+    frame: getCurrentFrame(),
+    fps,
+    isPlaying,
+    playbackRate,
+    volume,
+    isMuted,
+  });
+  latestClockRef.current = {
+    frame: getCurrentFrame(),
+    fps,
+    isPlaying,
+    playbackRate,
+    volume,
+    isMuted,
+  };
 
   const emitFirstTrackError = useCallback(() => {
     const first = failedTracksRef.current.values().next();
@@ -148,21 +162,30 @@ const SceneAudioSyncTracks: React.FC<SceneAudioSyncTracksProps> = ({
     [emitFirstTrackError]
   );
 
-  useEffect(() => {
-    for (const track of resolvedTracks) {
-      const keyId = track.trackKey || `${track.scene.id}:${track.kind || "voice"}`;
-      const el = audioRefs.current.get(keyId);
-      if (el) {
-        syncSingleElement(
-          track.scene,
-          el,
-          track.volumeScale ?? 1,
-          keyId,
-          track.kind === "sfx" ? track.scene.sfx : track.scene.audio
-        );
+  const syncAllTracks = useCallback(
+    (nextFrame: number) => {
+      latestClockRef.current.frame = nextFrame;
+      for (const track of resolvedTracks) {
+        const keyId = track.trackKey || `${track.scene.id}:${track.kind || "voice"}`;
+        const el = audioRefs.current.get(keyId);
+        if (el) {
+          syncSingleElement(
+            track.scene,
+            el,
+            track.volumeScale ?? 1,
+            keyId,
+            track.kind === "sfx" ? track.scene.sfx : track.scene.audio
+          );
+        }
       }
-    }
-  }, [frame, fps, isPlaying, playbackRate, volume, isMuted, resolvedTracks, syncSingleElement]);
+    },
+    [resolvedTracks, syncSingleElement]
+  );
+
+  useEffect(() => {
+    syncAllTracks(getCurrentFrame());
+    return subscribeFrame(syncAllTracks);
+  }, [fps, isPlaying, playbackRate, volume, isMuted, syncAllTracks, subscribeFrame, getCurrentFrame]);
 
   useEffect(() => {
     const map = audioRefs.current;
