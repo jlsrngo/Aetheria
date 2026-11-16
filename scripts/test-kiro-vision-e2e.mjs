@@ -75,7 +75,11 @@ function getAssistantText(msgs) {
   const last = assistants[assistants.length - 1];
   if (!last) return { finished: false, text: "", error: null };
   const info = last.info ?? last;
-  const parts = Array.isArray(last.parts) ? last.parts : [];
+  const parts = Array.isArray(last.parts)
+    ? last.parts
+    : Array.isArray(last.content)
+      ? last.content
+      : [];
   const text = parts
     .filter((p) => p.type === "text" && typeof p.text === "string")
     .map((p) => p.text)
@@ -105,6 +109,7 @@ async function runVisionPromptCase(baseUrl, authHeader, dirQuery, modelID, imgDa
       method: "POST",
       authHeader,
       body: {
+        model: { providerID: "local-cli", modelID },
         prompt: {
           text: "Answer in 1 short sentence only without calling any tools or creating any files: what main illustration/object is shown inside the chat card on the right side of the attached image?",
           files: [
