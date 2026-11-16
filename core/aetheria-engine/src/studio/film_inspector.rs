@@ -92,6 +92,58 @@ fn extract_number_field(source: &str, key: &str) -> Option<f64> {
     num_str.parse::<f64>().ok()
 }
 
+fn resolve_js_numeric_var(scope: &str, ident: &str) -> Option<f64> {
+    if ident.is_empty() {
+        return None;
+    }
+    let bytes = scope.as_bytes();
+    let mut offset = 0usize;
+    while let Some(rel) = scope[offset..].find(ident) {
+        let pos = offset + rel;
+        let prev_ok = pos == 0
+            || !(bytes[pos - 1].is_ascii_alphanumeric() || bytes[pos - 1] == b'_' || bytes[pos - 1] == b'$');
+        let after = pos + ident.len();
+        let next_ok = after >= bytes.len()
+            || !(bytes[after].is_ascii_alphanumeric() || bytes[after] == b'_' || bytes[after] == b'$');
+        if prev_ok && next_ok {
+            let trimmed = scope[after..].trim_start();
+            if let Some(after_eq) = trimmed.strip_prefix('=') {
+                if !after_eq.starts_with('=') {
+                    let mut num_str = String::new();
+                    for ch in after_eq.trim_start().chars() {
+                        if ch.is_ascii_digit() || ch == '.' {
+                            num_str.push(ch);
+                        } else {
+                            break;
+                        }
+                    }
+                    if let Ok(v) = num_str.parse::<f64>() {
+                        return Some(v);
+                    }
+                }
+            }
+        }
+        offset = pos + ident.len();
+    }
+    None
+}
+
+fn extract_number_or_var(primary: &str, scope: &str, key: &str) -> Option<f64> {
+    if let Some(v) = extract_number_field(primary, key) {
+        return Some(v);
+    }
+    let start = find_property_value_start(primary, key)?;
+    let rest = primary[start..].trim_start();
+    let ident: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '$')
+        .collect();
+    if ident.is_empty() || ident.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    resolve_js_numeric_var(scope, &ident)
+}
+
 fn extract_string_field(source: &str, key: &str) -> Option<String> {
     let start = find_property_value_start(source, key)?;
     let rest = source[start..].trim_start();
@@ -600,17 +652,17 @@ pub fn inspect_workspace_film(html_path: &Path) -> FilmMeta {
     };
     let primary_meta = meta_obj_top.as_deref().unwrap_or(&top_source);
 
-    let width = extract_number_field(primary_meta, "width")
+    let width = extract_number_or_var(primary_meta, &top_source, "width")
         .or_else(|| extract_number_field(&top_source, "width"))
         .map(|v| (v.round() as u32).max(16))
         .or_else(|| extract_canvas_attr_u32(&script_source, "width"))
         .unwrap_or(1080);
-    let height = extract_number_field(primary_meta, "height")
+    let height = extract_number_or_var(primary_meta, &top_source, "height")
         .or_else(|| extract_number_field(&top_source, "height"))
         .map(|v| (v.round() as u32).max(16))
         .or_else(|| extract_canvas_attr_u32(&script_source, "height"))
         .unwrap_or(1920);
-    let fps = extract_number_field(primary_meta, "fps")
+    let fps = extract_number_or_var(primary_meta, &top_source, "fps")
         .or_else(|| extract_number_field(&top_source, "fps"))
         .map(|v| (v.round() as u32).max(1))
         .unwrap_or(30);
@@ -618,7 +670,7 @@ pub fn inspect_workspace_film(html_path: &Path) -> FilmMeta {
     let title = extract_string_field(primary_meta, "title")
         .or_else(|| extract_string_field(&top_source, "title"))
         .unwrap_or(default_title);
-    let mut duration = extract_number_field(primary_meta, "duration")
+    let mut duration = extract_number_or_var(primary_meta, &top_source, "duration")
         .or_else(|| extract_number_field(&top_source, "duration"))
         .unwrap_or(0.0);
 
@@ -846,6 +898,32 @@ mod tests {
 
         let meta = inspect_workspace_film(&html_path);
         assert!(meta.lint.valid, "vendor three.min.js must not fail project lint: {:?}", meta.lint.issues);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolves_variable_references_in_film_meta() {
+        let dir = std::env::temp_dir().join(format!("aetheria_film_vars_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let html = r#"<!DOCTYPE html><html><head><title>4K Globe</title></head><body>
+        <canvas id="c"></canvas>
+        <script>
+        var W = 3840, H = 2160, FPS = 30, DUR = 20;
+        window.__filmMeta = { title: "4K Globe", width: W, height: H, fps: FPS, duration: DUR };
+        window.renderAt = function(t) {};
+        window.__ready = true;
+        </script></body></html>"#;
+        let html_path = dir.join("index.html");
+        std::fs::write(&html_path, html).unwrap();
+
+        let meta = inspect_workspace_film(&html_path);
+        assert_eq!(meta.width, 3840);
+        assert_eq!(meta.height, 2160);
+        assert_eq!(meta.fps, 30);
+        assert_eq!(meta.duration, 20.0);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

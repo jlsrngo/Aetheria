@@ -210,6 +210,24 @@ async function main() {
     if (emptyMeta?.exists !== false) {
       throw new Error(`Empty active project leaked legacy root index.html: ${JSON.stringify(emptyMeta)}`);
     }
+
+    // Verify film_inspector resolves JS variable dimensions (e.g. var W = 3840, H = 2160)
+    const varSlug = "var-dims-project";
+    const varDir = path.join(tempWorkspace, "projects", varSlug);
+    fs.mkdirSync(varDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(varDir, "index.html"),
+      `<!DOCTYPE html><html><head><title>4K Var</title></head><body><canvas id="c"></canvas><script>var W=3840,H=2160,FPS=30,DUR=20;window.__filmMeta={title:"4K Var",width:W,height:H,fps:FPS,duration:DUR};window.renderAt=function(){};window.__ready=true;</script></body></html>`,
+      "utf8"
+    );
+    fs.writeFileSync(path.join(tempWorkspace, ".aetheria", "active-project.json"), JSON.stringify({ project: varSlug }), "utf8");
+    const varMetaRes = await api(baseUrl, `/api/studio/film-meta?${dirQuery}`, { authHeader });
+    const varMeta = varMetaRes.json?.data ?? varMetaRes.json;
+    console.log("[VAR_DIMS_CHECK]", `width=${varMeta?.width}`, `height=${varMeta?.height}`, `duration=${varMeta?.duration}`);
+    if (varMeta?.width !== 3840 || varMeta?.height !== 2160 || varMeta?.duration !== 20) {
+      throw new Error(`film-meta failed resolving JS variable dimensions: ${JSON.stringify(varMeta)}`);
+    }
+
     fs.writeFileSync(path.join(tempWorkspace, ".aetheria", "active-project.json"), JSON.stringify({ project: projectSlug }), "utf8");
 
     const t0 = Date.now();
