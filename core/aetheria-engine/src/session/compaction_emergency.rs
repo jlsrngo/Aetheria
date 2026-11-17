@@ -178,7 +178,15 @@ pub fn emergency_compact_messages(messages: &[Value]) -> Vec<Value> {
     compacted
 }
 
-/// Runs overflow compaction when a provider returns a context-overflow rejection (HTTP 400).
+fn truncate_utf8_bytes(text: &mut String, max_bytes: usize) {
+    if text.len() > max_bytes {
+        let mut end = max_bytes;
+        while end > 0 && !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.truncate(end);
+    }
+}
 /// Calls the model with OpenCode's compaction summary instruction, emits `session.compaction.*`
 /// events, and compacts `messages` down to the summary + latest active turn (falling back to
 /// deterministic emergency compaction if the summary request fails).
@@ -207,7 +215,7 @@ pub async fn compact_overflow_with_model(
         }
     }
     if transcript.len() > 24_000 {
-        transcript.truncate(24_000);
+        truncate_utf8_bytes(&mut transcript, 24_000);
     }
 
     let compaction_prompt = concat!(
@@ -322,6 +330,14 @@ mod tests {
         assert!(healed_summary.contains("sales.xlsx"));
         assert_eq!(healed[2]["role"], "user");
         assert_eq!(healed[2]["content"], "Now summarize the final total.");
+    }
+
+    #[test]
+    fn truncate_utf8_bytes_handles_multibyte_boundary() {
+        let mut s = "a".repeat(23_999) + "😀extra";
+        truncate_utf8_bytes(&mut s, 24_000);
+        assert_eq!(s.len(), 23_999);
+        assert!(std::str::from_utf8(s.as_bytes()).is_ok());
     }
 }
 

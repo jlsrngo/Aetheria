@@ -9,6 +9,53 @@ use std::sync::{Mutex, OnceLock};
 use super::resolve_isolated_path;
 use crate::session::message::emit_event;
 
+pub(crate) const SENSITIVE_ENV_VARS: &[&str] = &[
+    "AETHERIA_SERVER_PASSWORD",
+    "AETHERIA_SERVER_USERNAME",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "OPENROUTER_API_KEY",
+    "QWEN_API_KEY",
+    "DASHSCOPE_API_KEY",
+];
+
+fn sanitize_session_segment(session_id: &str) -> String {
+    let clean: String = session_id
+        .trim()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .collect();
+    if clean.is_empty() {
+        "default".to_string()
+    } else {
+        clean
+    }
+}
+
+pub(crate) fn validate_bash_command(command: &str) -> Result<(), String> {
+    let lower = command.to_lowercase();
+    let forbidden_patterns = [
+        ("dev-server-password", "Reading engine server credentials is blocked."),
+        (".aetheria/credentials", "Reading credential storage is blocked."),
+        (".aetheria\\credentials", "Reading credential storage is blocked."),
+        ("aetheria_server_password", "Accessing server password env var is blocked."),
+        ("diskpart", "Host disk management commands are blocked."),
+        ("reg delete", "Modifying Windows registry hives is blocked."),
+        ("rm -rf /", "Root filesystem deletion is blocked."),
+        ("del /s /q c:\\", "System drive deletion is blocked."),
+        ("rd /s /q c:\\", "System drive deletion is blocked."),
+    ];
+    for (pat, reason) in forbidden_patterns {
+        if lower.contains(pat) {
+            return Err(format!("Blocked unsafe shell command: {}", reason));
+        }
+    }
+    Ok(())
+}
+
 static SESSION_CWD_MAP: OnceLock<Mutex<HashMap<String, PathBuf>>> = OnceLock::new();
 
 fn session_cwd_store() -> &'static Mutex<HashMap<String, PathBuf>> {
@@ -54,9 +101,15 @@ pub async fn execute_bash(
     if command.is_empty() {
         return json!({ "error": "Command is required" });
     }
+    if let Err(err) = validate_bash_command(command) {
+        return json!({ "ok": false, "error": err });
+    }
 
-    // Ensure .aetheria/scratch exists
-    let scratch_dir = Path::new(workspace_dir).join(".aetheria").join("scratch");
+    // Isolate scratch directory per session so parallel subagents do not wipe each other
+    let scratch_dir = Path::new(workspace_dir)
+        .join(".aetheria")
+        .join("scratch")
+        .join(sanitize_session_segment(session_id));
     let _ = std::fs::create_dir_all(&scratch_dir);
 
     // Determine working directory (strictly inside workspace; persists across session bash calls)
@@ -209,6 +262,9 @@ async fn run_command_with_interrupt(
     }
     cmd.env("PYTHONIOENCODING", "utf-8");
     cmd.env("PYTHONUTF8", "1");
+    for key in SENSITIVE_ENV_VARS {
+        cmd.env_remove(key);
+    }
     cmd.stdin(std::process::Stdio::null());
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
@@ -360,5 +416,12 @@ mod tests {
         }
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn validate_bash_command_blocks_secret_reads_and_host_destruction() {
+        assert!(validate_bash_command("cat ~/.aetheria/dev-server-password").is_err());
+        assert!(validate_bash_command("reg delete HKLM\\Software").is_err());
+        assert!(validate_bash_command("ffprobe -v error audio/scene1.wav").is_ok());
     }
 }

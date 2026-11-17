@@ -28,7 +28,7 @@ pub fn pick_ephemeral_port() -> Result<u16, String> {
     Ok(listener.local_addr().map_err(|e| e.to_string())?.port())
 }
 
-async fn serve_static_film_file(film_root: &Path, ws_root: &Path, rel_raw: &str) -> Response {
+async fn serve_static_film_file(film_root: &Path, _ws_root: &Path, rel_raw: &str) -> Response {
     let clean = rel_raw.trim().trim_start_matches('/').replace('\\', "/");
     let target_rel = if clean.is_empty() { "index.html" } else { clean.as_str() };
     if target_rel.contains("..") || target_rel.contains('\0') {
@@ -51,10 +51,7 @@ async fn serve_static_film_file(film_root: &Path, ws_root: &Path, rel_raw: &str)
         return ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response();
     }
 
-    let mut search_roots = vec![film_root.to_path_buf(), film_root.join("public")];
-    if ws_root != film_root {
-        search_roots.push(ws_root.to_path_buf());
-    }
+    let search_roots = [film_root.to_path_buf(), film_root.join("public")];
 
     for root in search_roots {
         let candidate = root.join(target_rel);

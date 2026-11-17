@@ -7,30 +7,58 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 fn resolve_safe_path(base_dir: &str, relative_path: &str) -> Result<PathBuf, String> {
-    let base = Path::new(base_dir).canonicalize().map_err(|e| format!("Invalid project directory: {}", e))?;
-    let target = base.join(relative_path);
-    
-    // Normalize target path without symlink escapes
-    let normalized = if target.exists() {
-        target.canonicalize().map_err(|e| e.to_string())?
-    } else {
-        // If file doesn't exist yet, check its parent
-        if let Some(parent) = target.parent() {
-            if parent.exists() {
-                parent.canonicalize().map_err(|e| e.to_string())?.join(target.file_name().unwrap_or_default())
-            } else {
-                target
-            }
-        } else {
-            target
-        }
-    };
+    let base = Path::new(base_dir)
+        .canonicalize()
+        .map_err(|e| format!("Invalid project directory: {}", e))?;
 
-    if !normalized.starts_with(&base) {
-        return Err("Path traversal violation: Access outside active project folder is strictly forbidden.".to_string());
+    let rel = Path::new(relative_path.trim());
+    if rel.as_os_str().is_empty() {
+        return Err("Relative path cannot be empty".to_string());
+    }
+    let mut clean_rel = PathBuf::new();
+    for comp in rel.components() {
+        match comp {
+            std::path::Component::Normal(seg) => clean_rel.push(seg),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir
+            | std::path::Component::RootDir
+            | std::path::Component::Prefix(_) => {
+                return Err(
+                    "Path traversal violation: Access outside active project folder is strictly forbidden."
+                        .to_string(),
+                );
+            }
+        }
     }
 
-    Ok(normalized)
+    let target = base.join(&clean_rel);
+    if target.exists() {
+        let canonical = target.canonicalize().map_err(|e| e.to_string())?;
+        if !canonical.starts_with(&base) {
+            return Err(
+                "Path traversal violation: Symlink escapes active project folder.".to_string(),
+            );
+        }
+        return Ok(canonical);
+    }
+
+    // Walk up to the deepest existing ancestor to guard against symlink escapes on new subdirs
+    let mut probe = target.clone();
+    while let Some(parent) = probe.parent() {
+        if parent.exists() {
+            let canon_parent = parent.canonicalize().map_err(|e| e.to_string())?;
+            if !canon_parent.starts_with(&base) {
+                return Err(
+                    "Path traversal violation: Parent directory escapes active project folder."
+                        .to_string(),
+                );
+            }
+            break;
+        }
+        probe = parent.to_path_buf();
+    }
+
+    Ok(target)
 }
 
 #[derive(serde::Serialize, Debug)]
@@ -111,8 +139,13 @@ mod tests {
         let files = list_project_files(current_dir.clone()).unwrap();
         assert!(!files.is_empty());
         
-        // Test traversal protection
-        let err = read_project_file(current_dir, "../../escaped.txt".to_string());
-        assert!(err.is_err());
+        // Test traversal protection (existing and nonexistent multi-level parent)
+        assert!(read_project_file(current_dir.clone(), "../../escaped.txt".to_string()).is_err());
+        assert!(write_project_file(
+            current_dir,
+            "../../nonexistent_dir/escaped.txt".to_string(),
+            "bad".to_string()
+        )
+        .is_err());
     }
 }

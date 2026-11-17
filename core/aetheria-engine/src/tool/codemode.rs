@@ -30,6 +30,19 @@ pub fn codemode_tool_definition() -> Value {
     })
 }
 
+fn sanitize_session_segment(session_id: &str) -> String {
+    let clean: String = session_id
+        .trim()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .collect();
+    if clean.is_empty() {
+        "default".to_string()
+    } else {
+        clean
+    }
+}
+
 pub async fn execute_codemode(
     session_id: &str,
     workspace_dir: &str,
@@ -46,21 +59,32 @@ pub async fn execute_codemode(
         return json!({ "ok": false, "error": "codemode `code` parameter is required" });
     }
 
-    let sandbox_dir = Path::new(workspace_dir).join(".aetheria").join("codemode");
+    let sid_dir = sanitize_session_segment(session_id);
+    let sandbox_dir = Path::new(workspace_dir)
+        .join(".aetheria")
+        .join("codemode")
+        .join(&sid_dir);
     let _ = std::fs::create_dir_all(&sandbox_dir);
     let script_file = sandbox_dir.join(format!("run_{}.cjs", crate::paths::now_ms()));
 
-    let escaped_ws = workspace_dir.replace('\\', "\\\\").replace('"', "\\\"");
     let harness_code = format!(
         r#"const fs = require("fs");
 const path = require("path");
-const workspaceDir = "{escaped_ws}";
+const workspaceDir = fs.realpathSync(process.env.AETHERIA_CODEMODE_WS || process.cwd());
 function resolveSafe(rel) {{
   const target = path.resolve(workspaceDir, rel);
-  if (!target.toLowerCase().startsWith(path.resolve(workspaceDir).toLowerCase())) {{
+  const existing = fs.existsSync(target)
+    ? fs.realpathSync(target)
+    : (() => {{
+        const parent = path.dirname(target);
+        const base = fs.existsSync(parent) ? fs.realpathSync(parent) : parent;
+        return path.join(base, path.basename(target));
+      }})();
+  const relPath = path.relative(workspaceDir, existing);
+  if (relPath.startsWith("..") || path.isAbsolute(relPath)) {{
     throw new Error("Path outside workspace: " + rel);
   }}
-  return target;
+  return existing;
 }}
 function readJson(rel) {{
   return JSON.parse(fs.readFileSync(resolveSafe(rel), "utf8"));
@@ -100,7 +124,12 @@ function writeJson(rel, data) {{
         const CREATE_NO_WINDOW: u32 = 0x08000000;
 
         let mut cmd = Command::new("node");
-        cmd.arg(&script_path_cloned).current_dir(&ws_cloned);
+        cmd.arg(&script_path_cloned)
+            .current_dir(&ws_cloned)
+            .env("AETHERIA_CODEMODE_WS", &ws_cloned);
+        for key in crate::tool::bash::SENSITIVE_ENV_VARS {
+            cmd.env_remove(key);
+        }
         #[cfg(windows)]
         cmd.creation_flags(CREATE_NO_WINDOW);
         cmd.output()
@@ -109,6 +138,7 @@ function writeJson(rel, data) {{
     .unwrap_or_else(|e| Err(std::io::Error::other(e.to_string())));
 
     let _ = std::fs::remove_file(&script_file);
+    let _ = std::fs::remove_dir(&sandbox_dir);
 
     match exec_res {
         Ok(output) => {

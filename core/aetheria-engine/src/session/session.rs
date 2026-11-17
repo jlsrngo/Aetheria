@@ -35,14 +35,25 @@ pub fn store_file_path() -> PathBuf {
     }
 }
 
-pub fn load_store() -> SessionStoreData {
-    let p = store_file_path();
-    if let Ok(raw) = std::fs::read_to_string(&p) {
-        if let Ok(parsed) = serde_json::from_str::<SessionStoreData>(&raw) {
-            if !parsed.sessions.is_empty() || !parsed.messages.is_empty() {
-                return parsed;
+pub fn load_store_from(p: &std::path::Path) -> SessionStoreData {
+    let bak = p.with_extension("json.bak");
+    for candidate in [p, bak.as_path()] {
+        if let Ok(raw) = std::fs::read_to_string(candidate) {
+            if let Ok(parsed) = serde_json::from_str::<SessionStoreData>(&raw) {
+                if !parsed.sessions.is_empty() || !parsed.messages.is_empty() {
+                    return parsed;
+                }
             }
         }
+    }
+    SessionStoreData::default()
+}
+
+pub fn load_store() -> SessionStoreData {
+    let p = store_file_path();
+    let loaded = load_store_from(&p);
+    if !loaded.sessions.is_empty() || !loaded.messages.is_empty() {
+        return loaded;
     }
     #[cfg(test)]
     return SessionStoreData::default();
@@ -69,11 +80,32 @@ pub fn load_store() -> SessionStoreData {
     }
 }
 
-pub fn save_store(store: &SessionStoreData) {
-    let p = store_file_path();
-    if let Ok(raw) = serde_json::to_string(store) {
-        let _ = std::fs::write(p, raw);
+pub fn save_store_to(p: &std::path::Path, store: &SessionStoreData) {
+    if let Some(parent) = p.parent() {
+        let _ = std::fs::create_dir_all(parent);
     }
+    if let Ok(raw) = serde_json::to_string(store) {
+        let tmp = p.with_extension(format!("json.tmp.{}", std::process::id()));
+        let bak = p.with_extension("json.bak");
+        let write_ok = (|| -> std::io::Result<()> {
+            use std::io::Write;
+            let mut f = std::fs::File::create(&tmp)?;
+            f.write_all(raw.as_bytes())?;
+            f.sync_all()?;
+            if p.exists() {
+                let _ = std::fs::copy(p, &bak);
+            }
+            std::fs::rename(&tmp, p)?;
+            Ok(())
+        })();
+        if write_ok.is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+    }
+}
+
+pub fn save_store(store: &SessionStoreData) {
+    save_store_to(&store_file_path(), store);
 }
 
 pub fn with_store<F, R>(f: F) -> R
@@ -99,5 +131,33 @@ pub fn is_active_run(session_id: &str) -> bool {
     let m = ACTIVE_RUNS.get_or_init(|| Mutex::new(HashMap::new()));
     let guard = m.lock().unwrap_or_else(|e| e.into_inner());
     guard.get(session_id).copied().unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn save_and_load_store_recovers_from_backup_when_primary_corrupt() {
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "aetheria_session_store_bak_{}",
+            crate::paths::now_ms()
+        ));
+        std::fs::create_dir_all(&tmp_dir).expect("create temp dir");
+        let p = tmp_dir.join("sessions-store.json");
+        let bak = p.with_extension("json.bak");
+
+        let mut data = SessionStoreData::default();
+        data.sessions.insert("s_test".to_string(), serde_json::json!({ "id": "s_test" }));
+        save_store_to(&p, &data);
+        data.sessions.insert("s_test_2".to_string(), serde_json::json!({ "id": "s_test_2" }));
+        save_store_to(&p, &data);
+
+        assert!(bak.exists(), "backup file should exist after second save");
+        std::fs::write(&p, "{corrupted json").expect("corrupt primary");
+        let recovered = load_store_from(&p);
+        assert!(recovered.sessions.contains_key("s_test"));
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
 }
 

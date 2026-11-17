@@ -173,23 +173,26 @@ pub async fn execute_fetch_web_image(workspace_dir: &str, arguments: &Value) -> 
     }
 
     for img_url in &candidate_urls {
-        if let Ok(resp) = client.get(img_url).send().await {
-            if resp.status().is_success() {
-                if let Ok(bytes) = resp.bytes().await {
-                    if bytes.len() > 1024 {
-                        if std::fs::write(&target_out, &bytes).is_ok() {
-                            return json!({
-                                "success": true,
-                                "query": query,
-                                "sourceUrl": img_url,
-                                "outputPath": target_out.to_string_lossy().to_string(),
-                                "assetPath": asset_rel,
-                                "assetUrl": format!("/{}", asset_rel),
-                                "bytes": bytes.len(),
-                                "message": format!("Downloaded internet image to {} (use '/{}' in index.html / script/scene*.js)", asset_rel, asset_rel)
-                            });
-                        }
-                    }
+        if let Ok((status, bytes)) = super::webfetch::fetch_bounded_public_url(
+            img_url,
+            "AetheriaNexus/1.0 (https://github.com/jlsrngo/AetheriaNexus; studio@aetheria.ai)",
+            15 * 1024 * 1024,
+            15,
+        )
+        .await
+        {
+            if (200..300).contains(&status) && bytes.len() > 1024 {
+                if std::fs::write(&target_out, &bytes).is_ok() {
+                    return json!({
+                        "success": true,
+                        "query": query,
+                        "sourceUrl": img_url,
+                        "outputPath": target_out.to_string_lossy().to_string(),
+                        "assetPath": asset_rel,
+                        "assetUrl": format!("/{}", asset_rel),
+                        "bytes": bytes.len(),
+                        "message": format!("Downloaded internet image to {} (use '/{}' in index.html / script/scene*.js)", asset_rel, asset_rel)
+                    });
                 }
             }
         }

@@ -40,13 +40,31 @@ pub fn execute_apply_patch(session_id: &str, workspace_dir: &str, arguments: &Va
 
     let mut touched_files: Vec<String> = Vec::new();
     let mut touched_paths: Vec<std::path::PathBuf> = Vec::new();
+    let mut rollback_log: Vec<(std::path::PathBuf, Option<Vec<u8>>)> = Vec::new();
     let mut current_op: Option<(&str, String)> = None;
     let mut current_lines: Vec<&str> = Vec::new();
+
+    let rollback_all = |log: &[(std::path::PathBuf, Option<Vec<u8>>)]| {
+        for (path, prev_opt) in log.iter().rev() {
+            match prev_opt {
+                Some(bytes) => {
+                    if let Some(parent) = path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    let _ = std::fs::write(path, bytes);
+                }
+                None => {
+                    let _ = std::fs::remove_file(path);
+                }
+            }
+        }
+    };
 
     let flush_op = |op: Option<(&str, String)>,
                     lines: &[&str],
                     touched: &mut Vec<String>,
-                    written: &mut Vec<std::path::PathBuf>|
+                    written: &mut Vec<std::path::PathBuf>,
+                    log: &mut Vec<(std::path::PathBuf, Option<Vec<u8>>)>|
      -> Result<(), String> {
         let Some((kind, rel_path)) = op else {
             return Ok(());
@@ -54,8 +72,11 @@ pub fn execute_apply_patch(session_id: &str, workspace_dir: &str, arguments: &Va
         let target = resolve_isolated_path(workspace_dir, &rel_path)?;
         match kind {
             "delete" => {
+                validate_writable_runtime_path(&target)?;
                 if target.exists() {
-                    let _ = std::fs::remove_file(&target);
+                    let prev = std::fs::read(&target).map_err(|e| e.to_string())?;
+                    log.push((target.clone(), Some(prev)));
+                    std::fs::remove_file(&target).map_err(|e| e.to_string())?;
                     touched.push(format!("D {}", rel_path));
                 }
             }
@@ -64,13 +85,19 @@ pub fn execute_apply_patch(session_id: &str, workspace_dir: &str, arguments: &Va
                 if let Some(parent) = target.parent() {
                     let _ = std::fs::create_dir_all(parent);
                 }
+                let prev = if target.exists() {
+                    Some(std::fs::read(&target).map_err(|e| e.to_string())?)
+                } else {
+                    None
+                };
                 let content: String = lines
                     .iter()
                     .map(|l| l.strip_prefix('+').unwrap_or(l))
                     .collect::<Vec<_>>()
                     .join("\n");
-                crate::files::record_document_change(workspace_dir, &rel_path, "", &content);
+                log.push((target.clone(), prev));
                 std::fs::write(&target, &content).map_err(|e| e.to_string())?;
+                crate::files::record_document_change(workspace_dir, &rel_path, "", &content);
                 touched.push(format!("A {}", rel_path));
                 written.push(target);
             }
@@ -80,13 +107,14 @@ pub fn execute_apply_patch(session_id: &str, workspace_dir: &str, arguments: &Va
                     format!("Cannot read '{}' for update patch: {}", rel_path, e)
                 })?;
                 let updated = apply_unified_lines_to_content(&existing, lines)?;
+                log.push((target.clone(), Some(existing.as_bytes().to_vec())));
+                std::fs::write(&target, &updated).map_err(|e| e.to_string())?;
                 crate::files::record_document_change(
                     workspace_dir,
                     &rel_path,
                     &existing,
                     &updated,
                 );
-                std::fs::write(&target, &updated).map_err(|e| e.to_string())?;
                 touched.push(format!("M {}", rel_path));
                 written.push(target);
             }
@@ -101,19 +129,40 @@ pub fn execute_apply_patch(session_id: &str, workspace_dir: &str, arguments: &Va
             continue;
         }
         if let Some(path) = trimmed.strip_prefix("*** Add File:") {
-            if let Err(e) = flush_op(current_op.take(), &current_lines, &mut touched_files, &mut touched_paths) {
+            if let Err(e) = flush_op(
+                current_op.take(),
+                &current_lines,
+                &mut touched_files,
+                &mut touched_paths,
+                &mut rollback_log,
+            ) {
+                rollback_all(&rollback_log);
                 return json!({ "ok": false, "error": e });
             }
             current_lines.clear();
             current_op = Some(("add", path.trim().to_string()));
         } else if let Some(path) = trimmed.strip_prefix("*** Update File:") {
-            if let Err(e) = flush_op(current_op.take(), &current_lines, &mut touched_files, &mut touched_paths) {
+            if let Err(e) = flush_op(
+                current_op.take(),
+                &current_lines,
+                &mut touched_files,
+                &mut touched_paths,
+                &mut rollback_log,
+            ) {
+                rollback_all(&rollback_log);
                 return json!({ "ok": false, "error": e });
             }
             current_lines.clear();
             current_op = Some(("update", path.trim().to_string()));
         } else if let Some(path) = trimmed.strip_prefix("*** Delete File:") {
-            if let Err(e) = flush_op(current_op.take(), &current_lines, &mut touched_files, &mut touched_paths) {
+            if let Err(e) = flush_op(
+                current_op.take(),
+                &current_lines,
+                &mut touched_files,
+                &mut touched_paths,
+                &mut rollback_log,
+            ) {
+                rollback_all(&rollback_log);
                 return json!({ "ok": false, "error": e });
             }
             current_lines.clear();
@@ -123,7 +172,14 @@ pub fn execute_apply_patch(session_id: &str, workspace_dir: &str, arguments: &Va
         }
     }
 
-    if let Err(e) = flush_op(current_op.take(), &current_lines, &mut touched_files, &mut touched_paths) {
+    if let Err(e) = flush_op(
+        current_op.take(),
+        &current_lines,
+        &mut touched_files,
+        &mut touched_paths,
+        &mut rollback_log,
+    ) {
+        rollback_all(&rollback_log);
         return json!({ "ok": false, "error": e });
     }
 
@@ -192,5 +248,37 @@ fn apply_unified_lines_to_content(original: &str, patch_lines: &[&str]) -> Resul
     }
     apply_hunk(&mut content, &old_block, &new_block)?;
     Ok(content)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn apply_patch_rolls_back_earlier_edits_on_failure() {
+        let tmp = std::env::temp_dir().join(format!("aetheria_patch_rb_{}", crate::paths::now_ms()));
+        std::fs::create_dir_all(&tmp).expect("mkdir");
+        let file_a = tmp.join("a.txt");
+        std::fs::write(&file_a, "line1\nold\nline3\n").expect("write a");
+        let ws = tmp.to_string_lossy().to_string();
+
+        let patch = concat!(
+            "*** Begin Patch\n",
+            "*** Update File: a.txt\n",
+            " line1\n",
+            "-old\n",
+            "+new\n",
+            "*** Update File: missing.txt\n",
+            "-nope\n",
+            "+never\n",
+            "*** End Patch\n",
+        );
+
+        let res = execute_apply_patch("sess1", &ws, &json!({ "patchText": patch }));
+        assert_eq!(res.get("ok").and_then(Value::as_bool), Some(false));
+        let after_a = std::fs::read_to_string(&file_a).expect("read a");
+        assert_eq!(after_a, "line1\nold\nline3\n");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 }
 
