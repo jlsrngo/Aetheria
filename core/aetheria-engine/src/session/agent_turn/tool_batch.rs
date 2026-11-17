@@ -15,6 +15,7 @@ struct PreparedCall {
     args_str: String,
     args_val: Value,
     syntax_error: Option<String>,
+    policy_error: Option<String>,
     loop_warning: Option<String>,
     tool_start: u64,
 }
@@ -31,6 +32,7 @@ pub(crate) async fn execute_tool_batch(
     assistant_msg_id: &str,
     tool_calls: Vec<Value>,
     tools_disabled: bool,
+    active_profile: crate::tool::profiles::ToolProfile,
     model_supports_vision: bool,
     doom_loop_detector: &mut DoomLoopDetector,
     content_parts: &mut Vec<Value>,
@@ -71,7 +73,13 @@ pub(crate) async fn execute_tool_batch(
             &format!("🔧 Executing tool '{}' with input: {}", display_name, args_str),
         );
 
-        let loop_warning = if tools_disabled || syntax_error.is_some() {
+        let policy_error = if tools_disabled || syntax_error.is_some() {
+            None
+        } else {
+            crate::tool::profiles::check_tool_allowed_runtime(active_profile, &fn_name).err()
+        };
+
+        let loop_warning = if tools_disabled || syntax_error.is_some() || policy_error.is_some() {
             None
         } else {
             let args_canonical =
@@ -85,6 +93,7 @@ pub(crate) async fn execute_tool_batch(
             args_str,
             args_val,
             syntax_error,
+            policy_error,
             loop_warning,
             tool_start,
         });
@@ -106,6 +115,12 @@ pub(crate) async fn execute_tool_batch(
                 json!({ "ok": false, "error": err_msg, "blocked": true, "syntaxError": true }),
                 true,
             )
+        } else if let Some(err_msg) = &pc.policy_error {
+            crate::paths::log_engine(
+                "tool",
+                &format!("🛑 Tool '{}' blocked by active profile: {}", pc.fn_name, err_msg),
+            );
+            (json!({ "ok": false, "error": err_msg, "blocked": true }), true)
         } else if let Some(warning) = &pc.loop_warning {
             crate::paths::log_engine(
                 "tool",
@@ -292,6 +307,7 @@ mod tests {
             "msg_test_g6",
             tc.clone(),
             false,
+            crate::tool::profiles::ToolProfile::General,
             true,
             &mut detector1,
             &mut parts1,
@@ -322,6 +338,7 @@ mod tests {
             "msg_test_g6_txt",
             tc,
             false,
+            crate::tool::profiles::ToolProfile::General,
             false,
             &mut detector2,
             &mut parts2,

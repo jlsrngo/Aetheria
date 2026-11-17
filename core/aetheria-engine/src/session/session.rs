@@ -80,32 +80,74 @@ pub fn load_store() -> SessionStoreData {
     }
 }
 
-pub fn save_store_to(p: &std::path::Path, store: &SessionStoreData) {
+pub fn save_store_raw_to(p: &std::path::Path, raw: &str) {
     if let Some(parent) = p.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    if let Ok(raw) = serde_json::to_string(store) {
-        let tmp = p.with_extension(format!("json.tmp.{}", std::process::id()));
-        let bak = p.with_extension("json.bak");
-        let write_ok = (|| -> std::io::Result<()> {
-            use std::io::Write;
-            let mut f = std::fs::File::create(&tmp)?;
-            f.write_all(raw.as_bytes())?;
-            f.sync_all()?;
-            if p.exists() {
-                let _ = std::fs::copy(p, &bak);
-            }
-            std::fs::rename(&tmp, p)?;
-            Ok(())
-        })();
-        if write_ok.is_err() {
-            let _ = std::fs::remove_file(&tmp);
+    let tmp = p.with_extension(format!("json.tmp.{}", std::process::id()));
+    let bak = p.with_extension("json.bak");
+    let write_ok = (|| -> std::io::Result<()> {
+        std::fs::write(&tmp, raw.as_bytes())?;
+        if p.exists() {
+            let _ = std::fs::remove_file(&bak);
+            let _ = std::fs::rename(p, &bak);
         }
+        if let Err(err) = std::fs::rename(&tmp, p) {
+            if !p.exists() && bak.exists() {
+                let _ = std::fs::rename(&bak, p);
+            }
+            return Err(err);
+        }
+        Ok(())
+    })();
+    if write_ok.is_err() {
+        let _ = std::fs::remove_file(&tmp);
     }
 }
 
+pub fn save_store_to(p: &std::path::Path, store: &SessionStoreData) {
+    if let Ok(raw) = serde_json::to_string(store) {
+        save_store_raw_to(p, &raw);
+    }
+}
+
+fn enqueue_background_store_write(p: PathBuf, raw: String) {
+    static WRITER_SLOT: OnceLock<std::sync::Arc<(Mutex<Option<(PathBuf, String)>>, std::sync::Condvar)>> =
+        OnceLock::new();
+    let pair = WRITER_SLOT.get_or_init(|| {
+        let shared = std::sync::Arc::new((
+            Mutex::new(None::<(PathBuf, String)>),
+            std::sync::Condvar::new(),
+        ));
+        let worker_shared = std::sync::Arc::clone(&shared);
+        let _ = std::thread::Builder::new()
+            .name("aetheria-session-persist".to_string())
+            .spawn(move || {
+                let (lock, cv) = &*worker_shared;
+                loop {
+                    let next_item = {
+                        let mut guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+                        while guard.is_none() {
+                            guard = cv.wait(guard).unwrap_or_else(|e| e.into_inner());
+                        }
+                        guard.take()
+                    };
+                    if let Some((path, payload)) = next_item {
+                        save_store_raw_to(&path, &payload);
+                    }
+                }
+            });
+        shared
+    });
+    let mut guard = pair.0.lock().unwrap_or_else(|e| e.into_inner());
+    *guard = Some((p, raw));
+    pair.1.notify_one();
+}
+
 pub fn save_store(store: &SessionStoreData) {
-    save_store_to(&store_file_path(), store);
+    if let Ok(raw) = serde_json::to_string(store) {
+        enqueue_background_store_write(store_file_path(), raw);
+    }
 }
 
 pub fn with_store<F, R>(f: F) -> R

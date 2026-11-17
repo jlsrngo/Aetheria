@@ -144,10 +144,13 @@ pub async fn run_agent_turn(
         client,
     } = resolve_provider_connection(session_id, provider_id, &current_provider_id, &cfg).await;
 
+    let active_profile = if should_attach_document_tools(prompt_text, history) {
+        crate::tool::profiles::resolve_coordinator_profile(workspace_dir, prompt_text, history)
+    } else {
+        crate::tool::profiles::ToolProfile::GeneralChat
+    };
     let tools_def = if should_attach_document_tools(prompt_text, history) {
-        let profile =
-            crate::tool::profiles::resolve_coordinator_profile(workspace_dir, prompt_text, history);
-        crate::tool::profiles::filter_tools_for_profile(profile, build_tool_definitions())
+        crate::tool::profiles::filter_tools_for_profile(active_profile, build_tool_definitions())
     } else {
         Vec::new()
     };
@@ -530,6 +533,7 @@ pub async fn run_agent_turn(
             &assistant_msg_id,
             tool_calls,
             step_limit_reached,
+            active_profile,
             step_vision_enabled,
             &mut doom_loop_detector,
             &mut content_parts,

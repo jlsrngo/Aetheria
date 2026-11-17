@@ -74,12 +74,24 @@ pub fn execute_subagent<'a>(
             .get("prompt")
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        let subagent_type = arguments
+        let raw_subagent_type = arguments
             .get("agent")
             .or_else(|| arguments.get("subagent_type"))
             .or_else(|| arguments.get("type"))
             .and_then(|v| v.as_str())
             .unwrap_or("general");
+        let subagent_type_owned = crate::tool::profiles::ToolProfile::from_subagent_type(raw_subagent_type)
+            .as_str()
+            .to_string();
+        let subagent_type: &str = if raw_subagent_type.trim().is_empty() {
+            "general"
+        } else if subagent_type_owned == "general"
+            && !matches!(raw_subagent_type.trim().to_ascii_lowercase().as_str(), "general")
+        {
+            raw_subagent_type.trim()
+        } else {
+            &subagent_type_owned
+        };
         let model_override = arguments
             .get("model")
             .and_then(|v| v.as_str())

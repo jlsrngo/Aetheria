@@ -82,14 +82,17 @@ fn save_job_store(store: &JobStoreData) {
         let tmp = p.with_extension(format!("json.tmp.{}", std::process::id()));
         let bak = p.with_extension("json.bak");
         let write_ok = (|| -> std::io::Result<()> {
-            use std::io::Write;
-            let mut f = std::fs::File::create(&tmp)?;
-            f.write_all(raw.as_bytes())?;
-            f.sync_all()?;
+            std::fs::write(&tmp, raw.as_bytes())?;
             if p.exists() {
-                let _ = std::fs::copy(&p, &bak);
+                let _ = std::fs::remove_file(&bak);
+                let _ = std::fs::rename(&p, &bak);
             }
-            std::fs::rename(&tmp, &p)?;
+            if let Err(err) = std::fs::rename(&tmp, &p) {
+                if !p.exists() && bak.exists() {
+                    let _ = std::fs::rename(&bak, &p);
+                }
+                return Err(err);
+            }
             Ok(())
         })();
         if write_ok.is_err() {

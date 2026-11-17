@@ -16,6 +16,7 @@ struct PreparedSubagentCall {
     fn_name: String,
     parsed_args: Value,
     syntax_error: Option<String>,
+    policy_error: Option<String>,
     loop_error: Option<String>,
 }
 
@@ -58,7 +59,14 @@ pub(crate) async fn execute_subagent_tool_calls(
             Err(repair_err) => (json!({}), Some(repair_err)),
         };
 
-        let loop_error = if syntax_error.is_none() {
+        let sub_profile = crate::tool::profiles::ToolProfile::from_subagent_type(subagent_type);
+        let policy_error = if fn_name == "question" {
+            Some("Tool 'question' is unavailable inside subagents.".to_string())
+        } else {
+            crate::tool::profiles::check_tool_allowed_runtime(sub_profile, &fn_name).err()
+        };
+
+        let loop_error = if syntax_error.is_none() && policy_error.is_none() {
             let canonical_args =
                 serde_json::to_string(&parsed_args).unwrap_or_else(|_| raw_args.to_string());
             doom_detector.check_and_record(&fn_name, &canonical_args)
@@ -67,7 +75,7 @@ pub(crate) async fn execute_subagent_tool_calls(
         };
 
         let label = format_tool_step_label(&fn_name, &parsed_args, false);
-        if syntax_error.is_none() && loop_error.is_none() {
+        if syntax_error.is_none() && policy_error.is_none() && loop_error.is_none() {
             tools_executed.push(fn_name.clone());
             emit_event(
                 workspace_dir,
@@ -90,6 +98,7 @@ pub(crate) async fn execute_subagent_tool_calls(
             fn_name,
             parsed_args,
             syntax_error,
+            policy_error,
             loop_error,
         });
     }
@@ -97,6 +106,9 @@ pub(crate) async fn execute_subagent_tool_calls(
     let futures = prepared.iter().map(|pc| async move {
         if let Some(err) = &pc.syntax_error {
             return (json!({ "ok": false, "error": err, "syntaxError": true }), false);
+        }
+        if let Some(err) = &pc.policy_error {
+            return (json!({ "ok": false, "error": err, "blocked": true }), false);
         }
         if let Some(reason) = &pc.loop_error {
             return (json!({ "ok": false, "error": reason }), false);

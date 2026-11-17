@@ -31,6 +31,54 @@ impl ToolProfile {
             ToolProfile::General => "general",
         }
     }
+
+    pub fn from_subagent_type(subagent_type: &str) -> Self {
+        let norm = subagent_type.trim().to_ascii_lowercase().replace('_', "-");
+        match norm.as_str() {
+            "explore" => ToolProfile::Explore,
+            "audio-director" => ToolProfile::AudioDirector,
+            "motion-designer" => ToolProfile::MotionDesigner,
+            "qa-verifier" => ToolProfile::QaVerifier,
+            _ => ToolProfile::General,
+        }
+    }
+}
+
+pub fn check_tool_allowed_runtime(profile: ToolProfile, tool_name: &str) -> Result<(), String> {
+    let role = profile.as_str();
+    let include_render = matches!(
+        profile,
+        ToolProfile::Director {
+            include_render: true
+        }
+    );
+    if is_tool_allowed_in_role(role, tool_name, include_render) {
+        return Ok(());
+    }
+    let hint = match profile {
+        ToolProfile::Director { .. } if matches!(tool_name, "write" | "edit" | "apply_patch") => {
+            "Delegate scene/script authoring to `task(subagent_type: \"motion-designer\")` after running `film_scaffold`."
+        }
+        ToolProfile::Director { .. }
+            if matches!(tool_name, "voicebox_speak" | "generate_smart_sfx") =>
+        {
+            "Use `film_audio` directly from director instead of per-clip voice/SFX tools."
+        }
+        ToolProfile::Director { .. } if tool_name == "render_video" => {
+            "`render_video` is disabled unless the user explicitly asked to render/export MP4."
+        }
+        ToolProfile::MotionDesigner | ToolProfile::QaVerifier => {
+            "Stay within your exposed scene authoring/verification tools."
+        }
+        ToolProfile::GeneralChat => {
+            "Mutation and execution tools are disabled in chat Q&A mode."
+        }
+        _ => "Use only tools exposed in the active profile.",
+    };
+    Err(format!(
+        "Tool '{}' is not permitted in active role '{}'. {}",
+        tool_name, role, hint
+    ))
 }
 
 pub fn is_tool_allowed_in_role(role: &str, name: &str, include_render: bool) -> bool {
@@ -532,6 +580,19 @@ mod tests {
             ToolProfile::Director {
                 include_render: true
             }
+        );
+
+        assert!(check_tool_allowed_runtime(
+            ToolProfile::Director {
+                include_render: false
+            },
+            "write"
+        )
+        .is_err());
+        assert!(check_tool_allowed_runtime(ToolProfile::GeneralChat, "bash").is_err());
+        assert_eq!(
+            ToolProfile::from_subagent_type("motion_designer"),
+            ToolProfile::MotionDesigner
         );
 
         let _ = std::fs::remove_dir_all(&tmp);

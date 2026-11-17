@@ -276,13 +276,7 @@ pub fn resolve_parent_skill_or_voice_directive(
 
 /// Filters the tool definitions available to a specific subagent persona via `tool::profiles`.
 pub fn build_subagent_tools(subagent_type: &str, current_depth: usize) -> Vec<Value> {
-    let profile = match subagent_type.trim().to_ascii_lowercase().as_str() {
-        "explore" => crate::tool::profiles::ToolProfile::Explore,
-        "audio-director" => crate::tool::profiles::ToolProfile::AudioDirector,
-        "motion-designer" => crate::tool::profiles::ToolProfile::MotionDesigner,
-        "qa-verifier" => crate::tool::profiles::ToolProfile::QaVerifier,
-        _ => crate::tool::profiles::ToolProfile::General,
-    };
+    let profile = crate::tool::profiles::ToolProfile::from_subagent_type(subagent_type);
     let mut filtered = crate::tool::profiles::filter_tools_for_profile(
         profile,
         crate::tool::build_tool_definitions(),

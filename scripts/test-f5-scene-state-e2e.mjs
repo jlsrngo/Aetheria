@@ -397,7 +397,7 @@ async function main() {
       authHeader,
       dirQuery,
       negSessId,
-      "Non-video script harness verification test: run steps cleanly.",
+      "Non-video script plugin harness verification test: run steps cleanly.",
       mockModel,
       60_000
     );
