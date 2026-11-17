@@ -20,6 +20,7 @@ pub mod cdp_ws;
 pub mod composition_scanner;
 pub mod compositions;
 pub mod ffmpeg_pipeline;
+pub mod fidelity_guard;
 pub mod film_inspector;
 pub mod film_static_server;
 pub mod gpu;

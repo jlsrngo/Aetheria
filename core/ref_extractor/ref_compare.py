@@ -103,6 +103,22 @@ def _fit_for_strip(img: np.ndarray, target_w: int, target_h: int) -> np.ndarray:
     return cv2.resize(img, (target_w, target_h), interpolation=cv2.INTER_AREA)
 
 
+def _fit_letterbox(img: np.ndarray, target_w: int, target_h: int) -> np.ndarray:
+    """Resizes preserving source aspect ratio inside target_w x target_h with padding."""
+    sh, sw = img.shape[:2]
+    if sw <= 0 or sh <= 0:
+        return np.zeros((target_h, target_w, 3), dtype=np.uint8)
+    scale = min(float(target_w) / float(sw), float(target_h) / float(sh))
+    nw = max(1, int(round(sw * scale)))
+    nh = max(1, int(round(sh * scale)))
+    resized = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_AREA)
+    canvas = np.zeros((target_h, target_w, 3), dtype=np.uint8)
+    ox = (target_w - nw) // 2
+    oy = (target_h - nh) // 2
+    canvas[oy:oy + nh, ox:ox + nw] = resized
+    return canvas
+
+
 def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
     pairs = payload.get("pairs") or []
     if not pairs:
@@ -110,15 +126,19 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     strip_out = Path(payload.get("stripOutputPath", "comparison_strip.jpg"))
     strip_out.parent.mkdir(parents=True, exist_ok=True)
-    threshold = float(payload.get("passThreshold", 0.72))
+    raw_threshold = payload.get("passThreshold")
+    threshold = float(raw_threshold) if raw_threshold is not None else 0.85
 
     per_frame: List[Dict[str, Any]] = []
     strip_rows: List[np.ndarray] = []
+    any_ar_mismatch = False
 
     for item in pairs:
         ref_path = Path(str(item.get("refPath", "")))
         prev_path = Path(str(item.get("previewPath", "")))
         ts = float(item.get("timestamp", 0.0))
+        scene_id = item.get("sceneId")
+        phase = item.get("phase")
 
         if not ref_path.is_file() or not prev_path.is_file():
             continue
@@ -128,13 +148,21 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
         if ref_img is None or prev_img is None:
             continue
 
-        # Normalize comparison size up to 480px max dimension (preserving preview aspect)
+        rh, rw = ref_img.shape[:2]
         ph, pw = prev_img.shape[:2]
+        ref_ar = float(rw) / max(1.0, float(rh))
+        prev_ar = float(pw) / max(1.0, float(ph))
+        ar_diff_ratio = abs(ref_ar - prev_ar) / max(ref_ar, prev_ar, 1e-6)
+        ar_mismatch = ar_diff_ratio > 0.02
+        if ar_mismatch:
+            any_ar_mismatch = True
+
+        # Normalize comparison size up to 480px max dimension (preserving aspect without silent distortion)
         scale = min(1.0, 480.0 / max(1, max(ph, pw)))
         cw = max(64, int(round(pw * scale)))
         ch = max(64, int(round(ph * scale)))
 
-        ref_cmp = _fit_for_strip(ref_img, cw, ch)
+        ref_cmp = _fit_letterbox(ref_img, cw, ch) if ar_mismatch else _fit_for_strip(ref_img, cw, ch)
         prev_cmp = _fit_for_strip(prev_img, cw, ch)
 
         ssim = compute_rgb_ssim(ref_cmp, prev_cmp)
@@ -145,19 +173,34 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
         luma_delta = round(luma_prev - luma_ref, 3)
 
         combined = float(np.clip(0.50 * ssim + 0.30 * color_sim + 0.20 * edge_sim, 0.0, 1.0))
-        verdict = "cocok" if combined >= 0.80 else ("sebagian" if combined >= 0.58 else "beda")
+        if ar_mismatch:
+            verdict = "aspect_mismatch"
+        else:
+            verdict = "cocok" if combined >= 0.85 else ("sebagian" if combined >= 0.65 else "beda")
 
-        per_frame.append({
+        ref_rel = str(item.get("refRelPath") or ref_path.name)
+        prev_rel = str(item.get("previewRelPath") or prev_path.name)
+        entry: Dict[str, Any] = {
             "timestamp": round(ts, 3),
-            "refPath": str(item.get("refRelPath") or ref_path.name),
-            "previewPath": str(item.get("previewRelPath") or prev_path.name),
+            "refPath": ref_rel,
+            "refRelPath": ref_rel,
+            "previewPath": prev_rel,
+            "previewRelPath": prev_rel,
             "ssim": round(ssim, 4),
             "colorSimilarity": round(color_sim, 4),
             "edgeSimilarity": round(edge_sim, 4),
             "luminanceDelta": luma_delta,
             "combinedScore": round(combined, 4),
+            "aspectRatioMismatch": bool(ar_mismatch),
+            "refDimensions": [int(rw), int(rh)],
+            "previewDimensions": [int(pw), int(ph)],
             "verdict": verdict,
-        })
+        }
+        if scene_id:
+            entry["sceneId"] = scene_id
+        if phase:
+            entry["phase"] = phase
+        per_frame.append(entry)
 
         # Build [Reference | Generated | Diff Heatmap] row
         diff_raw = cv2.absdiff(ref_cmp, prev_cmp)
@@ -202,7 +245,25 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
     color_mean = round(float(np.mean([f["colorSimilarity"] for f in per_frame])), 4)
     edge_mean = round(float(np.mean([f["edgeSimilarity"] for f in per_frame])), 4)
     overall = round(float(np.mean([f["combinedScore"] for f in per_frame])), 4)
-    worst = sorted(per_frame, key=lambda f: f["combinedScore"])[:2]
+    worst = sorted(per_frame, key=lambda f: f["combinedScore"])[:3]
+
+    scene_buckets: Dict[str, List[Dict[str, Any]]] = {}
+    for item in per_frame:
+        sid = item.get("sceneId")
+        if sid:
+            scene_buckets.setdefault(str(sid), []).append(item)
+    scene_scores: Dict[str, Dict[str, Any]] = {}
+    for sid, items in scene_buckets.items():
+        scene_scores[sid] = {
+            "count": len(items),
+            "ssimMean": round(float(np.mean([x["ssim"] for x in items])), 4),
+            "ssimMin": round(float(np.min([x["ssim"] for x in items])), 4),
+            "overallMean": round(float(np.mean([x["combinedScore"] for x in items])), 4),
+            "overallMin": round(float(np.min([x["combinedScore"] for x in items])), 4),
+        }
+
+    ssim_floor = round(threshold * 0.90, 4)
+    passed = bool((overall >= threshold) and (ssim_mean >= ssim_floor) and (not any_ar_mismatch))
 
     return {
         "ok": True,
@@ -213,7 +274,10 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
         "edgeMatchMean": edge_mean,
         "overallFidelity": overall,
         "passThreshold": threshold,
-        "passed": bool(overall >= threshold or ssim_mean >= threshold),
+        "ssimFloor": ssim_floor,
+        "aspectRatioMismatch": bool(any_ar_mismatch),
+        "passed": passed,
+        "sceneScores": scene_scores,
         "comparisonStripPath": str(strip_out) if strip_saved else None,
         "perFrame": per_frame,
         "worstFrames": worst,

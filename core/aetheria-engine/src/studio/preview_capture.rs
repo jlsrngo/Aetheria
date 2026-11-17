@@ -15,7 +15,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
-const MAX_PREVIEW_FRAMES: usize = 4;
+const MAX_PREVIEW_FRAMES: usize = 12;
+pub(crate) const DEFAULT_REFERENCE_PASS_THRESHOLD: f64 = 0.85;
 pub const RELATIVE_PREVIEW_POSITIONS: [f64; 4] = [0.10, 0.35, 0.60, 0.85];
 
 static PREVIOUS_PREVIEW_DIGESTS: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
@@ -80,6 +81,7 @@ pub struct FilmPreviewCaptureResult {
     pub comparison_strip_data_url: Option<String>,
     pub changed_since_last_capture: Option<bool>,
     pub compare_to_reference_overridden: bool,
+    pub anti_cheat: super::fidelity_guard::AntiCheatReport,
 }
 
 pub(crate) fn compute_relative_ratio(timestamp: f64, duration: f64) -> f64 {
@@ -329,13 +331,15 @@ pub async fn capture_film_preview_with_options(
         record_and_check_preview_changed(&mut guard, &project_key, frame_digests)
     };
 
+    let anti_cheat = super::fidelity_guard::validate_film_anti_cheat(&film_root);
+
     let (reference_comparison, comparison_strip_data_url) = if should_compare {
         match super::reference_compare::compare_preview_to_reference(
             &ref_root,
             &film_root,
             meta.duration,
             &frames,
-            pass_threshold.unwrap_or(0.72),
+            pass_threshold.unwrap_or(DEFAULT_REFERENCE_PASS_THRESHOLD),
         )
         .await
         {
@@ -365,6 +369,7 @@ pub async fn capture_film_preview_with_options(
         comparison_strip_data_url,
         changed_since_last_capture,
         compare_to_reference_overridden,
+        anti_cheat,
     })
 }
 
@@ -379,7 +384,11 @@ mod tests {
         assert_eq!(compute_relative_ratio(3.5, 10.0), 0.35);
 
         let custom = normalize_preview_timestamps(&[-1.0, 0.25, 0.255, 99.0, 2.0, 3.0, 4.0], 6.0);
-        assert_eq!(custom, vec![0.25, 5.95, 2.0]);
+        assert_eq!(custom, vec![0.25, 5.95, 2.0, 3.0, 4.0]);
+
+        let many: Vec<f64> = (1..=15).map(|i| i as f64 * 0.5).collect();
+        let capped = normalize_preview_timestamps(&many, 20.0);
+        assert_eq!(capped.len(), MAX_PREVIEW_FRAMES);
     }
 
     #[test]

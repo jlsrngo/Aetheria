@@ -13,6 +13,8 @@ pub struct ReferenceKeyframe {
     pub timestamp: f64,
     pub abs_path: PathBuf,
     pub rel_path: String,
+    pub scene_id: Option<String>,
+    pub phase: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -22,6 +24,8 @@ pub struct FrameComparePair {
     pub ref_rel: String,
     pub preview_abs: PathBuf,
     pub preview_rel: String,
+    pub scene_id: Option<String>,
+    pub phase: Option<String>,
 }
 
 /// Parses `Duration: HH:MM:SS.xx` from FFmpeg's stderr output.
@@ -65,7 +69,50 @@ fn rel_display(ws_root: &Path, abs_path: &Path) -> String {
         .replace('\\', "/")
 }
 
+fn resolve_extracted_frame_path(
+    ws_root: &Path,
+    extracted_dir: &Path,
+    raw_rel: &str,
+) -> Option<PathBuf> {
+    let direct = extracted_dir.join(raw_rel);
+    if direct.is_file() {
+        return Some(direct);
+    }
+    let from_ws = ws_root.join(raw_rel);
+    if from_ws.is_file() {
+        return Some(from_ws);
+    }
+    let fname = Path::new(raw_rel.trim()).file_name()?;
+    let in_frames = extracted_dir.join("frames").join(fname);
+    if in_frames.is_file() {
+        return Some(in_frames);
+    }
+    None
+}
+
+fn push_unique_ref_kf(
+    out: &mut Vec<ReferenceKeyframe>,
+    seen_paths: &mut std::collections::HashSet<PathBuf>,
+    ws_root: &Path,
+    abs: PathBuf,
+    ts: f64,
+    scene_id: Option<String>,
+    phase: &str,
+) {
+    if !seen_paths.insert(abs.clone()) {
+        return;
+    }
+    out.push(ReferenceKeyframe {
+        timestamp: (ts * 100.0).round() / 100.0,
+        rel_path: rel_display(ws_root, &abs),
+        abs_path: abs,
+        scene_id,
+        phase: Some(phase.to_string()),
+    });
+}
+
 /// Discovers extracted reference keyframes inside `<ws_root>/ref/` ordered by timestamp.
+/// Collects per-scene `start`, `mid`, and `end` keyframes when available (`P1-1`).
 pub fn discover_reference_keyframes(ws_root: &Path, film_duration: f64) -> Vec<ReferenceKeyframe> {
     let ref_dir = ws_root.join("ref");
     if !ref_dir.is_dir() {
@@ -75,36 +122,64 @@ pub fn discover_reference_keyframes(ws_root: &Path, film_duration: f64) -> Vec<R
     let extracted_dir = ref_dir.join("extracted");
     let style_path = extracted_dir.join("style.json");
     let mut out = Vec::new();
+    let mut seen_paths = std::collections::HashSet::new();
 
     if let Ok(raw) = std::fs::read_to_string(&style_path) {
         if let Ok(parsed) = serde_json::from_str::<Value>(&raw) {
             if let Some(scenes) = parsed.get("scenes").and_then(Value::as_array) {
                 for sc in scenes {
-                    let Some(kf_rel) = sc.get("keyframe").and_then(Value::as_str) else {
-                        continue;
-                    };
-                    let abs = extracted_dir.join(kf_rel);
-                    if abs.is_file() {
-                        let ts = sc
-                            .get("keyframeTimestamp")
-                            .and_then(Value::as_f64)
-                            .or_else(|| {
-                                let s = sc.get("start").and_then(Value::as_f64)?;
-                                let d = sc.get("duration").and_then(Value::as_f64)?;
-                                Some(s + d * 0.5)
-                            })
-                            .unwrap_or(0.0);
-                        out.push(ReferenceKeyframe {
-                            timestamp: ts,
-                            rel_path: rel_display(ws_root, &abs),
-                            abs_path: abs,
-                        });
+                    let scene_id = sc
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .map(str::to_string);
+                    let start = sc.get("start").and_then(Value::as_f64).unwrap_or(0.0);
+                    let dur = sc
+                        .get("duration")
+                        .and_then(Value::as_f64)
+                        .filter(|&d| d > 0.0)
+                        .unwrap_or(1.0);
+                    let end = sc
+                        .get("end")
+                        .and_then(Value::as_f64)
+                        .unwrap_or(start + dur);
+
+                    if let Some(start_rel) = sc.pointer("/keyframes/start").and_then(Value::as_str) {
+                        if let Some(abs) = resolve_extracted_frame_path(ws_root, &extracted_dir, start_rel) {
+                            let ts = start + (dur * 0.15).min(0.15);
+                            push_unique_ref_kf(&mut out, &mut seen_paths, ws_root, abs, ts, scene_id.clone(), "start");
+                        }
+                    }
+
+                    let mid_rel = sc
+                        .get("keyframe")
+                        .and_then(Value::as_str)
+                        .or_else(|| sc.pointer("/keyframes/mid").and_then(Value::as_str));
+                    if let Some(rel) = mid_rel {
+                        if let Some(abs) = resolve_extracted_frame_path(ws_root, &extracted_dir, rel) {
+                            let ts = sc
+                                .get("keyframeTimestamp")
+                                .and_then(Value::as_f64)
+                                .unwrap_or(start + dur * 0.5);
+                            push_unique_ref_kf(&mut out, &mut seen_paths, ws_root, abs, ts, scene_id.clone(), "mid");
+                        }
+                    }
+
+                    if let Some(end_rel) = sc.pointer("/keyframes/end").and_then(Value::as_str) {
+                        if let Some(abs) = resolve_extracted_frame_path(ws_root, &extracted_dir, end_rel) {
+                            let ts = (end - (dur * 0.15).min(0.15)).max(start + dur * 0.5);
+                            push_unique_ref_kf(&mut out, &mut seen_paths, ws_root, abs, ts, scene_id.clone(), "end");
+                        }
                     }
                 }
             }
         }
     }
     if !out.is_empty() {
+        out.sort_by(|a, b| {
+            a.timestamp
+                .partial_cmp(&b.timestamp)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         return out;
     }
 
@@ -130,12 +205,19 @@ pub fn discover_reference_keyframes(ws_root: &Path, film_duration: f64) -> Vec<R
             })
             .collect();
         thumbs.sort();
-        for (idx, p) in thumbs.into_iter().take(4).enumerate() {
-            let ts = safe_dur * ratios.get(idx).copied().unwrap_or(0.5);
+        let total_thumbs = thumbs.len().max(1);
+        for (idx, p) in thumbs.into_iter().take(12).enumerate() {
+            let ts = if total_thumbs <= ratios.len() {
+                safe_dur * ratios.get(idx).copied().unwrap_or(0.5)
+            } else {
+                safe_dur * ((idx as f64 + 0.5) / total_thumbs as f64)
+            };
             out.push(ReferenceKeyframe {
                 timestamp: (ts * 100.0).round() / 100.0,
                 rel_path: rel_display(ws_root, &p),
                 abs_path: p,
+                scene_id: None,
+                phase: Some("thumb".to_string()),
             });
         }
         if !out.is_empty() {
@@ -154,6 +236,8 @@ pub fn discover_reference_keyframes(ws_root: &Path, film_duration: f64) -> Vec<R
                     timestamp: (ts * 100.0).round() / 100.0,
                     rel_path: rel_display(ws_root, &p),
                     abs_path: p,
+                    scene_id: None,
+                    phase: Some("frame".to_string()),
                 });
             }
         }
@@ -180,6 +264,8 @@ pub fn discover_reference_keyframes(ws_root: &Path, film_duration: f64) -> Vec<R
                 timestamp: safe_dur * 0.5,
                 rel_path: rel_display(ws_root, &first),
                 abs_path: first,
+                scene_id: None,
+                phase: Some("image".to_string()),
             });
         }
     }
@@ -187,23 +273,66 @@ pub fn discover_reference_keyframes(ws_root: &Path, film_duration: f64) -> Vec<R
     out
 }
 
-/// Returns recommended preview capture timestamps aligned to discovered reference keyframes.
-pub fn recommended_reference_timestamps(ws_root: &Path, film_duration: f64, max_frames: usize) -> Vec<f64> {
-    let kfs = discover_reference_keyframes(ws_root, film_duration);
-    if kfs.is_empty() {
+fn sample_kf_indices(len: usize, max_count: usize) -> Vec<usize> {
+    if len == 0 || max_count == 0 {
         return Vec::new();
     }
-    let mut ts: Vec<f64> = kfs.into_iter().map(|k| k.timestamp).collect();
-    if ts.len() > max_frames && max_frames > 0 {
-        let step = (ts.len() - 1) as f64 / (max_frames - 1).max(1) as f64;
-        let mut sampled = Vec::with_capacity(max_frames);
-        for i in 0..max_frames {
-            let idx = ((i as f64) * step).round() as usize;
-            sampled.push(ts[idx.min(ts.len() - 1)]);
-        }
-        ts = sampled;
+    if len <= max_count {
+        return (0..len).collect();
     }
-    ts
+    if max_count == 1 {
+        return vec![0];
+    }
+    let mut out = Vec::with_capacity(max_count);
+    for i in 0..max_count {
+        let idx = (i * (len - 1)) / (max_count - 1);
+        if out.last().copied() != Some(idx) {
+            out.push(idx);
+        }
+    }
+    out
+}
+
+/// Returns recommended preview capture timestamps aligned to discovered reference keyframes.
+/// Prioritizes scene midpoints across all scenes before adding `start`/`end` transitions up to `max_frames`.
+pub fn recommended_reference_timestamps(ws_root: &Path, film_duration: f64, max_frames: usize) -> Vec<f64> {
+    let kfs = discover_reference_keyframes(ws_root, film_duration);
+    if kfs.is_empty() || max_frames == 0 {
+        return Vec::new();
+    }
+    if kfs.len() <= max_frames {
+        return kfs.into_iter().map(|k| k.timestamp).collect();
+    }
+
+    let mids: Vec<f64> = kfs
+        .iter()
+        .filter(|k| k.phase.as_deref() == Some("mid"))
+        .map(|k| k.timestamp)
+        .collect();
+    let others: Vec<f64> = kfs
+        .iter()
+        .filter(|k| k.phase.as_deref() != Some("mid"))
+        .map(|k| k.timestamp)
+        .collect();
+
+    let mut chosen = Vec::with_capacity(max_frames);
+    if mids.is_empty() {
+        for idx in sample_kf_indices(others.len(), max_frames) {
+            chosen.push(others[idx]);
+        }
+    } else {
+        for idx in sample_kf_indices(mids.len(), max_frames) {
+            chosen.push(mids[idx]);
+        }
+        let rem = max_frames.saturating_sub(chosen.len());
+        if rem > 0 {
+            for idx in sample_kf_indices(others.len(), rem) {
+                chosen.push(others[idx]);
+            }
+        }
+    }
+    chosen.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    chosen
 }
 
 /// Pairs each captured preview frame with its nearest timestamp reference keyframe.
@@ -217,7 +346,9 @@ pub fn pair_preview_with_reference(
     }
     let mut pairs = Vec::with_capacity(preview_frames.len());
     for (idx, pf) in preview_frames.iter().enumerate() {
-        let best_ref = if ref_frames.len() == preview_frames.len() {
+        let best_ref = if ref_frames.len() == preview_frames.len()
+            && (ref_frames[idx].timestamp - pf.timestamp).abs() < 0.25
+        {
             &ref_frames[idx]
         } else {
             ref_frames
@@ -235,6 +366,8 @@ pub fn pair_preview_with_reference(
             ref_rel: best_ref.rel_path.clone(),
             preview_abs: film_root.join(&pf.saved_rel_path),
             preview_rel: pf.saved_rel_path.clone(),
+            scene_id: best_ref.scene_id.clone(),
+            phase: best_ref.phase.clone(),
         });
     }
     pairs
@@ -268,6 +401,8 @@ pub async fn compare_preview_to_reference(
         .map(|p| {
             json!({
                 "timestamp": p.timestamp,
+                "sceneId": p.scene_id,
+                "phase": p.phase,
                 "refPath": p.ref_abs.to_string_lossy().to_string(),
                 "refRelPath": p.ref_rel,
                 "previewPath": p.preview_abs.to_string_lossy().to_string(),
@@ -295,7 +430,8 @@ pub async fn compare_preview_to_reference(
         return Err(format!("Comparison helper not found at {}", script_path.display()));
     }
 
-    let mut cmd = tokio::process::Command::new("python");
+    let py_bin = crate::paths::locate_python_binary();
+    let mut cmd = tokio::process::Command::new(&py_bin);
     crate::paths::configure_hidden_tokio_command(&mut cmd);
     cmd.arg(&script_path).arg(&payload_path);
     let output = cmd
@@ -380,6 +516,52 @@ mod tests {
         let pairs = pair_preview_with_reference(&ws, &previews, &kfs);
         assert_eq!(pairs.len(), 1);
         assert_eq!(pairs[0].ref_rel, "ref/extracted/frames/ref_scene_02.jpg");
+
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn discovers_multi_phase_start_mid_end_keyframes_and_samples_across_scenes() {
+        let ws = std::env::temp_dir().join(format!("aetheria_ref_multi_{}", crate::paths::now_ms()));
+        let frames = ws.join("ref").join("extracted").join("frames");
+        std::fs::create_dir_all(&frames).unwrap();
+        let mut scenes = Vec::new();
+        for idx in 1..=3 {
+            let st = format!("ref_scene_{idx:02}_start.jpg");
+            let mid = format!("ref_scene_{idx:02}.jpg");
+            let en = format!("ref_scene_{idx:02}_end.jpg");
+            std::fs::write(frames.join(&st), b"st").unwrap();
+            std::fs::write(frames.join(&mid), b"mid").unwrap();
+            std::fs::write(frames.join(&en), b"en").unwrap();
+            let s0 = (idx - 1) as f64 * 2.0;
+            scenes.push(json!({
+                "id": format!("s{idx}"),
+                "start": s0,
+                "duration": 2.0,
+                "end": s0 + 2.0,
+                "keyframe": format!("ref/extracted/frames/{mid}"),
+                "keyframes": {
+                    "start": format!("ref/extracted/frames/{st}"),
+                    "mid": format!("ref/extracted/frames/{mid}"),
+                    "end": format!("ref/extracted/frames/{en}"),
+                }
+            }));
+        }
+        std::fs::write(
+            ws.join("ref").join("extracted").join("style.json"),
+            serde_json::to_string(&json!({ "scenes": scenes })).unwrap(),
+        )
+        .unwrap();
+
+        let kfs = discover_reference_keyframes(&ws, 6.0);
+        assert_eq!(kfs.len(), 9, "expected start/mid/end for 3 scenes");
+        assert_eq!(kfs[0].phase.as_deref(), Some("start"));
+        assert_eq!(kfs[1].phase.as_deref(), Some("mid"));
+        assert_eq!(kfs[2].phase.as_deref(), Some("end"));
+        assert_eq!(kfs[4].scene_id.as_deref(), Some("s2"));
+
+        let ts = recommended_reference_timestamps(&ws, 6.0, 12);
+        assert_eq!(ts.len(), 9);
 
         let _ = std::fs::remove_dir_all(&ws);
     }

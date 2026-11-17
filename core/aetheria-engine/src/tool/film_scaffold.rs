@@ -394,6 +394,40 @@ fn render_scene_stub(scene: &FilmManifestScene, width: u32, height: u32, backgro
     )
 }
 
+fn read_reference_canvas_defaults(ws_root: &Path) -> Option<(u32, u32, u32)> {
+    let mut candidates = vec![
+        ws_root.join("ref").join("extracted").join("style.json"),
+        ws_root.join("ref").join("style.json"),
+    ];
+    if let Some(active_dir) = resolve_active_project_or_film_root(ws_root) {
+        if active_dir != ws_root {
+            candidates.push(active_dir.join("ref").join("extracted").join("style.json"));
+            candidates.push(active_dir.join("ref").join("style.json"));
+        }
+    }
+    for path in candidates {
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(v) = serde_json::from_str::<Value>(&raw) else {
+            continue;
+        };
+        let w = v.get("width").and_then(Value::as_u64).map(|n| n as u32);
+        let h = v.get("height").and_then(Value::as_u64).map(|n| n as u32);
+        if let (Some(rw), Some(rh)) = (w, h) {
+            if rw >= 16 && rh >= 16 {
+                let fps = v
+                    .get("fps")
+                    .and_then(Value::as_u64)
+                    .map(|n| (n as u32).max(1))
+                    .unwrap_or(30);
+                return Some((rw, rh, fps));
+            }
+        }
+    }
+    None
+}
+
 pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &Value) -> Value {
     let ws_root = if workspace_dir.trim().is_empty() {
         return json!({ "ok": false, "error": "workspace_dir is empty." });
@@ -424,6 +458,12 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
     let req_h = arguments.get("height").and_then(|v| v.as_u64()).map(|v| v as u32).or(preset_h);
     let req_fps = arguments.get("fps").and_then(|v| v.as_u64()).map(|v| v as u32);
 
+    let ref_defaults = read_reference_canvas_defaults(ws_root);
+    let allow_ar_mismatch = arguments
+        .get("allowAspectRatioMismatch")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
     let (width, height, fps) = if let Some(ref lk) = lock {
         if let (Some(w), Some(h)) = (req_w, req_h) {
             if w != lk.width || h != lk.height {
@@ -439,11 +479,36 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
         }
         (lk.width, lk.height, req_fps.unwrap_or(lk.fps).max(1))
     } else {
-        (
-            req_w.unwrap_or(1080).max(16),
-            req_h.unwrap_or(1920).max(16),
-            req_fps.unwrap_or(30).max(1),
-        )
+        let w = req_w
+            .or_else(|| ref_defaults.map(|d| d.0))
+            .unwrap_or(1080)
+            .max(16);
+        let h = req_h
+            .or_else(|| ref_defaults.map(|d| d.1))
+            .unwrap_or(1920)
+            .max(16);
+        let f = req_fps
+            .or_else(|| ref_defaults.map(|d| d.2))
+            .unwrap_or(30)
+            .max(1);
+        if let Some((rw, rh, _)) = ref_defaults {
+            if (req_w.is_some() || req_h.is_some()) && !allow_ar_mismatch {
+                let target_ar = w as f64 / h as f64;
+                let ref_ar = rw as f64 / rh as f64;
+                let diff_ratio = (target_ar - ref_ar).abs() / target_ar.max(ref_ar).max(1e-6);
+                if diff_ratio > 0.02 {
+                    return json!({
+                        "ok": false,
+                        "code": "REFERENCE_ASPECT_RATIO_MISMATCH",
+                        "error": format!(
+                            "Requested {}x{} (aspect {:.3}) mismatches extracted reference aspect {}x{} ({:.3}). Omit width/height/preset to inherit reference dimensions automatically, or pass allowAspectRatioMismatch: true.",
+                            w, h, target_ar, rw, rh, ref_ar
+                        )
+                    });
+                }
+            }
+        }
+        (w, h, f)
     };
 
     let title = arguments
@@ -1025,6 +1090,55 @@ mod tests {
         );
         assert_eq!(res_ok["ok"], true);
         assert_eq!(res_ok["warnings"].as_array().map(|a| a.len()).unwrap_or(99), 0);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn film_scaffold_inherits_reference_dimensions_and_rejects_aspect_mismatch() {
+        let dir = std::env::temp_dir().join(format!("aetheria_scaffold_ref_ar_{}", crate::paths::now_ms()));
+        let extracted = dir.join("ref").join("extracted");
+        std::fs::create_dir_all(&extracted).unwrap();
+        std::fs::write(
+            extracted.join("style.json"),
+            serde_json::to_string(&json!({
+                "width": 1920,
+                "height": 1080,
+                "fps": 60,
+                "aspectRatio": "16:9",
+                "scenes": []
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let ws = dir.to_string_lossy().to_string();
+
+        // Explicit portrait request against 16:9 reference must be rejected clearly
+        let err_res = execute_film_scaffold(
+            "ses_ar",
+            &ws,
+            &json!({
+                "title": "Ref Inherit Test",
+                "preset": "portrait",
+                "scenes": [{ "id": "s1", "duration": 2.0 }]
+            }),
+        );
+        assert_eq!(err_res["ok"], false);
+        assert_eq!(err_res["code"], "REFERENCE_ASPECT_RATIO_MISMATCH");
+
+        // Omitting width/height/fps inherits 1920x1080 @ 60fps from style.json
+        let ok_res = execute_film_scaffold(
+            "ses_ar",
+            &ws,
+            &json!({
+                "title": "Ref Inherit Test",
+                "scenes": [{ "id": "s1", "duration": 2.0 }]
+            }),
+        );
+        assert_eq!(ok_res["ok"], true, "{:?}", ok_res);
+        assert_eq!(ok_res["width"], 1920);
+        assert_eq!(ok_res["height"], 1080);
+        assert_eq!(ok_res["fps"], 60);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

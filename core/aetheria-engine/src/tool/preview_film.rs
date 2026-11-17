@@ -24,7 +24,7 @@ pub fn capture_film_preview_tool_definition() -> Value {
                     },
                     "passThreshold": {
                         "type": "number",
-                        "description": "Optional fidelity score pass threshold (0.0..1.0, default 0.72)."
+                        "description": "Optional fidelity score pass threshold (0.0..1.0, default 0.85)."
                     }
                 }
             }
@@ -99,12 +99,27 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
                 .map(|s| format!(" {}", s))
                 .collect();
             let has_runtime_errors = !res.runtime_errors.is_empty();
-            let ref_failed = res
+            let ref_exec_failed = res
                 .reference_comparison
                 .as_ref()
                 .and_then(|c| c.get("ok").and_then(Value::as_bool))
                 == Some(false);
-            let preview_ok = !has_runtime_errors && !ref_failed;
+            let ref_threshold_failed = res
+                .reference_comparison
+                .as_ref()
+                .and_then(|c| c.get("passed").and_then(Value::as_bool))
+                == Some(false);
+            let ref_ar_mismatch = res
+                .reference_comparison
+                .as_ref()
+                .and_then(|c| c.get("aspectRatioMismatch").and_then(Value::as_bool))
+                == Some(true);
+            let anti_cheat_failed = !res.anti_cheat.passed;
+            let preview_ok = !has_runtime_errors
+                && !ref_exec_failed
+                && !ref_threshold_failed
+                && !ref_ar_mismatch
+                && !anti_cheat_failed;
 
             let mut failure_reasons = Vec::new();
             if has_runtime_errors {
@@ -113,13 +128,45 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
                     res.runtime_errors.join(" | ")
                 ));
             }
-            if ref_failed {
+            if ref_exec_failed {
                 let ref_err = res
                     .reference_comparison
                     .as_ref()
                     .and_then(|c| c.get("error").and_then(Value::as_str))
                     .unwrap_or("Reference comparison failed.");
                 failure_reasons.push(format!("Reference comparison failed: {}", ref_err));
+            }
+            if ref_ar_mismatch {
+                failure_reasons.push(
+                    "Aspect ratio mismatch between generated preview and reference keyframes (> 2% tolerance)."
+                        .to_string(),
+                );
+            }
+            if ref_threshold_failed {
+                let overall = res
+                    .reference_comparison
+                    .as_ref()
+                    .and_then(|c| c.get("overallFidelity").and_then(Value::as_f64))
+                    .unwrap_or(0.0);
+                let ssim_mean = res
+                    .reference_comparison
+                    .as_ref()
+                    .and_then(|c| c.get("ssimMean").and_then(Value::as_f64))
+                    .unwrap_or(0.0);
+                let thr = res
+                    .reference_comparison
+                    .as_ref()
+                    .and_then(|c| c.get("passThreshold").and_then(Value::as_f64))
+                    .unwrap_or(0.85);
+                failure_reasons.push(format!(
+                    "Visual fidelity below threshold (overall={overall:.3}, ssimMean={ssim_mean:.3}, required passThreshold={thr:.2}). Inspect comparison_strip.jpg and fix worstFrames before finishing."
+                ));
+            }
+            if anti_cheat_failed {
+                failure_reasons.push(format!(
+                    "Anti-cheat constraint failed: {}",
+                    res.anti_cheat.violations.join(" | ")
+                ));
             }
 
             let runtime_note = if has_runtime_errors {
@@ -132,6 +179,8 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
             };
             let mut result = json!({
                 "ok": preview_ok,
+                "fidelityFailed": ref_threshold_failed || ref_ar_mismatch,
+                "antiCheat": res.anti_cheat,
                 "width": res.width,
                 "height": res.height,
                 "duration": res.duration,
