@@ -34,6 +34,8 @@ describe("htmlStageBridge", () => {
     const script = buildSandboxStageBridgeScript();
     expect(script).toContain("aetheria:renderAt");
     expect(script).toContain("aetheria:assetRequest");
+    expect(script).toContain("URL.revokeObjectURL");
+    expect(script).toContain("pagehide");
     expect(script).toContain("window.requestAnimationFrame = function()");
     expect(script).not.toContain("Authorization");
     expect(script).not.toContain("aetheriaDesktop");

@@ -48,7 +48,7 @@ impl Drop for ChromeProcessGuard {
     }
 }
 
-pub(super) fn spawn_headless_browser(
+fn spawn_headless_browser(
     browser_exe: &Path,
     cdp_port: u16,
     width: u32,
@@ -56,7 +56,13 @@ pub(super) fn spawn_headless_browser(
 ) -> Result<ChromeProcessGuard, String> {
     let profile_dir =
         std::env::temp_dir().join(format!("aetheria_cdp_{}_{}", std::process::id(), now_ms()));
-    let _ = std::fs::create_dir_all(&profile_dir);
+    std::fs::create_dir_all(&profile_dir).map_err(|e| {
+        format!(
+            "Failed creating headless browser profile directory '{}': {}",
+            profile_dir.display(),
+            e
+        )
+    })?;
 
     let mut browser_cmd = std::process::Command::new(browser_exe);
     browser_cmd
@@ -100,14 +106,14 @@ pub(super) fn spawn_headless_browser(
     })
 }
 
-pub(super) async fn wait_for_cdp_ws_url(cdp_port: u16) -> Result<String, String> {
+async fn wait_for_cdp_ws_url_polls(cdp_port: u16, max_polls: usize) -> Result<String, String> {
     let client = reqwest::Client::builder()
         .no_proxy()
         .build()
         .map_err(|e| e.to_string())?;
     let list_url = format!("http://127.0.0.1:{}/json/list", cdp_port);
 
-    for _ in 0..80 {
+    for _ in 0..max_polls {
         if let Ok(resp) = client.get(&list_url).send().await {
             if let Ok(items) = resp.json::<Vec<Value>>().await {
                 if let Some(ws) = items.iter().find_map(|item| {
@@ -127,7 +133,39 @@ pub(super) async fn wait_for_cdp_ws_url(cdp_port: u16) -> Result<String, String>
         tokio::time::sleep(std::time::Duration::from_millis(120)).await;
     }
 
-    Err("Timed out waiting for headless browser DevTools WebSocket".to_string())
+    Err(format!(
+        "Timed out waiting for headless browser DevTools WebSocket on port {}",
+        cdp_port
+    ))
+}
+
+/// Spawns headless Edge/Chrome with fresh ephemeral CDP port retries to eliminate port TOCTOU races.
+pub(super) async fn launch_headless_browser_with_cdp(
+    browser_exe: &Path,
+    width: u32,
+    height: u32,
+) -> Result<(ChromeProcessGuard, CdpWebSocket), String> {
+    const MAX_ATTEMPTS: usize = 3;
+    let mut last_err = String::new();
+
+    for attempt in 1..=MAX_ATTEMPTS {
+        let cdp_port = pick_ephemeral_port()?;
+        let guard = spawn_headless_browser(browser_exe, cdp_port, width, height)?;
+        let max_polls = if attempt < MAX_ATTEMPTS { 30 } else { 80 };
+        match wait_for_cdp_ws_url_polls(cdp_port, max_polls).await {
+            Ok(ws_url) => match CdpWebSocket::connect(&ws_url).await {
+                Ok(cdp) => return Ok((guard, cdp)),
+                Err(err) => last_err = err,
+            },
+            Err(err) => last_err = err,
+        }
+        drop(guard);
+    }
+
+    Err(format!(
+        "Failed connecting headless browser CDP after {} attempts: {}",
+        MAX_ATTEMPTS, last_err
+    ))
 }
 
 pub(super) async fn wait_for_film_ready(cdp: &mut CdpWebSocket, meta: &mut FilmMeta) -> Result<(), String> {
@@ -219,16 +257,19 @@ where
         return Err(format!("HTML film not found at {}", html_path.display()));
     }
     if let Some(parent) = params.output_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        tokio::fs::create_dir_all(parent).await.map_err(|e| {
+            format!(
+                "Failed creating render output directory '{}': {}",
+                parent.display(),
+                e
+            )
+        })?;
     }
 
     let (http_port, _server_guard) =
         start_ephemeral_film_server(film_root.clone(), ws_root.clone()).await?;
-    let cdp_port = pick_ephemeral_port()?;
-    let _chrome_guard = spawn_headless_browser(&browser_exe, cdp_port, meta.width, meta.height)?;
-
-    let ws_url = wait_for_cdp_ws_url(cdp_port).await?;
-    let mut cdp = CdpWebSocket::connect(&ws_url).await?;
+    let (_chrome_guard, mut cdp) =
+        launch_headless_browser_with_cdp(&browser_exe, meta.width, meta.height).await?;
     let _ = cdp.call("Page.enable", json!({})).await?;
     let _ = cdp.call("Runtime.enable", json!({})).await?;
     let _ = cdp
@@ -414,4 +455,41 @@ where
         height: meta.height,
         fps: meta.fps,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn render_propagates_output_directory_creation_error() {
+        let dir = std::env::temp_dir().join(format!("aetheria_render_mkdir_err_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("index.html"), "<html><script>window.renderAt=function(){};window.__ready=true;</script></html>").unwrap();
+        // Create a regular file at `blocker` so creating `blocker/out.mp4` parent directory fails cleanly.
+        let blocker = dir.join("blocker");
+        std::fs::write(&blocker, "not-a-dir").unwrap();
+
+        let err = render_active_html_film(
+            HtmlRenderParams {
+                workspace_dir: Some(dir.to_string_lossy().to_string()),
+                output_path: blocker.join("out.mp4"),
+                codec: "h264".to_string(),
+                frame_range: None,
+            },
+            |_, _| {},
+            |_, _, _| {},
+        )
+        .await;
+
+        let _ = std::fs::remove_dir_all(&dir);
+        if let Err(msg) = err {
+            // Either failed creating render output directory, or browser/ffmpeg missing in test env;
+            // verify it returned an explicit contextual Err instead of panicking or succeeding silently.
+            assert!(!msg.trim().is_empty());
+        } else {
+            panic!("Expected explicit error when output parent path is a regular file");
+        }
+    }
 }

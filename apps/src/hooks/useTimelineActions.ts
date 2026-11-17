@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { apiFetch, API_BASE } from "../lib/api";
+import { executeMediaRenderJob } from "../lib/studioRenderJob";
 import type { StudioComposition, StudioRenderJob, StudioCanvasSettings } from "../types/studio";
 import type { NexusVideoProps, VideoLayerSpec } from "../types/video";
 import {
@@ -17,6 +17,7 @@ interface TimelineStoreActions {
   updateActiveMetadata: (patch: Partial<Omit<StudioComposition, "props">>) => void;
   updateCanvas: (patch: Partial<StudioCanvasSettings>) => void;
   upsertRenderJob: (job: StudioRenderJob) => void;
+  replaceRenderJob: (oldRenderId: string, nextJob: StudioRenderJob) => void;
   setRenderJobs: (jobs: StudioRenderJob[]) => void;
 }
 
@@ -47,7 +48,6 @@ const ASPECT_RATIO_DIMENSIONS: Record<string, { width: number; height: number }>
 export function useTimelineActions({
   activeComposition,
   canvas,
-  renderJobs,
   actions,
   layers,
   durationInFrames,
@@ -61,65 +61,18 @@ export function useTimelineActions({
   const handleQuickExport = async () => {
     if (isExporting) return;
     setIsExporting(true);
-    const cleanName = `${activeComposition.id}-${Date.now().toString().slice(-4)}.mp4`;
-    const localRenderId = `render-${Date.now()}`;
-
-    const initialJob: StudioRenderJob = {
-      renderId: localRenderId,
-      compositionId: activeComposition.id,
-      status: "rendering",
-      percent: 5,
-      renderedFrames: Math.max(1, Math.round(durationInFrames * 0.05)),
-      totalFrames: durationInFrames,
-      outputPath: `out/${cleanName}`,
-      createdAt: Date.now(),
-    };
-    actions.upsertRenderJob(initialJob);
-    toast.info(`Exporting "${activeComposition.name}" to out/${cleanName}...`);
-
     try {
-      const res = await apiFetch(`${API_BASE}/render-media`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          compositionId: activeComposition.id,
-          inputProps: activeComposition.props,
-          outputName: cleanName,
-          ratio: activeComposition.ratio,
-          codec: "h264",
-          inFrame: canvas.inFrame,
-          outFrame: canvas.outFrame,
-        }),
+      await executeMediaRenderJob({
+        composition: activeComposition,
+        canvas,
+        durationInFrames,
+        codec: "h264",
+        startMessage: `Exporting "${activeComposition.name}" to out/{outputName}...`,
+        failureToastPrefix: "Export failed",
+        actions,
       });
-      if (res.ok) {
-        const json = (await res.json()) as {
-          success?: boolean;
-          error?: string;
-          data?: { renderId?: string; outputPath?: string };
-        };
-        if (json.data?.renderId) {
-          actions.setRenderJobs(renderJobs.filter((j) => j.renderId !== localRenderId));
-          actions.upsertRenderJob({
-            ...initialJob,
-            renderId: json.data.renderId,
-            outputPath: json.data.outputPath || initialJob.outputPath,
-          });
-          setIsExporting(false);
-          return;
-        }
-        throw new Error(json.error || "Render worker did not return a valid renderId");
-      }
-      throw new Error(`Render request failed with status ${res.status}`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Engine render worker is unavailable";
-      actions.upsertRenderJob({
-        ...initialJob,
-        status: "error",
-        percent: 0,
-        error: msg,
-      });
+    } finally {
       setIsExporting(false);
-      toast.error(`Export failed: ${msg}`);
     }
   };
 

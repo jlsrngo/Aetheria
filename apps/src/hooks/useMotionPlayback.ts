@@ -221,7 +221,10 @@ export function useMotionPlayback(opts: UseMotionPlaybackOptions) {
     };
 
     rafId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafId);
+    return () => {
+      cancelAnimationFrame(rafId);
+      lastTsRef.current = null;
+    };
   }, [isPlaying, fps, playbackRate, durationInFrames, inFrame, outFrame, loop, emitFrame, emitTime, setPlayingState]);
 
   return {

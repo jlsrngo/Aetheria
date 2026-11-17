@@ -394,6 +394,16 @@ export const studioActions = {
     emit();
   },
 
+  replaceRenderJob(targetRenderId: string, job: StudioRenderJob) {
+    const filtered = state.renderJobs.filter((j) => j.renderId !== targetRenderId);
+    const exists = filtered.some((j) => j.renderId === job.renderId);
+    const next = exists
+      ? filtered.map((j) => (j.renderId === job.renderId ? { ...j, ...job } : j))
+      : [job, ...filtered];
+    state = { ...state, renderJobs: next };
+    emit();
+  },
+
   setSubtitleCues(cues: StudioSubtitleCue[], style?: string) {
     state = {
       ...state,

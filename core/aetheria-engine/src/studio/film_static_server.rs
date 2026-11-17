@@ -37,7 +37,23 @@ async fn serve_static_film_file(film_root: &Path, _ws_root: &Path, rel_raw: &str
 
     if target_rel == "index.html" {
         let index_path = film_root.join("index.html");
-        let raw_html = std::fs::read_to_string(&index_path).unwrap_or_default();
+        let raw_html = match tokio::fs::read_to_string(&index_path).await {
+            Ok(content) => content,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    format!("HTML film entry not found: {}", index_path.display()),
+                )
+                    .into_response();
+            }
+            Err(err) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed reading index.html '{}': {}", index_path.display(), err),
+                )
+                    .into_response();
+            }
+        };
         let mut html =
             super::builtin_runtime::rewrite_three_cdn_tags(&raw_html, Some("/script/three.min.js"));
         if !html.contains("aetheria-motion.js") {
@@ -143,5 +159,49 @@ pub async fn start_ephemeral_film_server(
         let _ = axum::serve(http_listener, app).await;
     });
     Ok((http_port, FilmServerGuard(Some(server_handle))))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn missing_index_html_returns_404_not_empty_200() {
+        let dir = std::env::temp_dir().join(format!("aetheria_static_404_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let (port, _guard) = start_ephemeral_film_server(dir.clone(), dir.clone())
+            .await
+            .unwrap();
+        let resp = reqwest::get(format!("http://127.0.0.1:{}/index.html", port))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+        let body = resp.text().await.unwrap();
+        assert!(body.contains("HTML film entry not found"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn existing_index_html_returns_200_with_runtime_tag() {
+        let dir = std::env::temp_dir().join(format!("aetheria_static_200_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("index.html"), "<html><head></head><body>Hi</body></html>").unwrap();
+
+        let (port, _guard) = start_ephemeral_film_server(dir.clone(), dir.clone())
+            .await
+            .unwrap();
+        let resp = reqwest::get(format!("http://127.0.0.1:{}/index.html", port))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        let body = resp.text().await.unwrap();
+        assert!(body.contains("aetheria-motion.js"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 

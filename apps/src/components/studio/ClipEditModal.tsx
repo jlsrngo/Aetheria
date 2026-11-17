@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { toast } from "sonner";
 import {
   X,
   Save,
@@ -17,6 +18,7 @@ import { cn } from "../../lib/utils";
 import type { VideoLayerSpec } from "../../types/video";
 import { resolveColorToHex } from "../../types/video";
 import { useStudioStore } from "../../hooks/useStudioStore";
+import { useDialogFocusTrap } from "../../hooks/useDialogFocusTrap";
 import { ColorPickerField } from "./clip-modal/ColorPickerField";
 import { getFieldInfo } from "./clip-modal/clipModalTypes";
 
@@ -69,38 +71,47 @@ export const ClipEditModal: React.FC<ClipEditModalProps> = ({
   const [gridOpacityDraft, setGridOpacityDraft] = useState<number>(0.22);
   const [iconCharDraft, setIconCharDraft] = useState<string>("⚡");
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const syncContextRef = useRef({ layer, props: activeComposition.props });
+  syncContextRef.current = { layer, props: activeComposition.props };
+  const activeLayerId = layer?.id ?? null;
+
+  useDialogFocusTrap(isOpen && Boolean(layer), dialogRef);
+
   useEffect(() => {
-    if (layer) {
-      setContentDraft(layer.content ?? layer.label);
-      setFromDraft(layer.from);
-      setDurationDraft(layer.durationInFrames);
+    if (!isOpen) return;
+    const { layer: targetLayer, props } = syncContextRef.current;
+    if (!targetLayer) return;
 
-      const hexAccent = resolveColorToHex(
-        activeComposition.props.layerColors?.[layer.id] || layer.color || "#F97316"
-      );
-      setColorDraft(hexAccent);
+    setContentDraft(targetLayer.content ?? targetLayer.label);
+    setFromDraft(targetLayer.from);
+    setDurationDraft(targetLayer.durationInFrames);
 
-      const hexText = resolveColorToHex(
-        activeComposition.props.layerTextColors?.[layer.id] || "#FFFFFF"
-      );
-      setTextColorDraft(hexText);
+    const hexAccent = resolveColorToHex(
+      props.layerColors?.[targetLayer.id] || targetLayer.color || "#F97316"
+    );
+    setColorDraft(hexAccent);
 
-      const savedBg = activeComposition.props.layerBgColors?.[layer.id] || "glass";
-      if (savedBg.startsWith("#")) {
-        setCardBgDraft("custom");
-        setCustomCardBgHex(savedBg);
-      } else {
-        setCardBgDraft(savedBg);
-      }
+    const hexText = resolveColorToHex(
+      props.layerTextColors?.[targetLayer.id] || "#FFFFFF"
+    );
+    setTextColorDraft(hexText);
 
-      setBgStyleDraft(activeComposition.props.bgStyle || "radial");
-      setOrbSizeDraft(activeComposition.props.orbSize ?? 600);
-      setOrbBlurDraft(activeComposition.props.orbBlur ?? 140);
-      setGridSizeDraft(activeComposition.props.gridSize ?? 40);
-      setGridOpacityDraft(activeComposition.props.gridOpacity ?? 0.22);
-      setIconCharDraft(activeComposition.props.footerIconChar || "⚡");
+    const savedBg = props.layerBgColors?.[targetLayer.id] || "glass";
+    if (savedBg.startsWith("#")) {
+      setCardBgDraft("custom");
+      setCustomCardBgHex(savedBg);
+    } else {
+      setCardBgDraft(savedBg);
     }
-  }, [layer, activeComposition.props]);
+
+    setBgStyleDraft(props.bgStyle || "radial");
+    setOrbSizeDraft(props.orbSize ?? 600);
+    setOrbBlurDraft(props.orbBlur ?? 140);
+    setGridSizeDraft(props.gridSize ?? 40);
+    setGridOpacityDraft(props.gridOpacity ?? 0.22);
+    setIconCharDraft(props.footerIconChar || "⚡");
+  }, [isOpen, activeLayerId, activeComposition.id]);
 
   if (!isOpen || !layer) return null;
 
@@ -119,39 +130,47 @@ export const ClipEditModal: React.FC<ClipEditModalProps> = ({
   const fieldInfo = getFieldInfo(layer.id);
 
   const handleSave = () => {
-    const trimmed = contentDraft.trim();
-    if (trimmed.length > 0) {
-      onSaveContent(layer, trimmed);
+    try {
+      const trimmed = contentDraft.trim();
+      if (trimmed.length > 0) {
+        onSaveContent(layer, trimmed);
+      }
+      const safeFrom = Math.max(0, Math.min(durationInFrames - 1, fromDraft));
+      const safeDur = Math.max(1, Math.min(durationInFrames - safeFrom, durationDraft));
+      onSaveTiming(layer, safeFrom, safeDur);
+      if (onSaveColor && colorDraft) {
+        onSaveColor(layer, colorDraft);
+      }
+
+      const finalCardBg = cardBgDraft === "custom" ? customCardBgHex : cardBgDraft;
+
+      actions.updateActiveProps({
+        layerColors: {
+          ...(activeComposition.props.layerColors || {}),
+          [layer.id]: colorDraft,
+        },
+        layerTextColors: {
+          ...(activeComposition.props.layerTextColors || {}),
+          [layer.id]: textColorDraft,
+        },
+        layerBgColors: {
+          ...(activeComposition.props.layerBgColors || {}),
+          [layer.id]: finalCardBg,
+        },
+        ...(isBaseLayer ? { bgStyle: bgStyleDraft } : {}),
+        ...(isOrbLayer ? { orbSize: orbSizeDraft, orbBlur: orbBlurDraft } : {}),
+        ...(isGridLayer ? { gridSize: gridSizeDraft, gridOpacity: gridOpacityDraft } : {}),
+        ...(isIconLayer ? { footerIconChar: iconCharDraft.slice(0, 4) || "⚡" } : {}),
+      });
+
+      onClose();
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? `Failed to save clip changes: ${err.message}`
+          : "Failed to save clip changes"
+      );
     }
-    const safeFrom = Math.max(0, Math.min(durationInFrames - 1, fromDraft));
-    const safeDur = Math.max(1, Math.min(durationInFrames - safeFrom, durationDraft));
-    onSaveTiming(layer, safeFrom, safeDur);
-    if (onSaveColor && colorDraft) {
-      onSaveColor(layer, colorDraft);
-    }
-
-    const finalCardBg = cardBgDraft === "custom" ? customCardBgHex : cardBgDraft;
-
-    actions.updateActiveProps({
-      layerColors: {
-        ...(activeComposition.props.layerColors || {}),
-        [layer.id]: colorDraft,
-      },
-      layerTextColors: {
-        ...(activeComposition.props.layerTextColors || {}),
-        [layer.id]: textColorDraft,
-      },
-      layerBgColors: {
-        ...(activeComposition.props.layerBgColors || {}),
-        [layer.id]: finalCardBg,
-      },
-      ...(isBaseLayer ? { bgStyle: bgStyleDraft } : {}),
-      ...(isOrbLayer ? { orbSize: orbSizeDraft, orbBlur: orbBlurDraft } : {}),
-      ...(isGridLayer ? { gridSize: gridSizeDraft, gridOpacity: gridOpacityDraft } : {}),
-      ...(isIconLayer ? { footerIconChar: iconCharDraft.slice(0, 4) || "⚡" } : {}),
-    });
-
-    onClose();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -168,12 +187,15 @@ export const ClipEditModal: React.FC<ClipEditModalProps> = ({
     <div
       role="dialog"
       aria-modal="true"
+      onClick={onClose}
       onKeyDown={handleKeyDown}
       className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150"
     >
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-lg bg-[var(--bg-panel)] border border-[var(--border-strong)] rounded-2xl shadow-2xl flex flex-col overflow-hidden text-[var(--text-primary)]"
+        className="w-full max-w-lg bg-[var(--bg-panel)] border border-[var(--border-strong)] rounded-2xl shadow-2xl flex flex-col overflow-hidden text-[var(--text-primary)] outline-none"
       >
         {/* Header */}
         <div className="h-11 px-4 border-b border-[var(--border-color)] bg-[var(--bg-card)] flex items-center justify-between shrink-0">
@@ -245,22 +267,24 @@ export const ClipEditModal: React.FC<ClipEditModalProps> = ({
                     </span>
                   </div>
                   <div className="grid grid-cols-3 gap-1.5 pt-1">
-                    {[
-                      { id: "radial", label: "Radial Glow" },
-                      { id: "blueprint", label: "Swiss Blueprint" },
-                      { id: "linear", label: "Linear Studio" },
-                      { id: "vignette", label: "Deep Vignette" },
-                      { id: "cyberpunk", label: "Cyberpunk Dual" },
-                      { id: "solid", label: "Solid Studio" },
-                    ].map((opt) => (
+                    {(
+                      [
+                        { id: "radial", label: "Radial Glow" },
+                        { id: "blueprint", label: "Swiss Blueprint" },
+                        { id: "linear", label: "Linear Studio" },
+                        { id: "vignette", label: "Deep Vignette" },
+                        { id: "cyberpunk", label: "Cyberpunk Dual" },
+                        { id: "solid", label: "Solid Studio" },
+                      ] as const
+                    ).map((opt) => (
                       <button
                         key={opt.id}
                         type="button"
-                        onClick={() => setBgStyleDraft(opt.id as any)}
+                        onClick={() => setBgStyleDraft(opt.id)}
                         className={cn(
                           "h-7 px-2 rounded-lg border text-[10px] font-medium transition-colors cursor-pointer",
                           bgStyleDraft === opt.id
-                            ? "bg-[#cf6613] border-[#e07b27] text-white font-semibold"
+                            ? "bg-[var(--btn-primary-bg)] border-[var(--btn-primary-border)] text-[var(--btn-primary-text)] font-semibold"
                             : "bg-[var(--bg-input)] border-[var(--border-color)] text-[var(--text-secondary)] hover:text-white"
                         )}
                       >
@@ -298,7 +322,7 @@ export const ClipEditModal: React.FC<ClipEditModalProps> = ({
                             className={cn(
                               "h-6 px-2 rounded-md border text-[10px] font-mono transition-colors cursor-pointer",
                               orbSizeDraft === opt.val
-                                ? "bg-[#cf6613] border-[#e07b27] text-white font-semibold"
+                                ? "bg-[var(--btn-primary-bg)] border-[var(--btn-primary-border)] text-[var(--btn-primary-text)] font-semibold"
                                 : "bg-[var(--bg-input)] border-[var(--border-color)] text-[var(--text-secondary)] hover:text-white"
                             )}
                           >
@@ -326,7 +350,7 @@ export const ClipEditModal: React.FC<ClipEditModalProps> = ({
                             className={cn(
                               "h-6 px-2 rounded-md border text-[10px] font-mono transition-colors cursor-pointer",
                               orbBlurDraft === opt.val
-                                ? "bg-[#cf6613] border-[#e07b27] text-white font-semibold"
+                                ? "bg-[var(--btn-primary-bg)] border-[var(--btn-primary-border)] text-[var(--btn-primary-text)] font-semibold"
                                 : "bg-[var(--bg-input)] border-[var(--border-color)] text-[var(--text-secondary)] hover:text-white"
                             )}
                           >
@@ -366,7 +390,7 @@ export const ClipEditModal: React.FC<ClipEditModalProps> = ({
                             className={cn(
                               "h-6 px-2 rounded-md border text-[10px] font-mono transition-colors cursor-pointer",
                               gridSizeDraft === opt.val
-                                ? "bg-[#cf6613] border-[#e07b27] text-white font-semibold"
+                                ? "bg-[var(--btn-primary-bg)] border-[var(--btn-primary-border)] text-[var(--btn-primary-text)] font-semibold"
                                 : "bg-[var(--bg-input)] border-[var(--border-color)] text-[var(--text-secondary)] hover:text-white"
                             )}
                           >
@@ -396,7 +420,7 @@ export const ClipEditModal: React.FC<ClipEditModalProps> = ({
                             className={cn(
                               "h-6 px-2 rounded-md border text-[10px] font-mono transition-colors cursor-pointer",
                               gridOpacityDraft === opt.val
-                                ? "bg-[#cf6613] border-[#e07b27] text-white font-semibold"
+                                ? "bg-[var(--btn-primary-bg)] border-[var(--btn-primary-border)] text-[var(--btn-primary-text)] font-semibold"
                                 : "bg-[var(--bg-input)] border-[var(--border-color)] text-[var(--text-secondary)] hover:text-white"
                             )}
                           >
@@ -469,7 +493,7 @@ export const ClipEditModal: React.FC<ClipEditModalProps> = ({
                         className={cn(
                           "h-7 rounded-md border text-sm flex items-center justify-center cursor-pointer transition-colors",
                           iconCharDraft === sym
-                            ? "bg-[#cf6613] border-[#e07b27] text-white"
+                            ? "bg-[var(--btn-primary-bg)] border-[var(--btn-primary-border)] text-[var(--btn-primary-text)]"
                             : "bg-[var(--bg-input)] border-[var(--border-color)] hover:bg-[var(--bg-hover)]"
                         )}
                       >
@@ -564,7 +588,7 @@ export const ClipEditModal: React.FC<ClipEditModalProps> = ({
                       className={cn(
                         "h-7 px-2 rounded-lg border text-[10px] font-medium transition-colors cursor-pointer",
                         cardBgDraft === opt.id
-                          ? "bg-[#cf6613] border-[#e07b27] text-white font-semibold"
+                          ? "bg-[var(--btn-primary-bg)] border-[var(--btn-primary-border)] text-[var(--btn-primary-text)] font-semibold"
                           : "bg-[var(--bg-input)] border-[var(--border-color)] text-[var(--text-secondary)] hover:text-white"
                       )}
                     >
@@ -675,7 +699,7 @@ export const ClipEditModal: React.FC<ClipEditModalProps> = ({
               className={cn(
                 "h-7 px-3 rounded-lg border text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer",
                 layer.visible
-                  ? "bg-[#0284c7] border-[#38bdf8] text-white"
+                  ? "bg-[var(--status-done-bg)] border-[var(--status-done-border)] text-white"
                   : "bg-[var(--bg-input)] border-[var(--border-color)] text-[var(--text-muted)]"
               )}
             >
@@ -724,7 +748,7 @@ export const ClipEditModal: React.FC<ClipEditModalProps> = ({
             <button
               type="button"
               onClick={handleSave}
-              className="h-7 px-3.5 rounded-lg bg-[#cf6613] hover:bg-[#b8580f] border border-[#e07b27] text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+              className="h-7 px-3.5 rounded-lg bg-[var(--btn-primary-bg)] hover:bg-[var(--btn-primary-hover)] border border-[var(--btn-primary-border)] text-[var(--btn-primary-text)] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
             >
               <Save className="w-3.5 h-3.5" />
               <span>Save Changes</span>

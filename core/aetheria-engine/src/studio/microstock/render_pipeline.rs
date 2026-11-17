@@ -4,11 +4,10 @@ use super::adobe_profile::{RuleSeverity, URL_REFUSAL};
 use super::loop_check::{compare_images_psnr_ssim, FrameSimilarityMetrics};
 use super::manifest::PreflightItem;
 use crate::paths::{detect_browser_executable, locate_ffmpeg_binary, now_ms};
-use crate::studio::cdp_ws::CdpWebSocket;
 use crate::studio::ffmpeg_pipeline::{format_ffmpeg_failure_from_task, spawn_stderr_drain};
 use crate::studio::film_inspector::inspect_workspace_film;
-use crate::studio::film_static_server::{pick_ephemeral_port, start_ephemeral_film_server};
-use crate::studio::html_renderer::spawn_headless_browser;
+use crate::studio::film_static_server::start_ephemeral_film_server;
+use crate::studio::html_renderer::launch_headless_browser_with_cdp;
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -109,26 +108,6 @@ pub fn build_microstock_ffmpeg_command(
     cmd
 }
 
-async fn wait_for_cdp_ws_url(cdp_port: u16) -> Result<String, String> {
-    let list_url = format!("http://127.0.0.1:{}/json/list", cdp_port);
-    let client = reqwest::Client::new();
-    for _ in 0..50 {
-        if let Ok(resp) = client.get(&list_url).send().await {
-            if let Ok(targets) = resp.json::<Vec<Value>>().await {
-                for t in targets {
-                    if t.get("type").and_then(Value::as_str) == Some("page") {
-                        if let Some(ws) = t.get("webSocketDebuggerUrl").and_then(Value::as_str) {
-                            return Ok(ws.to_string());
-                        }
-                    }
-                }
-            }
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-    Err("Timed out waiting for headless browser CDP target".to_string())
-}
-
 pub async fn render_microstock_staging<FProgress>(
     params: MicrostockRenderParams,
     mut on_progress: FProgress,
@@ -177,7 +156,18 @@ where
         .join("output")
         .join("microstock")
         .join("staging");
-    let _ = std::fs::create_dir_all(&staging_dir);
+    tokio::fs::create_dir_all(&staging_dir)
+        .await
+        .map_err(|e| PreflightItem {
+            code: "MOTION_LINT_ERRORS".to_string(),
+            severity: RuleSeverity::Fail,
+            message: format!(
+                "Failed creating staging directory '{}': {}",
+                staging_dir.display(),
+                e
+            ),
+            source: URL_REFUSAL.to_string(),
+        })?;
     let final_output = staging_dir.join(&params.output_filename);
 
     let (http_port, _srv) =
@@ -189,32 +179,13 @@ where
                 message: e,
                 source: URL_REFUSAL.to_string(),
             })?;
-    let cdp_port = pick_ephemeral_port().map_err(|e| PreflightItem {
-        code: "MOTION_LINT_ERRORS".to_string(),
-        severity: RuleSeverity::Fail,
-        message: e,
-        source: URL_REFUSAL.to_string(),
-    })?;
-    let _chrome = spawn_headless_browser(
+    let (_chrome, mut cdp) = launch_headless_browser_with_cdp(
         &browser_exe,
-        cdp_port,
         params.target_width,
         params.target_height,
     )
+    .await
     .map_err(|e| PreflightItem {
-        code: "MOTION_LINT_ERRORS".to_string(),
-        severity: RuleSeverity::Fail,
-        message: e,
-        source: URL_REFUSAL.to_string(),
-    })?;
-
-    let ws_url = wait_for_cdp_ws_url(cdp_port).await.map_err(|e| PreflightItem {
-        code: "MOTION_LINT_ERRORS".to_string(),
-        severity: RuleSeverity::Fail,
-        message: e,
-        source: URL_REFUSAL.to_string(),
-    })?;
-    let mut cdp = CdpWebSocket::connect(&ws_url).await.map_err(|e| PreflightItem {
         code: "MOTION_LINT_ERRORS".to_string(),
         severity: RuleSeverity::Fail,
         message: e,

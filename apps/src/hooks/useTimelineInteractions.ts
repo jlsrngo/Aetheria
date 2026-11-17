@@ -108,6 +108,7 @@ export function useTimelineInteractions({
         target instanceof HTMLTextAreaElement ||
         target instanceof HTMLSelectElement ||
         target?.isContentEditable ||
+        Boolean(target?.closest("[role='textbox']")) ||
         Boolean(target?.closest("[role='dialog']"))
       ) {
         return;

@@ -166,6 +166,7 @@ export function ElementsCaptionsPanel({
     const targetStyle = resolveCaptionHex(styleOverride ?? captionStyle);
     setIsGenerating(true);
     const fullScript = `${activeComposition.props.hookText}. ${activeComposition.props.bodyText}`;
+    let apiFailureReason: string | null = null;
 
     try {
       const genRes = await apiFetch(`${API_BASE}/studio/generate-subtitles`, {
@@ -196,8 +197,14 @@ export function ElementsCaptionsPanel({
           setIsGenerating(false);
           return;
         }
+        apiFailureReason = "Engine returned no caption cues";
+      } else {
+        apiFailureReason = `HTTP ${genRes.status}`;
       }
-    } catch {}
+    } catch (err) {
+      apiFailureReason =
+        err instanceof Error ? err.message : "Engine subtitle generator unavailable";
+    }
 
     const fallback = buildLocalSubtitles(
       fullScript,
@@ -206,7 +213,13 @@ export function ElementsCaptionsPanel({
       targetStyle
     );
     actions.setSubtitleCues(fallback, targetStyle);
-    toast.success(`Generated ${fallback.length} synchronized caption cues`);
+    if (apiFailureReason) {
+      toast.warning(
+        `Engine caption generation failed (${apiFailureReason}); used ${fallback.length} local fallback cues`
+      );
+    } else {
+      toast.success(`Generated ${fallback.length} synchronized caption cues`);
+    }
     setIsGenerating(false);
   };
 
@@ -398,7 +411,7 @@ export function ElementsCaptionsPanel({
               type="button"
               onClick={() => void handleGenerateSubtitles()}
               disabled={isGenerating}
-              className="h-7 px-3.5 rounded-lg bg-[#cf6613] hover:bg-[#b8580f] border border-[#e07b27] text-white text-xs font-semibold flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap cursor-pointer transition-colors"
+              className="h-7 px-3.5 rounded-lg bg-[var(--btn-primary-bg)] hover:bg-[var(--btn-primary-hover)] border border-[var(--btn-primary-border)] text-[var(--btn-primary-text)] text-xs font-semibold flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap cursor-pointer transition-colors"
             >
               <Wand2 className="w-3.5 h-3.5 shrink-0" />
               <span>
@@ -410,9 +423,9 @@ export function ElementsCaptionsPanel({
           {/* Cue List */}
           {subtitleCues.length > 0 && (
             <div className="max-h-44 overflow-y-auto space-y-1 pt-1 border-t border-[var(--border-color)]">
-              {subtitleCues.map((cue, idx) => (
+              {subtitleCues.map((cue) => (
                 <button
-                  key={`${cue.startFrame}-${idx}`}
+                  key={cue.id || `cue-${cue.startFrame}-${cue.endFrame}-${cue.text.slice(0, 12)}`}
                   type="button"
                   onClick={() => actions.setCurrentFrame(cue.startFrame)}
                   className="w-full text-left px-2 py-1 rounded-md bg-[var(--bg-input)] hover:bg-[var(--bg-hover)] flex items-center justify-between gap-2 text-[11px] cursor-pointer transition-colors"

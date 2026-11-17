@@ -2,10 +2,9 @@
 //! Reuses the Edge/Chrome CDP pipeline from `html_renderer` without requiring FFmpeg,
 //! allowing the agent to visually inspect rendered frames and compare them against references.
 
-use super::cdp_ws::CdpWebSocket;
 use super::film_inspector::inspect_workspace_film;
-use super::film_static_server::{pick_ephemeral_port, start_ephemeral_film_server};
-use super::html_renderer::{spawn_headless_browser, wait_for_cdp_ws_url, wait_for_film_ready};
+use super::film_static_server::start_ephemeral_film_server;
+use super::html_renderer::{launch_headless_browser_with_cdp, wait_for_film_ready};
 use super::motion::resolve_active_html_film_path;
 use crate::paths::detect_browser_executable;
 use crate::tool::path_guard::resolve_isolated_path;
@@ -200,11 +199,8 @@ pub async fn capture_film_preview_with_options(
     let film_root_str = film_root.to_string_lossy().to_string();
     let (http_port, _server_guard) =
         start_ephemeral_film_server(film_root.clone(), ws_root.clone()).await?;
-    let cdp_port = pick_ephemeral_port()?;
-    let _chrome_guard = spawn_headless_browser(&browser_exe, cdp_port, meta.width, meta.height)?;
-
-    let ws_url = wait_for_cdp_ws_url(cdp_port).await?;
-    let mut cdp = CdpWebSocket::connect(&ws_url).await?;
+    let (_chrome_guard, mut cdp) =
+        launch_headless_browser_with_cdp(&browser_exe, meta.width, meta.height).await?;
     let _ = cdp.call("Page.enable", json!({})).await?;
     let _ = cdp.call("Runtime.enable", json!({})).await?;
     let _ = cdp

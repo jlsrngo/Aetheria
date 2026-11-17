@@ -25,6 +25,45 @@ export interface GeneratedScriptFile {
   updatedAt?: number;
 }
 
+interface SessionToolInputPayload {
+  filePath?: unknown;
+  path?: unknown;
+  targetFile?: unknown;
+  TargetFile?: unknown;
+  content?: unknown;
+  oldString?: unknown;
+  target?: unknown;
+  old_str?: unknown;
+  newString?: unknown;
+  replacement?: unknown;
+  new_str?: unknown;
+}
+
+interface SessionPartPayload {
+  type?: unknown;
+  name?: unknown;
+  state?: {
+    status?: unknown;
+    input?: SessionToolInputPayload;
+  };
+  input?: SessionToolInputPayload;
+}
+
+interface SessionMessagePayload {
+  content?: SessionPartPayload[];
+  parts?: SessionPartPayload[];
+  time?: {
+    created?: number;
+  };
+}
+
+interface ListedFileItemPayload {
+  type?: unknown;
+  name?: unknown;
+  path?: unknown;
+  absolute?: unknown;
+}
+
 interface ScriptPanelProps {
   onClose: () => void;
   width?: number | string;
@@ -97,9 +136,11 @@ export const ScriptPanel = memo(function ScriptPanel({
   const [sessionFiles, setSessionFiles] = useState<GeneratedScriptFile[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const fetchSessionScripts = useCallback(async () => {
     setIsLoading(true);
+    const errors: string[] = [];
     try {
       const fileMap = new Map<string, GeneratedScriptFile>();
 
@@ -108,15 +149,15 @@ export const ScriptPanel = memo(function ScriptPanel({
         try {
           const res = await engineFetch(`/api/session/${activeChatId}/message`);
           if (res.ok) {
-            const json = await res.json();
-            const messages: any[] = Array.isArray(json?.data) ? json.data : [];
+            const json = (await res.json()) as { data?: SessionMessagePayload[] };
+            const messages: SessionMessagePayload[] = Array.isArray(json?.data) ? json.data : [];
             const chronological = [...messages].reverse();
             for (const msg of chronological) {
-              const parts: any[] = Array.isArray(msg?.content)
+              const parts: SessionPartPayload[] = Array.isArray(msg?.content)
                 ? msg.content
                 : Array.isArray(msg?.parts)
-                ? msg.parts
-                : [];
+                  ? msg.parts
+                  : [];
 
               for (const part of parts) {
                 if (part?.type !== "tool") continue;
@@ -127,12 +168,13 @@ export const ScriptPanel = memo(function ScriptPanel({
                 if (state?.status && state.status !== "completed") continue;
 
                 const input = state?.input || part?.input || {};
-                const rawPath: string =
+                const rawPath = String(
                   input.filePath ||
                   input.path ||
                   input.targetFile ||
                   input.TargetFile ||
-                  "";
+                  ""
+                );
                 if (!rawPath || !CODE_EXT_REGEX.test(rawPath)) continue;
                 if (isInternalAppFile(rawPath)) continue;
 
@@ -183,9 +225,11 @@ export const ScriptPanel = memo(function ScriptPanel({
                 }
               }
             }
+          } else {
+            errors.push(`Session read HTTP ${res.status}`);
           }
-        } catch {
-          // Session message fetch error non-blocking
+        } catch (err) {
+          errors.push(err instanceof Error ? err.message : "Failed reading session scripts");
         }
       }
 
@@ -195,17 +239,20 @@ export const ScriptPanel = memo(function ScriptPanel({
         try {
           const dirRes = await engineFetch(`/file?path=${encodeURIComponent(scanDir)}`);
           if (dirRes.ok) {
-            const dirFiles = await dirRes.json();
+            const dirFiles = (await dirRes.json()) as ListedFileItemPayload[];
             for (const item of Array.isArray(dirFiles) ? dirFiles : []) {
-              if (item.type === "file" && CODE_EXT_REGEX.test(item.name)) {
-                if (isInternalAppFile(item.path)) continue;
-                const fullPath = item.absolute || item.path;
+              const itemName = typeof item.name === "string" ? item.name : "";
+              const itemPath = typeof item.path === "string" ? item.path : "";
+              const itemAbs = typeof item.absolute === "string" ? item.absolute : "";
+              if (item.type === "file" && itemName && CODE_EXT_REGEX.test(itemName)) {
+                if (isInternalAppFile(itemPath)) continue;
+                const fullPath = itemAbs || itemPath;
                 const normKey = toScriptKey(fullPath, activeFolder);
                 const existing = fileMap.get(normKey);
                 if (!existing) {
                   fileMap.set(normKey, {
                     id: normKey,
-                    name: item.name,
+                    name: itemName,
                     relativePath: toDisplayRelativePath(fullPath, activeFolder),
                     fullPath: fullPath,
                     status: "added",
@@ -213,26 +260,29 @@ export const ScriptPanel = memo(function ScriptPanel({
                     removedLines: 0,
                     updatedAt: Date.now(),
                   });
-                } else if (item.absolute && !/^[a-zA-Z]:[\\/]/.test(existing.fullPath)) {
+                } else if (itemAbs && !/^[a-zA-Z]:[\\/]/.test(existing.fullPath)) {
                   existing.fullPath = fullPath;
                 }
               } else if (
                 item.type === "directory" &&
-                (item.name === "scenes" || item.name === "_storyboard" || item.name === "components" || item.name === "script")
+                (itemName === "scenes" || itemName === "_storyboard" || itemName === "components" || itemName === "script")
               ) {
-                const subRes = await engineFetch(`/file?path=${encodeURIComponent(item.path)}`);
+                const subRes = await engineFetch(`/file?path=${encodeURIComponent(itemPath)}`);
                 if (subRes.ok) {
-                  const subFiles = await subRes.json();
+                  const subFiles = (await subRes.json()) as ListedFileItemPayload[];
                   for (const sub of Array.isArray(subFiles) ? subFiles : []) {
-                    if (sub.type === "file" && CODE_EXT_REGEX.test(sub.name)) {
-                      if (isInternalAppFile(sub.path)) continue;
-                      const subFullPath = sub.absolute || sub.path;
+                    const subName = typeof sub.name === "string" ? sub.name : "";
+                    const subPath = typeof sub.path === "string" ? sub.path : "";
+                    const subAbs = typeof sub.absolute === "string" ? sub.absolute : "";
+                    if (sub.type === "file" && subName && CODE_EXT_REGEX.test(subName)) {
+                      if (isInternalAppFile(subPath)) continue;
+                      const subFullPath = subAbs || subPath;
                       const subKey = toScriptKey(subFullPath, activeFolder);
                       const existingSub = fileMap.get(subKey);
                       if (!existingSub) {
                         fileMap.set(subKey, {
                           id: subKey,
-                          name: sub.name,
+                          name: subName,
                           relativePath: toDisplayRelativePath(subFullPath, activeFolder),
                           fullPath: subFullPath,
                           status: "added",
@@ -240,7 +290,7 @@ export const ScriptPanel = memo(function ScriptPanel({
                           removedLines: 0,
                           updatedAt: Date.now(),
                         });
-                      } else if (sub.absolute && !/^[a-zA-Z]:[\\/]/.test(existingSub.fullPath)) {
+                      } else if (subAbs && !/^[a-zA-Z]:[\\/]/.test(existingSub.fullPath)) {
                         existingSub.fullPath = subFullPath;
                       }
                     }
@@ -249,14 +299,15 @@ export const ScriptPanel = memo(function ScriptPanel({
               }
             }
           }
-        } catch {
-          // Ignore individual directory scan errors cleanly
+        } catch (err) {
+          errors.push(err instanceof Error ? err.message : `Scan failed (${scanDir})`);
         }
       }
 
       setSessionFiles(Array.from(fileMap.values()));
-    } catch {
-      // Ignore network errors cleanly
+      setLoadError(errors.length > 0 ? errors[0] : null);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Failed scanning workspace scripts");
     } finally {
       setIsLoading(false);
     }
@@ -380,6 +431,23 @@ export const ScriptPanel = memo(function ScriptPanel({
             <span className="text-[var(--text-primary)] font-medium">+{totalAdded}</span>
             <span className="text-rose-400/80">-{totalRemoved}</span>
           </div>
+        </div>
+      )}
+
+      {loadError && (
+        <div
+          role="status"
+          className="px-3 py-1.5 border-b border-[var(--border-color)] bg-amber-500/10 text-[11px] text-amber-300 flex items-center justify-between gap-2"
+        >
+          <span className="truncate">Script scan warning: {loadError}</span>
+          <button
+            type="button"
+            onClick={() => setLoadError(null)}
+            aria-label="Dismiss script scan warning"
+            className="text-[10px] underline shrink-0 cursor-pointer"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 

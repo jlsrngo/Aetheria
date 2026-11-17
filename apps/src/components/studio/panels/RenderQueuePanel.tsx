@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { useStudioStore } from "../../../hooks/useStudioStore";
 import { useMicrostockStore } from "../../../hooks/useMicrostockStore";
 import { ADOBE_ALLOWED_CODECS } from "../../../lib/microstockUtils";
+import { executeMediaRenderJob } from "../../../lib/studioRenderJob";
 import { apiFetch, API_BASE } from "../../../lib/api";
 import { cn } from "../../../lib/utils";
 import type { StudioGpuTelemetry, StudioRenderJob } from "../../../types/studio";
@@ -41,6 +42,7 @@ export function RenderQueuePanel({
   const microstock = useMicrostockStore();
   const [codec, setCodec] = useState<"h264" | "h265" | "vp9" | "gif">("h264");
   const [outputName, setOutputName] = useState<string>("");
+  const [telemetryError, setTelemetryError] = useState<string | null>(null);
 
   // Fetch GPU telemetry on mount
   useEffect(() => {
@@ -54,10 +56,19 @@ export function RenderQueuePanel({
             data?: StudioGpuTelemetry;
           };
           if (json.data) {
+            setTelemetryError(null);
             actions.setGpuTelemetry(json.data);
           }
+        } else if (!cancelled) {
+          setTelemetryError(`Telemetry unavailable (HTTP ${res.status})`);
         }
-      } catch {}
+      } catch (err) {
+        if (!cancelled) {
+          setTelemetryError(
+            err instanceof Error ? err.message : "Failed to reach GPU telemetry endpoint"
+          );
+        }
+      }
     };
     void loadTelemetry();
     return () => {
@@ -72,21 +83,40 @@ export function RenderQueuePanel({
     );
     if (!hasActive) return;
 
+    let consecutivePollFailures = 0;
     const timer = setInterval(async () => {
       try {
         const res = await apiFetch(`${API_BASE}/render-progress`);
-        if (res.ok) {
-          const json = (await res.json()) as {
-            success?: boolean;
-            data?: StudioRenderJob[];
-          };
-          if (Array.isArray(json.data) && json.data.length > 0) {
-            for (const job of json.data) {
-              actions.upsertRenderJob(job);
-            }
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        consecutivePollFailures = 0;
+        const json = (await res.json()) as {
+          success?: boolean;
+          data?: StudioRenderJob[];
+        };
+        if (Array.isArray(json.data) && json.data.length > 0) {
+          for (const job of json.data) {
+            actions.upsertRenderJob(job);
           }
         }
-      } catch {}
+      } catch {
+        consecutivePollFailures += 1;
+        if (consecutivePollFailures >= 5) {
+          clearInterval(timer);
+          const msg = "Lost connection to engine render worker while polling render progress";
+          for (const activeJob of renderJobs) {
+            if (activeJob.status === "rendering" || activeJob.status === "pending") {
+              actions.upsertRenderJob({
+                ...activeJob,
+                status: "error",
+                error: msg,
+              });
+            }
+          }
+          toast.error(msg);
+        }
+      }
     }, 1200);
 
     return () => clearInterval(timer);
@@ -107,68 +137,16 @@ export function RenderQueuePanel({
       return;
     }
 
-    const ext = codec === "vp9" ? "webm" : codec === "gif" ? "gif" : "mp4";
-    const cleanName =
-      outputName.trim() || `${activeComposition.id}-${Date.now().toString().slice(-4)}.${ext}`;
-    const localRenderId = `render-${Date.now()}`;
-
-    const initialJob: StudioRenderJob = {
-      renderId: localRenderId,
-      compositionId: activeComposition.id,
-      status: "rendering",
-      percent: 5,
-      renderedFrames: Math.max(1, Math.round(durationInFrames * 0.05)),
-      totalFrames: durationInFrames,
-      outputPath: `out/${cleanName}`,
-      createdAt: Date.now(),
-    };
-    actions.upsertRenderJob(initialJob);
-    toast.info(`Started rendering "${activeComposition.name}"`);
-
-    try {
-      const res = await apiFetch(`${API_BASE}/render-media`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          compositionId: activeComposition.id,
-          inputProps: activeComposition.props,
-          outputName: cleanName,
-          ratio: activeComposition.ratio,
-          codec,
-          inFrame: canvas.inFrame,
-          outFrame: canvas.outFrame,
-        }),
-      });
-      if (res.ok) {
-        const json = (await res.json()) as {
-          success?: boolean;
-          error?: string;
-          data?: { renderId?: string; outputPath?: string };
-        };
-        if (json.data?.renderId) {
-          actions.setRenderJobs(
-            renderJobs.filter((j) => j.renderId !== localRenderId)
-          );
-          actions.upsertRenderJob({
-            ...initialJob,
-            renderId: json.data.renderId,
-            outputPath: json.data.outputPath || initialJob.outputPath,
-          });
-          return;
-        }
-        throw new Error(json.error || "Render worker did not return a renderId");
-      }
-      throw new Error(`Render request failed with status ${res.status}`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Engine render worker is unavailable";
-      actions.upsertRenderJob({
-        ...initialJob,
-        status: "error",
-        percent: 0,
-        error: msg,
-      });
-      toast.error(`Render failed: ${msg}`);
-    }
+    await executeMediaRenderJob({
+      composition: activeComposition,
+      canvas,
+      durationInFrames,
+      codec,
+      outputName,
+      startMessage: `Started rendering "${activeComposition.name}"`,
+      failureToastPrefix: "Render failed",
+      actions,
+    });
   };
 
   return (
@@ -213,7 +191,7 @@ export function RenderQueuePanel({
               className={cn(
                 "px-2 py-0.5 rounded-full text-[9px] font-mono font-semibold border shrink-0 whitespace-nowrap",
                 gpuTelemetry?.hardwareAccelerated
-                  ? "bg-[#cf6613] border-[#e07b27] text-white"
+                  ? "bg-[var(--btn-primary-bg)] border-[var(--btn-primary-border)] text-[var(--btn-primary-text)]"
                   : "bg-[var(--bg-input)] border-[var(--border-color)] text-[var(--text-secondary)]"
               )}
             >
@@ -221,7 +199,9 @@ export function RenderQueuePanel({
             </span>
           </div>
           <div className="text-[11px] text-[var(--text-secondary)] truncate">
-            {gpuTelemetry?.gpuName || "Local Nexus Renderer (Zero Cloud Cost)"}
+            {telemetryError
+              ? telemetryError
+              : gpuTelemetry?.gpuName || "Local Nexus Renderer (Zero Cloud Cost)"}
           </div>
         </div>
 
@@ -264,7 +244,7 @@ export function RenderQueuePanel({
                     className={cn(
                       "h-6 rounded-md text-[10px] font-mono border transition-colors cursor-pointer",
                       microstock.activeCodec === item.id
-                        ? "bg-[#be123c] border-[#e11d48] text-white font-semibold"
+                        ? "bg-[var(--btn-action-bg)] border-[var(--btn-action-border)] text-white font-semibold"
                         : "bg-[var(--bg-input)] border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                     )}
                   >
@@ -289,7 +269,7 @@ export function RenderQueuePanel({
                     className={cn(
                       "h-6 rounded-md text-[10px] font-mono border transition-colors cursor-pointer",
                       codec === item.id
-                        ? "bg-[#be123c] border-[#e11d48] text-white font-semibold"
+                        ? "bg-[var(--btn-action-bg)] border-[var(--btn-action-border)] text-white font-semibold"
                         : "bg-[var(--bg-input)] border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                     )}
                   >
@@ -304,7 +284,7 @@ export function RenderQueuePanel({
             <button
               type="button"
               onClick={() => void handleStartRender()}
-              className="h-7 px-3.5 rounded-lg bg-[#be123c] hover:bg-[#9f1239] border border-[#e11d48] text-white text-xs font-semibold flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap cursor-pointer transition-colors"
+              className="h-7 px-3.5 rounded-lg bg-[var(--btn-action-bg)] hover:bg-[var(--btn-action-hover)] border border-[var(--btn-action-border)] text-white text-xs font-semibold flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap cursor-pointer transition-colors"
             >
               <Play className="w-3.5 h-3.5 fill-current shrink-0" />
               <span>
@@ -360,10 +340,10 @@ export function RenderQueuePanel({
                       className={cn(
                         "px-2 py-0.5 rounded-full text-[9px] font-mono font-semibold flex items-center gap-1 shrink-0 whitespace-nowrap border",
                         job.status === "done"
-                          ? "bg-[#0284c7] border-[#38bdf8] text-white"
+                          ? "bg-[var(--status-done-bg)] border-[var(--status-done-border)] text-white"
                           : job.status === "error"
-                          ? "bg-[#be123c] border-[#f43f5e] text-white"
-                          : "bg-[#cf6613] border-[#e07b27] text-white"
+                          ? "bg-[var(--status-error-bg)] border-[var(--status-error-border)] text-white"
+                          : "bg-[var(--btn-primary-bg)] border-[var(--btn-primary-border)] text-[var(--btn-primary-text)]"
                       )}
                     >
                       {job.status === "done" ? (
@@ -383,10 +363,10 @@ export function RenderQueuePanel({
                       className={cn(
                         "h-full transition-all duration-300",
                         job.status === "done"
-                          ? "bg-[#06B6D4]"
+                          ? "bg-[var(--status-done-bar)]"
                           : job.status === "error"
-                          ? "bg-[#E11D48]"
-                          : "bg-[#F59E0B]"
+                          ? "bg-[var(--status-error-bar)]"
+                          : "bg-[var(--status-warn-bar)]"
                       )}
                       style={{ width: `${Math.min(100, Math.max(0, job.percent))}%` }}
                     />

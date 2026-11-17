@@ -5,8 +5,8 @@ use super::manifest::PreflightItem;
 use crate::paths::{detect_browser_executable, locate_ffmpeg_binary, now_ms};
 use crate::studio::cdp_ws::CdpWebSocket;
 use crate::studio::film_inspector::inspect_workspace_film;
-use crate::studio::film_static_server::{pick_ephemeral_port, start_ephemeral_film_server};
-use crate::studio::html_renderer::spawn_headless_browser;
+use crate::studio::film_static_server::start_ephemeral_film_server;
+use crate::studio::html_renderer::launch_headless_browser_with_cdp;
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -116,26 +116,6 @@ async fn capture_png_at_time(cdp: &mut CdpWebSocket, t_sec: f64, dest: &Path) ->
     std::fs::write(dest, bytes).map_err(|e| format!("Failed writing frame PNG: {}", e))
 }
 
-async fn wait_for_cdp_ws(cdp_port: u16) -> Result<String, String> {
-    let url = format!("http://127.0.0.1:{}/json/list", cdp_port);
-    let client = reqwest::Client::new();
-    for _ in 0..50 {
-        if let Ok(resp) = client.get(&url).send().await {
-            if let Ok(list) = resp.json::<Vec<Value>>().await {
-                for item in list {
-                    if item.get("type").and_then(Value::as_str) == Some("page") {
-                        if let Some(ws) = item.get("webSocketDebuggerUrl").and_then(Value::as_str) {
-                            return Ok(ws.to_string());
-                        }
-                    }
-                }
-            }
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-    Err("Timed out waiting for headless browser CDP target".to_string())
-}
-
 /// Evaluates loop continuity at `renderAt(0)`, `renderAt(duration)`, and `renderAt(last_frame)` via CDP.
 pub async fn check_project_loop_continuity(
     project_dir: &Path,
@@ -162,11 +142,8 @@ pub async fn check_project_loop_continuity(
 
     let (http_port, _srv) =
         start_ephemeral_film_server(project_dir.to_path_buf(), ws_root.to_path_buf()).await?;
-    let cdp_port = pick_ephemeral_port()?;
-    let _chrome = spawn_headless_browser(&browser_exe, cdp_port, probe_w, probe_h)?;
-
-    let ws_url = wait_for_cdp_ws(cdp_port).await?;
-    let mut cdp = CdpWebSocket::connect(&ws_url).await?;
+    let (_chrome, mut cdp) =
+        launch_headless_browser_with_cdp(&browser_exe, probe_w, probe_h).await?;
     let _ = cdp.call("Page.enable", json!({})).await?;
     let _ = cdp.call("Runtime.enable", json!({})).await?;
     let _ = cdp

@@ -1,6 +1,7 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { cn } from "../../lib/utils";
+import { ErrorBoundary } from "../common/ErrorBoundary";
 import { AppHeader } from "./AppHeader";
 import { AppFooter } from "./AppFooter";
 import { useAppNetworkStatus } from "./hooks/useAppNetworkStatus";
@@ -27,6 +28,7 @@ const SettingsPage = lazy(() =>
 
 export function AppLayout() {
   const location = useLocation();
+  const [routeResetKey, setRouteResetKey] = useState(0);
   const { isOnline } = useAppNetworkStatus();
   const {
     activeFolder,
@@ -35,12 +37,17 @@ export function AppLayout() {
   } = useActiveFolderSync();
 
   useEffect(() => {
-    const raf1 = requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
+    let raf1 = 0;
+    let raf2 = 0;
+    raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
         console.info("[AETHERIA_UI_PAINTED]");
       });
     });
-    return () => cancelAnimationFrame(raf1);
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
   }, []);
 
   const isStudioRoute =
@@ -63,13 +70,26 @@ export function AppLayout() {
             !isStudioRoute && "hidden"
           )}
         >
-          <Suspense fallback={<div className="w-full h-full flex-1 bg-[var(--bg-app)]" />}>
-            <UnifiedWorkstationPage />
-          </Suspense>
+          <ErrorBoundary
+            key={`studio-route-${routeResetKey}`}
+            fullScreen={false}
+            fallbackTitle="Workstation view encountered an error"
+            onReset={() => setRouteResetKey((k) => k + 1)}
+          >
+            <Suspense fallback={<div className="w-full h-full flex-1 bg-[var(--bg-app)]" />}>
+              <UnifiedWorkstationPage />
+            </Suspense>
+          </ErrorBoundary>
         </div>
 
-        <Suspense fallback={<div className="w-full h-full flex-1 bg-[var(--bg-app)]" />}>
-          {location.pathname === "/stock" && (
+        <ErrorBoundary
+          key={`page-route-${location.pathname}-${routeResetKey}`}
+          fullScreen={false}
+          fallbackTitle="Page failed to load"
+          onReset={() => setRouteResetKey((k) => k + 1)}
+        >
+          <Suspense fallback={<div className="w-full h-full flex-1 bg-[var(--bg-app)]" />}>
+            {location.pathname === "/stock" && (
             <div className="w-full h-full flex flex-col flex-1">
               <StockVaultPage />
             </div>
@@ -84,12 +104,13 @@ export function AppLayout() {
               <AnalyticsPage />
             </div>
           )}
-          {location.pathname === "/settings" && (
-            <div className="w-full h-full flex flex-col flex-1">
-              <SettingsPage />
-            </div>
-          )}
-        </Suspense>
+            {location.pathname === "/settings" && (
+              <div className="w-full h-full flex flex-col flex-1">
+                <SettingsPage />
+              </div>
+            )}
+          </Suspense>
+        </ErrorBoundary>
       </main>
 
       {/* 3. Footer Bar (Edge-to-edge status bar matching technical blueprint) */}

@@ -213,7 +213,7 @@ export function InspectorPanel({
                 className={cn(
                   "h-6 rounded-md text-[10px] font-mono border transition-colors cursor-pointer",
                   activeComposition.ratio === r
-                    ? "bg-[#cf6613] border-[#e07b27] text-white font-semibold"
+                    ? "bg-[var(--btn-primary-bg)] border-[var(--btn-primary-border)] text-[var(--btn-primary-text)] font-semibold"
                     : "bg-[var(--bg-input)] border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
                 )}
               >
@@ -370,6 +370,7 @@ export function InspectorPanel({
                       )}
                       style={{ backgroundColor: hex }}
                       title={hex.toUpperCase()}
+                      aria-label={`Select theme color ${hex.toUpperCase()}`}
                     />
                   ))}
                 </div>
@@ -414,7 +415,7 @@ export function InspectorPanel({
                 <button
                   type="button"
                   onClick={handleApplyJson}
-                  className="h-7 px-3.5 rounded-lg bg-[#cf6613] hover:bg-[#b8580f] border border-[#e07b27] text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                  className="h-7 px-3.5 rounded-lg bg-[var(--btn-primary-bg)] hover:bg-[var(--btn-primary-hover)] border border-[var(--btn-primary-border)] text-[var(--btn-primary-text)] text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
                 >
                   <Check className="w-3.5 h-3.5" />
                   Apply JSON Props
@@ -457,7 +458,7 @@ export function InspectorPanel({
               type="button"
               onClick={handleSavePropsToDisk}
               disabled={isSaving}
-              className="h-7 px-3.5 rounded-lg bg-[#cf6613] hover:bg-[#b8580f] border border-[#e07b27] text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+              className="h-7 px-3.5 rounded-lg bg-[var(--btn-primary-bg)] hover:bg-[var(--btn-primary-hover)] border border-[var(--btn-primary-border)] text-[var(--btn-primary-text)] text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
               title="Save Default Props to project (Ctrl+S)"
             >
               <Save className="w-3.5 h-3.5" />

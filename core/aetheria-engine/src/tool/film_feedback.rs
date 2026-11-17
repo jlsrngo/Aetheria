@@ -146,25 +146,33 @@ fn check_js_scene_wiring(
         return;
     }
 
-    if !has_dynamic && !registered_ids.is_empty() {
-        let index_path = film_dir.join("index.html");
-        if index_path.is_file() {
-            let html_raw = std::fs::read_to_string(&index_path).unwrap_or_default();
-            if html_raw.contains("SCENES") {
-                let meta = inspect_workspace_film(&index_path);
-                let valid_ids: Vec<&str> = meta.scenes.iter().map(|s| s.id.as_str()).collect();
-                if !valid_ids.is_empty() {
-                    for reg_id in &registered_ids {
-                        if !valid_ids.iter().any(|id| id == reg_id) {
-                            feedback.has_errors = true;
-                            feedback.wiring_error = true;
-                            feedback.diagnostics.push(format!(
-                                "ERROR (SCENE_ID_MISMATCH): AM.registerScene(\"{}\") in '{}' does not match any scene id in index.html SCENES (expected one of: [{}]).",
-                                reg_id,
-                                rel_script,
-                                valid_ids.join(", ")
-                            ));
-                        }
+    let index_path = film_dir.join("index.html");
+    if index_path.is_file() {
+        let html_raw = std::fs::read_to_string(&index_path).unwrap_or_default();
+        if is_scene_file
+            && !extract_local_script_srcs(&html_raw)
+                .iter()
+                .any(|s| s.eq_ignore_ascii_case(&rel_script))
+        {
+            feedback.diagnostics.push(format!(
+                "WARNING (UNREFERENCED_SCENE_SCRIPT): '{}' exists in script/ but is not loaded in index.html. Add `<script src=\"{}\"></script>` before inline initialization.",
+                rel_script, rel_script
+            ));
+        }
+        if !has_dynamic && !registered_ids.is_empty() && html_raw.contains("SCENES") {
+            let meta = inspect_workspace_film(&index_path);
+            let valid_ids: Vec<&str> = meta.scenes.iter().map(|s| s.id.as_str()).collect();
+            if !valid_ids.is_empty() {
+                for reg_id in &registered_ids {
+                    if !valid_ids.iter().any(|id| id == reg_id) {
+                        feedback.has_errors = true;
+                        feedback.wiring_error = true;
+                        feedback.diagnostics.push(format!(
+                            "ERROR (SCENE_ID_MISMATCH): AM.registerScene(\"{}\") in '{}' does not match any scene id in index.html SCENES (expected one of: [{}]).",
+                            reg_id,
+                            rel_script,
+                            valid_ids.join(", ")
+                        ));
                     }
                 }
             }
@@ -828,6 +836,45 @@ pub fn collect_file_feedback(workspace_dir: &str, target: &Path) -> FileFeedback
     feedback
 }
 
+/// Deterministically inserts missing `<script src="..."></script>` tags into `index.html`.
+pub fn repair_missing_html_script_tags(html: &str, missing_scripts: &[String]) -> Option<String> {
+    let existing = extract_local_script_srcs(html);
+    let mut insertions = Vec::new();
+    for raw_rel in missing_scripts {
+        let norm = raw_rel.trim().trim_start_matches("./").trim_start_matches('/');
+        if norm.is_empty()
+            || !norm.starts_with("script/")
+            || !norm.ends_with(".js")
+            || existing.iter().any(|s| s.eq_ignore_ascii_case(norm))
+            || insertions
+                .iter()
+                .any(|s: &String| s.eq_ignore_ascii_case(norm))
+        {
+            continue;
+        }
+        insertions.push(norm.to_string());
+    }
+    if insertions.is_empty() {
+        return None;
+    }
+
+    let snippet: String = insertions
+        .iter()
+        .map(|s| format!("  <script src=\"{}\"></script>\n", s))
+        .collect();
+    let mut updated = html.to_string();
+    let lower = updated.to_ascii_lowercase();
+    if let Some(inline_idx) = lower.find("<script>") {
+        updated.insert_str(inline_idx, &snippet);
+    } else if let Some(body_end) = lower.rfind("</body>") {
+        updated.insert_str(body_end, &snippet);
+    } else {
+        updated.push('\n');
+        updated.push_str(&snippet);
+    }
+    Some(updated)
+}
+
 /// Attaches structured diagnostics and inspected film metadata to a write/edit/patch tool result.
 pub fn attach_post_write_feedback(result: &mut Value, workspace_dir: &str, target: &Path) {
     let feedback = collect_file_feedback(workspace_dir, target);
@@ -848,6 +895,46 @@ pub fn attach_post_write_feedback(result: &mut Value, workspace_dir: &str, targe
             }
         }
         if let Some(film_dir) = super::film_state::resolve_film_dir_from_target(workspace_dir, target) {
+            let script_dir = film_dir.join("script");
+            let index_path = film_dir.join("index.html");
+            if index_path.is_file() && script_dir.is_dir() {
+                if let (Ok(html_raw), Ok(entries)) =
+                    (std::fs::read_to_string(&index_path), std::fs::read_dir(&script_dir))
+                {
+                    let mut scene_files: Vec<String> = entries
+                        .flatten()
+                        .filter_map(|e| {
+                            let name = e.file_name().to_string_lossy().to_string();
+                            if name.to_ascii_lowercase().starts_with("scene")
+                                && name.to_ascii_lowercase().ends_with(".js")
+                            {
+                                Some(format!("script/{}", name))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    scene_files.sort();
+                    if let Some(repaired) = repair_missing_html_script_tags(&html_raw, &scene_files) {
+                        let existing = extract_local_script_srcs(&html_raw);
+                        let missing: Vec<String> = scene_files
+                            .into_iter()
+                            .filter(|s| !existing.iter().any(|e| e.eq_ignore_ascii_case(s)))
+                            .collect();
+                        if !missing.is_empty() {
+                            obj.insert(
+                                "repairSuggestion".to_string(),
+                                json!({
+                                    "target": "index.html",
+                                    "missingScripts": missing,
+                                    "hint": "Insert these <script src=\"...\"></script> tags into index.html before inline initialization.",
+                                    "patchedBytes": repaired.len()
+                                }),
+                            );
+                        }
+                    }
+                }
+            }
             if let Some(progress) = super::film_state::collect_film_scene_progress(&film_dir) {
                 obj.insert("sceneProgress".to_string(), progress.to_json());
             }
@@ -1156,6 +1243,34 @@ mod tests {
             .diagnostics
             .iter()
             .any(|d| d.contains("WEBGL_ALPHA_MISSING_BACKGROUND")));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_repair_missing_html_script_tags_and_unreferenced_scene_warning() {
+        let dir = std::env::temp_dir().join(format!("aetheria_fb_repair_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("script")).unwrap();
+        let html = "<!DOCTYPE html><html><body><canvas id=\"c\"></canvas><script src=\"script/scene1.js\"></script><script>window.renderAt=function(){};</script></body></html>";
+        std::fs::write(dir.join("index.html"), html).unwrap();
+        let s2 = dir.join("script").join("scene2.js");
+        std::fs::write(&s2, "AM.registerScene('s2', function(){});").unwrap();
+
+        let fb = collect_file_feedback(&dir.to_string_lossy(), &s2);
+        assert!(fb
+            .diagnostics
+            .iter()
+            .any(|d| d.contains("UNREFERENCED_SCENE_SCRIPT") && d.contains("script/scene2.js")));
+
+        let repaired = repair_missing_html_script_tags(
+            html,
+            &["script/scene1.js".to_string(), "script/scene2.js".to_string()],
+        )
+        .expect("missing scene2.js should generate repaired HTML");
+        assert!(repaired.contains("<script src=\"script/scene2.js\"></script>"));
+        assert!(repaired.find("script/scene2.js").unwrap() < repaired.find("window.renderAt").unwrap());
+        assert!(repair_missing_html_script_tags(&repaired, &["script/scene2.js".to_string()]).is_none());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

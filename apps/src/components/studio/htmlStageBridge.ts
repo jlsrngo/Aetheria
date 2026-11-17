@@ -227,11 +227,42 @@ export function buildSandboxStageBridgeScript(): string {
     });
   }
 
+  var blobUrlCache = Object.create(null);
+  var blobUrlOrder = [];
+  var MAX_BLOB_URL_CACHE = 48;
+
+  function revokeAllBlobUrls() {
+    for (var k in blobUrlCache) {
+      if (Object.prototype.hasOwnProperty.call(blobUrlCache, k)) {
+        try { URL.revokeObjectURL(blobUrlCache[k]); } catch (_) {}
+      }
+    }
+    blobUrlCache = Object.create(null);
+    blobUrlOrder = [];
+  }
+
+  window.addEventListener("pagehide", revokeAllBlobUrls);
+  window.addEventListener("beforeunload", revokeAllBlobUrls);
+
   function fetchWorkspaceBlobUrl(relPath) {
+    if (blobUrlCache[relPath]) {
+      return Promise.resolve(blobUrlCache[relPath]);
+    }
     return requestParentAsset(relPath).then(function(res) {
       if (!res || !res.ok || !res.buffer) return "";
+      if (blobUrlCache[relPath]) return blobUrlCache[relPath];
       var blob = new Blob([res.buffer], { type: res.contentType || "application/octet-stream" });
-      return URL.createObjectURL(blob);
+      var url = URL.createObjectURL(blob);
+      blobUrlCache[relPath] = url;
+      blobUrlOrder.push(relPath);
+      while (blobUrlOrder.length > MAX_BLOB_URL_CACHE) {
+        var oldestKey = blobUrlOrder.shift();
+        if (oldestKey && blobUrlCache[oldestKey]) {
+          try { URL.revokeObjectURL(blobUrlCache[oldestKey]); } catch (_) {}
+          delete blobUrlCache[oldestKey];
+        }
+      }
+      return url;
     });
   }
 

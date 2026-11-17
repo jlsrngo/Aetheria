@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useStudioCurrentFrame, useStudioStore } from "../../hooks/useStudioStore";
 import { useMicrostockStore } from "../../hooks/useMicrostockStore";
@@ -48,6 +48,14 @@ export const Timeline: React.FC<TimelineProps> = ({
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
   const [modalLayer, setModalLayer] = useState<VideoLayerSpec | null>(null);
   const [isSnapping, setIsSnapping] = useState<boolean>(true);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const activeFilmMeta = useTimelineFilmMeta(activeComposition.id);
   const lastFrame = Math.max(0, durationInFrames - 1);
@@ -209,6 +217,7 @@ export const Timeline: React.FC<TimelineProps> = ({
         onMotionClick={() => {
           const next = !microstock.manifest.enabled;
           void microstock.actions.toggleMode(next).then(() => {
+            if (!isMountedRef.current) return;
             if (next) {
               toast.success(
                 "Adobe Stock Mode Active: 16:9 (1920×1080) Rec.709 • LLM Auto-Metadata"
@@ -229,6 +238,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                 durationSec: activeComposition.duration,
               })
               .then((res) => {
+                if (!isMountedRef.current) return;
                 if (res.ok) toast.success(res.message);
                 else toast.error(res.message);
               });
