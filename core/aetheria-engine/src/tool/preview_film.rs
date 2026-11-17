@@ -145,6 +145,23 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
                     obj.insert("error".to_string(), json!(err_msg));
                 }
             }
+            if let Some((_, progress)) = super::film_state::collect_active_film_scene_progress(workspace_dir) {
+                result["sceneProgress"] = progress.to_json();
+                let unfinished = progress.unfinished_scenes();
+                if !unfinished.is_empty() {
+                    let list: Vec<String> = unfinished
+                        .iter()
+                        .map(|(id, sc, st)| format!("{} ({} = {})", id, sc, st))
+                        .collect();
+                    let note = format!(
+                        " Unfinished scenes remain on disk: {}. Implement every stub/missing scene and re-run capture_film_preview before finishing.",
+                        list.join(", ")
+                    );
+                    if let Some(prev_out) = result.get("output").and_then(Value::as_str).map(str::to_string) {
+                        result["output"] = json!(format!("{}{}", prev_out, note));
+                    }
+                }
+            }
             result
         }
         Err(err) => json!({

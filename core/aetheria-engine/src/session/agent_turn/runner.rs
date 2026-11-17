@@ -1535,17 +1535,17 @@ fn handle_no_tool_calls(
         FinishReason::Stop | FinishReason::ToolCalls | FinishReason::Unknown
     ) && *verification_gate_retries < 1
     {
-        let unresolved =
-            super::history::collect_unresolved_mutating_or_verify_failures(content_parts);
-        if !unresolved.is_empty() {
+        let blockers =
+            super::history::collect_turn_completion_blockers(content_parts, target.workspace_dir);
+        if !blockers.is_empty() {
             *verification_gate_retries += 1;
             emit_step_ended_event(target, step_finish, Some(true), step_usage);
             chat_messages.push(msg.clone());
             chat_messages.push(json!({
                 "role": "user",
                 "content": format!(
-                    "COMPLETION BLOCKED BY VERIFICATION GATE: This turn has unresolved tool failure(s): {}. Do NOT claim the changes succeeded. Inspect the unread lines/errors, apply the fix (e.g. via 'write' or 'edit' with 'startLine'/'endLine'), and re-verify — or report honestly what failed.",
-                    unresolved.join("; ")
+                    "COMPLETION BLOCKED BY VERIFICATION GATE: This turn cannot finish cleanly yet because unresolved failure(s) or incomplete stub/broken scene(s) remain: {}. Do NOT claim the video or edits succeeded. Fix every reported issue (overwrite short stubs/scripts with 'write', resolve syntax/wiring errors, and re-run 'capture_film_preview') — or state honestly what failed or remains unfinished.",
+                    blockers.join("; ")
                 )
             }));
             return NoToolCallAction::Continue;

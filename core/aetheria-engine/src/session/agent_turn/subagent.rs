@@ -595,9 +595,11 @@ async fn run_subagent_loop(
             }
             continue;
         }
-        if let Some(gate_issue) =
-            evaluate_subagent_verification_gate(subagent_type, &executed_tool_parts)
-        {
+        if let Some(gate_issue) = evaluate_subagent_verification_gate_in_workspace(
+            subagent_type,
+            workspace_dir,
+            &executed_tool_parts,
+        ) {
             if verification_retries < 1 && steps_run < max_steps {
                 verification_retries += 1;
                 chat_messages.push(json!({
@@ -688,9 +690,18 @@ async fn run_subagent_loop(
     result
 }
 
-/// Checks whether a subagent has unresolved tool/verify failures or skipped required visual preview.
+/// Checks whether a subagent has unresolved tool/verify failures, skipped preview, or unfixed script stubs/errors.
+#[allow(dead_code)] // Direct unit-test convenience wrapper without filesystem workspace inspection.
 pub(crate) fn evaluate_subagent_verification_gate(
     subagent_type: &str,
+    executed_tool_parts: &[Value],
+) -> Option<String> {
+    evaluate_subagent_verification_gate_in_workspace(subagent_type, "", executed_tool_parts)
+}
+
+pub(crate) fn evaluate_subagent_verification_gate_in_workspace(
+    subagent_type: &str,
+    workspace_dir: &str,
     executed_tool_parts: &[Value],
 ) -> Option<String> {
     let mut issues = super::history::collect_unresolved_mutating_or_verify_failures(executed_tool_parts);
@@ -699,6 +710,7 @@ pub(crate) fn evaluate_subagent_verification_gate(
     let mut touched_mutation = false;
     let mut preview_ok_after_last_mutation = false;
     let mut any_preview_ok = false;
+    let mut touched_paths: Vec<String> = Vec::new();
 
     for p in executed_tool_parts {
         if p.get("type").and_then(Value::as_str) != Some("tool") {
@@ -732,6 +744,15 @@ pub(crate) fn evaluate_subagent_verification_gate(
         {
             touched_mutation = true;
             preview_ok_after_last_mutation = false;
+            if let Some(fp) = p
+                .pointer("/state/input/filePath")
+                .or_else(|| p.pointer("/state/input/path"))
+                .and_then(Value::as_str)
+            {
+                if !touched_paths.iter().any(|x| x == fp) {
+                    touched_paths.push(fp.to_string());
+                }
+            }
         } else if ok && name == "capture_film_preview" {
             any_preview_ok = true;
             preview_ok_after_last_mutation = true;
@@ -745,6 +766,39 @@ pub(crate) fn evaluate_subagent_verification_gate(
         );
     } else if sub_lower == "qa-verifier" && !any_preview_ok {
         issues.push("'qa-verifier' did not complete a clean 'capture_film_preview'".to_string());
+    }
+
+    if !workspace_dir.trim().is_empty() {
+        if sub_lower == "motion-designer" {
+            for rel in &touched_paths {
+                let norm = rel.replace('\\', "/").to_ascii_lowercase();
+                if !norm.contains("script/") || !norm.ends_with(".js") {
+                    continue;
+                }
+                if let Ok(resolved) = crate::tool::path_guard::resolve_isolated_path(workspace_dir, rel) {
+                    if resolved.is_file() {
+                        if let Ok(text) = std::fs::read_to_string(&resolved) {
+                            if crate::tool::film_state::is_scaffold_stub_content(&text) {
+                                issues.push(format!("Touched scene '{}' is still a scaffold stub", rel));
+                                continue;
+                            }
+                        }
+                        let fb = crate::tool::film_feedback::collect_file_feedback(workspace_dir, &resolved);
+                        if fb.has_errors {
+                            for d in fb.diagnostics {
+                                if d.starts_with("ERROR") {
+                                    issues.push(format!("{} -> {}", rel, d));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else if sub_lower == "qa-verifier" {
+            issues.extend(crate::tool::film_state::collect_film_completion_blockers(
+                workspace_dir,
+            ));
+        }
     }
 
     if issues.is_empty() {

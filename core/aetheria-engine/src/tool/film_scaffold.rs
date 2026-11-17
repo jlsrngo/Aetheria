@@ -735,7 +735,8 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
     }
 
     let meta = inspect_workspace_film(&index_path);
-    json!({
+    let scene_progress = super::film_state::collect_film_scene_progress(&film_dir).map(|p| p.to_json());
+    let mut result = json!({
         "ok": true,
         "filmRoot": film_root_rel,
         "filmJson": if film_root_rel.is_empty() { "film.json".to_string() } else { format!("{}/film.json", film_root_rel) },
@@ -751,7 +752,7 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
         "lintValid": meta.lint.valid,
         "warnings": audio_warnings,
         "output": format!(
-            "Scaffolded film '{}' ({}x{} @ {}fps, {} scene(s)) in '{}'. Now edit/write the animation inside: {}.",
+            "Scaffolded film '{}' ({}x{} @ {}fps, {} scene(s)) in '{}'. Now write the animation inside: {} (track real progress via sceneProgress on disk instead of todowrite).",
             manifest.title,
             manifest.width,
             manifest.height,
@@ -760,7 +761,11 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
             film_root_rel,
             scene_files.join(", ")
         )
-    })
+    });
+    if let Some(prog) = scene_progress {
+        result["sceneProgress"] = prog;
+    }
+    result
 }
 
 #[cfg(test)]

@@ -111,6 +111,60 @@ pub(crate) fn collect_unresolved_mutating_or_verify_failures(parts: &[Value]) ->
         .collect()
 }
 
+/// Returns true when this turn executed or attempted film creation/editing tools or motion subagents.
+pub(crate) fn turn_touched_film_build(parts: &[Value]) -> bool {
+    for p in parts {
+        if p.get("type").and_then(Value::as_str) != Some("tool") {
+            continue;
+        }
+        let name = p
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        if matches!(
+            name.as_str(),
+            "film_scaffold" | "film_audio" | "capture_film_preview" | "render_video"
+        ) {
+            return true;
+        }
+        if name == "task" {
+            let sub = p
+                .pointer("/state/input/subagent_type")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase();
+            if matches!(sub.as_str(), "motion-designer" | "qa-verifier") {
+                return true;
+            }
+        }
+        if matches!(name.as_str(), "write" | "edit" | "apply_patch") {
+            let fp = p
+                .pointer("/state/input/filePath")
+                .or_else(|| p.pointer("/state/input/path"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .replace('\\', "/")
+                .to_ascii_lowercase();
+            if fp.contains("script/") || fp.ends_with("index.html") || fp.ends_with("film.json") {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Shared fact-based completion blocker check combining unresolved tool errors with on-disk film state.
+pub(crate) fn collect_turn_completion_blockers(parts: &[Value], workspace_dir: &str) -> Vec<String> {
+    let mut blockers = collect_unresolved_mutating_or_verify_failures(parts);
+    if !workspace_dir.trim().is_empty() && turn_touched_film_build(parts) {
+        blockers.extend(crate::tool::film_state::collect_film_completion_blockers(workspace_dir));
+    }
+    blockers
+}
+
 pub(crate) fn build_historical_turn_warning(msg: &Value, unresolved: &[String]) -> Option<String> {
     let mut notes = Vec::new();
 

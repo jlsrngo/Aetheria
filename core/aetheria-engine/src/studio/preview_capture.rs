@@ -356,6 +356,8 @@ pub async fn capture_film_preview_with_options(
         (None, None)
     };
 
+    crate::tool::film_state::record_preview_state(&film_root, runtime_errors.len());
+
     Ok(FilmPreviewCaptureResult {
         width: meta.width,
         height: meta.height,

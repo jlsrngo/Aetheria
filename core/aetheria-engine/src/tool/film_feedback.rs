@@ -93,15 +93,53 @@ fn check_js_scene_wiring(
             return;
         }
 
+        if is_scene_file && !has_dynamic && registered_ids.is_empty() {
+            let expected_ids: Vec<&str> = manifest
+                .scenes
+                .iter()
+                .filter(|s| s.script.eq_ignore_ascii_case(&rel_script))
+                .map(|s| s.id.as_str())
+                .collect();
+            let expected_label = if expected_ids.is_empty() {
+                valid_ids.join(", ")
+            } else {
+                expected_ids.join(", ")
+            };
+            feedback.has_errors = true;
+            feedback.wiring_error = true;
+            feedback.diagnostics.push(format!(
+                "ERROR (MISSING_REGISTER_SCENE): Scene script '{}' does not call AM.registerScene(\"<id>\", ...). Expected scene id: [{}].",
+                rel_script,
+                expected_label
+            ));
+            return;
+        }
+
+        let matched_manifest_ids: Vec<&str> = manifest
+            .scenes
+            .iter()
+            .filter(|s| s.script.eq_ignore_ascii_case(&rel_script))
+            .map(|s| s.id.as_str())
+            .collect();
         for reg_id in &registered_ids {
-            if !valid_ids.iter().any(|id| id == reg_id) {
+            let allowed = if !matched_manifest_ids.is_empty() {
+                matched_manifest_ids.iter().any(|id| id == reg_id)
+            } else {
+                valid_ids.iter().any(|id| id == reg_id)
+            };
+            if !allowed {
                 feedback.has_errors = true;
                 feedback.wiring_error = true;
+                let expected = if !matched_manifest_ids.is_empty() {
+                    matched_manifest_ids.join(", ")
+                } else {
+                    valid_ids.join(", ")
+                };
                 feedback.diagnostics.push(format!(
-                    "ERROR (SCENE_ID_MISMATCH): AM.registerScene(\"{}\") in '{}' does not match any scene id in film.json (expected one of: [{}]).",
+                    "ERROR (SCENE_ID_MISMATCH): AM.registerScene(\"{}\") in '{}' does not match scene id in film.json (expected: [{}]).",
                     reg_id,
                     rel_script,
-                    valid_ids.join(", ")
+                    expected
                 ));
             }
         }
@@ -293,7 +331,7 @@ fn workspace_asset_exists(film_dir: &Path, ws_root: &Path, raw_rel: &str) -> boo
     false
 }
 
-fn extract_local_script_srcs(html: &str) -> Vec<String> {
+pub(crate) fn extract_local_script_srcs(html: &str) -> Vec<String> {
     let mut refs = Vec::new();
     let lower = html.to_ascii_lowercase();
     let mut cursor = 0usize;
@@ -627,8 +665,13 @@ pub fn attach_post_write_feedback(result: &mut Value, workspace_dir: &str, targe
             if feedback.has_errors {
                 obj.insert(
                     "actionRequired".to_string(),
-                    json!("Fix the reported ERROR diagnostics with edit before finishing."),
+                    json!("Fix the reported ERROR diagnostics before finishing."),
                 );
+            }
+        }
+        if let Some(film_dir) = super::film_state::resolve_film_dir_from_target(workspace_dir, target) {
+            if let Some(progress) = super::film_state::collect_film_scene_progress(&film_dir) {
+                obj.insert("sceneProgress".to_string(), progress.to_json());
             }
         }
     }
@@ -837,10 +880,21 @@ mod tests {
         let diags_str = tool_res["diagnostics"].to_string();
         assert!(diags_str.contains("SCENE_ID_MISMATCH"));
 
-        // 3. Fix scene1.js with matching ID -> no wiring error
+        // 2b. Write script/scene1.js without any AM.registerScene call -> MISSING_REGISTER_SCENE + ok: false
+        std::fs::write(&s1, "var broken = 1;").unwrap();
+        let mut tool_res_missing = json!({ "ok": true });
+        attach_post_write_feedback(&mut tool_res_missing, &ws, &s1);
+        assert_eq!(tool_res_missing["ok"], false);
+        assert!(tool_res_missing["diagnostics"]
+            .to_string()
+            .contains("MISSING_REGISTER_SCENE"));
+
+        // 3. Fix scene1.js with matching ID -> no wiring error and disk sceneProgress reports drafted=1
         std::fs::write(&s1, "AM.registerScene('scene1_intro', function(ctx){ ctx.fillRect(0,0,10,10); });").unwrap();
-        let fb_ok = collect_file_feedback(&ws, &s1);
-        assert!(!fb_ok.wiring_error, "unexpected wiring error: {:?}", fb_ok.diagnostics);
+        let mut tool_res_ok = json!({ "ok": true });
+        attach_post_write_feedback(&mut tool_res_ok, &ws, &s1);
+        assert_eq!(tool_res_ok["ok"], true, "unexpected wiring error: {:?}", tool_res_ok);
+        assert_eq!(tool_res_ok["sceneProgress"]["drafted"], json!(1));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

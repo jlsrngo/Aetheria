@@ -184,13 +184,17 @@ pub(crate) async fn finalize_agent_turn(
     mut last_step_usage: Option<RecordedUsage>,
     mut last_finish: FinishReason,
 ) {
-    let unresolved = super::history::collect_unresolved_mutating_or_verify_failures(&content_parts);
-    let unresolved_notice = if unresolved.is_empty() {
+    let blockers = super::history::collect_turn_completion_blockers(&content_parts, workspace_dir);
+    let unresolved_notice = if blockers.is_empty() {
         None
     } else {
+        crate::paths::log_engine(
+            "verification",
+            &format!("[F5_COMPLETION_GUARD] session={} blockers={}", session_id, blockers.join(" | ")),
+        );
         Some(format!(
-            "[Verification notice: unresolved tool failure(s) remained in this turn — {}.]",
-            unresolved.join("; ")
+            "[Verification notice: unresolved tool failure(s) or unfinished/invalid disk scene(s) remained in this turn — {}.]",
+            blockers.join("; ")
         ))
     };
 
@@ -253,7 +257,7 @@ pub(crate) async fn finalize_agent_turn(
         if let Some(ref notice) = unresolved_notice {
             if final_text.trim().is_empty() {
                 final_text = notice.clone();
-            } else if !final_text.contains("unresolved tool failure(s)") {
+            } else if !final_text.contains("[Verification notice:") {
                 final_text.push_str("\n\n");
                 final_text.push_str(notice);
             }
@@ -266,7 +270,7 @@ pub(crate) async fn finalize_agent_turn(
             &mut content_parts,
         );
     } else if let Some(ref notice) = unresolved_notice {
-        if !final_text.contains("unresolved tool failure(s)") {
+        if !final_text.contains("[Verification notice:") {
             let delta = if final_text.trim().is_empty() {
                 notice.clone()
             } else {

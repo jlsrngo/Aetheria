@@ -11,6 +11,7 @@ pub mod fetch_web_image;
 pub mod film_audio;
 pub mod film_feedback;
 pub mod film_scaffold;
+pub mod film_state;
 pub mod glob;
 pub mod grep;
 pub mod json_repair;
