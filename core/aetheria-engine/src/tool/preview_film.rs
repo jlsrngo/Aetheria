@@ -99,14 +99,29 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
                 .map(|s| format!(" {}", s))
                 .collect();
             let has_runtime_errors = !res.runtime_errors.is_empty();
-            let runtime_err_msg = if has_runtime_errors {
-                Some(format!(
+            let ref_failed = res
+                .reference_comparison
+                .as_ref()
+                .and_then(|c| c.get("ok").and_then(Value::as_bool))
+                == Some(false);
+            let preview_ok = !has_runtime_errors && !ref_failed;
+
+            let mut failure_reasons = Vec::new();
+            if has_runtime_errors {
+                failure_reasons.push(format!(
                     "Film runtime errors detected: {}",
                     res.runtime_errors.join(" | ")
-                ))
-            } else {
-                None
-            };
+                ));
+            }
+            if ref_failed {
+                let ref_err = res
+                    .reference_comparison
+                    .as_ref()
+                    .and_then(|c| c.get("error").and_then(Value::as_str))
+                    .unwrap_or("Reference comparison failed.");
+                failure_reasons.push(format!("Reference comparison failed: {}", ref_err));
+            }
+
             let runtime_note = if has_runtime_errors {
                 format!(
                     " Runtime errors detected ({} error(s)); fix script errors before finishing.",
@@ -116,7 +131,7 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
                 String::new()
             };
             let mut result = json!({
-                "ok": !has_runtime_errors,
+                "ok": preview_ok,
                 "width": res.width,
                 "height": res.height,
                 "duration": res.duration,
@@ -140,9 +155,9 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
                 ),
                 "_vision_images": vision_images
             });
-            if let Some(err_msg) = runtime_err_msg {
+            if !failure_reasons.is_empty() {
                 if let Some(obj) = result.as_object_mut() {
-                    obj.insert("error".to_string(), json!(err_msg));
+                    obj.insert("error".to_string(), json!(failure_reasons.join(" | ")));
                 }
             }
             if let Some((_, progress)) = super::film_state::collect_active_film_scene_progress(workspace_dir) {

@@ -215,7 +215,8 @@ pub(crate) async fn finalize_agent_turn(
             "messages": chat_messages,
             "stream": false
         });
-        if let Ok(resp) = client
+        let mut synth_err: Option<String> = None;
+        match client
             .post(format!("{}/chat/completions", base_url))
             .header("Content-Type", "application/json")
             .header("Authorization", format!("Bearer {}", api_key))
@@ -223,7 +224,7 @@ pub(crate) async fn finalize_agent_turn(
             .send()
             .await
         {
-            if resp.status().is_success() {
+            Ok(resp) if resp.status().is_success() => {
                 if let Ok(data) = resp.json::<Value>().await {
                     let cfg = read_aetheria_config();
                     let tiers = resolve_model_cost_tiers(&cfg, provider_id, model_id);
@@ -240,15 +241,30 @@ pub(crate) async fn finalize_agent_turn(
                     {
                         final_text = txt.trim().to_string();
                     }
+                } else {
+                    synth_err = Some("invalid JSON response from synthesis endpoint".to_string());
                 }
+            }
+            Ok(resp) => {
+                synth_err = Some(format!("HTTP {}", resp.status()));
+            }
+            Err(e) => {
+                synth_err = Some(e.to_string());
             }
         }
         if final_text.trim().is_empty() {
+            if let Some(ref reason) = synth_err {
+                eprintln!("[turn_finalize] synthesis failed ({}): {}", session_id, reason);
+            }
             final_text = if unresolved_notice.is_some() {
                 "Turn ended without a model summary; see the unresolved verification notice below."
                     .to_string()
             } else {
-                "All requested operations have been completed successfully.".to_string()
+                let reason = synth_err.unwrap_or_else(|| "empty synthesis content".to_string());
+                format!(
+                    "[TURN INCOMPLETE — summary unavailable: {}]",
+                    reason
+                )
             };
         }
     }

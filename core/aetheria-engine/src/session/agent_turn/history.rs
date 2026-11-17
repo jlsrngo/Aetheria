@@ -16,6 +16,23 @@ fn normalize_tool_failure_buckets(name: &str, input: &Value) -> Vec<(String, Str
     if matches!(lower.as_str(), "capture_film_preview" | "render_video") {
         return vec![(lower, String::new())];
     }
+    if lower == "lsp" {
+        return crate::session::doom_loop::extract_tool_target_keys("lsp", input)
+            .into_iter()
+            .map(|target| ("lsp".to_string(), target))
+            .collect();
+    }
+    if lower == "bash" {
+        let cmd_key: String = input
+            .get("command")
+            .and_then(Value::as_str)
+            .map(|s| s.split_whitespace().collect::<Vec<_>>().join(" "))
+            .unwrap_or_default()
+            .chars()
+            .take(64)
+            .collect();
+        return vec![("bash".to_string(), cmd_key)];
+    }
     if matches!(lower.as_str(), "task" | "subagent") {
         return crate::session::doom_loop::extract_tool_target_keys(&lower, input)
             .into_iter()
@@ -572,6 +589,48 @@ mod tests {
         let turn0_warn = assistant_texts[0];
         assert!(!turn0_warn.contains("script/scene1.js"));
         assert!(turn0_warn.contains("task(subagent:motion-designer:fix scene1)"));
+    }
+
+    #[test]
+    fn tracks_bash_and_lsp_failures_in_verification_buckets() {
+        let parts_fail = vec![
+            json!({
+                "type": "tool",
+                "name": "bash",
+                "state": {
+                    "status": "completed",
+                    "input": { "command": "npm test" },
+                    "structured": { "ok": false, "error": "1 test failed" }
+                }
+            }),
+            json!({
+                "type": "tool",
+                "name": "lsp",
+                "state": {
+                    "status": "completed",
+                    "input": { "filePath": "src/App.tsx" },
+                    "structured": { "ok": false, "error": "No checker for .tsx" }
+                }
+            }),
+        ];
+        let blockers = collect_unresolved_mutating_or_verify_failures(&parts_fail);
+        assert_eq!(blockers.len(), 2);
+        assert!(blockers.iter().any(|b| b.contains("bash(npm test)")));
+        assert!(blockers.iter().any(|b| b.contains("lsp(src/app.tsx)")));
+
+        let mut parts_pass = parts_fail.clone();
+        parts_pass.push(json!({
+            "type": "tool",
+            "name": "bash",
+            "state": {
+                "status": "completed",
+                "input": { "command": "npm test" },
+                "structured": { "ok": true }
+            }
+        }));
+        let blockers_after = collect_unresolved_mutating_or_verify_failures(&parts_pass);
+        assert_eq!(blockers_after.len(), 1);
+        assert!(blockers_after[0].contains("lsp(src/app.tsx)"));
     }
 }
 

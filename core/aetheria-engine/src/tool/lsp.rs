@@ -128,12 +128,39 @@ pub fn execute_lsp(workspace_dir: &str, arguments: &Value) -> Value {
                 .take(60)
                 .collect();
             json!({
-                "ok": true,
+                "ok": false,
+                "error": format!("No syntax/type checker available in lsp for '.{}' files; run build/typecheck/test via bash.", ext),
                 "diagnostics": [],
                 "symbols": symbols,
-                "output": format!("Extracted {} top-level symbols from {}", symbols.len(), file_path)
+                "output": format!(
+                    "Extracted {} top-level symbols from {}, but lsp has no syntax/type checker for '.{}' (use bash typecheck/cargo/pytest).",
+                    symbols.len(),
+                    file_path,
+                    ext
+                )
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lsp_returns_ok_false_for_unsupported_extensions() {
+        let dir = std::env::temp_dir().join(format!("aetheria_lsp_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let tsx = dir.join("Comp.tsx");
+        std::fs::write(&tsx, "export function Comp() { return <div />; }\n").unwrap();
+
+        let res = execute_lsp(&dir.to_string_lossy(), &json!({ "filePath": "Comp.tsx" }));
+        assert_eq!(res["ok"], false);
+        assert!(res["error"].as_str().unwrap_or("").contains("No syntax/type checker"));
+        assert_eq!(res["symbols"].as_array().map(|a| a.len()).unwrap_or(0), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

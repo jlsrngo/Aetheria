@@ -254,11 +254,25 @@ pub fn replace_content(
                         res.push_str(&content[first_idx + search.len()..]);
                         res
                     };
+                    if updated == content {
+                        return Err(
+                            "No changes to apply: replacement produced identical file content."
+                                .to_string(),
+                        );
+                    }
                     return Ok((updated, if replace_all { count } else { 1 }));
                 }
-                // Multiple occurrences even when replaceAll is false: replace all to avoid blocking document edits
-                let updated = content.replace(&search, new_string);
-                return Ok((updated, count));
+                let line_nums: Vec<String> = content
+                    .match_indices(&search)
+                    .take(8)
+                    .map(|(idx, _)| format!("L{}", content[..idx].bytes().filter(|&b| b == b'\n').count() + 1))
+                    .collect();
+                return Err(format!(
+                    "Found {} occurrences of oldString ({}{}). Provide more surrounding context, pass startLine/endLine, or set replaceAll: true.",
+                    count,
+                    line_nums.join(", "),
+                    if count > 8 { ", ..." } else { "" }
+                ));
             }
         }
     }
@@ -343,15 +357,21 @@ pub fn execute_edit(session_id: &str, workspace_dir: &str, arguments: &Value) ->
 
                 match edit_res {
                     Ok((norm_updated, count)) => {
+                        if norm_updated == norm_content {
+                            return json!({
+                                "ok": false,
+                                "error": format!("No changes to apply: replacement produced identical content (file: '{}').", fp)
+                            });
+                        }
                         let updated = convert_to_line_ending(&norm_updated, ending);
                         if let Err(val_err) = super::write::validate_root_tsx_imports(&p, &updated) {
                             return json!({ "ok": false, "error": val_err });
                         }
                         let (resolved_rel, film_root_rel) =
                             super::path_guard::resolve_film_display_info(workspace_dir, &p);
-                        crate::files::record_document_change(workspace_dir, &resolved_rel, &content_old, &updated);
                         match std::fs::write(&p, &updated) {
                             Ok(_) => {
+                                crate::files::record_document_change(workspace_dir, &resolved_rel, &content_old, &updated);
                                 emit_event(
                                     workspace_dir,
                                     "file.edited",
@@ -485,5 +505,18 @@ mod tests {
             DEFAULT_MAX_UNRANGED_EDIT_LINES,
         )
         .is_ok());
+    }
+
+    #[test]
+    fn test_replace_all_false_rejects_multiple_matches_and_noop() {
+        let content = "let x = 1;\nlet y = 2;\nlet x = 1;\n";
+        let err = replace_content(content, "let x = 1;", "let x = 9;", false).unwrap_err();
+        assert!(err.contains("Found 2 occurrences"));
+        assert!(err.contains("L1"));
+        assert!(err.contains("L3"));
+
+        let (updated, count) = replace_content(content, "let x = 1;", "let x = 9;", true).unwrap();
+        assert_eq!(count, 2);
+        assert_eq!(updated, "let x = 9;\nlet y = 2;\nlet x = 9;\n");
     }
 }
