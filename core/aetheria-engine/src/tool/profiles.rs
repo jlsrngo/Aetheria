@@ -13,6 +13,8 @@ pub enum ToolProfile {
     QaVerifier,
     AudioDirector,
     Explore,
+    GeneralChat,
+    GeneralCode,
     General,
 }
 
@@ -24,6 +26,8 @@ impl ToolProfile {
             ToolProfile::QaVerifier => "qa-verifier",
             ToolProfile::AudioDirector => "audio-director",
             ToolProfile::Explore => "explore",
+            ToolProfile::GeneralChat => "general-chat",
+            ToolProfile::GeneralCode => "general-code",
             ToolProfile::General => "general",
         }
     }
@@ -72,6 +76,37 @@ pub fn is_tool_allowed_in_role(role: &str, name: &str, include_render: bool) -> 
             "voicebox_speak" | "generate_smart_sfx" | "read" | "write" | "glob"
         ),
         "explore" => matches!(name, "read" | "glob" | "grep" | "websearch" | "webfetch"),
+        "general-chat" => matches!(
+            name,
+            "read"
+                | "glob"
+                | "grep"
+                | "webfetch"
+                | "websearch"
+                | "question"
+                | "manage_operational_tasks"
+                | "task"
+        ),
+        "general-code" => matches!(
+            name,
+            "read"
+                | "write"
+                | "edit"
+                | "apply_patch"
+                | "glob"
+                | "grep"
+                | "bash"
+                | "codemode"
+                | "lsp"
+                | "snapshot"
+                | "question"
+                | "todowrite"
+                | "manage_operational_tasks"
+                | "webfetch"
+                | "websearch"
+                | "fetch_web_image"
+                | "task"
+        ),
         "general" => !matches!(name, "voicebox_speak" | "generate_smart_sfx"),
         _ => true,
     }
@@ -113,15 +148,7 @@ pub fn prompt_explicitly_requests_render(prompt_text: &str) -> bool {
     .any(|p| lower.contains(p))
 }
 
-fn history_used_video_tools(history: &[Value]) -> bool {
-    const VIDEO_TOOLS: &[&str] = &[
-        "film_scaffold",
-        "film_audio",
-        "capture_film_preview",
-        "render_video",
-        "extract_video_reference",
-        "produce_video",
-    ];
+fn history_used_any_tool(history: &[Value], tool_names: &[&str]) -> bool {
     for msg in history {
         let parts = msg
             .get("parts")
@@ -134,13 +161,91 @@ fn history_used_video_tools(history: &[Value]) -> bool {
                     .or_else(|| p.get("name"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
-                if VIDEO_TOOLS.contains(&name) {
+                if tool_names.contains(&name) {
                     return true;
                 }
             }
         }
     }
     false
+}
+
+fn history_used_video_tools(history: &[Value]) -> bool {
+    const VIDEO_TOOLS: &[&str] = &[
+        "film_scaffold",
+        "film_audio",
+        "capture_film_preview",
+        "render_video",
+        "extract_video_reference",
+        "produce_video",
+    ];
+    history_used_any_tool(history, VIDEO_TOOLS)
+}
+
+fn history_used_write_or_exec_tools(history: &[Value]) -> bool {
+    const WRITE_TOOLS: &[&str] = &["write", "edit", "apply_patch", "bash", "codemode", "lsp"];
+    history_used_any_tool(history, WRITE_TOOLS)
+}
+
+fn prompt_mentions_plugins_or_styles(prompt_text: &str) -> bool {
+    let lower = prompt_text.to_ascii_lowercase();
+    [
+        "plugin",
+        "extension",
+        "mcp",
+        "register_motion_style",
+        "register_style",
+        "plugin_install",
+        "plugin_list",
+    ]
+    .iter()
+    .any(|k| lower.contains(k))
+}
+
+fn prompt_needs_code_or_write_tools(prompt_text: &str) -> bool {
+    let lower = prompt_text.to_ascii_lowercase();
+    [
+        "edit",
+        "write",
+        "buat file",
+        "create file",
+        "hapus file",
+        "delete file",
+        "ubah ",
+        "perbaiki",
+        "fix ",
+        "bug",
+        "error",
+        "refactor",
+        "patch",
+        "apply_patch",
+        "codemode",
+        "bash",
+        "run ",
+        "jalankan",
+        "cargo ",
+        "npm ",
+        "npx ",
+        "vitest",
+        "pytest",
+        "git ",
+        "src-tauri",
+        ".rs",
+        ".ts",
+        ".tsx",
+        ".js",
+        ".py",
+        ".json",
+        ".xlsx",
+        ".docx",
+        ".pdf",
+        "spreadsheet",
+        "dokumen",
+        "skrip",
+        "script",
+    ]
+    .iter()
+    .any(|k| lower.contains(k))
 }
 
 fn prompt_looks_like_general_engineering(prompt_text: &str) -> bool {
@@ -162,7 +267,8 @@ fn prompt_looks_like_general_engineering(prompt_text: &str) -> bool {
     .any(|k| lower.contains(k))
 }
 
-/// Selects `Director` on video-production turns and `General` on non-video chat/coding turns.
+/// Selects `Director` on video-production turns, or narrows non-video turns to
+/// `General` (plugins), `GeneralCode` (workspace editing/commands), or `GeneralChat` (lightweight Q&A).
 pub fn resolve_coordinator_profile(
     workspace_dir: &str,
     prompt_text: &str,
@@ -226,8 +332,14 @@ pub fn resolve_coordinator_profile(
         ToolProfile::Director {
             include_render: prompt_explicitly_requests_render(prompt_text),
         }
-    } else {
+    } else if prompt_mentions_plugins_or_styles(prompt_text) {
         ToolProfile::General
+    } else if prompt_needs_code_or_write_tools(prompt_text)
+        || history_used_write_or_exec_tools(history)
+    {
+        ToolProfile::GeneralCode
+    } else {
+        ToolProfile::GeneralChat
     }
 }
 
@@ -348,6 +460,33 @@ mod tests {
             vec!["glob", "grep", "read", "webfetch", "websearch"]
         );
 
+        let general_chat = sorted_names(filter_tools_for_profile(
+            ToolProfile::GeneralChat,
+            catalog.clone(),
+        ));
+        assert_eq!(
+            general_chat,
+            vec![
+                "glob",
+                "grep",
+                "manage_operational_tasks",
+                "question",
+                "read",
+                "task",
+                "webfetch",
+                "websearch",
+            ]
+        );
+
+        let general_code = sorted_names(filter_tools_for_profile(
+            ToolProfile::GeneralCode,
+            catalog.clone(),
+        ));
+        assert!(!general_code.contains(&"film_scaffold".to_string()));
+        assert!(!general_code.contains(&"plugin_install".to_string()));
+        assert!(general_code.contains(&"edit".to_string()));
+        assert!(general_code.contains(&"bash".to_string()));
+
         let general = sorted_names(filter_tools_for_profile(ToolProfile::General, catalog));
         assert!(!general.contains(&"voicebox_speak".to_string()));
         assert!(!general.contains(&"generate_smart_sfx".to_string()));
@@ -368,14 +507,18 @@ mod tests {
 
         assert_eq!(
             resolve_coordinator_profile(&ws, "Jelaskan perbedaan const dan let", &[]),
-            ToolProfile::General
+            ToolProfile::GeneralChat
         );
         assert_eq!(
             resolve_coordinator_profile(&ws, "Periksa error cargo test di backend", &[]),
-            ToolProfile::General
+            ToolProfile::GeneralCode
         );
         assert_eq!(
             resolve_coordinator_profile(&ws, "Tugas non-video: buat file hello.txt", &[]),
+            ToolProfile::GeneralCode
+        );
+        assert_eq!(
+            resolve_coordinator_profile(&ws, "Install plugin baru via plugin_install", &[]),
             ToolProfile::General
         );
         assert_eq!(

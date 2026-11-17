@@ -7,7 +7,7 @@ High-Contrast Editorial Kinetic Motion Graphics
 **Fonts:** Inter, JetBrains Mono. **Scale Law:** `u(refPx) = refPx * (1080 / 410)`.
 
 ## Do
-- Follow all specifications in REMOTION_BRIEF.md verbatim.
+- Read style.md and tokens.json first; read REMOTION_BRIEF.md selectively with offset/limit only when an exact layout/easing spec is needed.
 - Use frame-based easing functions (easeOutExpo / easeOutBack).
 - Keep camera locked off except whip-zoom on hook.
 

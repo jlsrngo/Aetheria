@@ -268,7 +268,7 @@ fn resolve_dynamic_style_or_skill_command_inner(
                                     .map(|k| format!("{}{}", project_rel_prefix, k))
                                     .collect();
                                 format!(
-                                    "\nSEEDED KIT FILES ALREADY IN PROJECT (DO NOT OVERWRITE OR SHRINK THESE): {}\n",
+                                    "\nSEEDED KIT FILES ALREADY IN PROJECT (DO NOT OVERWRITE OR READ IN FULL; USE EXPORTED APIs PER SKILL.md): {}\n",
                                     prefixed.join(", ")
                                 )
                             };

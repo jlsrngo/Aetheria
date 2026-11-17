@@ -138,7 +138,7 @@ pub fn register_skill_internal(
         {description}\n\n\
         **Fonts:** {fonts}. **Scale Law:** `u(refPx) = refPx * (1080 / 410)`.\n\n\
         ## Do\n\
-        - Follow all specifications in REMOTION_BRIEF.md verbatim.\n\
+        - Read style.md and tokens.json first; read REMOTION_BRIEF.md selectively with offset/limit only when an exact layout/easing spec is needed.\n\
         - Use frame-based easing functions (easeOutExpo / easeOutBack).\n\
         - Keep camera locked off except whip-zoom on hook.\n\n\
         ## Don't\n\

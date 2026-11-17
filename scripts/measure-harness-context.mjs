@@ -403,7 +403,7 @@ function measureRoles(allTools) {
 
   // If F3 tool profiles exist (tool/profiles.rs), read them explicitly too
   if (pSrc) {
-    for (const pName of ["director", "motion-designer", "qa-verifier", "audio-director", "general"]) {
+    for (const pName of ["director", "motion-designer", "qa-verifier", "audio-director", "general-chat", "general-code", "general"]) {
       const spec = extractAllowlist(pSrc, pName);
       if (spec) {
         const nameSet = new Set(spec.names);
