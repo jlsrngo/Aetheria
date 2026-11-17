@@ -215,7 +215,21 @@ test.describe("MotionClone Reference Extraction & Closed-Loop Comparison E2E", (
       sawReferenceBlueprint: boolean;
       turnsSeen: number;
       rawToolMessages: string[];
-      toolResults: Array<{ ok: boolean; passed: boolean; ssimMean: number; colorMatchMean: number; runtimeErrors: string[] }>;
+      toolResults: Array<{
+        ok: boolean;
+        error: string | null;
+        fidelityFailed: boolean;
+        comparisonOk: boolean;
+        passed: boolean;
+        comparedCount: number;
+        attempt: number;
+        targetWorstCount: number;
+        ssimMean: number;
+        colorMatchMean: number;
+        edgeMatchMean: number;
+        overallFidelity: number;
+        runtimeErrors: string[];
+      }>;
     } = {
       sawReferenceBlueprint: false,
       turnsSeen: 0,
@@ -234,8 +248,123 @@ test.describe("MotionClone Reference Extraction & Closed-Loop Comparison E2E", (
           return;
         }
         const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-        observations.turnsSeen += 1;
         const msgs = Array.isArray(payload.messages) ? payload.messages : [];
+        const sysText = String(msgs[0]?.content ?? "");
+        const scene1Match = `(function(){
+  var AM = window.AM;
+  AM.registerScene("scene1_hook", function(ctx, localTime, dur, scene, AM) {
+    var pose = AM.evalKeyframes([
+      { t: 0, x: 90, y: 280, w: 360, h: 280, opacity: 1, reveal: 1 },
+      { t: 2, x: 90, y: 280, w: 360, h: 280, opacity: 1, reveal: 1 }
+    ], localTime, "linear");
+    ctx.fillStyle = "#14141A";
+    ctx.fillRect(0, 0, 540, 960);
+    ctx.fillStyle = "#FA8C28";
+    ctx.fillRect(pose.x, pose.y, pose.w, pose.h);
+    ctx.fillStyle = "#F5F5FA";
+    ctx.font = "bold 56px sans-serif";
+    ctx.fillText(AM.textReveal("HOOK", pose.reveal), 160, 440);
+  });
+})();\n`;
+        const scene2Match = `(function(){
+  var AM = window.AM;
+  AM.registerScene("scene2_payoff", function(ctx, localTime, dur, scene, AM) {
+    ctx.fillStyle = "#EAE6DF";
+    ctx.fillRect(0, 0, 540, 960);
+    ctx.fillStyle = "#B42828";
+    ctx.fillRect(70, 260, 400, 360);
+    ctx.fillStyle = "#FFFFFF";
+    ctx.font = "bold 52px sans-serif";
+    ctx.fillText("PAYOFF", 120, 460);
+  });
+})();\n`;
+
+        res.writeHead(200, { "Content-Type": "application/json" });
+        if (sysText.includes("Motion Designer Subagent")) {
+          const hasWrote = msgs.some((m) => m.role === "tool" && m.name === "write");
+          const hasPreviewed = msgs.some(
+            (m) => m.role === "tool" && m.name === "capture_film_preview",
+          );
+          if (!hasWrote) {
+            res.end(
+              JSON.stringify({
+                choices: [
+                  {
+                    finish_reason: "tool_calls",
+                    message: {
+                      role: "assistant",
+                      content: "",
+                      tool_calls: [
+                        {
+                          id: "call_write_s1",
+                          type: "function",
+                          function: {
+                            name: "write",
+                            arguments: JSON.stringify({
+                              filePath: "script/scene1.js",
+                              content: scene1Match,
+                            }),
+                          },
+                        },
+                        {
+                          id: "call_write_s2",
+                          type: "function",
+                          function: {
+                            name: "write",
+                            arguments: JSON.stringify({
+                              filePath: "script/scene2.js",
+                              content: scene2Match,
+                            }),
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              }),
+            );
+            return;
+          }
+          if (!hasPreviewed) {
+            res.end(
+              JSON.stringify({
+                choices: [
+                  {
+                    finish_reason: "tool_calls",
+                    message: {
+                      role: "assistant",
+                      content: "",
+                      tool_calls: [
+                        {
+                          id: "call_sub_preview",
+                          type: "function",
+                          function: {
+                            name: "capture_film_preview",
+                            arguments: JSON.stringify({ compareToReference: true }),
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              }),
+            );
+            return;
+          }
+          res.end(
+            JSON.stringify({
+              choices: [
+                {
+                  finish_reason: "stop",
+                  message: { role: "assistant", content: "Refined scene1.js and scene2.js." },
+                },
+              ],
+            }),
+          );
+          return;
+        }
+
+        observations.turnsSeen += 1;
         const joined = JSON.stringify(msgs);
         if (joined.includes("Active Video Reference Blueprint")) {
           observations.sawReferenceBlueprint = true;
@@ -249,9 +378,19 @@ test.describe("MotionClone Reference Extraction & Closed-Loop Comparison E2E", (
             if (parsed.referenceComparison) {
               observations.toolResults.push({
                 ok: Boolean(parsed.ok),
+                error: parsed.error ? String(parsed.error) : null,
+                fidelityFailed: Boolean(parsed.fidelityFailed),
+                comparisonOk: Boolean(parsed.referenceComparison.ok),
                 passed: Boolean(parsed.referenceComparison.passed),
+                comparedCount: Number(parsed.referenceComparison.comparedCount ?? 0),
+                attempt: Number(parsed.referenceComparison.attempt ?? 0),
+                targetWorstCount: Array.isArray(parsed.referenceComparison.targetWorstScenes)
+                  ? parsed.referenceComparison.targetWorstScenes.length
+                  : 0,
                 ssimMean: Number(parsed.referenceComparison.ssimMean ?? 0),
                 colorMatchMean: Number(parsed.referenceComparison.colorMatchMean ?? 0),
+                edgeMatchMean: Number(parsed.referenceComparison.edgeMatchMean ?? 0),
+                overallFidelity: Number(parsed.referenceComparison.overallFidelity ?? 0),
                 runtimeErrors: Array.isArray(parsed.runtimeErrors) ? parsed.runtimeErrors : [],
               });
             }
@@ -261,7 +400,6 @@ test.describe("MotionClone Reference Extraction & Closed-Loop Comparison E2E", (
         }
 
         turnIndex += 1;
-        res.writeHead(200, { "Content-Type": "application/json" });
 
         if (turnIndex === 1) {
           res.end(
@@ -291,35 +429,7 @@ test.describe("MotionClone Reference Extraction & Closed-Loop Comparison E2E", (
         }
 
         if (turnIndex === 2) {
-          // Refine scene1.js & scene2.js to match extracted reference colors & geometry
-          const scene1Match = `(function(){
-  var AM = window.AM;
-  AM.registerScene("scene1_hook", function(ctx, localTime, dur, scene, AM) {
-    var pose = AM.evalKeyframes([
-      { t: 0, x: 90, y: 280, w: 360, h: 280, opacity: 1, reveal: 1 },
-      { t: 2, x: 90, y: 280, w: 360, h: 280, opacity: 1, reveal: 1 }
-    ], localTime, "linear");
-    ctx.fillStyle = "#14141A";
-    ctx.fillRect(0, 0, 540, 960);
-    ctx.fillStyle = "#FA8C28";
-    ctx.fillRect(pose.x, pose.y, pose.w, pose.h);
-    ctx.fillStyle = "#F5F5FA";
-    ctx.font = "bold 56px sans-serif";
-    ctx.fillText(AM.textReveal("HOOK", pose.reveal), 160, 440);
-  });
-})();\n`;
-          const scene2Match = `(function(){
-  var AM = window.AM;
-  AM.registerScene("scene2_payoff", function(ctx, localTime, dur, scene, AM) {
-    ctx.fillStyle = "#EAE6DF";
-    ctx.fillRect(0, 0, 540, 960);
-    ctx.fillStyle = "#B42828";
-    ctx.fillRect(70, 260, 400, 360);
-    ctx.fillStyle = "#FFFFFF";
-    ctx.font = "bold 52px sans-serif";
-    ctx.fillText("PAYOFF", 120, 460);
-  });
-})();\n`;
+          // Director delegates script refinement to motion-designer child subagent
           res.end(
             JSON.stringify({
               choices: [
@@ -330,24 +440,15 @@ test.describe("MotionClone Reference Extraction & Closed-Loop Comparison E2E", (
                     content: "",
                     tool_calls: [
                       {
-                        id: "call_write_s1",
+                        id: "call_delegate_md",
                         type: "function",
                         function: {
-                          name: "write",
+                          name: "task",
                           arguments: JSON.stringify({
-                            filePath: "script/scene1.js",
-                            content: scene1Match,
-                          }),
-                        },
-                      },
-                      {
-                        id: "call_write_s2",
-                        type: "function",
-                        function: {
-                          name: "write",
-                          arguments: JSON.stringify({
-                            filePath: "script/scene2.js",
-                            content: scene2Match,
+                            description: "Refine scenes to match ref",
+                            prompt: "Rewrite script/scene1.js and script/scene2.js to match exact reference colors and geometry.",
+                            subagent_type: "motion-designer",
+                            background: false,
                           }),
                         },
                       },
@@ -504,12 +605,17 @@ test.describe("MotionClone Reference Extraction & Closed-Loop Comparison E2E", (
 
       expect(observations.sawReferenceBlueprint).toBe(true);
       const [firstPass, secondPass] = observations.toolResults;
-      expect(firstPass.ok).toBe(true);
+      expect(firstPass.ok).toBe(false);
+      expect(firstPass.fidelityFailed).toBe(true);
+      expect(firstPass.comparisonOk).toBe(true);
       expect(firstPass.passed).toBe(false);
+      expect(firstPass.comparedCount).toBeGreaterThanOrEqual(4);
+      expect(firstPass.targetWorstCount).toBeGreaterThan(0);
       expect(firstPass.ssimMean).toBeLessThan(0.65);
 
-      expect(secondPass.ok).toBe(true);
+      expect(secondPass.ok, `secondPass failed: ${JSON.stringify(secondPass)}`).toBe(true);
       expect(secondPass.passed).toBe(true);
+      expect(secondPass.attempt).toBeGreaterThanOrEqual(2);
       expect(secondPass.ssimMean).toBeGreaterThanOrEqual(0.75);
       expect(secondPass.colorMatchMean).toBeGreaterThanOrEqual(0.8);
       expect(secondPass.runtimeErrors).toEqual([]);
@@ -624,6 +730,7 @@ test.describe("MotionClone Reference Extraction & Closed-Loop Comparison E2E", (
       turnsSeen: 0,
       comparison: null as null | {
         ok: boolean;
+        comparisonOk: boolean;
         ssimMean: number;
         colorMatchMean: number;
         edgeMatchMean: number;
@@ -656,6 +763,7 @@ test.describe("MotionClone Reference Extraction & Closed-Loop Comparison E2E", (
             if (parsed.referenceComparison) {
               pinObs.comparison = {
                 ok: Boolean(parsed.ok),
+                comparisonOk: Boolean(parsed.referenceComparison.ok),
                 ssimMean: Number(parsed.referenceComparison.ssimMean ?? 0),
                 colorMatchMean: Number(parsed.referenceComparison.colorMatchMean ?? 0),
                 edgeMatchMean: Number(parsed.referenceComparison.edgeMatchMean ?? 0),
@@ -805,7 +913,7 @@ window.renderAt(0);
       expect(pinObs.sawPinterestNote).toBe(true);
       expect(pinObs.sawBlueprint).toBe(true);
       expect(pinObs.sawVisionImage).toBe(true);
-      expect(pinObs.comparison?.ok).toBe(true);
+      expect(pinObs.comparison?.comparisonOk).toBe(true);
       expect(pinObs.comparison?.runtimeErrors).toEqual([]);
       expect(pinObs.comparison?.ssimMean).toBeGreaterThan(0);
 
@@ -824,6 +932,322 @@ window.renderAt(0);
     } finally {
       pinLlm.closeAllConnections?.();
       await new Promise<void>((resolve) => pinLlm.close(() => resolve()));
+    }
+  });
+
+  test("local MP4 attachment extracts turn-1 blueprint, attaches child vision frames, rejects aspect ratio mismatch & anti-cheat replay", async () => {
+    tmpVideoDir = fs.mkdtempSync(path.join(os.tmpdir(), "mc-e2e-local-att-"));
+    const sampleMp4 = path.join(tmpVideoDir, "local_ref.mp4");
+    generateSyntheticReferenceMp4(sampleMp4);
+
+    const obs = {
+      coordinatorSawBlueprint: false,
+      coordinatorImageCount: 0,
+      childSawMotionDesigner: false,
+      childSawBlueprint: false,
+      childImageCount: 0,
+      aspectMismatchPreview: null as null | {
+        ok: boolean;
+        fidelityFailed: boolean;
+        aspectRatioMismatch: boolean;
+        passed: boolean;
+        antiCheatPassed: boolean;
+        violations: string[];
+      },
+      done: false,
+    };
+
+    let coordTurn = 0;
+    const mockLlm = http.createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (c) => chunks.push(c));
+      req.on("end", () => {
+        if (req.url?.endsWith("/models")) {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ data: [{ id: "e2e-clone", object: "model" }] }));
+          return;
+        }
+        const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        const msgs = Array.isArray(payload.messages) ? payload.messages : [];
+        const sysText = String(msgs[0]?.content ?? "");
+
+        res.writeHead(200, { "Content-Type": "application/json" });
+        if (sysText.includes("Motion Designer Subagent")) {
+          obs.childSawMotionDesigner = true;
+          const childJoined = JSON.stringify(msgs);
+          if (childJoined.includes("Active Video Reference Blueprint")) {
+            obs.childSawBlueprint = true;
+          }
+          const userContent = msgs[1]?.content;
+          if (Array.isArray(userContent)) {
+            obs.childImageCount = userContent.filter((p) => p?.type === "image_url").length;
+          }
+          const hasPreview = msgs.some(
+            (m) => m.role === "tool" && m.name === "capture_film_preview",
+          );
+          if (!hasPreview) {
+            res.end(
+              JSON.stringify({
+                choices: [
+                  {
+                    finish_reason: "tool_calls",
+                    message: {
+                      role: "assistant",
+                      content: "",
+                      tool_calls: [
+                        {
+                          id: "call_child_preview",
+                          type: "function",
+                          function: {
+                            name: "capture_film_preview",
+                            arguments: JSON.stringify({ compareToReference: true }),
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              }),
+            );
+            return;
+          }
+          res.end(
+            JSON.stringify({
+              choices: [
+                {
+                  finish_reason: "stop",
+                  message: { role: "assistant", content: "Child inspection complete." },
+                },
+              ],
+            }),
+          );
+          return;
+        }
+
+        const coordJoined = JSON.stringify(msgs);
+        if (coordJoined.includes("Active Video Reference Blueprint")) {
+          obs.coordinatorSawBlueprint = true;
+        }
+        const firstUser = msgs.find((m) => m.role === "user");
+        if (Array.isArray(firstUser?.content)) {
+          obs.coordinatorImageCount = firstUser.content.filter(
+            (p: { type?: string }) => p?.type === "image_url",
+          ).length;
+        }
+
+        const previewToolMsg = [...msgs]
+          .reverse()
+          .find((m) => m.role === "tool" && m.name === "capture_film_preview");
+        if (previewToolMsg && typeof previewToolMsg.content === "string") {
+          try {
+            const parsed = JSON.parse(previewToolMsg.content);
+            if (parsed.referenceComparison) {
+              obs.aspectMismatchPreview = {
+                ok: Boolean(parsed.ok),
+                fidelityFailed: Boolean(parsed.fidelityFailed),
+                aspectRatioMismatch: Boolean(parsed.referenceComparison.aspectRatioMismatch),
+                passed: Boolean(parsed.referenceComparison.passed),
+                antiCheatPassed: Boolean(parsed.antiCheat?.passed),
+                violations: Array.isArray(parsed.antiCheat?.violations)
+                  ? parsed.antiCheat.violations
+                  : [],
+              };
+            }
+          } catch {
+            // ignore
+          }
+        }
+
+        coordTurn += 1;
+        if (coordTurn === 1) {
+          res.end(
+            JSON.stringify({
+              choices: [
+                {
+                  finish_reason: "tool_calls",
+                  message: {
+                    role: "assistant",
+                    content: "",
+                    tool_calls: [
+                      {
+                        id: "call_spawn_md",
+                        type: "function",
+                        function: {
+                          name: "task",
+                          arguments: JSON.stringify({
+                            description: "Build clone scenes",
+                            prompt: "Inspect extracted reference and preview.",
+                            subagent_type: "motion-designer",
+                            background: false,
+                          }),
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            }),
+          );
+          return;
+        }
+
+        if (coordTurn === 2) {
+          res.end(
+            JSON.stringify({
+              choices: [
+                {
+                  finish_reason: "tool_calls",
+                  message: {
+                    role: "assistant",
+                    content: "",
+                    tool_calls: [
+                      {
+                        id: "call_bad_preview",
+                        type: "function",
+                        function: {
+                          name: "capture_film_preview",
+                          arguments: JSON.stringify({ compareToReference: true }),
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            }),
+          );
+          return;
+        }
+
+        obs.done = true;
+        res.end(
+          JSON.stringify({
+            choices: [
+              {
+                finish_reason: "stop",
+                message: {
+                  role: "assistant",
+                  content: "Verified turn-1 local extraction, child vision, aspect check, and anti-cheat.",
+                },
+              },
+            ],
+          }),
+        );
+      });
+    });
+
+    await new Promise<void>((resolve) => mockLlm.listen(0, "127.0.0.1", () => resolve()));
+    const addr = mockLlm.address();
+    if (!addr || typeof addr === "string") {
+      throw new Error("Mock LLM failed to bind port");
+    }
+
+    try {
+      stack = await startLiveStack({
+        startWeb: false,
+        aetheriaConfig: {
+          provider: {
+            "e2e-clone": {
+              name: "E2E Clone Provider",
+              type: "openai",
+              options: {
+                baseURL: `http://127.0.0.1:${addr.port}/v1`,
+                apiKey: "e2e-clone-key",
+              },
+              models: {
+                "e2e-clone": { name: "E2E Clone Model", vision: true },
+              },
+            },
+          },
+        },
+      });
+
+      // Seed landscape 960x540 (mismatched vs 540x960 portrait ref) + forbidden <video src="ref/ref_local_ref.mp4">
+      fs.mkdirSync(path.join(stack.workspaceDir, "script"), { recursive: true });
+      fs.writeFileSync(
+        path.join(stack.workspaceDir, "index.html"),
+        `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Bad Clone</title></head>
+<body style="margin:0;overflow:hidden;background:#000;">
+<video src="ref/ref_local_ref.mp4" style="display:none;"></video>
+<canvas id="stage" width="960" height="540"></canvas>
+<script>
+window.__filmMeta = { title: "Bad Clone", width: 960, height: 540, fps: 30, duration: 4, scenes: [{ id: "s1", start: 0, duration: 4 }] };
+var ctx = document.getElementById("stage").getContext("2d");
+window.renderAt = function(t) {
+  ctx.fillStyle = t < 2 ? "#111111" : "#222244";
+  ctx.fillRect(0, 0, 960, 540);
+};
+window.__ready = true;
+window.renderAt(0);
+</script>
+</body></html>`,
+      );
+
+      const sessRes = await fetch(
+        `${stack.engineUrl}/api/session?directory=${encodeURIComponent(stack.workspaceDir)}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: stack.authHeader,
+          },
+          body: JSON.stringify({
+            title: "Local MP4 Attachment Fidelity E2E",
+            directory: stack.workspaceDir,
+            model: { providerID: "e2e-clone", id: "e2e-clone" },
+          }),
+        },
+      );
+      expect(sessRes.ok).toBe(true);
+      const sessJson = await sessRes.json();
+      const sessionId = sessJson?.data?.id || sessJson?.id;
+      expect(sessionId).toBeTruthy();
+
+      const mp4B64 = fs.readFileSync(sampleMp4).toString("base64");
+      const promptRes = await fetch(
+        `${stack.engineUrl}/api/session/${encodeURIComponent(sessionId)}/prompt?directory=${encodeURIComponent(stack.workspaceDir)}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: stack.authHeader,
+          },
+          body: JSON.stringify({
+            prompt: { text: "Clone video referensi terlampir secara akurat" },
+            files: [
+              {
+                name: "local_ref.mp4",
+                mime: "video/mp4",
+                uri: `data:video/mp4;base64,${mp4B64}`,
+              },
+            ],
+          }),
+        },
+      );
+      expect(promptRes.ok).toBe(true);
+
+      await expect.poll(() => obs.done, { timeout: 90_000 }).toBe(true);
+      expect(obs.coordinatorSawBlueprint).toBe(true);
+      expect(obs.coordinatorImageCount).toBeGreaterThanOrEqual(2);
+      expect(obs.childSawMotionDesigner).toBe(true);
+      expect(obs.childSawBlueprint).toBe(true);
+      expect(obs.childImageCount).toBeGreaterThanOrEqual(2);
+
+      expect(obs.aspectMismatchPreview).not.toBeNull();
+      expect(obs.aspectMismatchPreview?.ok).toBe(false);
+      expect(obs.aspectMismatchPreview?.fidelityFailed).toBe(true);
+      expect(obs.aspectMismatchPreview?.aspectRatioMismatch).toBe(true);
+      expect(obs.aspectMismatchPreview?.passed).toBe(false);
+      expect(obs.aspectMismatchPreview?.antiCheatPassed).toBe(false);
+      expect(obs.aspectMismatchPreview?.violations.join(" ")).toContain("ref/ref_");
+      expect(obs.aspectMismatchPreview?.violations.join(" ")).toContain("<video>");
+
+      expect(fs.existsSync(path.join(stack.workspaceDir, "ref", "extracted", "style.json"))).toBe(
+        true,
+      );
+    } finally {
+      mockLlm.closeAllConnections?.();
+      await new Promise<void>((resolve) => mockLlm.close(() => resolve()));
     }
   });
 });

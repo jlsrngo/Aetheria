@@ -128,6 +128,25 @@ pub(crate) fn select_extracted_vision_keyframes(
                                 midpoints.push(p);
                             }
                         }
+                        if let Some(kfs_arr) = sc.get("keyframes").and_then(Value::as_array) {
+                            for item in kfs_arr {
+                                let Some(path_str) = item.get("path").and_then(Value::as_str) else {
+                                    continue;
+                                };
+                                let Some(p) = resolve_style_frame_in_dir(frames_dir, path_str) else {
+                                    continue;
+                                };
+                                if !seen.insert(p.clone()) {
+                                    continue;
+                                }
+                                let lower_path = path_str.to_ascii_lowercase();
+                                if lower_path.contains("_start.") || lower_path.contains("_end.") {
+                                    transitions.push(p);
+                                } else {
+                                    midpoints.push(p);
+                                }
+                            }
+                        }
                         for key in ["start", "end"] {
                             if let Some(p) = sc
                                 .pointer(&format!("/keyframes/{}", key))

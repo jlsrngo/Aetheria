@@ -343,7 +343,28 @@ pub async fn capture_film_preview_with_options(
         )
         .await
         {
-            Ok((cmp_json, strip_url)) => (Some(cmp_json), strip_url),
+            Ok((mut cmp_json, strip_url)) => {
+                if cmp_json.get("ok").and_then(Value::as_bool) == Some(true) {
+                    let overall = cmp_json
+                        .get("overallFidelity")
+                        .and_then(Value::as_f64)
+                        .unwrap_or(0.0);
+                    let hist = super::fidelity_guard::record_fidelity_score(&project_key, overall);
+                    let target_worst =
+                        super::fidelity_guard::build_target_worst_scenes(&film_root, &cmp_json);
+                    if let Some(obj) = cmp_json.as_object_mut() {
+                        obj.insert("attempt".to_string(), json!(hist.attempt));
+                        obj.insert("previousOverall".to_string(), json!(hist.previous_overall));
+                        obj.insert("scoreDelta".to_string(), json!(hist.score_delta));
+                        obj.insert(
+                            "regressedFromPrevious".to_string(),
+                            json!(hist.regressed_from_previous),
+                        );
+                        obj.insert("targetWorstScenes".to_string(), json!(target_worst));
+                    }
+                }
+                (Some(cmp_json), strip_url)
+            }
             Err(err) => (
                 Some(json!({
                     "ok": false,

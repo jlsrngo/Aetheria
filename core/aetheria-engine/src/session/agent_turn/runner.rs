@@ -1564,10 +1564,12 @@ fn handle_no_tool_calls(
         return NoToolCallAction::Continue;
     }
 
+    let latest_fidelity_hint = super::subagent::extract_latest_fidelity_refinement_hint(content_parts);
+    let max_verify_retries = if latest_fidelity_hint.is_some() { 2 } else { 1 };
     if matches!(
         step_finish,
         FinishReason::Stop | FinishReason::ToolCalls | FinishReason::Unknown
-    ) && *verification_gate_retries < 1
+    ) && *verification_gate_retries < max_verify_retries
     {
         let blockers =
             super::history::collect_turn_completion_blockers(content_parts, target.workspace_dir);
@@ -1575,11 +1577,17 @@ fn handle_no_tool_calls(
             *verification_gate_retries += 1;
             emit_step_ended_event(target, step_finish, Some(true), step_usage);
             chat_messages.push(msg.clone());
+            let refinement_note = latest_fidelity_hint
+                .map(|(_, hint)| format!("\n\n{}", hint))
+                .unwrap_or_default();
             chat_messages.push(json!({
                 "role": "user",
                 "content": format!(
-                    "COMPLETION BLOCKED BY VERIFICATION GATE: This turn cannot finish cleanly yet because unresolved failure(s) or incomplete stub/broken scene(s) remain: {}. Do NOT claim the video or edits succeeded. Fix every reported issue (overwrite short stubs/scripts with 'write', resolve syntax/wiring errors, and re-run 'capture_film_preview') — or state honestly what failed or remains unfinished.",
-                    blockers.join("; ")
+                    "COMPLETION BLOCKED BY VERIFICATION GATE (attempt {}/{}): This turn cannot finish cleanly yet because unresolved failure(s) or incomplete stub/broken scene(s) remain: {}. Do NOT claim the video or edits succeeded. Fix every reported issue (overwrite short stubs/scripts with 'write', resolve syntax/wiring errors, and re-run 'capture_film_preview') — or state honestly what failed or remains unfinished.{}",
+                    *verification_gate_retries,
+                    max_verify_retries,
+                    blockers.join("; "),
+                    refinement_note
                 )
             }));
             return NoToolCallAction::Continue;

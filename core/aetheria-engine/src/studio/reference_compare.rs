@@ -143,6 +143,42 @@ pub fn discover_reference_keyframes(ws_root: &Path, film_duration: f64) -> Vec<R
                         .and_then(Value::as_f64)
                         .unwrap_or(start + dur);
 
+                    if let Some(kfs_arr) = sc.get("keyframes").and_then(Value::as_array) {
+                        for item in kfs_arr {
+                            let Some(path_str) = item.get("path").and_then(Value::as_str) else {
+                                continue;
+                            };
+                            let Some(abs) =
+                                resolve_extracted_frame_path(ws_root, &extracted_dir, path_str)
+                            else {
+                                continue;
+                            };
+                            let lower_p = path_str.to_ascii_lowercase();
+                            let phase = if lower_p.contains("_start.") {
+                                "start"
+                            } else if lower_p.contains("_end.") {
+                                "end"
+                            } else {
+                                "mid"
+                            };
+                            let fallback_ts = match phase {
+                                "start" => start + (dur * 0.15).min(0.15),
+                                "end" => (end - (dur * 0.15).min(0.15)).max(start + dur * 0.5),
+                                _ => start + dur * 0.5,
+                            };
+                            let ts = item.get("t").and_then(Value::as_f64).unwrap_or(fallback_ts);
+                            push_unique_ref_kf(
+                                &mut out,
+                                &mut seen_paths,
+                                ws_root,
+                                abs,
+                                ts,
+                                scene_id.clone(),
+                                phase,
+                            );
+                        }
+                    }
+
                     if let Some(start_rel) = sc.pointer("/keyframes/start").and_then(Value::as_str) {
                         if let Some(abs) = resolve_extracted_frame_path(ws_root, &extracted_dir, start_rel) {
                             let ts = start + (dur * 0.15).min(0.15);
@@ -539,12 +575,12 @@ mod tests {
                 "start": s0,
                 "duration": 2.0,
                 "end": s0 + 2.0,
-                "keyframe": format!("ref/extracted/frames/{mid}"),
-                "keyframes": {
-                    "start": format!("ref/extracted/frames/{st}"),
-                    "mid": format!("ref/extracted/frames/{mid}"),
-                    "end": format!("ref/extracted/frames/{en}"),
-                }
+                "keyframe": format!("frames/{mid}"),
+                "keyframes": [
+                    { "t": s0 + 0.15, "path": format!("frames/{st}") },
+                    { "t": s0 + 1.0, "path": format!("frames/{mid}") },
+                    { "t": s0 + 1.85, "path": format!("frames/{en}") },
+                ]
             }));
         }
         std::fs::write(

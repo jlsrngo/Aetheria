@@ -82,15 +82,53 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
             } else {
                 None
             };
+            let regressed = res
+                .reference_comparison
+                .as_ref()
+                .and_then(|c| c.get("regressedFromPrevious").and_then(Value::as_bool))
+                == Some(true);
+            let target_worst_desc: Option<String> = res
+                .reference_comparison
+                .as_ref()
+                .and_then(|c| c.get("targetWorstScenes").and_then(Value::as_array))
+                .filter(|arr| !arr.is_empty())
+                .map(|arr| {
+                    arr.iter()
+                        .map(|item| {
+                            let sid = item.get("sceneId").and_then(Value::as_str).unwrap_or("scene");
+                            let sc = item.get("script").and_then(Value::as_str).unwrap_or("script/scene*.js");
+                            let ts = item.get("timestamp").and_then(Value::as_f64).unwrap_or(0.0);
+                            let comb = item.get("combinedScore").and_then(Value::as_f64).unwrap_or(0.0);
+                            format!("{sid} ({sc} @ t={ts:.2}s, score={comb:.3})")
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                });
+
             let summary_extra = match &res.reference_comparison {
-                Some(cmp) if cmp.get("ok").and_then(Value::as_bool) == Some(true) => format!(
-                    " Reference comparison: RGB SSIM mean={}, color={}, edge={}, overall={}, passed={}. Inspect side-by-side strip + frames and refine any low-scoring scenes.",
-                    cmp.get("ssimMean").and_then(Value::as_f64).unwrap_or(0.0),
-                    cmp.get("colorMatchMean").and_then(Value::as_f64).unwrap_or(0.0),
-                    cmp.get("edgeMatchMean").and_then(Value::as_f64).unwrap_or(0.0),
-                    cmp.get("overallFidelity").and_then(Value::as_f64).unwrap_or(0.0),
-                    cmp.get("passed").and_then(Value::as_bool).unwrap_or(false),
-                ),
+                Some(cmp) if cmp.get("ok").and_then(Value::as_bool) == Some(true) => {
+                    let worst_note = target_worst_desc
+                        .as_ref()
+                        .map(|w| format!(" Target worst scenes: {w}."))
+                        .unwrap_or_default();
+                    let reg_note = if regressed {
+                        let prev = cmp.get("previousOverall").and_then(Value::as_f64).unwrap_or(0.0);
+                        let cur = cmp.get("overallFidelity").and_then(Value::as_f64).unwrap_or(0.0);
+                        format!(" REGRESSION DETECTED ({prev:.3} -> {cur:.3}): revert ineffective patch before continuing.")
+                    } else {
+                        String::new()
+                    };
+                    format!(
+                        " Reference comparison: RGB SSIM mean={}, color={}, edge={}, overall={}, passed={}. Inspect side-by-side strip + frames.{}{}",
+                        cmp.get("ssimMean").and_then(Value::as_f64).unwrap_or(0.0),
+                        cmp.get("colorMatchMean").and_then(Value::as_f64).unwrap_or(0.0),
+                        cmp.get("edgeMatchMean").and_then(Value::as_f64).unwrap_or(0.0),
+                        cmp.get("overallFidelity").and_then(Value::as_f64).unwrap_or(0.0),
+                        cmp.get("passed").and_then(Value::as_bool).unwrap_or(false),
+                        worst_note,
+                        reg_note,
+                    )
+                }
                 _ => String::new(),
             };
             let extra_notices: String = [unchanged_warning, ref_override_note]
@@ -207,6 +245,23 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
             if !failure_reasons.is_empty() {
                 if let Some(obj) = result.as_object_mut() {
                     obj.insert("error".to_string(), json!(failure_reasons.join(" | ")));
+                }
+            }
+            if ref_threshold_failed || regressed || ref_ar_mismatch {
+                if let Some(obj) = result.as_object_mut() {
+                    obj.insert(
+                        "refinementGuidance".to_string(),
+                        json!({
+                            "regressedFromPrevious": regressed,
+                            "targetWorstScenes": res
+                                .reference_comparison
+                                .as_ref()
+                                .and_then(|c| c.get("targetWorstScenes"))
+                                .cloned()
+                                .unwrap_or_else(|| json!([])),
+                            "summary": target_worst_desc.clone().unwrap_or_else(|| "Inspect worstFrames and comparison_strip.jpg".to_string()),
+                        }),
+                    );
                 }
             }
             if let Some((_, progress)) = super::film_state::collect_active_film_scene_progress(workspace_dir) {

@@ -644,13 +644,18 @@ async fn run_subagent_loop(
             workspace_dir,
             &executed_tool_parts,
         ) {
-            if verification_retries < 1 && steps_run < max_steps {
+            let refinement = extract_latest_fidelity_refinement_hint(&executed_tool_parts);
+            let max_gate_retries = if refinement.is_some() { 2 } else { 1 };
+            if verification_retries < max_gate_retries && steps_run < max_steps {
                 verification_retries += 1;
+                let extra_refinement = refinement
+                    .map(|(_, msg)| format!("\n\n{}", msg))
+                    .unwrap_or_default();
                 chat_messages.push(json!({
                     "role": "user",
                     "content": format!(
-                        "SUBAGENT VERIFICATION GATE: Cannot complete task yet — {}. Fix unresolved tool/runtime failures or run 'capture_film_preview' cleanly before finishing.",
-                        gate_issue
+                        "SUBAGENT VERIFICATION GATE (attempt {}/{}): Cannot complete task yet — {}. Fix unresolved tool/runtime failures or run 'capture_film_preview' cleanly before finishing.{}",
+                        verification_retries, max_gate_retries, gate_issue, extra_refinement
                     )
                 }));
                 continue;
@@ -852,6 +857,63 @@ pub(crate) fn evaluate_subagent_verification_gate_in_workspace(
     }
 }
 
+/// Extracts bounded visual refinement instructions (`P1-3`) from the latest failing `capture_film_preview` tool part.
+pub(crate) fn extract_latest_fidelity_refinement_hint(
+    executed_tool_parts: &[Value],
+) -> Option<(bool, String)> {
+    let latest_preview = executed_tool_parts.iter().rev().find(|p| {
+        p.get("type").and_then(Value::as_str) == Some("tool")
+            && p.get("name")
+                .and_then(Value::as_str)
+                .is_some_and(|n| n.eq_ignore_ascii_case("capture_film_preview"))
+    })?;
+    let structured = latest_preview.pointer("/state/structured")?;
+    if structured.get("ok").and_then(Value::as_bool) != Some(false) {
+        return None;
+    }
+    let cmp = structured.get("referenceComparison")?;
+    if cmp.get("passed").and_then(Value::as_bool) != Some(false)
+        && cmp.get("aspectRatioMismatch").and_then(Value::as_bool) != Some(true)
+    {
+        return None;
+    }
+
+    let attempt = cmp.get("attempt").and_then(Value::as_u64).unwrap_or(1);
+    let overall = cmp.get("overallFidelity").and_then(Value::as_f64).unwrap_or(0.0);
+    let thr = cmp.get("passThreshold").and_then(Value::as_f64).unwrap_or(0.85);
+    let regressed = cmp.get("regressedFromPrevious").and_then(Value::as_bool) == Some(true);
+    let targets: String = cmp
+        .get("targetWorstScenes")
+        .and_then(Value::as_array)
+        .filter(|a| !a.is_empty())
+        .map(|arr| {
+            arr.iter()
+                .map(|t| {
+                    let sid = t.get("sceneId").and_then(Value::as_str).unwrap_or("scene");
+                    let sc = t.get("script").and_then(Value::as_str).unwrap_or("script/scene*.js");
+                    let ts = t.get("timestamp").and_then(Value::as_f64).unwrap_or(0.0);
+                    let comb = t.get("combinedScore").and_then(Value::as_f64).unwrap_or(0.0);
+                    format!("{sid} ({sc} @ t={ts:.2}s, score={comb:.3})")
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_else(|| "low-scoring frames in worstFrames".to_string());
+
+    let reg_note = if regressed {
+        let prev = cmp.get("previousOverall").and_then(Value::as_f64).unwrap_or(0.0);
+        format!(" SCORE REGRESSED from {prev:.3} -> {overall:.3}: undo/revise the last change.")
+    } else {
+        String::new()
+    };
+    Some((
+        regressed,
+        format!(
+            "BOUNDED VISUAL REFINEMENT (attempt #{attempt}, overall={overall:.3} < required {thr:.2}): Patch ONLY {targets} without overwriting passing scenes. Inspect `.aetheria/preview/comparison_strip.jpg` and re-run `capture_film_preview(compareToReference: true)`.{reg_note}"
+        ),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -941,5 +1003,44 @@ mod tests {
         assert!(evaluate_subagent_verification_gate("motion-designer", &verified_parts).is_none());
         assert!(evaluate_subagent_verification_gate("qa-verifier", &verified_parts).is_none());
         assert!(evaluate_subagent_verification_gate("qa-verifier", &[]).is_some());
+    }
+
+    #[test]
+    fn extract_latest_fidelity_refinement_hint_surfaces_worst_scenes_and_regression() {
+        let failing_parts = vec![json!({
+            "type": "tool",
+            "name": "capture_film_preview",
+            "state": {
+                "status": "completed",
+                "input": { "compareToReference": true },
+                "structured": {
+                    "ok": false,
+                    "referenceComparison": {
+                        "ok": true,
+                        "attempt": 2,
+                        "overallFidelity": 0.61,
+                        "previousOverall": 0.69,
+                        "regressedFromPrevious": true,
+                        "passThreshold": 0.85,
+                        "passed": false,
+                        "aspectRatioMismatch": false,
+                        "targetWorstScenes": [
+                            {
+                                "sceneId": "scene2_payoff",
+                                "script": "script/scene2.js",
+                                "timestamp": 3.5,
+                                "combinedScore": 0.48
+                            }
+                        ]
+                    }
+                }
+            }
+        })];
+        let (regressed, hint) =
+            extract_latest_fidelity_refinement_hint(&failing_parts).expect("expected hint");
+        assert!(regressed);
+        assert!(hint.contains("scene2_payoff"));
+        assert!(hint.contains("script/scene2.js"));
+        assert!(hint.contains("SCORE REGRESSED"));
     }
 }
