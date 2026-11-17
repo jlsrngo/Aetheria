@@ -149,6 +149,7 @@ pub fn build_ffmpeg_command(
     }
 
     if !active_audios.is_empty() {
+        let total_dur = (end_sec - start_sec).max(0.05);
         let mut filter_parts = Vec::with_capacity(active_audios.len() + 1);
         let mut mix_labels = Vec::with_capacity(active_audios.len());
         for (idx, (_, delay_ms, trim_start, max_dur, vol)) in active_audios.iter().enumerate() {
@@ -165,10 +166,14 @@ pub fn build_ffmpeg_command(
             ));
             mix_labels.push(label);
         }
+        // Clamp `[aout]` to the exact target video duration via `apad` + `atrim` so audio neither
+        // truncates nor outlives the video without relying on `-shortest` (which can close `pipe:0` early).
         filter_parts.push(format!(
-            "{}amix=inputs={}:duration=longest:normalize=0[aout]",
+            "{}amix=inputs={}:duration=longest:normalize=0,apad=whole_dur={:.4},atrim=duration={:.4}[aout]",
             mix_labels.join(""),
-            active_audios.len()
+            active_audios.len(),
+            total_dur,
+            total_dur
         ));
         cmd.args(["-filter_complex", &filter_parts.join(";")])
             .args(["-map", "0:v", "-map", "[aout]", "-c:a", "aac", "-b:a", "192k"]);
@@ -264,10 +269,6 @@ pub fn build_ffmpeg_command(
                 ]);
             }
         }
-    }
-
-    if !active_audios.is_empty() {
-        cmd.arg("-shortest");
     }
 
     cmd.arg(output_path)
@@ -396,6 +397,39 @@ mod tests {
         assert!(args.contains(&"-loop".to_string()));
         assert!(args.iter().any(|a| a.contains("palettegen") && a.contains("paletteuse")));
         assert!(!args.contains(&"libx264".to_string()));
+    }
+
+    #[test]
+    fn mp4_audio_filter_clamps_exact_video_duration_without_shortest() {
+        let tmp = std::env::temp_dir().join(format!(
+            "aetheria-ffmpeg-pad-test-{}",
+            crate::paths::now_ms()
+        ));
+        let audio_dir = tmp.join("audio");
+        std::fs::create_dir_all(&audio_dir).expect("create audio dir");
+        std::fs::write(audio_dir.join("bgm.mp3"), b"stub").expect("write audio stub");
+
+        let meta = sample_meta();
+        let cmd = build_ffmpeg_command(
+            Path::new("ffmpeg"),
+            &meta,
+            &tmp,
+            &tmp,
+            0.0,
+            5.0,
+            "h264",
+            &tmp.join("out.mp4"),
+        );
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        let _ = std::fs::remove_dir_all(&tmp);
+        assert!(!args.contains(&"-shortest".to_string()));
+        assert!(args.iter().any(|a| {
+            a.contains("amix=inputs=1:duration=longest:normalize=0,apad=whole_dur=5.0000,atrim=duration=5.0000[aout]")
+        }));
     }
 
     #[tokio::test]

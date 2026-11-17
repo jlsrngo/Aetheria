@@ -368,6 +368,21 @@ where
     if let Err(err) = pipe_res {
         let _ = ff_child.kill().await;
         let _ = tokio::fs::remove_file(&tmp_output).await;
+        if let Ok(Ok(ff_err)) =
+            tokio::time::timeout(std::time::Duration::from_secs(2), ff_stderr_task).await
+        {
+            let lines: Vec<&str> = ff_err.lines().collect();
+            let summary = if lines.len() <= 30 {
+                lines.join("\n")
+            } else {
+                let head = lines[..12].join("\n");
+                let tail = lines[lines.len().saturating_sub(18)..].join("\n");
+                format!("{}\n...\n{}", head, tail)
+            };
+            if !summary.trim().is_empty() {
+                return Err(format!("{}\nFFmpeg stderr:\n{}", err, summary));
+            }
+        }
         return Err(err);
     }
 
