@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef } from "react";
 import { useMotionConfig, useMotionFrameSubscription } from "./MotionContext";
+import { computeEffectiveAudioVolume } from "./sceneAudioUtils";
 
 export interface ProxyVideoStageProps {
   streamUrl: string;
@@ -24,8 +25,9 @@ export const ProxyVideoStage: React.FC<ProxyVideoStageProps> = ({ streamUrl }) =
     const safeFps = Math.max(1, cfg.fps);
     const targetSec = Math.max(0, frame / safeFps);
 
-    el.muted = cfg.isMuted || cfg.volume <= 0;
-    el.volume = Math.max(0, Math.min(1, cfg.volume));
+    const effVol = computeEffectiveAudioVolume(cfg.volume, cfg.isMuted, 1);
+    el.muted = effVol <= 0;
+    el.volume = effVol;
     el.playbackRate = Math.max(0.25, Math.min(4, cfg.playbackRate));
 
     if (el.readyState >= 1) {

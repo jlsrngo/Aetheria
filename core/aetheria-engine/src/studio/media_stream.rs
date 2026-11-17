@@ -120,20 +120,13 @@ pub(crate) async fn serve_ranged_file(
         .first_or_octet_stream()
         .to_string();
 
+    const MAX_STREAM_CHUNK_BYTES: u64 = 4 * 1024 * 1024;
     let range_header = headers.get(header::RANGE).and_then(|h| h.to_str().ok());
 
     if let Some(range) = range_header {
-        if let Some(spec) = range.strip_prefix("bytes=") {
-            let parts: Vec<&str> = spec.split('-').collect();
-            let start: u64 = parts[0].parse().unwrap_or(0);
-            let end: u64 = if parts.len() > 1 && !parts[1].is_empty() {
-                parts[1].parse().unwrap_or(file_size.saturating_sub(1))
-            } else {
-                file_size.saturating_sub(1)
-            };
-
-            let end = end.min(file_size.saturating_sub(1));
-            if start <= end {
+        match parse_http_byte_range(range, file_size) {
+            Ok((start, raw_end)) => {
+                let end = raw_end.min(start.saturating_add(MAX_STREAM_CHUNK_BYTES - 1)).min(file_size.saturating_sub(1));
                 let length = end - start + 1;
                 if file.seek(std::io::SeekFrom::Start(start)).await.is_ok() {
                     let mut chunk = vec![0u8; length as usize];
@@ -154,6 +147,15 @@ pub(crate) async fn serve_ranged_file(
                     }
                 }
             }
+            Err(()) => {
+                return Response::builder()
+                    .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                    .header(header::CONTENT_RANGE, format!("bytes */{}", file_size))
+                    .body(axum::body::Body::empty())
+                    .unwrap_or_else(|_| {
+                        (StatusCode::RANGE_NOT_SATISFIABLE, "Range Not Satisfiable").into_response()
+                    });
+            }
         }
     }
 
@@ -171,9 +173,50 @@ pub(crate) async fn serve_ranged_file(
     }
 }
 
+fn parse_http_byte_range(range_header: &str, file_size: u64) -> Result<(u64, u64), ()> {
+    if file_size == 0 {
+        return Err(());
+    }
+    let spec = range_header
+        .trim()
+        .strip_prefix("bytes=")
+        .ok_or(())?
+        .split(',')
+        .next()
+        .ok_or(())?
+        .trim();
+    let (raw_start, raw_end) = spec.split_once('-').ok_or(())?;
+    let s_str = raw_start.trim();
+    let e_str = raw_end.trim();
+    if s_str.is_empty() {
+        if e_str.is_empty() {
+            return Err(());
+        }
+        let suffix_len: u64 = e_str.parse().map_err(|_| ())?;
+        if suffix_len == 0 {
+            return Err(());
+        }
+        let clamped = suffix_len.min(file_size);
+        return Ok((file_size - clamped, file_size - 1));
+    }
+    let start: u64 = s_str.parse().map_err(|_| ())?;
+    if start >= file_size {
+        return Err(());
+    }
+    let end: u64 = if e_str.is_empty() {
+        file_size - 1
+    } else {
+        e_str.parse::<u64>().map_err(|_| ())?.min(file_size - 1)
+    };
+    if start > end {
+        return Err(());
+    }
+    Ok((start, end))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::resolve_stream_video_target;
+    use super::{parse_http_byte_range, resolve_stream_video_target};
     use axum::http::StatusCode;
     use std::path::Path;
 
@@ -214,6 +257,16 @@ mod tests {
         assert_eq!(Path::new(&ok_abs), inside_abs.as_path());
 
         let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn test_parse_http_byte_range_handles_suffix_and_bounds() {
+        assert_eq!(parse_http_byte_range("bytes=-500", 1000), Ok((500, 999)));
+        assert_eq!(parse_http_byte_range("bytes=-2000", 1000), Ok((0, 999)));
+        assert_eq!(parse_http_byte_range("bytes=100-199", 1000), Ok((100, 199)));
+        assert_eq!(parse_http_byte_range("bytes=900-", 1000), Ok((900, 999)));
+        assert!(parse_http_byte_range("bytes=1000-", 1000).is_err());
+        assert!(parse_http_byte_range("bytes=500-400", 1000).is_err());
     }
 }
 

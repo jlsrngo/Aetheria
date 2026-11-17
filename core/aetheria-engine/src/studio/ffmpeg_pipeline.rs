@@ -128,7 +128,8 @@ pub fn build_ffmpeg_command(
                 continue;
             }
             let trim_start = (start_sec - sc_start).max(0.0);
-            let max_dur = (end_sec - sc_start.max(start_sec)).max(0.05);
+            let clipped_end = sc_end.min(end_sec);
+            let max_dur = (clipped_end - sc_start.max(start_sec)).max(0.05);
             let delay_ms = ((sc_start - start_sec).max(0.0) * 1000.0).round() as u64;
 
             if let Some(ref audio_rel) = scene.audio {
@@ -176,7 +177,20 @@ pub fn build_ffmpeg_command(
             total_dur
         ));
         cmd.args(["-filter_complex", &filter_parts.join(";")])
-            .args(["-map", "0:v", "-map", "[aout]", "-c:a", "aac", "-b:a", "192k"]);
+            .args([
+                "-map",
+                "0:v",
+                "-map",
+                "[aout]",
+                "-c:a",
+                "aac",
+                "-ar",
+                "48000",
+                "-ac",
+                "2",
+                "-b:a",
+                "192k",
+            ]);
     } else {
         cmd.args(["-map", "0:v", "-an"]);
     }
@@ -430,6 +444,67 @@ mod tests {
         assert!(args.iter().any(|a| {
             a.contains("amix=inputs=1:duration=longest:normalize=0,apad=whole_dur=5.0000,atrim=duration=5.0000[aout]")
         }));
+        assert!(args.windows(2).any(|w| w == ["-ar", "48000"]));
+        assert!(args.windows(2).any(|w| w == ["-ac", "2"]));
+    }
+
+    #[test]
+    fn scene_audio_is_clipped_to_scene_end_boundary() {
+        let tmp = std::env::temp_dir().join(format!(
+            "aetheria-ffmpeg-clip-test-{}",
+            crate::paths::now_ms()
+        ));
+        let audio_dir = tmp.join("audio");
+        std::fs::create_dir_all(&audio_dir).expect("create audio dir");
+        std::fs::write(audio_dir.join("s1.wav"), b"stub").expect("write audio stub");
+
+        let mut meta = sample_meta();
+        meta.duration = 10.0;
+        meta.total_frames = 300;
+        meta.scenes = vec![
+            FilmSceneSpec {
+                id: "s1".to_string(),
+                title: "S1".to_string(),
+                start: 0.0,
+                duration: 3.0,
+                start_frame: 0,
+                duration_frames: 90,
+                audio: Some("audio/s1.wav".to_string()),
+                sfx: None,
+                words: None,
+            },
+            FilmSceneSpec {
+                id: "s2".to_string(),
+                title: "S2".to_string(),
+                start: 3.0,
+                duration: 7.0,
+                start_frame: 90,
+                duration_frames: 210,
+                audio: None,
+                sfx: None,
+                words: None,
+            },
+        ];
+
+        let cmd = build_ffmpeg_command(
+            Path::new("ffmpeg"),
+            &meta,
+            &tmp,
+            &tmp,
+            0.0,
+            10.0,
+            "h264",
+            &tmp.join("out.mp4"),
+        );
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        let _ = std::fs::remove_dir_all(&tmp);
+        assert!(args
+            .iter()
+            .any(|a| a.contains("[1:a]atrim=start=0.0000:duration=3.0000")));
     }
 
     #[tokio::test]

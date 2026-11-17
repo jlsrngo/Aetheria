@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useMotionConfig, useMotionFrameSubscription } from "./MotionContext";
 import { type HtmlFilmScene } from "./htmlStageBundle";
 import {
@@ -8,9 +8,11 @@ import {
   subscribeEngineMediaAuth,
 } from "../../lib/api";
 import {
+  appendAudioRevision,
   computeAudioTargetSeconds,
   computeEffectiveAudioVolume,
   formatAudioErrorMessage,
+  isAudioAssetFile,
   isAudioTrackFinished,
   resolveSceneAudioTracks,
   shouldResyncAudioTime,
@@ -41,15 +43,35 @@ export const SceneAudioSync: React.FC<SceneAudioSyncProps> = ({
     () => true
   );
 
+  const [audioRevision, setAudioRevision] = useState(0);
+
   useEffect(() => {
     void initEngineMediaAuth();
   }, []);
 
+  useEffect(() => {
+    const handleAudioEdited = (e: Event) => {
+      const detail = (e as CustomEvent<{ file?: string }>).detail;
+      if (isAudioAssetFile(detail?.file)) {
+        setAudioRevision((r) => r + 1);
+      }
+    };
+    window.addEventListener("aetheria:file.edited", handleAudioEdited);
+    window.addEventListener("aetheria:sse-file-edited", handleAudioEdited);
+    return () => {
+      window.removeEventListener("aetheria:file.edited", handleAudioEdited);
+      window.removeEventListener("aetheria:sse-file-edited", handleAudioEdited);
+    };
+  }, []);
+
   const resolvedTracks = useMemo(() => {
-    // Re-resolve track URLs once Tauri runtimeAuthToken arrives.
+    // Re-resolve track URLs once Tauri runtimeAuthToken arrives or an audio asset file changes.
     void authToken;
-    return resolveSceneAudioTracks(scenes, activeDir, authSettled);
-  }, [scenes, activeDir, authSettled, authToken]);
+    return resolveSceneAudioTracks(scenes, activeDir, authSettled).map((track) => ({
+      ...track,
+      src: appendAudioRevision(track.src, audioRevision),
+    }));
+  }, [scenes, activeDir, authSettled, authToken, audioRevision]);
 
   useEffect(() => {
     if (resolvedTracks.length === 0) {

@@ -10,7 +10,7 @@ pub fn sfx_tool_definition() -> Value {
         "type": "function",
         "function": {
             "name": "generate_smart_sfx",
-            "description": "Generates context-aware, studio-grade sound effect cues for video scenes. The engine automatically maps scene events (scene entrance -> whoosh, headline/card pop -> pop, key stat/proof -> chime, dramatic climax -> impact, CTA -> chime) and enforces an anti-clutter density guard so audio is dynamic yet clean and uncluttered. Returns cue placements ready for Remotion.",
+            "description": "Generates context-aware, studio-grade sound effect cues for video scenes. The engine automatically maps scene events (scene entrance -> whoosh, headline/card pop -> pop, key stat/proof -> chime, dramatic climax -> impact, CTA -> chime) and enforces an anti-clutter density guard so audio is dynamic yet clean and uncluttered. Returns cue timing metadata for Aetheria Motion Studio (for narrated films needing synthesized WAV tracks, prefer film_audio with sfxCues).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -47,12 +47,15 @@ pub async fn execute_smart_sfx(_workspace_dir: &str, arguments: &Value) -> Value
     let fps = arguments.get("fps").and_then(|v| v.as_u64()).unwrap_or(30) as usize;
     let root = crate::paths::project_root();
 
+    let scenes_json = serde_json::to_string(scenes).unwrap_or_else(|_| "[]".to_string());
     let mut py_cmd = Command::new("python");
     crate::paths::configure_hidden_tokio_command(&mut py_cmd);
-    py_cmd.arg("-c")
+    py_cmd
+        .env("AETHERIA_SFX_SCENES_JSON", &scenes_json)
+        .arg("-c")
         .arg(format!(
             r#"
-import sys, json
+import os, sys, json
 sys.path.insert(0, r"{}")
 from sfx_engine import SmartSfxScheduler, ensure_soundbank
 from pathlib import Path
@@ -62,14 +65,13 @@ ensure_soundbank(root / "workspace" / "public" / "sfx")
 ensure_soundbank(root / "public" / "sfx")
 ensure_soundbank(root / "apps" / "public" / "sfx")
 
-scenes = json.loads(r'{}')
+scenes = json.loads(os.environ.get("AETHERIA_SFX_SCENES_JSON", "[]"))
 fps = {}
 cues = SmartSfxScheduler.generate_cues_for_scenes(scenes, fps=fps)
 print(json.dumps({{"success": True, "cues": cues, "totalCues": len(cues)}}))
 "#,
             root.join("core").join("voicebox").display(),
             root.display(),
-            serde_json::to_string(scenes).unwrap_or_else(|_| "[]".to_string()),
             fps
         ));
 

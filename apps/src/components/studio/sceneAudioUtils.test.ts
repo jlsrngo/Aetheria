@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import type { HtmlFilmScene } from "./htmlStageBundle";
 import { appendEngineAuthToken } from "../../lib/api";
 import {
+  appendAudioRevision,
   clampAudioVolume,
   computeAudioTargetSeconds,
   computeEffectiveAudioVolume,
   formatAudioErrorMessage,
+  isAudioAssetFile,
   isAudioTrackFinished,
   resolveSceneAudioTracks,
   shouldResyncAudioTime,
@@ -117,5 +119,14 @@ describe("sceneAudioUtils", () => {
     expect(shouldResyncAudioTime(1.0, 1.1, true, false)).toBe(true);
     expect(shouldResyncAudioTime(1.0, 1.05, true, true)).toBe(true);
     expect(shouldResyncAudioTime(1.0, 1.05, false, true)).toBe(true);
+  });
+
+  it("identifies audio asset edits and appends cache-busting revision query params", () => {
+    expect(isAudioAssetFile("audio/scene1.wav")).toBe(true);
+    expect(isAudioAssetFile("bgm/track.mp3")).toBe(true);
+    expect(isAudioAssetFile("script/scene1.js")).toBe(false);
+    expect(appendAudioRevision("/ws/a.wav", 0)).toBe("/ws/a.wav");
+    expect(appendAudioRevision("/ws/a.wav", 2)).toBe("/ws/a.wav?_rev=2");
+    expect(appendAudioRevision("/ws/a.wav?auth_token=t", 2)).toBe("/ws/a.wav?auth_token=t&_rev=2");
   });
 });

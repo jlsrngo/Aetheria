@@ -55,6 +55,37 @@ pub struct SaveVoicePresetPayload {
     pub fallback_pitch: Option<String>,
 }
 
+const MAX_SAMPLE_BYTES: usize = 20 * 1024 * 1024;
+const MAX_SAMPLE_BASE64_CHARS: usize = 28 * 1024 * 1024;
+
+fn sanitize_sample_filename(raw: Option<&str>, preset_id: &str) -> Result<String, String> {
+    let default_name = format!("{}.wav", preset_id);
+    let Some(candidate) = raw.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(default_name);
+    };
+    if candidate.contains('/') || candidate.contains('\\') || candidate.contains("..") {
+        return Err("Invalid sampleFileName: path separators and '..' are forbidden.".to_string());
+    }
+    let clean = candidate
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if clean.is_empty() || clean == "." || clean == ".." {
+        return Ok(default_name);
+    }
+    if clean.to_lowercase().ends_with(".wav") {
+        Ok(clean)
+    } else {
+        Ok(default_name)
+    }
+}
+
 /// POST `/api/studio/voice-presets/save`
 pub async fn handle_save_voice_preset(
     Json(payload): Json<SaveVoicePresetPayload>,
@@ -92,16 +123,17 @@ pub async fn handle_save_voice_preset(
         .cloned()
         .unwrap_or_else(|| json!({}));
 
-    let mut sample_filename = payload
-        .sample_file_name
-        .filter(|s| !s.trim().is_empty())
-        .or_else(|| {
-            existing
-                .get("sampleFile")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-        })
-        .unwrap_or_else(|| format!("{}.wav", preset_id));
+    let mut sample_filename = match sanitize_sample_filename(
+        payload
+            .sample_file_name
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| existing.get("sampleFile").and_then(|v| v.as_str())),
+        &preset_id,
+    ) {
+        Ok(name) => name,
+        Err(err) => return Json(json!({ "success": false, "error": err })),
+    };
 
     if let Some(b64_raw) = payload.sample_base64.filter(|s| !s.trim().is_empty()) {
         let clean_b64 = b64_raw
@@ -109,12 +141,30 @@ pub async fn handle_save_voice_preset(
             .next_back()
             .unwrap_or(b64_raw.as_str())
             .trim();
+        if clean_b64.len() > MAX_SAMPLE_BASE64_CHARS {
+            return Json(json!({
+                "success": false,
+                "error": "Audio sample exceeds maximum allowed 20 MiB limit."
+            }));
+        }
         match base64::engine::general_purpose::STANDARD.decode(clean_b64) {
             Ok(bytes) => {
+                if bytes.len() > MAX_SAMPLE_BYTES {
+                    return Json(json!({
+                        "success": false,
+                        "error": "Decoded audio sample exceeds maximum allowed 20 MiB limit."
+                    }));
+                }
                 if !sample_filename.to_lowercase().ends_with(".wav") {
                     sample_filename = format!("{}.wav", preset_id);
                 }
                 let sample_target = dir.join(&sample_filename);
+                if !crate::paths::contains_path(&dir, &sample_target) {
+                    return Json(json!({
+                        "success": false,
+                        "error": "Invalid sampleFileName path escapes presets directory."
+                    }));
+                }
                 if let Err(e) = std::fs::write(&sample_target, &bytes) {
                     return Json(json!({
                         "success": false,
@@ -303,9 +353,7 @@ pub async fn handle_test_voice_preset(
     }
 
     let root = crate::paths::project_root();
-    let out_dir = root.join("output");
-    let _ = std::fs::create_dir_all(&out_dir);
-    let out_file = out_dir.join(format!("preset_preview_{}.wav", crate::paths::now_ms()));
+    let out_file = std::env::temp_dir().join(format!("aetheria_preset_preview_{}.wav", crate::paths::now_ms()));
 
     if let Some(cfg) = payload.cfg_value {
         let json_path = presets_json_path();
@@ -393,5 +441,20 @@ pub async fn handle_test_voice_preset(
             "success": false,
             "error": format!("Failed to launch Voicebox engine: {}", e)
         })),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_sample_filename_blocks_traversal() {
+        assert!(sanitize_sample_filename(Some("../evil.wav"), "p1").is_err());
+        assert!(sanitize_sample_filename(Some("dir/evil.wav"), "p1").is_err());
+        assert!(sanitize_sample_filename(Some("dir\\evil.wav"), "p1").is_err());
+        assert_eq!(sanitize_sample_filename(Some("voice_sample.wav"), "p1").unwrap(), "voice_sample.wav");
+        assert_eq!(sanitize_sample_filename(Some("voice_sample.mp3"), "p1").unwrap(), "p1.wav");
+        assert_eq!(sanitize_sample_filename(None, "p1").unwrap(), "p1.wav");
     }
 }

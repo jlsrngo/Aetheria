@@ -155,7 +155,7 @@ test.describe("Studio Audio & Penumpang Stage E2E (Real Engine + Browser)", () =
       );
       expect(vols.length).toBeGreaterThanOrEqual(5);
       for (const v of vols) {
-        expect(v.volume).toBe(0.35);
+        expect(v.volume).toBe(0.12);
         expect(v.muted).toBe(false);
       }
     }).toPass({ timeout: 10_000 });
@@ -178,7 +178,7 @@ test.describe("Studio Audio & Penumpang Stage E2E (Real Engine + Browser)", () =
       );
       for (const s of unmutedStates) {
         expect(s.muted).toBe(false);
-        expect(s.volume).toBe(0.35);
+        expect(s.volume).toBe(0.12);
       }
     }).toPass({ timeout: 10_000 });
 

@@ -144,31 +144,103 @@ pub async fn execute_voicebox(workspace_dir: &str, arguments: &Value) -> Value {
         });
     let root = crate::paths::project_root();
 
-    // Fast Cache Hit: Only reuse existing WAV if the text actually matches what was requested!
-    // Never reuse an old file with different text just because the filename is the same.
+    let spoken = arguments
+        .get("spokenText")
+        .or_else(|| arguments.get("spoken_text"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let lexicon_arg = arguments
+        .get("lexicon")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let voice_arg = arguments
+        .get("voice")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let style_arg = arguments
+        .get("style")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let ref_audio_opt = arguments
+        .get("refAudio")
+        .or_else(|| arguments.get("ref_audio"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let clone_voice = arguments
+        .get("cloneVoice")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let voice_design = arguments
+        .get("voiceDesign")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let engine_arg = arguments
+        .get("engine")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let rate_arg = arguments
+        .get("rate")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let pitch_arg = arguments
+        .get("pitch")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    let resolved_lexicon = if let Some(lex_raw) = lexicon_arg {
+        match crate::tool::path_guard::resolve_isolated_path(workspace_dir, lex_raw) {
+            Ok(p) => Some(p),
+            Err(e) => return json!({ "success": false, "error": format!("Invalid lexicon path: {}", e) }),
+        }
+    } else {
+        None
+    };
+
+    let resolved_ref_audio = if let Some(ref_raw) = ref_audio_opt {
+        match crate::tool::path_guard::resolve_isolated_path(workspace_dir, ref_raw) {
+            Ok(p) => Some(p),
+            Err(e) => return json!({ "success": false, "error": format!("Invalid refAudio path: {}", e) }),
+        }
+    } else {
+        None
+    };
+
+    let cache_sig = build_voicebox_cache_signature(
+        text,
+        spoken,
+        lang,
+        voice_arg,
+        style_arg,
+        engine_arg,
+        rate_arg,
+        pitch_arg,
+        lexicon_arg,
+        ref_audio_opt,
+        clone_voice,
+        voice_design,
+    );
+
+    // Fast Cache Hit: Only reuse existing WAV if BOTH text and synthesis parameters match!
     let force_regen = arguments.get("force").and_then(|v| v.as_bool()).unwrap_or(false)
         || arguments.get("resetVoiceLock").and_then(|v| v.as_bool()).unwrap_or(false);
-    if !force_regen {
-        let words_path = target_out.with_extension("words.json");
-        if let (Ok(meta), Ok(words_content)) = (std::fs::metadata(&target_out), std::fs::read_to_string(&words_path)) {
-            if meta.len() > 1024 {
-                if let Ok(words_json) = serde_json::from_str::<serde_json::Value>(&words_content) {
-                    if let Some(cached_text) = words_json.get("text").and_then(|v| v.as_str()) {
-                        let clean_cached = cached_text.split_whitespace().collect::<Vec<_>>().join(" ");
-                        let clean_requested = text.split_whitespace().collect::<Vec<_>>().join(" ");
-                        if clean_cached == clean_requested {
-                            sync_audio_inside_workspace(&ws, &target_out);
-                            return json!({
-                                "success": true,
-                                "cached": true,
-                                "message": format!("Reused existing mastered voiceover at '{}'", target_out.display()),
-                                "outputPath": target_out.to_string_lossy().to_string()
-                            });
-                        }
-                    }
-                }
-            }
-        }
+    let cache_meta_path = target_out.with_extension("cache.json");
+    if !force_regen && is_voicebox_cache_hit(&target_out, &cache_meta_path, text, &cache_sig) {
+        sync_audio_inside_workspace(&ws, &target_out);
+        return json!({
+            "success": true,
+            "cached": true,
+            "message": format!("Reused existing mastered voiceover at '{}'", target_out.display()),
+            "outputPath": target_out.to_string_lossy().to_string()
+        });
     }
 
     let script_path = root.join("core").join("voicebox").join("voicebox_engine.py");
@@ -185,51 +257,40 @@ pub async fn execute_voicebox(workspace_dir: &str, arguments: &Value) -> Value {
         .arg("--workspace")
         .arg(&ws);
 
-    if let Some(spoken) = arguments.get("spokenText").or_else(|| arguments.get("spoken_text")).and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-        cmd.arg("--spoken-text").arg(spoken);
+    if let Some(sp) = spoken {
+        cmd.arg("--spoken-text").arg(sp);
     }
-    if let Some(lex) = arguments.get("lexicon").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-        cmd.arg("--lexicon").arg(lex);
+    if let Some(ref lex_path) = resolved_lexicon {
+        cmd.arg("--lexicon").arg(lex_path);
     }
 
-    if let Some(v) = arguments.get("voice").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+    if let Some(v) = voice_arg {
         cmd.arg("--voice").arg(v);
     }
-    if let Some(st) = arguments.get("style").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+    if let Some(st) = style_arg {
         cmd.arg("--style").arg(st);
     }
 
-    let ref_audio_opt = arguments
-        .get("refAudio")
-        .or_else(|| arguments.get("ref_audio"))
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty());
-    if let Some(ref_rel) = ref_audio_opt {
-        let ref_path = if Path::new(ref_rel).is_absolute() {
-            std::path::PathBuf::from(ref_rel)
-        } else {
-            ws.join(ref_rel)
-        };
+    if let Some(ref ref_path) = resolved_ref_audio {
         if ref_path.is_file() {
-            let clone = arguments.get("cloneVoice").and_then(|v| v.as_bool()).unwrap_or(false);
-            if clone {
-                cmd.arg("--clone-ref").arg(&ref_path);
+            if clone_voice {
+                cmd.arg("--clone-ref").arg(ref_path);
             }
             cmd.arg("--ref-audio").arg(ref_path);
         }
     }
 
-    if let Some(d) = arguments.get("voiceDesign").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty()) {
+    if let Some(d) = voice_design {
         cmd.arg("--voice-design").arg(d);
     }
-    if let Some(e) = arguments.get("engine").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+    if let Some(e) = engine_arg {
         cmd.arg("--engine").arg(e);
     }
 
-    if let Some(r) = arguments.get("rate").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+    if let Some(r) = rate_arg {
         cmd.arg("--rate").arg(r);
     }
-    if let Some(p) = arguments.get("pitch").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+    if let Some(p) = pitch_arg {
         cmd.arg("--pitch").arg(p);
     }
 
@@ -248,6 +309,9 @@ pub async fn execute_voicebox(workspace_dir: &str, arguments: &Value) -> Value {
                 });
             }
 
+            if let Ok(sig_str) = serde_json::to_string(&cache_sig) {
+                let _ = std::fs::write(&cache_meta_path, sig_str);
+            }
             sync_audio_inside_workspace(&ws, &target_out);
 
             // Parse json output from python if possible
@@ -266,5 +330,153 @@ pub async fn execute_voicebox(workspace_dir: &str, arguments: &Value) -> Value {
         Err(err) => json!({
             "error": format!("Failed to run Voicebox Python engine: {}", err)
         }),
+    }
+}
+
+fn normalize_ws_str(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_voicebox_cache_signature(
+    text: &str,
+    spoken: Option<&str>,
+    lang: &str,
+    voice: Option<&str>,
+    style: Option<&str>,
+    engine: Option<&str>,
+    rate: Option<&str>,
+    pitch: Option<&str>,
+    lexicon: Option<&str>,
+    ref_audio: Option<&str>,
+    clone_voice: bool,
+    voice_design: Option<&str>,
+) -> Value {
+    json!({
+        "text": normalize_ws_str(text),
+        "spokenText": spoken.unwrap_or(""),
+        "lang": lang,
+        "voice": voice.unwrap_or(""),
+        "style": style.unwrap_or(""),
+        "engine": engine.unwrap_or(""),
+        "rate": rate.unwrap_or(""),
+        "pitch": pitch.unwrap_or(""),
+        "lexicon": lexicon.unwrap_or(""),
+        "refAudio": ref_audio.unwrap_or(""),
+        "cloneVoice": clone_voice,
+        "voiceDesign": voice_design.unwrap_or("")
+    })
+}
+
+fn is_voicebox_cache_hit(
+    target_out: &Path,
+    cache_meta_path: &Path,
+    text: &str,
+    cache_sig: &Value,
+) -> bool {
+    let words_path = target_out.with_extension("words.json");
+    let Ok(meta) = std::fs::metadata(target_out) else {
+        return false;
+    };
+    if meta.len() <= 1024 {
+        return false;
+    }
+    let Ok(words_content) = std::fs::read_to_string(&words_path) else {
+        return false;
+    };
+    let Ok(words_json) = serde_json::from_str::<Value>(&words_content) else {
+        return false;
+    };
+    let Some(cached_text) = words_json.get("text").and_then(|v| v.as_str()) else {
+        return false;
+    };
+    if normalize_ws_str(cached_text) != normalize_ws_str(text) {
+        return false;
+    }
+    let Ok(raw_cache) = std::fs::read_to_string(cache_meta_path) else {
+        return false;
+    };
+    let Ok(stored_sig) = serde_json::from_str::<Value>(&raw_cache) else {
+        return false;
+    };
+    &stored_sig == cache_sig
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn voicebox_cache_invalidates_when_voice_or_style_changes() {
+        let dir = std::env::temp_dir().join(format!("aetheria_vb_cache_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let wav = dir.join("vo.wav");
+        let words = dir.join("vo.words.json");
+        let cache = dir.join("vo.cache.json");
+        std::fs::write(&wav, vec![0u8; 2048]).unwrap();
+        std::fs::write(&words, r#"{"text":"Halo dunia"}"#).unwrap();
+
+        let sig1 = build_voicebox_cache_signature(
+            "Halo dunia",
+            None,
+            "id",
+            Some("id-ID-ArdiNeural"),
+            Some("default"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            None,
+        );
+        std::fs::write(&cache, serde_json::to_string(&sig1).unwrap()).unwrap();
+        assert!(is_voicebox_cache_hit(&wav, &cache, "Halo dunia", &sig1));
+
+        let sig2 = build_voicebox_cache_signature(
+            "Halo dunia",
+            None,
+            "id",
+            Some("id-ID-GadisNeural"),
+            Some("default"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            None,
+        );
+        assert!(!is_voicebox_cache_hit(&wav, &cache, "Halo dunia", &sig2));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn voicebox_rejects_outside_workspace_lexicon_and_ref_audio() {
+        let dir = std::env::temp_dir().join(format!("aetheria_vb_guard_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ws = dir.to_string_lossy().to_string();
+
+        let lex_res = execute_voicebox(
+            &ws,
+            &json!({ "text": "Halo", "lexicon": "../../etc/passwd" }),
+        )
+        .await;
+        assert_eq!(lex_res["success"], false);
+        assert!(lex_res["error"].as_str().unwrap_or("").contains("lexicon"));
+
+        let ref_res = execute_voicebox(
+            &ws,
+            &json!({ "text": "Halo", "refAudio": "../../secret.wav" }),
+        )
+        .await;
+        assert_eq!(ref_res["success"], false);
+        assert!(ref_res["error"].as_str().unwrap_or("").contains("refAudio"));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

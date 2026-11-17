@@ -182,7 +182,7 @@ pub async fn execute_produce_video(
     let mixer_script = root.join("core").join("voicebox").join("storyboard_mixer.py");
     let mut mix_cmd = Command::new("python");
     crate::paths::configure_hidden_std_command(&mut mix_cmd);
-    let mix_status = mix_cmd
+    let mix_output = mix_cmd
         .arg(&mixer_script)
         .arg("--resolved-json")
         .arg(&resolved_json_path)
@@ -190,9 +190,23 @@ pub async fn execute_produce_video(
         .arg(&audio_dir)
         .arg("--out")
         .arg(&master_wav_path)
-        .status();
-    if !mix_status.map(|s| s.success()).unwrap_or(false) {
-        return json!({ "error": "Failed to mix storyboard master audio via storyboard_mixer.py" });
+        .output();
+    match mix_output {
+        Ok(out) if out.status.success() => {}
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            return json!({
+                "error": format!(
+                    "Failed to mix storyboard master audio via storyboard_mixer.py: {}",
+                    if stderr.is_empty() { "unknown error".to_string() } else { stderr }
+                )
+            });
+        }
+        Err(e) => {
+            return json!({
+                "error": format!("Failed to spawn storyboard_mixer.py: {}", e)
+            });
+        }
     }
 
     let html_out = ws.join("index.html");

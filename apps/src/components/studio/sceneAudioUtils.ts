@@ -124,3 +124,22 @@ export function formatAudioErrorMessage(
         : `Audio failed to load (${label}).`;
   }
 }
+
+/** Matches workspace audio asset file extensions for hot audio track reloading without remounting HTML frames. */
+export function isAudioAssetFile(filePath: unknown): boolean {
+  if (typeof filePath !== "string") return false;
+  const clean = filePath.trim().toLowerCase();
+  return (
+    clean.endsWith(".wav") ||
+    clean.endsWith(".mp3") ||
+    clean.endsWith(".ogg") ||
+    clean.endsWith(".m4a")
+  );
+}
+
+/** Appends a cache-busting revision query parameter to an audio asset URL when `revision > 0`. */
+export function appendAudioRevision(url: string, revision: number): string {
+  if (revision <= 0) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}_rev=${revision}`;
+}

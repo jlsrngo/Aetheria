@@ -3,6 +3,7 @@ import json
 import math
 import os
 import struct
+import sys
 import wave
 
 SAMPLE_RATE = 48000
@@ -62,9 +63,17 @@ def main():
             val = math.sin(phase) * gain * math.pow(0.001 / gain, frac)
             add_sfx(start_idx + i, val, val)
 
-    def overlay_wav(target_l, target_r, wav_path, start_sec, gain=1.0, pan=0.0):
+    missing_warnings = []
+    missing_vo_errors = []
+
+    def overlay_wav(target_l, target_r, wav_path, start_sec, gain=1.0, pan=0.0, required_label=None):
         samples, sr = read_wav_mono_or_stereo(wav_path)
         if not samples:
+            msg = f"Missing or empty WAV asset: {wav_path}"
+            if required_label == "vo":
+                missing_vo_errors.append(msg)
+            elif wav_path not in missing_warnings:
+                missing_warnings.append(msg)
             return
         start_idx = int(start_sec * SAMPLE_RATE)
         ratio = SAMPLE_RATE / float(sr)
@@ -98,7 +107,7 @@ def main():
                 if os.path.isabs(vo_file)
                 else os.path.join(pub, os.path.basename(vo_file))
             )
-            overlay_wav(vo_l, vo_r, vo_path, s_start + 0.12, gain=1.05, pan=0.0)
+            overlay_wav(vo_l, vo_r, vo_path, s_start + 0.12, gain=1.05, pan=0.0, required_label="vo")
 
         # Scene cut whoosh + sub-bass thud
         overlay_wav(sfx_l, sfx_r, sfx_files["whoosh"], s_start, gain=0.78)
@@ -152,7 +161,17 @@ def main():
         wf.setframerate(SAMPLE_RATE)
         wf.writeframes(struct.pack(f"<{num_samples * 2}h", *out_shorts))
 
-    print(json.dumps({"success": True, "outputPath": args.out, "durationSec": total_sec}))
+    if missing_vo_errors:
+        for err in missing_vo_errors:
+            print(err, file=sys.stderr)
+        print(json.dumps({"success": False, "errors": missing_vo_errors, "warnings": missing_warnings}))
+        sys.exit(1)
+
+    if missing_warnings:
+        for w in missing_warnings:
+            print(f"[storyboard_mixer warning] {w}", file=sys.stderr)
+
+    print(json.dumps({"success": True, "outputPath": args.out, "durationSec": total_sec, "warnings": missing_warnings}))
 
 
 if __name__ == "__main__":
