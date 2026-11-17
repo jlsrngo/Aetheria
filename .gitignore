@@ -85,7 +85,8 @@ crates/**/target/
 *.key
 *.pub
 
-docs/
+docs/*
+!docs/harness-fokus-visual.md
 demo/
 demo-workspace/
 

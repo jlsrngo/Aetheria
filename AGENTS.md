@@ -8,8 +8,8 @@ Aturan untuk agent AI (dan manusia) yang mengubah repo ini. Isinya sudah dicocok
 
 * **Target:** aplikasi desktop Windows (`.exe` / `.msi`) — Tauri v2 + Rust + React + mesin motion HTML5/JS modular.
 * **Prioritas:** TikTok-first (P0); render lokal tanpa biaya cloud (headless browser CDP murni-Rust + FFmpeg); stok video; penjadwalan; analitik akun (views, likes, followers).
-* **Peta repo:** `apps/` (React + Vite), `core/aetheria-engine/` (engine Rust), `src-tauri/` (shell Tauri), `scripts/` (dev/smoke/bundle), `.aetheria/skills/` (skill motion untuk Studio).
-* **Rujukan UI:** [`apps/design.md`](apps/design.md). Bila isinya berbeda dengan variabel di `apps/src/index.css`, yang berlaku adalah kode yang berjalan; laporkan selisihnya.
+* **Peta repo:** `apps/` (React + Vite), `core/aetheria-engine/` (engine Rust), `src-tauri/` (shell Tauri), `scripts/` (dev/smoke/bundle & skrip E2E harness `test-f1..f6`), `.aetheria/skills/` (skill motion untuk Studio), `.aetheria/reference/` (`AM_API.md` kontrak tunggal runtime `window.AM`).
+* **Rujukan UI & Harness:** [`apps/design.md`](apps/design.md) untuk visual UI (bila berbeda dengan variabel di `apps/src/index.css`, yang berlaku adalah kode yang berjalan; laporkan selisihnya), dan [`docs/harness-fokus-visual.md`](docs/harness-fokus-visual.md) untuk kontrak harness fokus visual (F0–F7).
 
 ---
 
@@ -37,7 +37,7 @@ Repo ini **tidak punya CI** (`.github/` ada di `.gitignore`), jadi gate di bawah
 ```bash
 npm run typecheck             # tsc -b apps/tsconfig.json (strict)
 npm run build                 # tsc --noEmit + vite build
-(cd apps && npx vitest run)   # suite frontend (15 file / 61 tes saat aturan ini ditulis)
+(cd apps && npx vitest run)   # suite frontend (26 file / 102 tes termasuk skill-lint & paritas AM_API di apps/src/lib/motionHarnessSpec.test.ts)
 ```
 
 `npm run verify` **bukan** bukti yang cukup: ia tidak menjalankan Vitest, dan `test:smoke` di dalamnya butuh engine yang sedang hidup.
@@ -195,7 +195,8 @@ Stack: Rust edition 2021, `axum` 0.7, `tokio` (full), `reqwest` (rustls), `serde
 
 **Struktur**
 
-1. **1 file = 1 tanggung jawab kohesif** (kohesi, bukan batas baris; file panjang boleh bila satu domain utuh beserta tesnya). Contoh pemisahan di `core/aetheria-engine/src/studio/`: `motion_linter.rs` (linter) terpisah dari `film_inspector.rs` (inspektor scene), `film_static_server.rs` (static HTTP), `ffmpeg_pipeline.rs` (pipeline FFmpeg), `html_renderer.rs` (orkestrator browser CDP).
+1. **1 file = 1 tanggung jawab kohesif** (kohesi, bukan batas baris; file panjang boleh bila satu domain utuh beserta tesnya). Contoh pemisahan di `core/aetheria-engine/src/studio/`: `motion_linter.rs` (linter) terpisah dari `film_inspector.rs` (inspektor scene), `film_static_server.rs` (static HTTP), `ffmpeg_pipeline.rs` (pipeline FFmpeg), `html_renderer.rs` (orkestrator browser CDP); serta pada lapisan harness: `tool/film_audio.rs` (sintesis audio + parser durasi WAV RIFF + validator durasi scene), `tool/profiles.rs` (allowlist tool berbasis peran), `tool/film_state.rs` (status progres scene berbasis disk & validasi completion gate), `tool/edit.rs` (guard `oldString` >25 baris tanpa range), dan `session/agent_turn/dynamic_context.rs` (filter relevansi & cap blok dinamis).
+2. **Baseline konteks harness (terukur `scripts/measure-harness-context.mjs`, formula kasar `ceil(chars/4)`):** Baseline F0 (`7861f99`) pada `default.txt` = `19,482` chr (`~4,871` tok), definisi tool koordinator default = `28` tool (`33,078` chr), `qa-verifier` = `29` tool (`37,100` chr), `mg-soft-clay-story/SKILL.md` = `12,199` chr, blok dinamis `E:\JS\Aetheria-Workspace` = `5,073` chr; setelah F1–F6 (`52892f1`), `default.txt` = `16,741` chr, `profile:director` = `10` tool (`16,442` chr), `motion-designer` = `8` tool (`10,951` chr), `qa-verifier` = `7` tool (`10,050` chr), `mg-soft-clay-story/SKILL.md` = `8,955` chr, blok dinamis video unstyled = `2,027` chr (explicit skill = `715` chr, non-video = `427` chr, greeting = `0` chr). Lihat [`docs/harness-fokus-visual.md`](docs/harness-fokus-visual.md).
 2. **Handler tipis, service kohesif.** Handler Axum dan command Tauri (`src-tauri/src/*_cmds.rs`: `cli_auth_cmds`, `studio_cmds`, `window_cmds`) hanya memvalidasi input, mendelegasikan ke modul domain, lalu memformat respons. Logika domain tetap di engine, bukan di `src-tauri/`. Jangan mencampur handler dengan parser/linter, peluncur subprocess, atau protocol client dalam satu file.
 3. **Fungsi ramping.** Ekstrak helper privat saat sebuah fungsi menyentuh beberapa langkah I/O atau level abstraksi; jangan memecah file hanya karena panjang.
 4. Ikuti konvensi folder yang ada (15 folder memakai `mod.rs`, selebihnya file bernama); jangan mengubah gaya modul sebuah folder di luar tugas.
