@@ -9,8 +9,227 @@ use tokio::process::Command;
 
 use super::resolve_isolated_path;
 
+pub(crate) const MAX_EXTRACTED_VISION_FRAMES: usize = 12;
+
+fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    let mut i = 0usize;
+    let mut j = 0usize;
+    let ab = a.as_bytes();
+    let bb = b.as_bytes();
+    while i < ab.len() && j < bb.len() {
+        let ca = ab[i];
+        let cb = bb[j];
+        if ca.is_ascii_digit() && cb.is_ascii_digit() {
+            let start_i = i;
+            let start_j = j;
+            while i < ab.len() && ab[i].is_ascii_digit() {
+                i += 1;
+            }
+            while j < bb.len() && bb[j].is_ascii_digit() {
+                j += 1;
+            }
+            let na: u64 = std::str::from_utf8(&ab[start_i..i])
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
+            let nb: u64 = std::str::from_utf8(&bb[start_j..j])
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
+            match na.cmp(&nb) {
+                std::cmp::Ordering::Equal => {
+                    let len_cmp = (i - start_i).cmp(&(j - start_j));
+                    if len_cmp != std::cmp::Ordering::Equal {
+                        return len_cmp;
+                    }
+                }
+                ord => return ord,
+            }
+        } else {
+            let la = ca.to_ascii_lowercase();
+            let lb = cb.to_ascii_lowercase();
+            match la.cmp(&lb) {
+                std::cmp::Ordering::Equal => {
+                    i += 1;
+                    j += 1;
+                }
+                ord => return ord,
+            }
+        }
+    }
+    ab.len().cmp(&bb.len())
+}
+
+fn sample_evenly_indices(len: usize, max_count: usize) -> Vec<usize> {
+    if len == 0 || max_count == 0 {
+        return Vec::new();
+    }
+    if len <= max_count {
+        return (0..len).collect();
+    }
+    if max_count == 1 {
+        return vec![0];
+    }
+    let mut out = Vec::with_capacity(max_count);
+    for i in 0..max_count {
+        let idx = (i * (len - 1)) / (max_count - 1);
+        if out.last().copied() != Some(idx) {
+            out.push(idx);
+        }
+    }
+    out
+}
+
+fn resolve_style_frame_in_dir(frames_dir: &Path, raw: &str) -> Option<PathBuf> {
+    let fname = Path::new(raw.trim()).file_name()?.to_str()?;
+    let candidate = frames_dir.join(fname);
+    if candidate.is_file() {
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
+/// Selects reference keyframes in temporal scene order rather than lexicographical truncation.
+/// Priority:
+/// 1) Per-scene midpoint keyframes across ALL scenes (evenly sampled only if scenes > `max_frames`),
+/// 2) Per-scene `_start` / `_end` transition frames evenly across scenes,
+/// 3) Overview `thumb_*.jpg` fallback frames naturally sorted.
+pub(crate) fn select_extracted_vision_keyframes(
+    frames_dir: &Path,
+    style_json_path: Option<&Path>,
+    max_frames: usize,
+) -> Vec<PathBuf> {
+    if max_frames == 0 {
+        return Vec::new();
+    }
+
+    let style_candidate = style_json_path
+        .map(PathBuf::from)
+        .or_else(|| frames_dir.parent().map(|p| p.join("style.json")));
+
+    let mut midpoints: Vec<PathBuf> = Vec::new();
+    let mut transitions: Vec<PathBuf> = Vec::new();
+
+    if let Some(style_path) = style_candidate.filter(|p| p.is_file()) {
+        if let Ok(raw) = std::fs::read_to_string(&style_path) {
+            if let Ok(parsed) = serde_json::from_str::<Value>(&raw) {
+                if let Some(scenes) = parsed.get("scenes").and_then(Value::as_array) {
+                    let mut seen = std::collections::HashSet::new();
+                    for sc in scenes {
+                        let mid_str = sc
+                            .pointer("/keyframes/mid")
+                            .and_then(Value::as_str)
+                            .or_else(|| sc.get("keyframe").and_then(Value::as_str));
+                        if let Some(p) =
+                            mid_str.and_then(|s| resolve_style_frame_in_dir(frames_dir, s))
+                        {
+                            if seen.insert(p.clone()) {
+                                midpoints.push(p);
+                            }
+                        }
+                        for key in ["start", "end"] {
+                            if let Some(p) = sc
+                                .pointer(&format!("/keyframes/{}", key))
+                                .and_then(Value::as_str)
+                                .and_then(|s| resolve_style_frame_in_dir(frames_dir, s))
+                            {
+                                if seen.insert(p.clone()) {
+                                    transitions.push(p);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut thumbs: Vec<PathBuf> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(frames_dir) {
+        let mut disk_files: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| {
+                p.is_file()
+                    && p.extension()
+                        .and_then(|e| e.to_str())
+                        .map(|e| {
+                            matches!(
+                                e.to_ascii_lowercase().as_str(),
+                                "jpg" | "jpeg" | "png" | "webp"
+                            )
+                        })
+                        .unwrap_or(false)
+            })
+            .collect();
+        disk_files.sort_by(|a, b| {
+            let na = a.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let nb = b.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            natural_cmp(na, nb)
+        });
+
+        let has_style_scenes = !midpoints.is_empty();
+        let already_listed: std::collections::HashSet<PathBuf> =
+            midpoints.iter().chain(transitions.iter()).cloned().collect();
+
+        for p in disk_files {
+            if already_listed.contains(&p) {
+                continue;
+            }
+            let name = p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if !has_style_scenes && name.starts_with("ref_scene_") {
+                if name.contains("_start.") || name.contains("_end.") {
+                    transitions.push(p);
+                } else {
+                    midpoints.push(p);
+                }
+            } else {
+                thumbs.push(p);
+            }
+        }
+    }
+
+    let mut selected: Vec<PathBuf> = Vec::with_capacity(max_frames);
+    let mut selected_set = std::collections::HashSet::new();
+
+    for idx in sample_evenly_indices(midpoints.len(), max_frames) {
+        let p = &midpoints[idx];
+        if selected_set.insert(p.clone()) {
+            selected.push(p.clone());
+        }
+    }
+
+    let rem = max_frames.saturating_sub(selected.len());
+    if rem > 0 {
+        for idx in sample_evenly_indices(transitions.len(), rem) {
+            let p = &transitions[idx];
+            if selected_set.insert(p.clone()) {
+                selected.push(p.clone());
+            }
+        }
+    }
+
+    let rem = max_frames.saturating_sub(selected.len());
+    if rem > 0 {
+        for idx in sample_evenly_indices(thumbs.len(), rem) {
+            let p = &thumbs[idx];
+            if selected_set.insert(p.clone()) {
+                selected.push(p.clone());
+            }
+        }
+    }
+
+    selected
+}
+
 async fn python_has_cv2_and_numpy() -> bool {
-    let mut check = Command::new("python");
+    let py_bin = crate::paths::locate_python_binary();
+    let mut check = Command::new(&py_bin);
     crate::paths::configure_hidden_tokio_command(&mut check);
     check.arg("-c").arg("import cv2, numpy");
     check
@@ -25,27 +244,34 @@ pub(crate) fn collect_extracted_frames_response(
     frames_dir: &Path,
     fallback_mode: &str,
 ) -> Value {
+    let total_extracted = std::fs::read_dir(frames_dir)
+        .map(|rd| rd.flatten().filter(|e| e.path().is_file()).count())
+        .unwrap_or(0);
+    let selected_paths =
+        select_extracted_vision_keyframes(frames_dir, None, MAX_EXTRACTED_VISION_FRAMES);
     let mut frame_paths = Vec::new();
     let mut vision_images = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(frames_dir) {
-        let mut files: Vec<PathBuf> = entries
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| p.is_file())
-            .collect();
-        files.sort();
-        for p in files.into_iter().take(4) {
-            let rel = p
-                .strip_prefix(ws)
-                .unwrap_or(&p)
-                .to_string_lossy()
-                .replace('\\', "/");
-            frame_paths.push(rel);
-            if let Ok(bytes) = std::fs::read(&p) {
-                if !bytes.is_empty() {
-                    let b64 = BASE64_STANDARD.encode(&bytes);
-                    vision_images.push(Value::String(format!("data:image/jpeg;base64,{}", b64)));
-                }
+    for p in selected_paths {
+        let rel = p
+            .strip_prefix(ws)
+            .unwrap_or(&p)
+            .to_string_lossy()
+            .replace('\\', "/");
+        frame_paths.push(rel);
+        if let Ok(bytes) = std::fs::read(&p) {
+            if !bytes.is_empty() {
+                let b64 = BASE64_STANDARD.encode(&bytes);
+                let mime = match p
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e.to_ascii_lowercase())
+                    .as_deref()
+                {
+                    Some("png") => "image/png",
+                    Some("webp") => "image/webp",
+                    _ => "image/jpeg",
+                };
+                vision_images.push(Value::String(format!("data:{};base64,{}", mime, b64)));
             }
         }
     }
@@ -53,6 +279,7 @@ pub(crate) fn collect_extracted_frames_response(
         "ok": true,
         "success": true,
         "fallback": fallback_mode,
+        "totalExtractedFrames": total_extracted,
         "frames": frame_paths,
         "_vision_images": vision_images
     })
@@ -80,6 +307,151 @@ pub fn ref_extractor_tool_definition() -> Value {
             }
         }
     })
+}
+
+fn probe_video_dimensions_sync(ffmpeg_bin: &Path, video_path: &Path) -> Option<(u32, u32)> {
+    let ffprobe_name = if cfg!(windows) { "ffprobe.exe" } else { "ffprobe" };
+    let ffprobe_path = ffmpeg_bin
+        .parent()
+        .map(|p| p.join(ffprobe_name))
+        .filter(|p| p.is_file())
+        .unwrap_or_else(|| PathBuf::from(ffprobe_name));
+    let mut cmd = std::process::Command::new(ffprobe_path);
+    crate::paths::configure_hidden_std_command(&mut cmd);
+    let out = cmd
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height",
+            "-of",
+            "csv=s=x:p=0",
+        ])
+        .arg(video_path)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let (w_s, h_s) = text.trim().split_once('x')?;
+    let w = w_s.trim().parse::<u32>().ok().filter(|&n| n >= 16)?;
+    let h = h_s.trim().parse::<u32>().ok().filter(|&n| n >= 16)?;
+    Some((w, h))
+}
+
+pub(crate) fn write_ffmpeg_fallback_blueprint(
+    video_path: &Path,
+    out_dir: &Path,
+    probed_dur: f64,
+    dims: Option<(u32, u32)>,
+    sample_points: &[(f64, String)],
+    frame_rel_paths: &[String],
+) -> (PathBuf, PathBuf, PathBuf) {
+    let _ = std::fs::create_dir_all(out_dir);
+    let (width, height) = dims.unwrap_or((1080, 1920));
+    let aspect_ratio = if height > width {
+        "9:16"
+    } else if width.abs_diff(height) <= 16 {
+        "1:1"
+    } else {
+        "16:9"
+    };
+    let warning = "Python OpenCV/NumPy/RapidOCR unavailable; FFmpeg fallback extracted keyframe images only without semantic scene segmentation, color clustering, bounding boxes, or OCR text strings.";
+
+    let timestamps: Vec<f64> = sample_points
+        .iter()
+        .map(|(ratio, _)| ((probed_dur * ratio) * 100.0).round() / 100.0)
+        .collect();
+
+    let mut fallback_scenes = Vec::new();
+    let total = frame_rel_paths.len().max(1);
+    for (idx, frame_rel) in frame_rel_paths.iter().enumerate() {
+        let start = if idx == 0 {
+            0.0
+        } else {
+            ((probed_dur * (idx as f64 / total as f64)) * 100.0).round() / 100.0
+        };
+        let end = (((idx + 1) as f64 / total as f64) * probed_dur * 100.0).round() / 100.0;
+        let dur = (end - start).max(0.25);
+        fallback_scenes.push(json!({
+            "index": idx + 1,
+            "id": format!("scene_{}", idx + 1),
+            "role": format!("segment_{}", idx + 1),
+            "start": start,
+            "end": end,
+            "duration": dur,
+            "durationFrames": (dur * 30.0).round() as u32,
+            "keyframe": frame_rel,
+            "keyframes": { "start": frame_rel, "mid": frame_rel, "end": frame_rel },
+            "motion": "unknown_ffmpeg_fallback",
+            "motionEnergy": 0.05,
+        }));
+    }
+
+    let temporal_path = out_dir.join("temporal.json");
+    let temporal_json = json!({
+        "duration": (probed_dur * 100.0).round() / 100.0,
+        "fps": 30,
+        "width": width,
+        "height": height,
+        "extractorBackend": "ffmpeg_fallback",
+        "pythonCvUnavailable": true,
+        "cutTimestamps": timestamps,
+        "visualJumpTimestamps": [],
+        "fallbackWarning": warning,
+    });
+    let _ = std::fs::write(
+        &temporal_path,
+        serde_json::to_string_pretty(&temporal_json).unwrap_or_default(),
+    );
+
+    let style_path = out_dir.join("style.json");
+    let style_json = json!({
+        "sourceVideo": video_path.file_name().and_then(|n| n.to_str()).unwrap_or("reference.mp4"),
+        "totalDuration": (probed_dur * 100.0).round() / 100.0,
+        "fps": 30,
+        "width": width,
+        "height": height,
+        "aspectRatio": aspect_ratio,
+        "fidelityTarget": 0.85,
+        "extractorBackend": "ffmpeg_fallback",
+        "pythonCvUnavailable": true,
+        "ocrAvailable": false,
+        "ocrWarning": warning,
+        "fallbackWarning": warning,
+        "scenes": fallback_scenes,
+    });
+    let _ = std::fs::write(
+        &style_path,
+        serde_json::to_string_pretty(&style_json).unwrap_or_default(),
+    );
+
+    let report_path = out_dir.join("ref_report.md");
+    let report_md = format!(
+        "# Reference Video Analysis Report (FFmpeg Fallback)\n\
+         **Source:** `{}`\n\
+         **Duration:** {:.2}s | **Resolution:** {}x{} ({})\n\
+         **Extractor Backend:** `ffmpeg_fallback` (`pythonCvUnavailable=true`, `ocrAvailable=false`)\n\n\
+         > **WARNING:** {}\n\n\
+         **Extracted Sample Keyframes:**\n{}\n",
+        video_path.file_name().and_then(|n| n.to_str()).unwrap_or("reference.mp4"),
+        probed_dur,
+        width,
+        height,
+        aspect_ratio,
+        warning,
+        frame_rel_paths
+            .iter()
+            .map(|f| format!("- `{}`", f))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    let _ = std::fs::write(&report_path, report_md);
+
+    (style_path, temporal_path, report_path)
 }
 
 pub async fn execute_ref_extractor(workspace_dir: &str, arguments: &Value) -> Value {
@@ -113,7 +485,8 @@ pub async fn execute_ref_extractor(workspace_dir: &str, arguments: &Value) -> Va
 
     if python_has_cv2_and_numpy().await {
         let script_path = root.join("core").join("ref_extractor").join("ref_extractor.py");
-        let mut cmd = Command::new("python");
+        let py_bin = crate::paths::locate_python_binary();
+        let mut cmd = Command::new(&py_bin);
         crate::paths::configure_hidden_tokio_command(&mut cmd);
         cmd.arg(&script_path).arg(&video_path).arg(&out_dir);
 
@@ -131,6 +504,9 @@ pub async fn execute_ref_extractor(workspace_dir: &str, arguments: &Value) -> Va
                             }
                             if let Some(frames) = vision_bundle.get("frames").cloned() {
                                 obj.insert("extractedFrames".to_string(), frames);
+                            }
+                            if let Some(total) = vision_bundle.get("totalExtractedFrames").cloned() {
+                                obj.insert("totalExtractedFrames".to_string(), total);
                             }
                         }
                         return parsed;
@@ -178,12 +554,38 @@ pub async fn execute_ref_extractor(workspace_dir: &str, arguments: &Value) -> Va
             .await;
     }
 
-    let fallback_res = collect_extracted_frames_response(&ws, &frames_dir, "ffmpeg");
-    if fallback_res
+    let mut fallback_res = collect_extracted_frames_response(&ws, &frames_dir, "ffmpeg");
+    let frame_rels: Vec<String> = fallback_res
         .get("frames")
         .and_then(|v| v.as_array())
-        .is_some_and(|arr| !arr.is_empty())
-    {
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    if !frame_rels.is_empty() {
+        let dims = probe_video_dimensions_sync(&ff_bin, &video_path);
+        let (style_path, temporal_path, report_path) = write_ffmpeg_fallback_blueprint(
+            &video_path,
+            &out_dir,
+            probed_dur,
+            dims,
+            &sample_points,
+            &frame_rels,
+        );
+        if let Some(obj) = fallback_res.as_object_mut() {
+            obj.insert("pythonCvUnavailable".to_string(), json!(true));
+            obj.insert("ocrAvailable".to_string(), json!(false));
+            obj.insert("extractorBackend".to_string(), json!("ffmpeg_fallback"));
+            obj.insert(
+                "fallbackWarning".to_string(),
+                json!("Python OpenCV/NumPy unavailable; generated minimal FFmpeg fallback frames and metadata without scene cuts or OCR."),
+            );
+            obj.insert("stylePath".to_string(), json!(style_path.to_string_lossy()));
+            obj.insert("temporalPath".to_string(), json!(temporal_path.to_string_lossy()));
+            obj.insert("reportPath".to_string(), json!(report_path.to_string_lossy()));
+        }
         return fallback_res;
     }
 
@@ -222,6 +624,108 @@ mod tests {
                 .map(|a| a.len()),
             Some(2)
         );
+
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn select_extracted_vision_keyframes_covers_all_scenes_and_sorts_naturally() {
+        let ws = std::env::temp_dir().join(format!("aetheria_ref_sel_{}", crate::paths::now_ms()));
+        let frames_dir = ws.join("ref").join("extracted").join("frames");
+        std::fs::create_dir_all(&frames_dir).unwrap();
+
+        // Create 10 scene midpoints + start/end + thumbs, intentionally named without zero padding for scene 2 vs 10 test
+        let mut scenes = Vec::new();
+        for idx in 1..=10 {
+            let mid = format!("ref_scene_{idx}.jpg");
+            let st = format!("ref_scene_{idx}_start.jpg");
+            let en = format!("ref_scene_{idx}_end.jpg");
+            std::fs::write(frames_dir.join(&mid), format!("mid_{idx}").as_bytes()).unwrap();
+            std::fs::write(frames_dir.join(&st), format!("st_{idx}").as_bytes()).unwrap();
+            std::fs::write(frames_dir.join(&en), format!("en_{idx}").as_bytes()).unwrap();
+            scenes.push(json!({
+                "index": idx,
+                "id": format!("scene_{idx}"),
+                "keyframe": format!("ref/extracted/frames/{mid}"),
+                "keyframes": {
+                    "start": format!("ref/extracted/frames/{st}"),
+                    "mid": format!("ref/extracted/frames/{mid}"),
+                    "end": format!("ref/extracted/frames/{en}"),
+                }
+            }));
+        }
+        std::fs::write(frames_dir.join("thumb_001.jpg"), b"t1").unwrap();
+        let style_path = ws.join("ref").join("extracted").join("style.json");
+        std::fs::write(&style_path, serde_json::to_string(&json!({ "scenes": scenes })).unwrap()).unwrap();
+
+        let selected = select_extracted_vision_keyframes(&frames_dir, Some(&style_path), 12);
+        let names: Vec<String> = selected
+            .iter()
+            .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(str::to_string))
+            .collect();
+
+        assert_eq!(names.len(), 12);
+        // All 10 scenes must be represented in order 1..10 before adding transition frames
+        assert_eq!(
+            &names[0..10],
+            &[
+                "ref_scene_1.jpg",
+                "ref_scene_2.jpg",
+                "ref_scene_3.jpg",
+                "ref_scene_4.jpg",
+                "ref_scene_5.jpg",
+                "ref_scene_6.jpg",
+                "ref_scene_7.jpg",
+                "ref_scene_8.jpg",
+                "ref_scene_9.jpg",
+                "ref_scene_10.jpg",
+            ]
+        );
+        // Without style.json, natural ordering still places ref_scene_2 before ref_scene_10
+        let _ = std::fs::remove_file(&style_path);
+        let fallback_names: Vec<String> =
+            select_extracted_vision_keyframes(&frames_dir, None, 12)
+                .iter()
+                .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(str::to_string))
+                .collect();
+        assert_eq!(fallback_names[1], "ref_scene_2.jpg");
+        assert_eq!(fallback_names[9], "ref_scene_10.jpg");
+
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn write_ffmpeg_fallback_blueprint_emits_honest_warnings() {
+        let ws = std::env::temp_dir().join(format!("aetheria_ff_fb_{}", crate::paths::now_ms()));
+        let out_dir = ws.join("ref").join("extracted");
+        let vid = ws.join("ref").join("ref_demo.mp4");
+        let (style_path, temporal_path, report_path) = write_ffmpeg_fallback_blueprint(
+            &vid,
+            &out_dir,
+            6.5,
+            Some((1280, 720)),
+            &[(0.1, "00:00:00.65".into()), (0.6, "00:00:03.90".into())],
+            &[
+                "ref/extracted/frames/thumb_001.jpg".into(),
+                "ref/extracted/frames/thumb_002.jpg".into(),
+            ],
+        );
+
+        let style: Value =
+            serde_json::from_str(&std::fs::read_to_string(style_path).unwrap()).unwrap();
+        let temporal: Value =
+            serde_json::from_str(&std::fs::read_to_string(temporal_path).unwrap()).unwrap();
+        let report = std::fs::read_to_string(report_path).unwrap();
+
+        assert_eq!(style["width"], 1280);
+        assert_eq!(style["height"], 720);
+        assert_eq!(style["aspectRatio"], "16:9");
+        assert_eq!(style["pythonCvUnavailable"], true);
+        assert_eq!(style["ocrAvailable"], false);
+        assert_eq!(style["extractorBackend"], "ffmpeg_fallback");
+        assert_eq!(temporal["extractorBackend"], "ffmpeg_fallback");
+        assert!(report.contains("FFmpeg Fallback"));
+        assert!(report.contains("ocrAvailable=false"));
 
         let _ = std::fs::remove_dir_all(&ws);
     }

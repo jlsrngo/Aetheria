@@ -75,18 +75,37 @@ pub fn decode_data_uri_text(uri: &str) -> Option<String> {
     }
 }
 
-/// Ingests attached files from chat payload (images, videos, audio, and text/HTML/SVG code)
-pub fn process_attached_files(
+fn is_video_file_name(lower_name: &str) -> bool {
+    lower_name.ends_with(".mp4")
+        || lower_name.ends_with(".mov")
+        || lower_name.ends_with(".webm")
+        || lower_name.ends_with(".mkv")
+        || lower_name.ends_with(".avi")
+}
+
+struct SavedVideoAttachment {
+    rel_path: String,
+    disk_path: PathBuf,
+    file_name: String,
+    prefix: String,
+}
+
+/// Ingests attached files from chat payload (images, videos, audio, and text/HTML/SVG code).
+/// When `defer_video_frames` is true, video files still extract audio and record their paths
+/// so the async blueprint pipeline can attach MotionClone keyframes without duplicating naive thumbs.
+fn process_attached_files_inner(
     workspace_dir: &str,
     files: Option<&Value>,
     ffmpeg_bin: Option<&Path>,
-) -> (Vec<String>, Vec<String>) {
+    defer_video_frames: bool,
+) -> (Vec<String>, Vec<String>, Vec<SavedVideoAttachment>) {
     let mut ocr_transcriptions = Vec::new();
     let mut image_urls = Vec::new();
+    let mut saved_videos = Vec::new();
 
     let files_arr = match files.and_then(|f| f.as_array()) {
         Some(arr) => arr,
-        None => return (ocr_transcriptions, image_urls),
+        None => return (ocr_transcriptions, image_urls, saved_videos),
     };
 
     for file_item in files_arr {
@@ -126,11 +145,7 @@ pub fn process_attached_files(
                 }
             }
         } else if uri.starts_with("data:video/")
-            || (uri.starts_with("data:")
-                && (lower_name.ends_with(".mp4")
-                    || lower_name.ends_with(".mov")
-                    || lower_name.ends_with(".webm")
-                    || lower_name.ends_with(".mkv")))
+            || (uri.starts_with("data:") && is_video_file_name(&lower_name))
         {
             if let Some(comma_pos) = uri.find(',') {
                 let b64_data = &uri[comma_pos + 1..];
@@ -138,74 +153,42 @@ pub fn process_attached_files(
                     let ref_dir = resolve_workspace_ref_dir(workspace_dir);
                     let clean_name = file_name
                         .replace(|c: char| !c.is_alphanumeric() && c != '.' && c != '_', "_");
+                    let rel_path = format!("ref/ref_{}", clean_name);
                     let vid_path = ref_dir.join(format!("ref_{}", clean_name));
                     let ref_wav = ref_dir.join("ref_voice.wav");
                     if std::fs::write(&vid_path, &bytes).is_ok() {
-                        if let Some(ff) = ffmpeg_bin {
-                            // Extract reference voice audio track (24kHz mono WAV)
-                            let mut ff_audio = std::process::Command::new(ff);
-                            crate::paths::configure_hidden_std_command(&mut ff_audio);
-                            let _ = ff_audio
-                                .args([
-                                    "-y",
-                                    "-hide_banner",
-                                    "-loglevel",
-                                    "error",
-                                    "-i",
-                                    &vid_path.to_string_lossy(),
-                                    "-vn",
-                                    "-ac",
-                                    "1",
-                                    "-ar",
-                                    "24000",
-                                    &ref_wav.to_string_lossy(),
-                                ])
-                                .output();
-
-                            // Extract 4 visual style keyframes at normalized ratios [10%, 35%, 60%, 85%] of probed video duration
-                            let probed_dur = crate::studio::reference_compare::probe_video_duration_secs(
-                                ff,
+                        super::social_links::extract_audio_track_ffmpeg(
+                            ffmpeg_bin,
+                            &vid_path,
+                            &ref_wav,
+                        );
+                        if !defer_video_frames {
+                            let probed_dur = ffmpeg_bin
+                                .and_then(|ff| {
+                                    crate::studio::reference_compare::probe_video_duration_secs(
+                                        ff,
+                                        &vid_path,
+                                    )
+                                })
+                                .unwrap_or(10.0);
+                            super::social_links::extract_sample_frames_ffmpeg(
+                                ffmpeg_bin,
+                                &ref_dir,
                                 &vid_path,
-                            )
-                            .unwrap_or(10.0);
-                            let sample_points =
-                                super::social_links::compute_relative_sample_timestamps(probed_dur);
-                            for (idx, (_ratio, ts)) in sample_points.iter().enumerate() {
-                                let frame_jpg = ref_dir.join(format!("ref_frame_{}.jpg", idx + 1));
-                                let mut ff_frame = std::process::Command::new(ff);
-                                crate::paths::configure_hidden_std_command(&mut ff_frame);
-                                if ff_frame
-                                    .args([
-                                        "-y",
-                                        "-hide_banner",
-                                        "-loglevel",
-                                        "error",
-                                        "-ss",
-                                        ts.as_str(),
-                                        "-i",
-                                        &vid_path.to_string_lossy(),
-                                        "-frames:v",
-                                        "1",
-                                        "-q:v",
-                                        "4",
-                                        &frame_jpg.to_string_lossy(),
-                                    ])
-                                    .output()
-                                    .map(|o| o.status.success())
-                                    .unwrap_or(false)
-                                {
-                                    if let Ok(jpg_bytes) = std::fs::read(&frame_jpg) {
-                                        if !jpg_bytes.is_empty() {
-                                            let b64_jpg = BASE64_STANDARD.encode(&jpg_bytes);
-                                            image_urls.push(format!("data:image/jpeg;base64,{}", b64_jpg));
-                                        }
-                                    }
-                                }
-                            }
+                                &clean_name,
+                                probed_dur,
+                                &mut image_urls,
+                            );
                         }
+                        saved_videos.push(SavedVideoAttachment {
+                            rel_path: rel_path.clone(),
+                            disk_path: vid_path,
+                            file_name: file_name.to_string(),
+                            prefix: clean_name.clone(),
+                        });
                         ocr_transcriptions.push(format!(
-                            "[Reference Video Style & Voice Asset: '{}' saved at ref/ref_{} with keyframes ref/ref_frame_1.jpg..ref/ref_frame_4.jpg at normalized ratios [10%, 35%, 60%, 85%]. Visual keyframes have been attached for style matching, and its voice track is extracted at 'ref/ref_voice.wav'. Only clone it (refAudio + cloneVoice: true) if it is the user's own voice or they confirmed permission; otherwise describe its tone in voiceDesign.]",
-                            file_name, clean_name
+                            "[Reference Video Style & Voice Asset: '{}' saved at {} — voice track extracted at 'ref/ref_voice.wav'. Only clone it (refAudio + cloneVoice: true) if it is the user's own voice or they confirmed permission; otherwise describe its tone in voiceDesign.]",
+                            file_name, rel_path
                         ));
                     }
                 }
@@ -363,17 +346,115 @@ pub fn process_attached_files(
         } else if !uri.is_empty() {
             if let Ok(candidate) = crate::tool::path_guard::resolve_isolated_path(workspace_dir, uri) {
                 if candidate.exists() {
-                    ocr_transcriptions.push(format!(
-                        "[Attached Media Asset: {} at {}]",
-                        file_name,
-                        candidate.display()
-                    ));
+                    let cand_lower = candidate
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or(&lower_name)
+                        .to_ascii_lowercase();
+                    if is_video_file_name(&cand_lower) || mime.to_ascii_lowercase().starts_with("video/") {
+                        let ref_dir = resolve_workspace_ref_dir(workspace_dir);
+                        let clean_name = file_name
+                            .replace(|c: char| !c.is_alphanumeric() && c != '.' && c != '_', "_");
+                        let rel_path = candidate
+                            .strip_prefix(Path::new(workspace_dir))
+                            .map(|p| p.to_string_lossy().replace('\\', "/"))
+                            .unwrap_or_else(|_| uri.to_string());
+                        let ref_wav = ref_dir.join("ref_voice.wav");
+                        super::social_links::extract_audio_track_ffmpeg(
+                            ffmpeg_bin,
+                            &candidate,
+                            &ref_wav,
+                        );
+                        saved_videos.push(SavedVideoAttachment {
+                            rel_path: rel_path.clone(),
+                            disk_path: candidate.clone(),
+                            file_name: file_name.to_string(),
+                            prefix: clean_name,
+                        });
+                        ocr_transcriptions.push(format!(
+                            "[Attached Reference Video Asset: '{}' at {} — queued for MotionClone blueprint extraction]",
+                            file_name, rel_path
+                        ));
+                    } else {
+                        ocr_transcriptions.push(format!(
+                            "[Attached Media Asset: {} at {}]",
+                            file_name,
+                            candidate.display()
+                        ));
+                    }
                 }
             }
         }
     }
 
-    (ocr_transcriptions, image_urls)
+    (ocr_transcriptions, image_urls, saved_videos)
+}
+
+/// Sync attachment ingestion (used in unit tests / synchronous contexts).
+pub fn process_attached_files(
+    workspace_dir: &str,
+    files: Option<&Value>,
+    ffmpeg_bin: Option<&Path>,
+) -> (Vec<String>, Vec<String>) {
+    let (transcriptions, image_urls, _) =
+        process_attached_files_inner(workspace_dir, files, ffmpeg_bin, false);
+    (transcriptions, image_urls)
+}
+
+/// Async attachment ingestion that also runs MotionClone `ref_extractor` on local video attachments
+/// so `ref/extracted/style.json`, `ref_report.md`, and temporal keyframes exist on turn 1.
+pub async fn process_attached_files_and_blueprints(
+    workspace_dir: &str,
+    files: Option<&Value>,
+    ffmpeg_bin: Option<&Path>,
+) -> (Vec<String>, Vec<String>) {
+    let (mut transcriptions, mut image_urls, saved_videos) =
+        process_attached_files_inner(workspace_dir, files, ffmpeg_bin, true);
+
+    for vid in saved_videos {
+        let mut blueprint_imgs = Vec::new();
+        let report_opt = super::social_links::attach_extracted_video_blueprint(
+            workspace_dir,
+            &vid.rel_path,
+            &mut blueprint_imgs,
+        )
+        .await;
+
+        if blueprint_imgs.is_empty() {
+            let ref_dir = resolve_workspace_ref_dir(workspace_dir);
+            let probed_dur = ffmpeg_bin
+                .and_then(|ff| {
+                    crate::studio::reference_compare::probe_video_duration_secs(
+                        ff,
+                        &vid.disk_path,
+                    )
+                })
+                .unwrap_or(10.0);
+            super::social_links::extract_sample_frames_ffmpeg(
+                ffmpeg_bin,
+                &ref_dir,
+                &vid.disk_path,
+                &vid.prefix,
+                probed_dur,
+                &mut blueprint_imgs,
+            );
+        }
+
+        for img in blueprint_imgs {
+            if !image_urls.iter().any(|existing| existing == &img) {
+                image_urls.push(img);
+            }
+        }
+
+        if let Some(report_rel) = report_opt {
+            transcriptions.push(format!(
+                "[Local Video MotionClone Blueprint Extracted for '{}': source=`{}`, report=`{}`, style=`ref/extracted/style.json`, temporal=`ref/extracted/temporal.json`. Temporal keyframes have been attached for scene-by-scene replication.]",
+                vid.file_name, vid.rel_path, report_rel
+            ));
+        }
+    }
+
+    (transcriptions, image_urls)
 }
 
 /// Removes `_vision_images` from a tool result before serialization and appends valid image data URLs.
@@ -479,6 +560,57 @@ mod tests {
             .join(".aetheria/uploads/animasi_happy_new_year_2027_microstock.html")
             .is_file());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn process_attached_files_and_blueprints_extracts_blueprint_for_mp4_attachment() {
+        let Some(ff) = find_ffmpeg_bin() else {
+            return;
+        };
+        let ws = std::env::temp_dir().join(format!(
+            "aetheria_vision_vid_bp_{}",
+            crate::paths::now_ms()
+        ));
+        std::fs::create_dir_all(&ws).unwrap();
+        let sample_mp4 = ws.join("sample_src.mp4");
+        let status = std::process::Command::new(&ff)
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=#141824:s=320x568:d=1.5",
+                "-pix_fmt",
+                "yuv420p",
+            ])
+            .arg(&sample_mp4)
+            .output()
+            .unwrap();
+        assert!(status.status.success(), "ffmpeg should synthesize sample mp4");
+        let mp4_bytes = std::fs::read(&sample_mp4).unwrap();
+        let files_val = serde_json::json!([{
+            "name": "local_clip.mp4",
+            "uri": format!("data:video/mp4;base64,{}", BASE64_STANDARD.encode(&mp4_bytes)),
+            "mime": "video/mp4"
+        }]);
+
+        let (transcriptions, images) =
+            process_attached_files_and_blueprints(&ws.to_string_lossy(), Some(&files_val), Some(&ff))
+                .await;
+
+        assert!(!images.is_empty(), "blueprint frames should attach to vision images");
+        assert!(
+            transcriptions
+                .iter()
+                .any(|t| t.contains("Local Video MotionClone Blueprint Extracted")),
+            "transcriptions={:?}",
+            transcriptions
+        );
+        assert!(ws.join("ref/ref_local_clip.mp4").is_file());
+        assert!(ws.join("ref/extracted/style.json").is_file());
+        assert!(ws.join("ref/extracted/ref_report.md").is_file());
+
+        let _ = std::fs::remove_dir_all(&ws);
     }
 }
 

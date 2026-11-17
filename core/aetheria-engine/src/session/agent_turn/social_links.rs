@@ -192,7 +192,87 @@ fn is_pinterest_url(url: &str) -> bool {
             || (lower.contains("pinterest.") && lower.contains("/pin/")))
 }
 
-async fn attach_extracted_video_blueprint(
+pub(crate) fn extract_audio_track_ffmpeg(
+    ffmpeg_bin: Option<&Path>,
+    mp4_path: &Path,
+    wav_path: &Path,
+) {
+    let Some(ff_cmd) = ffmpeg_bin else {
+        return;
+    };
+    let mut ff_audio = std::process::Command::new(ff_cmd);
+    crate::paths::configure_hidden_std_command(&mut ff_audio);
+    let _ = ff_audio
+        .args([
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            &mp4_path.to_string_lossy(),
+            "-vn",
+            "-acodec",
+            "pcm_s16le",
+            "-ar",
+            "24000",
+            "-ac",
+            "1",
+            &wav_path.to_string_lossy(),
+        ])
+        .output();
+}
+
+pub(crate) fn extract_sample_frames_ffmpeg(
+    ffmpeg_bin: Option<&Path>,
+    ref_dir: &Path,
+    mp4_path: &Path,
+    prefix: &str,
+    duration_secs: f64,
+    image_urls: &mut Vec<String>,
+) -> Vec<Vec<u8>> {
+    let mut extracted = Vec::new();
+    let Some(ff_cmd) = ffmpeg_bin else {
+        return extracted;
+    };
+    let sample_points = compute_relative_sample_timestamps(duration_secs);
+    for (idx, (_ratio, ts)) in sample_points.iter().enumerate() {
+        let frame_name = format!("ref_{}_frame_{}.jpg", prefix, idx + 1);
+        let frame_jpg = ref_dir.join(&frame_name);
+        let mut ff_frame = std::process::Command::new(ff_cmd);
+        crate::paths::configure_hidden_std_command(&mut ff_frame);
+        let ok = ff_frame
+            .args([
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-ss",
+                ts.as_str(),
+                "-i",
+                &mp4_path.to_string_lossy(),
+                "-frames:v",
+                "1",
+                "-q:v",
+                "4",
+                &frame_jpg.to_string_lossy(),
+            ])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if ok {
+            if let Ok(jpg_bytes) = std::fs::read(&frame_jpg) {
+                if !jpg_bytes.is_empty() {
+                    let b64 = BASE64_STANDARD.encode(&jpg_bytes);
+                    image_urls.push(format!("data:image/jpeg;base64,{}", b64));
+                    extracted.push(jpg_bytes);
+                }
+            }
+        }
+    }
+    extracted
+}
+
+pub(crate) async fn attach_extracted_video_blueprint(
     workspace_dir: &str,
     video_rel_path: &str,
     image_urls: &mut Vec<String>,
@@ -357,15 +437,99 @@ pub async fn process_social_links(
             None
         };
         if let Some(vid_id) = yt_id.filter(|id| id.len() >= 8) {
+            let ref_dir = crate::tool::path_guard::resolve_isolated_path(workspace_dir, "ref")
+                .unwrap_or_else(|_| Path::new(workspace_dir).join("ref"));
+            let _ = std::fs::create_dir_all(&ref_dir);
+            let yt_mp4 = ref_dir.join("ref_youtube.mp4");
+            let yt_wav = ref_dir.join("ref_voice.wav");
+            let ytdlp_note: String;
+
+            if let Some(ytdlp_bin) = crate::paths::locate_ytdlp_binary() {
+                let mut dl = tokio::process::Command::new(&ytdlp_bin);
+                crate::paths::configure_hidden_tokio_command(&mut dl);
+                dl.args([
+                    "--no-playlist",
+                    "--max-filesize",
+                    "120M",
+                    "-f",
+                    "best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best",
+                    "--merge-output-format",
+                    "mp4",
+                    "-o",
+                ])
+                .arg(&yt_mp4)
+                .arg(clean_url);
+                if let Some(ff) = ffmpeg_bin.and_then(|p| p.parent()) {
+                    dl.arg("--ffmpeg-location").arg(ff);
+                }
+                match tokio::time::timeout(std::time::Duration::from_secs(90), dl.output()).await {
+                    Ok(Ok(out)) if out.status.success() && yt_mp4.is_file() => {
+                        extract_audio_track_ffmpeg(ffmpeg_bin, &yt_mp4, &yt_wav);
+                        let blueprint_path = attach_extracted_video_blueprint(
+                            workspace_dir,
+                            "ref/ref_youtube.mp4",
+                            &mut image_urls,
+                        )
+                        .await;
+                        if image_urls.is_empty() {
+                            let dur = ffmpeg_bin
+                                .and_then(|ff| {
+                                    crate::studio::reference_compare::probe_video_duration_secs(
+                                        ff,
+                                        &yt_mp4,
+                                    )
+                                })
+                                .unwrap_or(10.0);
+                            extract_sample_frames_ffmpeg(
+                                ffmpeg_bin,
+                                &ref_dir,
+                                &yt_mp4,
+                                "youtube",
+                                dur,
+                                &mut image_urls,
+                            );
+                        }
+                        let bp_line = blueprint_path
+                            .map(|p| format!("\n- MotionClone Blueprint Extracted: {}, ref/extracted/style.json, ref/extracted/temporal.json", p))
+                            .unwrap_or_default();
+                        ocr_transcriptions.push(format!(
+                            "[YouTube Reference Video Extracted (ID: {}):\n\
+                             - Reference Video Downloaded via yt-dlp: ref/ref_youtube.mp4{}\n\
+                             - Reference Voice Track Extracted: ref/ref_voice.wav\n\
+                             - Scene keyframes & measured blueprint attached for accurate pacing, palette, and motion replication.]",
+                            vid_id, bp_line
+                        ));
+                        continue;
+                    }
+                    Ok(Ok(out)) => {
+                        let stderr = String::from_utf8_lossy(&out.stderr);
+                        ytdlp_note = format!(
+                            "yt-dlp failed ({}); ",
+                            stderr.trim().chars().take(120).collect::<String>()
+                        );
+                    }
+                    Ok(Err(e)) => {
+                        ytdlp_note = format!("yt-dlp launch failed ({e}); ");
+                    }
+                    Err(_) => {
+                        ytdlp_note = "yt-dlp timed out after 90s; ".to_string();
+                    }
+                }
+            } else {
+                ytdlp_note = "yt-dlp binary is not installed; ".to_string();
+            }
+
             let thumb_url = format!("https://i.ytimg.com/vi/{}/hqdefault.jpg", vid_id);
             if let Ok(resp) = reqwest::get(&thumb_url).await {
                 if let Ok(bytes) = resp.bytes().await {
                     if !bytes.is_empty() {
+                        let thumb_path = ref_dir.join("ref_youtube_thumb.jpg");
+                        let _ = std::fs::write(&thumb_path, &bytes);
                         let b64 = BASE64_STANDARD.encode(&bytes);
                         image_urls.push(format!("data:image/jpeg;base64,{}", b64));
                         ocr_transcriptions.push(format!(
-                            "[Reference Video Link Detected (YouTube ID: {}): Visual reference frame attached to vision context — match its aesthetic, color palette, typography, and motion pacing!]",
-                            vid_id
+                            "[Reference Video Link Detected (YouTube ID: {}): Thumbnail fallback ONLY — {}only a single thumbnail (`hqdefault.jpg` saved at `ref/ref_youtube_thumb.jpg`) was attached. Full scene cuts, exact timing/BPM, motion curves, and multi-scene layout were NOT extracted. Match thumbnail mood/palette honestly without fabricating unverified scene timings unless the user uploads the MP4 directly or installs `yt-dlp`.]",
+                            vid_id, ytdlp_note
                         ));
                     }
                 }

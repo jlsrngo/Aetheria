@@ -116,6 +116,92 @@ pub fn locate_ffmpeg_binary() -> Option<PathBuf> {
     fixed.into_iter().find(|p| p.is_file())
 }
 
+fn find_executable_in_path_or_dirs(names: &[&str], extra_dirs: &[PathBuf]) -> Option<PathBuf> {
+    if let Some(path_os) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path_os) {
+            for name in names {
+                let candidate = dir.join(name);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+    for dir in extra_dirs {
+        for name in names {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+/// Locates Python executable with preference for explicit `AETHERIA_PYTHON`,
+/// workspace/user virtual environments (`.venv`), then `PATH`.
+pub fn locate_python_binary() -> PathBuf {
+    if let Ok(explicit) = std::env::var("AETHERIA_PYTHON") {
+        let trimmed = explicit.trim();
+        if !trimmed.is_empty() {
+            let p = PathBuf::from(trimmed);
+            if p.is_file() {
+                return p;
+            }
+        }
+    }
+
+    let root = project_root();
+    let dot_dir = aetheria_dot_dir();
+    let venv_candidates = if cfg!(windows) {
+        [
+            root.join(".venv").join("Scripts").join("python.exe"),
+            dot_dir.join("venv").join("Scripts").join("python.exe"),
+            dot_dir.join(".venv").join("Scripts").join("python.exe"),
+        ]
+    } else {
+        [
+            root.join(".venv").join("bin").join("python"),
+            dot_dir.join("venv").join("bin").join("python"),
+            dot_dir.join(".venv").join("bin").join("python"),
+        ]
+    };
+    if let Some(found) = venv_candidates.into_iter().find(|p| p.is_file()) {
+        return found;
+    }
+
+    let names: &[&str] = if cfg!(windows) {
+        &["python.exe", "python3.exe"]
+    } else {
+        &["python3", "python"]
+    };
+    find_executable_in_path_or_dirs(names, &[dot_dir.join("bin"), root.join("bin")])
+        .unwrap_or_else(|| PathBuf::from("python"))
+}
+
+/// Locates `yt-dlp` binary when installed for downloading full reference videos (e.g. YouTube).
+pub fn locate_ytdlp_binary() -> Option<PathBuf> {
+    if let Ok(explicit) = std::env::var("AETHERIA_YTDLP") {
+        let trimmed = explicit.trim();
+        if !trimmed.is_empty() {
+            let p = PathBuf::from(trimmed);
+            if p.is_file() {
+                return Some(p);
+            }
+        }
+    }
+    let root = project_root();
+    let names: &[&str] = if cfg!(windows) {
+        &["yt-dlp.exe", "yt-dlp"]
+    } else {
+        &["yt-dlp"]
+    };
+    find_executable_in_path_or_dirs(
+        names,
+        &[aetheria_dot_dir().join("bin"), root.join("bin"), root.clone()],
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

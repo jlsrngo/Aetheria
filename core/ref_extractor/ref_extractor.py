@@ -479,6 +479,17 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
     scenes: List[Dict[str, Any]] = []
     scene_palettes: List[Dict[str, Any]] = []
     ocr_engine = _get_ocr_engine()
+    ocr_available = ocr_engine is not None
+    ocr_warning: Optional[str] = None
+    if not ocr_available:
+        try:
+            from rapidocr_onnxruntime import RapidOCR as _ProbeOCR  # noqa: F401
+            ocr_warning = "RapidOCR failed to initialize at runtime; on-screen text strings were NOT extracted."
+        except Exception as _ocr_exc:
+            ocr_warning = (
+                f"RapidOCR unavailable ({_ocr_exc}); install core/ref_extractor/requirements.txt "
+                "or rapidocr-onnxruntime to extract reference text strings."
+            )
 
     for i, start, end, dur, role, ts_start, ts_mid, ts_end in scene_specs:
         fr_start = _frame_at(ts_start)
@@ -587,6 +598,9 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
             else {"top": 64, "bottom": 120, "left": 80, "right": 80},
         },
         "visualJumpTimestamps": temporal["visualJumpTimestamps"],
+        "ocrAvailable": ocr_available,
+        "ocrWarning": ocr_warning,
+        "extractorBackend": "python_cv2_rapidocr" if ocr_available else "python_cv2_no_ocr",
         "scenes": scenes,
     }
 
@@ -600,12 +614,19 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
 
     report_md = out_dir / "ref_report.md"
     theme_label = "Measured Light" if is_light_theme else "Measured Dark"
+    ocr_banner = (
+        f"\n> **WARNING (OCR Unavailable):** {ocr_warning} Inspect the extracted keyframes directly for exact copy/typography.\n"
+        if not ocr_available and ocr_warning
+        else ""
+    )
 
     md = f"""# Reference Video Analysis Report (MotionClone Blueprint)
 **Source:** `{v_path.name}`
 **Duration:** {duration:.2f}s | **FPS:** {int(round(fps))} | **Resolution:** {width}x{height} ({aspect_ratio})
 **Detected Tone:** {theme_label} (Mean Luma: {avg_luma:.1f})
 **Detected Scene Cuts:** {len(cut_timestamps)} scenes (`{", ".join(f"{t:.2f}s" for t in cut_timestamps)}`)
+**Extractor Backend:** `{style_spec['extractorBackend']}` (`ocrAvailable={ocr_available}`)
+{ocr_banner}
 
 ## Measured Color Tokens (From Reference Pixels)
 - Primary Background: `{lead_palette['bgHex']}`

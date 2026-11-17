@@ -6,6 +6,149 @@
 
 use std::path::Path;
 
+const STYLE_JSON_SOFT_CAP_CHARS: usize = 14_000;
+
+fn compact_scene_entry(sc: &serde_json::Value, max_regions: usize) -> serde_json::Value {
+    let Some(obj) = sc.as_object() else {
+        return sc.clone();
+    };
+    let mut out = serde_json::Map::new();
+    for key in [
+        "index",
+        "id",
+        "role",
+        "start",
+        "end",
+        "duration",
+        "durationFrames",
+        "keyframe",
+        "keyframes",
+        "motion",
+        "motionEnergy",
+    ] {
+        if let Some(v) = obj.get(key) {
+            out.insert(key.to_string(), v.clone());
+        }
+    }
+    if let Some(layout) = obj.get("layout").and_then(serde_json::Value::as_object) {
+        let mut ly_out = serde_json::Map::new();
+        for key in [
+            "visual_archetype",
+            "visualArchetype",
+            "is_dark_scene",
+            "card_count",
+            "pill_count",
+            "scatter_count",
+            "top",
+            "hero",
+            "bottom",
+        ] {
+            if let Some(v) = layout.get(key) {
+                ly_out.insert(key.to_string(), v.clone());
+            }
+        }
+        if let Some(pal) = layout.get("palette").and_then(serde_json::Value::as_object) {
+            let mut pal_out = serde_json::Map::new();
+            for key in ["bgHex", "surfaceHex", "textHex", "accentHex", "secondaryAccentHex", "isDark"] {
+                if let Some(v) = pal.get(key) {
+                    pal_out.insert(key.to_string(), v.clone());
+                }
+            }
+            ly_out.insert("palette".to_string(), serde_json::Value::Object(pal_out));
+        }
+        if max_regions > 0 {
+            if let Some(regs) = layout.get("regions").and_then(serde_json::Value::as_array) {
+                let mut prioritized: Vec<&serde_json::Value> = regs
+                    .iter()
+                    .filter(|r| r.get("kind").and_then(serde_json::Value::as_str) == Some("text"))
+                    .collect();
+                for r in regs {
+                    if r.get("kind").and_then(serde_json::Value::as_str) != Some("text") {
+                        prioritized.push(r);
+                    }
+                }
+                let compact_regs: Vec<serde_json::Value> = prioritized
+                    .into_iter()
+                    .take(max_regions)
+                    .map(|r| {
+                        let Some(ro) = r.as_object() else {
+                            return r.clone();
+                        };
+                        let mut ro_out = serde_json::Map::new();
+                        for key in ["kind", "zone", "text", "x", "y", "w", "h", "fillHex"] {
+                            if let Some(v) = ro.get(key) {
+                                ro_out.insert(key.to_string(), v.clone());
+                            }
+                        }
+                        serde_json::Value::Object(ro_out)
+                    })
+                    .collect();
+                ly_out.insert("regions".to_string(), serde_json::Value::Array(compact_regs));
+            }
+        }
+        out.insert("layout".to_string(), serde_json::Value::Object(ly_out));
+    }
+    serde_json::Value::Object(out)
+}
+
+/// Summarizes `style.json` cleanly while keeping ALL scenes intact (no raw mid-JSON truncation).
+pub(crate) fn summarize_style_json_compact(raw: &str, max_chars: usize) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if trimmed.chars().count() <= max_chars {
+        return trimmed.to_string();
+    }
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+        return trimmed.chars().take(max_chars).collect();
+    };
+    let Some(obj) = parsed.as_object() else {
+        return trimmed.chars().take(max_chars).collect();
+    };
+
+    for region_limit in [6usize, 3, 0] {
+        let mut compact = serde_json::Map::new();
+        for key in [
+            "sourceVideo",
+            "totalDuration",
+            "fps",
+            "width",
+            "height",
+            "aspectRatio",
+            "fidelityTarget",
+            "passThreshold",
+            "ocrAvailable",
+            "ocrWarning",
+            "extractorBackend",
+            "pythonCvUnavailable",
+            "palette",
+            "safeZone",
+            "typography",
+            "cutTimestamps",
+        ] {
+            if let Some(v) = obj.get(key) {
+                compact.insert(key.to_string(), v.clone());
+            }
+        }
+        if let Some(scenes) = obj.get("scenes").and_then(serde_json::Value::as_array) {
+            let compact_scenes: Vec<serde_json::Value> = scenes
+                .iter()
+                .map(|s| compact_scene_entry(s, region_limit))
+                .collect();
+            compact.insert("scenes".to_string(), serde_json::Value::Array(compact_scenes));
+        }
+        compact.insert("compactedForContext".to_string(), serde_json::json!(true));
+        if let Ok(serialized) = serde_json::to_string_pretty(&serde_json::Value::Object(compact)) {
+            if serialized.chars().count() <= max_chars || region_limit == 0 {
+                return serialized;
+            }
+        }
+    }
+
+    trimmed.chars().take(max_chars).collect()
+}
+
 /// Injects active video reference report (and keyframe inventory) if present in workspace.
 pub fn resolve_reference_report(workspace_dir: &str) -> Option<String> {
     let ws_path = Path::new(workspace_dir);
@@ -33,9 +176,9 @@ pub fn resolve_reference_report(workspace_dir: &str) -> Option<String> {
     }
     if let Some(style_path) = target_style {
         if let Ok(raw) = std::fs::read_to_string(&style_path) {
-            let trimmed: String = raw.chars().take(6000).collect();
-            if !trimmed.trim().is_empty() {
-                sections.push(format!("Structured style.json:\n{}", trimmed.trim()));
+            let compact = summarize_style_json_compact(&raw, STYLE_JSON_SOFT_CAP_CHARS);
+            if !compact.is_empty() {
+                sections.push(format!("Structured style.json:\n{}", compact));
             }
         }
     }
@@ -468,6 +611,65 @@ mod tests {
         assert!(resolved.contains("DESIGN TOKENS"));
         assert!(resolved.contains("REFERENCE EXAMPLE (examples/script/clay-kit.js"));
         assert!(resolved.contains("ClayKit"));
+    }
+
+    #[test]
+    fn summarize_style_json_compact_preserves_all_scenes_when_exceeding_6000_chars() {
+        let scenes: Vec<serde_json::Value> = (1..=12)
+            .map(|idx| {
+                serde_json::json!({
+                    "index": idx,
+                    "id": format!("scene_{idx}"),
+                    "start": (idx - 1) as f64 * 1.5,
+                    "end": idx as f64 * 1.5,
+                    "duration": 1.5,
+                    "durationFrames": 45,
+                    "keyframe": format!("ref/extracted/frames/ref_scene_{idx:02}.jpg"),
+                    "motion": "kinetic_slide",
+                    "motionEnergy": 0.42,
+                    "layout": {
+                        "visual_archetype": "bento_card",
+                        "palette": {
+                            "bgHex": "#101218",
+                            "surfaceHex": "#1A1E28",
+                            "textHex": "#F5F7FA",
+                            "accentHex": "#F59E0B",
+                            "extractedColors": ["#101218", "#1A1E28", "#F5F7FA", "#F59E0B", "#38BDF8", "#A78BFA"]
+                        },
+                        "hero": [format!("Headline Scene {idx}")],
+                        "regions": (0..6).map(|r| serde_json::json!({
+                            "kind": if r == 0 { "text" } else { "card" },
+                            "zone": "hero",
+                            "text": format!("Scene {idx} box {r} description with extended metadata padding to bloat JSON size"),
+                            "x": 0.1,
+                            "y": 0.2,
+                            "w": 0.8,
+                            "h": 0.15,
+                            "px": [108, 384, 864, 288],
+                            "fillHex": "#1A1E28"
+                        })).collect::<Vec<_>>()
+                    }
+                })
+            })
+            .collect();
+        let raw = serde_json::to_string_pretty(&serde_json::json!({
+            "sourceVideo": "long_ref.mp4",
+            "totalDuration": 18.0,
+            "fps": 30,
+            "width": 1080,
+            "height": 1920,
+            "aspectRatio": "9:16",
+            "scenes": scenes,
+        }))
+        .unwrap();
+        assert!(raw.chars().count() > 8000, "test fixture should exceed 6000 chars");
+
+        let compact = summarize_style_json_compact(&raw, 7000);
+        let parsed: serde_json::Value =
+            serde_json::from_str(&compact).expect("compacted style.json must remain valid JSON");
+        let parsed_scenes = parsed["scenes"].as_array().unwrap();
+        assert_eq!(parsed_scenes.len(), 12);
+        assert_eq!(parsed_scenes[11]["id"], "scene_12");
     }
 }
 

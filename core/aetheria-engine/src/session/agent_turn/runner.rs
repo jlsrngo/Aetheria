@@ -37,7 +37,10 @@ use super::tool_batch::execute_tool_batch;
 use super::turn_finalize::{
     finalize_agent_turn, finalize_execution_failure, finalize_failed_turn, finalize_interrupted_turn,
 };
-use super::vision::{find_ffmpeg_bin, process_attached_files, process_social_links};
+use super::vision::{
+    find_ffmpeg_bin, process_attached_files, process_attached_files_and_blueprints,
+    process_social_links,
+};
 use super::xml_tool_parser::extract_xml_tool_calls;
 
 struct ActiveRunGuard<'a>(&'a str);
@@ -706,8 +709,13 @@ async fn prepare_initial_chat_messages(
     let ffmpeg_bin = find_ffmpeg_bin();
     let (social_transcriptions, social_images) =
         process_social_links(workspace_dir, prompt_text, ffmpeg_bin.as_deref()).await;
+    let (file_transcriptions, mut attached_images) =
+        process_attached_files_and_blueprints(workspace_dir, files, ffmpeg_bin.as_deref()).await;
 
     let mut extra_context = social_transcriptions;
+    extra_context.extend(file_transcriptions);
+    attached_images.extend(social_images);
+
     let lower_prompt = prompt_text.trim().to_lowercase();
     let is_greeting = is_greeting_prompt(prompt_text);
     if !is_greeting {
@@ -745,7 +753,7 @@ async fn prepare_initial_chat_messages(
             || lower_prompt.contains("blueprint")
             || lower_prompt.contains("video preset")
             || has_media_attachments
-            || !social_images.is_empty();
+            || !attached_images.is_empty();
         if wants_reference {
             if let Some(ref_report) = resolve_reference_report(workspace_dir) {
                 has_style_or_ref = true;
@@ -774,16 +782,13 @@ async fn prepare_initial_chat_messages(
         }
     }
 
-    let user_msg = build_user_message_with_vision_fallback(
-        workspace_dir,
+    let user_msg = build_user_message_from_preextracted_with_vision_fallback(
         provider_id,
         model_id,
         cfg,
         prompt_text,
-        files,
-        ffmpeg_bin.as_deref(),
         extra_context,
-        social_images,
+        attached_images,
     )
     .await;
     chat_messages.push(user_msg);
@@ -856,23 +861,14 @@ fn build_user_message_with_attachments(
     )
 }
 
-async fn build_user_message_with_vision_fallback(
-    workspace_dir: &str,
+async fn build_user_message_from_preextracted_with_vision_fallback(
     provider_id: &str,
     model_id: &str,
     cfg: &Value,
     prompt_text: &str,
-    files: Option<&Value>,
-    ffmpeg_bin: Option<&std::path::Path>,
-    extra_context: Vec<String>,
-    extra_image_urls: Vec<String>,
+    mut context_additions: Vec<String>,
+    image_urls: Vec<String>,
 ) -> Value {
-    let (file_transcriptions, mut image_urls) =
-        process_attached_files(workspace_dir, files, ffmpeg_bin);
-    image_urls.extend(extra_image_urls);
-    let mut context_additions = file_transcriptions;
-    context_additions.extend(extra_context);
-
     let mut has_caption = false;
     if !image_urls.is_empty() && !model_supports_vision_from_config(Some(cfg), provider_id, model_id)
     {

@@ -141,7 +141,9 @@ pub fn project_root() -> PathBuf {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
-pub use crate::binary_locator::{detect_browser_executable, locate_ffmpeg_binary};
+pub use crate::binary_locator::{
+    detect_browser_executable, locate_ffmpeg_binary, locate_python_binary, locate_ytdlp_binary,
+};
 
 /// Stable folder for engine render caches and temporary artifacts.
 /// Kept out of the install dir, which is read-only under Program Files.
