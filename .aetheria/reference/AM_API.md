@@ -55,7 +55,7 @@ Do NOT call `Math.random()`, `Date.now()`, `performance.now()`, `requestAnimatio
 - `AM.drawCharacterRig(ctx, t, opts?)` — `{ x, y, scale, coatColor, coatShade, skinColor, hairColor, hairStyle, glasses, reactTime, reachTime, lean, expression, collarColor, leftSh, ... }`
 - `AM.drawTopHeader(ctx, scene, localTimeOrIdx, globalTime)` — **OPTIONAL** top bar (omit unless active skill wants header bar)
 - `AM.drawHeadlinePlaque(ctx, scene, localTime)` — **OPTIONAL** dark card plaque (omit unless active skill wants plaque)
-- `AM.drawSubtitles(ctx, words, localTime, opts?)` — renders synced words (`[{ word, start, end }]`); supports hex color string OR options `{ style: "neobrutalism", wordsPerGroup, palette, x, y, maxWidth, fontSize, fontFamily, activeColor, pastColor, upcomingColor, bgColor, borderColor, shadowColor, textColor, borderWidth, shadowOffsetX, shadowOffsetY, radius, tiltDeg, uppercase, holdAfterEnd }`
+- `AM.drawSubtitles(ctx, words, localTime, opts?)` — renders synced words (`[{ word, start, end }]`); defaults to 1-word-at-a-time `"neobrutalism"` chips (`wordsPerGroup: 1`) unless `style: "pill"` or `wordsPerGroup > 1` is passed (`style: "neobrutalism" | "pill", wordsPerGroup, palette, x, y, maxWidth, fontSize, fontFamily, activeColor, pastColor, upcomingColor, bgColor, borderColor, shadowColor, textColor, borderWidth, shadowOffsetX, shadowOffsetY, radius, tiltDeg, uppercase, holdAfterEnd`)
 
 ## Keyframe Track, Reveal & SVG Path Helpers
 - `AM.evalKeyframes(frames, t, easingMode = "linear")` — interpolate `{ t, x, y, w, h, opacity, rotation, blur, reveal }` keyframes (`"linear" | "smooth" | "out" | "step"`)

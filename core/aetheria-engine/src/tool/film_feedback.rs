@@ -445,6 +445,32 @@ fn check_webgl_diagnostics(content: &str, file_name: &str, feedback: &mut FileFe
     }
 }
 
+fn check_claykit_diagnostics(
+    target: &Path,
+    file_name: &str,
+    content: &str,
+    feedback: &mut FileFeedback,
+) {
+    if crate::studio::builtin_runtime::is_vendor_script_name(file_name)
+        || file_name.eq_ignore_ascii_case("clay-kit.js")
+    {
+        return;
+    }
+    let has_claykit_sibling = target
+        .parent()
+        .is_some_and(|dir| dir.join("clay-kit.js").is_file());
+    if !has_claykit_sibling {
+        return;
+    }
+    if content.contains("drawTopHeader(") || content.contains("drawHeadlinePlaque(") {
+        feedback.has_errors = true;
+        feedback.diagnostics.push(
+            "ERROR (CLAYKIT_DARK_OVERLAY_FORBIDDEN): Soft-Clay scenes with clay-kit.js forbid AM.drawTopHeader / AM.drawHeadlinePlaque dark bars over the 3D sky or sidewalk."
+                .to_string(),
+        );
+    }
+}
+
 /// Inspects a newly written or edited project file and returns actionable engine diagnostics.
 pub fn collect_file_feedback(workspace_dir: &str, target: &Path) -> FileFeedback {
     let mut feedback = FileFeedback::default();
@@ -504,6 +530,7 @@ pub fn collect_file_feedback(workspace_dir: &str, target: &Path) -> FileFeedback
                 .diagnostics
                 .extend(find_short_hex_mix_warnings(&content));
             check_webgl_diagnostics(&content, file_name, &mut feedback);
+            check_claykit_diagnostics(target, file_name, &content, &mut feedback);
             check_microstock_js_diagnostics(workspace_dir, file_name, &content, &mut feedback);
             check_js_scene_wiring(target, file_name, &content, &mut feedback);
         }
@@ -895,6 +922,30 @@ mod tests {
         attach_post_write_feedback(&mut tool_res_ok, &ws, &s1);
         assert_eq!(tool_res_ok["ok"], true, "unexpected wiring error: {:?}", tool_res_ok);
         assert_eq!(tool_res_ok["sceneProgress"]["drafted"], json!(1));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_claykit_scene_forbids_dark_top_header_overlays() {
+        let dir = std::env::temp_dir().join(format!("aetheria_fb_claykit_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let script_dir = dir.join("script");
+        std::fs::create_dir_all(&script_dir).unwrap();
+        std::fs::write(script_dir.join("clay-kit.js"), "(function(){})();").unwrap();
+
+        let s1 = script_dir.join("scene1.js");
+        std::fs::write(
+            &s1,
+            "AM.registerScene('s1', function(ctx, t, dur, sc){ AM.drawTopHeader(ctx, sc, t); });",
+        )
+        .unwrap();
+        let fb = collect_file_feedback(&dir.to_string_lossy(), &s1);
+        assert!(fb.has_errors);
+        assert!(fb
+            .diagnostics
+            .iter()
+            .any(|d| d.contains("CLAYKIT_DARK_OVERLAY_FORBIDDEN")));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

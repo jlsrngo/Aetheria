@@ -381,6 +381,26 @@
   function initStage(canvas, width, height) {
     if (typeof THREE === "undefined" || !canvas) return null;
 
+    if (typeof window !== "undefined" && canvas.parentElement && typeof window.getComputedStyle === "function") {
+      var parentEl = canvas.parentElement;
+      var cs = window.getComputedStyle(parentEl);
+      var bgImg = cs ? String(cs.backgroundImage || "") : "";
+      var bgCol = cs ? String(cs.backgroundColor || "").replace(/\s+/g, "").toLowerCase() : "";
+      var needsSkyGradient =
+        bgImg === "none" &&
+        (!bgCol ||
+          bgCol === "transparent" ||
+          bgCol === "rgba(0,0,0,0)" ||
+          bgCol === "rgb(0,0,0)" ||
+          bgCol === "rgb(15,17,21)");
+      if (needsSkyGradient) {
+        parentEl.style.background = "linear-gradient(180deg, #93C5FD 0%, #BAE6FD 48%, #E0F2FE 100%)";
+        if (document.body) {
+          document.body.style.background = "#93C5FD";
+        }
+      }
+    }
+
     var scene = new THREE.Scene();
     scene.fog = new THREE.FogExp2(0xdbeafe, 0.008);
 

@@ -1048,8 +1048,16 @@
     if (!ctx || !Array.isArray(words) || words.length === 0) return;
     const normalizedOpts =
       typeof opts === "string" ? { activeColor: opts } : opts || {};
-    const isNeobrutal =
-      String(normalizedOpts.style || normalizedOpts.variant || "").toLowerCase() === "neobrutalism";
+    const explicitStyle = String(normalizedOpts.style || normalizedOpts.variant || "").toLowerCase();
+    const wantsLegacyPill =
+      explicitStyle === "pill" ||
+      explicitStyle === "dark" ||
+      explicitStyle === "classic" ||
+      (normalizedOpts.wordsPerGroup != null &&
+        Number(normalizedOpts.wordsPerGroup) > 1 &&
+        explicitStyle !== "neobrutalism") ||
+      (normalizedOpts.bgColor != null && explicitStyle !== "neobrutalism");
+    const isNeobrutal = !wantsLegacyPill;
     const options = Object.assign(
       {
         x: 540,

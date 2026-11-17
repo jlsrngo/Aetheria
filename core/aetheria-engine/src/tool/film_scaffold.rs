@@ -310,8 +310,11 @@ pub(crate) fn render_managed_index_html(
         ctx.restore();
       }}
       if (!MICROSTOCK_MODE && scene._words && scene._words.length > 0 && window.AM.drawSubtitles) {{
+        var subOpts = (scene.subtitleStyle && typeof scene.subtitleStyle === "object")
+          ? scene.subtitleStyle
+          : {{ style: "neobrutalism", wordsPerGroup: 1 }};
         ctx.save();
-        window.AM.drawSubtitles(ctx, scene._words, localTime, scene.accent || "#f59e0b");
+        window.AM.drawSubtitles(ctx, scene._words, localTime, subOpts);
         ctx.restore();
       }}
     }};
@@ -955,5 +958,32 @@ mod tests {
         assert!(short_res["error"].as_str().unwrap().contains("1.500s"));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn film_scaffold_managed_html_defaults_to_neobrutalism_word_by_word_subtitles() {
+        let manifest = FilmManifestJson {
+            schema_version: 1,
+            manage_index_html: true,
+            title: "Sub Test".to_string(),
+            width: 1080,
+            height: 1920,
+            fps: 30,
+            background: "#93C5FD".to_string(),
+            use_three: false,
+            scenes: vec![FilmManifestScene {
+                id: "s1".to_string(),
+                title: "S1".to_string(),
+                script: "script/scene1.js".to_string(),
+                start: 0.0,
+                duration: 3.0,
+                audio: None,
+                sfx: None,
+                words: None,
+                accent: "#FFDE59".to_string(),
+            }],
+        };
+        let html = render_managed_index_html(&manifest, false);
+        assert!(html.contains(r#"style: "neobrutalism", wordsPerGroup: 1"#));
     }
 }
