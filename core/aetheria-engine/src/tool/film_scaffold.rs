@@ -453,13 +453,13 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
         .filter(|s| !s.is_empty())
         .unwrap_or("Motion Film")
         .to_string();
-    let background = arguments
+    let explicit_background = arguments
         .get("background")
         .and_then(|v| v.as_str())
         .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or("#0f1115")
-        .to_string();
+        .filter(|s| !s.is_empty());
+    let background_omitted = explicit_background.is_none();
+    let background = explicit_background.unwrap_or("#0f1115").to_string();
     let use_three = arguments.get("useThree").and_then(|v| v.as_bool()).unwrap_or(false);
     let manage_index = arguments
         .get("manageIndexHtml")
@@ -628,7 +628,7 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
         acc_start += resolved_duration;
     }
 
-    let audio_warnings = match super::film_audio::validate_scenes_audio_durations(
+    let mut warnings = match super::film_audio::validate_scenes_audio_durations(
         &film_dir,
         &manifest_scenes,
         warn_tol,
@@ -636,6 +636,12 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
         Ok(w) => w,
         Err(err_val) => return err_val,
     };
+    if use_three && background_omitted {
+        warnings.push(json!({
+            "code": "USE_THREE_DEFAULT_DARK_BG",
+            "message": "WARNING: 'useThree: true' defaulted 'background' to dark '#0f1115'. Pass an explicit 'background' (e.g. '#93C5FD') or set 'scene.background' / 'renderer.setClearColor(...)' / '#stage' CSS gradient if using alpha: true."
+        }));
+    }
 
     if let Err(e) = std::fs::create_dir_all(&script_dir) {
         return json!({
@@ -753,7 +759,7 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
         "fps": manifest.fps,
         "totalDuration": meta.duration,
         "lintValid": meta.lint.valid,
-        "warnings": audio_warnings,
+        "warnings": warnings,
         "output": format!(
             "Scaffolded film '{}' ({}x{} @ {}fps, {} scene(s)) in '{}'. Now write the animation inside: {} (track real progress via sceneProgress on disk instead of todowrite).",
             manifest.title,
@@ -985,5 +991,41 @@ mod tests {
         };
         let html = render_managed_index_html(&manifest, false);
         assert!(html.contains(r#"style: "neobrutalism", wordsPerGroup: 1"#));
+    }
+
+    #[test]
+    fn film_scaffold_warns_when_use_three_omits_background() {
+        let dir = std::env::temp_dir().join(format!("aetheria_scaffold_3d_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ws = dir.to_string_lossy().to_string();
+
+        let res_warn = execute_film_scaffold(
+            "ses_3d",
+            &ws,
+            &json!({
+                "title": "3D No BG",
+                "useThree": true,
+                "scenes": [{ "id": "s1", "duration": 3.0 }]
+            }),
+        );
+        assert_eq!(res_warn["ok"], true);
+        let warn_str = res_warn["warnings"].to_string();
+        assert!(warn_str.contains("useThree: true"), "expected useThree warning, got {}", warn_str);
+
+        let res_ok = execute_film_scaffold(
+            "ses_3d",
+            &ws,
+            &json!({
+                "title": "3D Explicit BG",
+                "useThree": true,
+                "background": "#93C5FD",
+                "scenes": [{ "id": "s1", "duration": 3.0 }]
+            }),
+        );
+        assert_eq!(res_ok["ok"], true);
+        assert_eq!(res_ok["warnings"].as_array().map(|a| a.len()).unwrap_or(99), 0);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

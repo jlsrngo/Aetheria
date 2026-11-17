@@ -432,7 +432,148 @@ fn check_microstock_js_diagnostics(
     }
 }
 
-fn check_webgl_diagnostics(content: &str, file_name: &str, feedback: &mut FileFeedback) {
+fn is_dark_or_empty_css_color(raw: &str) -> bool {
+    let norm = raw.trim().trim_end_matches(';').trim().to_ascii_lowercase();
+    norm.is_empty()
+        || matches!(
+            norm.as_str(),
+            "#0f1115" | "#000" | "#000000" | "black" | "transparent" | "none"
+        )
+}
+
+fn uses_webgl_alpha_true(content: &str) -> bool {
+    let mut offset = 0usize;
+    while let Some(rel) = content[offset..].find("WebGLRenderer(") {
+        let start = offset + rel + "WebGLRenderer(".len();
+        let rest = &content[start..];
+        let max_len = rest
+            .char_indices()
+            .nth(400)
+            .map(|(i, _)| i)
+            .unwrap_or(rest.len());
+        let end = rest[..max_len].find(')').unwrap_or(max_len);
+        let opts = &rest[..end];
+        let mut a_off = 0usize;
+        while let Some(a_rel) = opts[a_off..].find("alpha") {
+            let a_pos = a_off + a_rel;
+            let prev_ok = a_pos == 0
+                || !(opts.as_bytes()[a_pos - 1].is_ascii_alphanumeric()
+                    || opts.as_bytes()[a_pos - 1] == b'_');
+            let after_alpha = opts[a_pos + "alpha".len()..].trim_start();
+            if prev_ok && after_alpha.starts_with(':') {
+                let val = after_alpha[1..].trim_start();
+                if val.starts_with("true")
+                    && val["true".len()..]
+                        .chars()
+                        .next()
+                        .is_none_or(|c| !c.is_ascii_alphanumeric() && c != '_')
+                {
+                    return true;
+                }
+            }
+            a_off = a_pos + "alpha".len();
+        }
+        offset = start;
+    }
+    false
+}
+
+fn has_js_explicit_bg(src: &str) -> bool {
+    if src.contains(".background =")
+        || src.contains(".background=")
+        || src.contains("linear-gradient(")
+        || src.contains("radial-gradient(")
+    {
+        return true;
+    }
+    if let Some(idx) = src.find("setClearColor(") {
+        let rest = &src[idx + "setClearColor(".len()..];
+        let end = rest.find(')').unwrap_or_else(|| rest.len().min(60));
+        let args = &rest[..end];
+        if let Some((_, alpha_raw)) = args.split_once(',') {
+            let a = alpha_raw.trim();
+            if a == "0" || a == "0.0" {
+                return false;
+            }
+        }
+        return true;
+    }
+    false
+}
+
+fn html_has_non_dark_stage_bg(html: &str) -> bool {
+    let lower = html.to_ascii_lowercase();
+    if lower.contains("linear-gradient(") || lower.contains("radial-gradient(") {
+        return true;
+    }
+    let Some(stage_idx) = lower.find("#stage") else {
+        return false;
+    };
+    let after = &lower[stage_idx..];
+    let Some(open) = after.find('{') else {
+        return false;
+    };
+    let body = &after[open + 1..];
+    let close = body.find('}').unwrap_or(body.len());
+    let rule = &body[..close];
+    for key in ["background:", "background-color:"] {
+        if let Some(k_idx) = rule.find(key) {
+            let val_rest = &rule[k_idx + key.len()..];
+            let val = val_rest.split([';', '}']).next().unwrap_or("");
+            if !is_dark_or_empty_css_color(val) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn has_explicit_webgl_background(target: &Path, content: &str) -> bool {
+    if has_js_explicit_bg(content) || html_has_non_dark_stage_bg(content) {
+        return true;
+    }
+    let film_root = if target
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.eq_ignore_ascii_case("script"))
+    {
+        target.parent().and_then(|p| p.parent())
+    } else {
+        target.parent()
+    };
+    let Some(root) = film_root else {
+        return false;
+    };
+    let index_path = root.join("index.html");
+    if index_path.is_file() {
+        if let Ok(html) = std::fs::read_to_string(&index_path) {
+            if has_js_explicit_bg(&html) || html_has_non_dark_stage_bg(&html) {
+                return true;
+            }
+        }
+    }
+    let film_json_path = root.join("film.json");
+    if film_json_path.is_file() {
+        if let Ok(raw) = std::fs::read_to_string(&film_json_path) {
+            if let Ok(parsed) = serde_json::from_str::<Value>(&raw) {
+                if let Some(bg) = parsed.get("background").and_then(Value::as_str) {
+                    if !is_dark_or_empty_css_color(bg) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+fn check_webgl_diagnostics(
+    target: &Path,
+    content: &str,
+    file_name: &str,
+    feedback: &mut FileFeedback,
+) {
     if crate::studio::builtin_runtime::is_vendor_script_name(file_name) {
         return;
     }
@@ -440,6 +581,16 @@ fn check_webgl_diagnostics(content: &str, file_name: &str, feedback: &mut FileFe
         feedback.has_errors = true;
         feedback.diagnostics.push(
             "ERROR (WEBGL_MISSING_PRESERVE_DRAWING_BUFFER): new THREE.WebGLRenderer(...) must include preserveDrawingBuffer: true so headless MP4 capture does not produce blank frames."
+                .to_string(),
+        );
+    }
+    if !file_name.eq_ignore_ascii_case("clay-kit.js")
+        && uses_webgl_alpha_true(content)
+        && !has_explicit_webgl_background(target, content)
+    {
+        feedback.has_errors = true;
+        feedback.diagnostics.push(
+            "ERROR (WEBGL_ALPHA_MISSING_BACKGROUND): new THREE.WebGLRenderer({ alpha: true }) leaves the stage transparent (exposing dark '#0f1115'). Set 'scene.background', 'renderer.setClearColor(...)', a CSS '#stage' gradient, or a non-dark 'background' in film_scaffold."
                 .to_string(),
         );
     }
@@ -529,13 +680,13 @@ pub fn collect_file_feedback(workspace_dir: &str, target: &Path) -> FileFeedback
             feedback
                 .diagnostics
                 .extend(find_short_hex_mix_warnings(&content));
-            check_webgl_diagnostics(&content, file_name, &mut feedback);
+            check_webgl_diagnostics(target, &content, file_name, &mut feedback);
             check_claykit_diagnostics(target, file_name, &content, &mut feedback);
             check_microstock_js_diagnostics(workspace_dir, file_name, &content, &mut feedback);
             check_js_scene_wiring(target, file_name, &content, &mut feedback);
         }
         "html" | "htm" => {
-            check_webgl_diagnostics(&content, file_name, &mut feedback);
+            check_webgl_diagnostics(target, &content, file_name, &mut feedback);
             let meta = inspect_workspace_film(target);
             feedback.film_meta = Some(summarize_film_meta(&meta));
             let ws_root = Path::new(workspace_dir);
@@ -946,6 +1097,65 @@ mod tests {
             .diagnostics
             .iter()
             .any(|d| d.contains("CLAYKIT_DARK_OVERLAY_FORBIDDEN")));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_webgl_alpha_true_requires_explicit_background_or_gradient() {
+        let dir = std::env::temp_dir().join(format!("aetheria_fb_webgl_alpha_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let script_dir = dir.join("script");
+        std::fs::create_dir_all(&script_dir).unwrap();
+
+        // Managed index.html with default dark #0f1115
+        std::fs::write(
+            dir.join("index.html"),
+            "<style>#stage { background: #0f1115; }</style>",
+        )
+        .unwrap();
+
+        let s1 = script_dir.join("scene1.js");
+        std::fs::write(
+            &s1,
+            "var r = new THREE.WebGLRenderer({ canvas: c, alpha: true, preserveDrawingBuffer: true });",
+        )
+        .unwrap();
+        let fb_fail = collect_file_feedback(&dir.to_string_lossy(), &s1);
+        assert!(fb_fail.has_errors);
+        assert!(fb_fail
+            .diagnostics
+            .iter()
+            .any(|d| d.contains("WEBGL_ALPHA_MISSING_BACKGROUND")));
+
+        // Setting scene.background in JS passes cleanly
+        std::fs::write(
+            &s1,
+            "scene.background = new THREE.Color(0x93c5fd);\nvar r = new THREE.WebGLRenderer({ canvas: c, alpha: true, preserveDrawingBuffer: true });",
+        )
+        .unwrap();
+        let fb_scene_bg = collect_file_feedback(&dir.to_string_lossy(), &s1);
+        assert!(!fb_scene_bg
+            .diagnostics
+            .iter()
+            .any(|d| d.contains("WEBGL_ALPHA_MISSING_BACKGROUND")));
+
+        // Or setting CSS #stage linear-gradient in sibling index.html passes cleanly
+        std::fs::write(
+            dir.join("index.html"),
+            "<style>#stage { background: linear-gradient(180deg, #93C5FD 0%, #E0F2FE 100%); }</style>",
+        )
+        .unwrap();
+        std::fs::write(
+            &s1,
+            "var r = new THREE.WebGLRenderer({ canvas: c, alpha: true, preserveDrawingBuffer: true });",
+        )
+        .unwrap();
+        let fb_grad = collect_file_feedback(&dir.to_string_lossy(), &s1);
+        assert!(!fb_grad
+            .diagnostics
+            .iter()
+            .any(|d| d.contains("WEBGL_ALPHA_MISSING_BACKGROUND")));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
