@@ -28,7 +28,7 @@ use crate::session::usage::{
 use serde_json::{json, Value};
 
 use super::context::{
-    assemble_system_prompt, resolve_mentioned_files, resolve_motioncraft_style_command,
+    assemble_system_prompt_for_turn, resolve_mentioned_files, resolve_motioncraft_style_command,
     resolve_reference_report, resolve_voice_preset_command,
 };
 use super::history::build_chat_messages;
@@ -652,7 +652,7 @@ async fn prepare_initial_chat_messages(
             }
         }
     }
-    let sys_prompt = assemble_system_prompt(workspace_dir);
+    let sys_prompt = assemble_system_prompt_for_turn(workspace_dir, prompt_text);
     let (effective_history, was_compacted) = crate::session::compaction::compact_session_history(
         history,
         crate::session::compaction::DEFAULT_CONTEXT_WINDOW,

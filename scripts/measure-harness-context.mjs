@@ -512,18 +512,47 @@ function measureDynamicContext(workspaceDir) {
     return { workspace: ws, exists: false };
   }
 
-  let livingMemoryChars = 0;
+  let rawLivingMemoryChars = 0;
+  let rawLivingMemory = "";
   const aetheriaMd = path.join(ws, ".aetheria", "AETHERIA.md");
   if (fs.existsSync(aetheriaMd)) {
-    livingMemoryChars += fs.readFileSync(aetheriaMd, "utf8").trim().length;
+    rawLivingMemory = fs.readFileSync(aetheriaMd, "utf8").trim();
+    rawLivingMemoryChars += rawLivingMemory.length;
   }
   const corrections = path.join(ws, ".aetheria", "user-corrections.jsonl");
   if (fs.existsSync(corrections)) {
-    livingMemoryChars += fs.readFileSync(corrections, "utf8").trim().length;
+    rawLivingMemoryChars += fs.readFileSync(corrections, "utf8").trim().length;
   }
 
-  let knowledgeChars = 0;
+  // F6 compacted living memory (<= 8 catalog entries, <= 900 chars)
+  const memLines = [];
+  let inCat = false;
+  let catKept = 0;
+  let catOmitted = 0;
+  for (const line of rawLivingMemory.split(/\r?\n/)) {
+    const ltrim = line.trimStart();
+    if (ltrim.startsWith("## ")) {
+      if (inCat && catOmitted > 0) memLines.push(`- ... (${catOmitted} more files; inspect via \`glob\`)`);
+      inCat = ltrim.startsWith("## Workspace Catalog");
+      catKept = 0;
+      catOmitted = 0;
+      memLines.push(line);
+      continue;
+    }
+    if (ltrim.startsWith("<!--") && ltrim.endsWith("-->")) continue;
+    if (inCat && ltrim.startsWith("- ")) {
+      if (catKept < 8) { memLines.push(line); catKept++; } else catOmitted++;
+      continue;
+    }
+    memLines.push(line);
+  }
+  if (inCat && catOmitted > 0) memLines.push(`- ... (${catOmitted} more files; inspect via \`glob\`)`);
+  const livingMemoryCapped = memLines.join("\n").trim().slice(0, 900);
+  const livingMemoryChars = livingMemoryCapped.length;
+
+  let rawKnowledgeChars = 0;
   let knowledgeNotes = 0;
+  const knNodes = [];
   const knPath = path.join(ws, ".aetheria", "knowledge.json");
   if (fs.existsSync(knPath)) {
     try {
@@ -536,15 +565,20 @@ function measureDynamicContext(workspaceDir) {
       for (const n of active) {
         const title = String(n.title || "Note");
         const content = String(n.content || "").slice(0, 4000);
-        knowledgeChars += `--- ${title} ---\n${content}\n`.length;
+        rawKnowledgeChars += `--- ${title} ---\n${content}\n`.length;
+        knNodes.push({ title, body: String(n.content || "").slice(0, 320), pinned: Boolean(n.pinned || n.alwaysInject) });
       }
     } catch {
       // ignore parse errors
     }
   }
+  const knowledgeChars = knNodes
+    .slice(0, 5)
+    .reduce((acc, n) => (acc + n.body.length + n.title.length + 12 <= 1500 ? acc + n.body.length + n.title.length + 12 : acc), 0);
 
-  let skillsCatalogChars = 0;
+  let rawSkillsCatalogChars = 0;
   let skillsCatalogCount = 0;
+  const compactSkillLines = [];
   const seenSkills = new Set();
   for (const base of [
     path.join(ws, ".aetheria", "skills"),
@@ -572,11 +606,25 @@ function measureDynamicContext(workspaceDir) {
         else if (t.startsWith("description:")) sDesc = t.slice(12).trim();
       }
       if (!sDesc) sDesc = `Skill: ${sName}`;
-      skillsCatalogChars += `- ${sName}: ${sDesc} (Path: ${smd})\n`.length;
+      rawSkillsCatalogChars += `- ${sName}: ${sDesc} (Path: ${smd})\n`.length;
+      const shortDesc = sDesc.length <= 72 ? sDesc : `${sDesc.slice(0, 69).trimEnd()}...`;
+      compactSkillLines.push({ slug: ent.name, name: sName, line: `- ${sName}: ${shortDesc}`, smd });
     }
   }
+  const skillHdr = "<skills>\nMotion/domain skills in `.aetheria/skills/<name>/SKILL.md` (call `read` to inspect; use `/<name>` to lock):\n";
+  let skillsCatalogChars = 0;
+  if (compactSkillLines.length > 0) {
+    let used = skillHdr.length + "\n</skills>".length;
+    for (const s of compactSkillLines) {
+      if (used + s.line.length + 1 > 1600) break;
+      used += s.line.length + 1;
+    }
+    skillsCatalogChars = Math.min(used + 45, 1600);
+  }
+  const clay = compactSkillLines.find((s) => s.slug === "mg-soft-clay-story") || compactSkillLines[0];
+  const skillsExplicitChars = clay ? (skillHdr.length + clay.line.length + clay.smd.length + 14) : 0;
 
-  let pluginRulesChars = 0;
+  let rawPluginRulesChars = 0;
   const pluginsDir = path.join(ws, ".aetheria", "plugins");
   if (fs.existsSync(pluginsDir)) {
     for (const ent of fs.readdirSync(pluginsDir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -584,27 +632,40 @@ function measureDynamicContext(workspaceDir) {
       const rulesDir = path.join(pluginsDir, ent.name, "rules");
       if (!fs.existsSync(rulesDir)) continue;
       for (const rf of fs.readdirSync(rulesDir).filter((f) => f.endsWith(".md")).sort()) {
-        pluginRulesChars += fs.readFileSync(path.join(rulesDir, rf), "utf8").trim().length;
+        rawPluginRulesChars += fs.readFileSync(path.join(rulesDir, rf), "utf8").trim().length;
       }
     }
   }
+  const pluginRulesChars = Math.min(rawPluginRulesChars, 1500);
 
-  const totalDynamicChars = livingMemoryChars + knowledgeChars + skillsCatalogChars + pluginRulesChars;
+  const rawDynamicChars = rawLivingMemoryChars + rawKnowledgeChars + rawSkillsCatalogChars + rawPluginRulesChars;
+  const totalDynamicChars = Math.min(livingMemoryChars + knowledgeChars + skillsCatalogChars + pluginRulesChars, 3500);
+  const explicitSkillTurnChars = Math.min(livingMemoryChars + knowledgeChars + skillsExplicitChars + pluginRulesChars, 3500);
+  const nonVideoTurnChars = Math.min(livingMemoryChars + knowledgeChars + pluginRulesChars, 3500);
   return {
     workspace: ws,
     exists: true,
     livingMemoryChars,
+    rawLivingMemoryChars,
     livingMemoryTokensRough: roughTokens(livingMemoryChars),
     knowledgeNotes,
     knowledgeChars,
+    rawKnowledgeChars,
     knowledgeTokensRough: roughTokens(knowledgeChars),
     skillsCatalogCount,
     skillsCatalogChars,
+    rawSkillsCatalogChars,
     skillsCatalogTokensRough: roughTokens(skillsCatalogChars),
     pluginRulesChars,
+    rawPluginRulesChars,
     pluginRulesTokensRough: roughTokens(pluginRulesChars),
+    rawDynamicChars,
+    rawDynamicTokensRough: roughTokens(rawDynamicChars),
     totalDynamicChars,
     totalDynamicTokensRough: roughTokens(totalDynamicChars),
+    explicitSkillTurnChars,
+    nonVideoTurnChars,
+    greetingTurnChars: 0,
   };
 }
 
@@ -777,11 +838,13 @@ function formatMarkdownReport(data) {
   } else {
     const d = data.dynamicContext;
     lines.push(`- Workspace: \`${d.workspace}\``);
-    lines.push(`- Living memory: \`${d.livingMemoryChars}\` chr (~${d.livingMemoryTokensRough} token)`);
-    lines.push(`- Knowledge base (${d.knowledgeNotes} catatan aktif): \`${d.knowledgeChars}\` chr (~${d.knowledgeTokensRough} token)`);
-    lines.push(`- Katalog skills (${d.skillsCatalogCount} skill): \`${d.skillsCatalogChars}\` chr (~${d.skillsCatalogTokensRough} token)`);
-    lines.push(`- Plugin rules: \`${d.pluginRulesChars}\` chr (~${d.pluginRulesTokensRough} token)`);
-    lines.push(`- **Total blok dinamis:** **${d.totalDynamicChars}** chr (**~${d.totalDynamicTokensRough}** token, taksiran kasar)`);
+    lines.push(`- Living memory: raw \`${d.rawLivingMemoryChars}\` chr → F6 capped \`${d.livingMemoryChars}\` chr (~${d.livingMemoryTokensRough} token)`);
+    lines.push(`- Knowledge base (${d.knowledgeNotes} catatan aktif): raw \`${d.rawKnowledgeChars}\` chr → F6 capped \`${d.knowledgeChars}\` chr (~${d.knowledgeTokensRough} token)`);
+    lines.push(`- Katalog skills (${d.skillsCatalogCount} skill): raw \`${d.rawSkillsCatalogChars}\` chr → F6 compact \`${d.skillsCatalogChars}\` chr (~${d.skillsCatalogTokensRough} token)`);
+    lines.push(`- Plugin rules: raw \`${d.rawPluginRulesChars}\` chr → F6 capped \`${d.pluginRulesChars}\` chr (~${d.pluginRulesTokensRough} token)`);
+    lines.push(`- **Total blok dinamis (F0 raw):** **${d.rawDynamicChars}** chr (~${d.rawDynamicTokensRough} token)`);
+    lines.push(`- **Total blok dinamis (F6 compact video unstyled):** **${d.totalDynamicChars}** chr (**~${d.totalDynamicTokensRough}** token, taksiran kasar)`);
+    lines.push(`- **Total per mode relevan:** explicit \`/mg-soft-clay-story\`=\`${d.explicitSkillTurnChars}\` chr (~${roughTokens(d.explicitSkillTurnChars)} tok), non-video=\`${d.nonVideoTurnChars}\` chr (~${roughTokens(d.nonVideoTurnChars)} tok), greeting=\`${d.greetingTurnChars}\` chr`);
   }
   lines.push("");
   lines.push("## 5. Statistik Sesi Video (`sessions-store.json`)");

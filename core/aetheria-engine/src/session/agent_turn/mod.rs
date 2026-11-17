@@ -8,6 +8,7 @@
 
 pub mod command_resolvers;
 pub mod context;
+pub mod dynamic_context;
 pub mod history;
 pub mod kiro_standby;
 pub mod resilience;

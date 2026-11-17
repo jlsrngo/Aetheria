@@ -11,136 +11,61 @@ pub use super::command_resolvers::{
 };
 
 use crate::knowledge::get_active_knowledge_for_workspace;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-/// Scans workspace directory for installed agent skills (`.agents/skills/*/SKILL.md`, `.aetheria/plugins/*/SKILL.md`, `.opencode/skills/`).
+/// Scans workspace directory for compact skill entries bounded by turn relevance & config cap.
 pub fn discover_workspace_skills(workspace_dir: &str) -> String {
-    let ws_path = Path::new(workspace_dir);
-    let mut search_dirs = vec![
-        ws_path.join(".aetheria").join("skills"),
-        ws_path.join(".agents").join("skills"),
-        ws_path.join("skills"),
-        ws_path.join(".opencode").join("skills"),
-    ];
-    let root = crate::paths::project_root();
-    if ws_path != root {
-        search_dirs.push(root.join(".aetheria").join("skills"));
-        search_dirs.push(root.join(".agents").join("skills"));
-        search_dirs.push(root.join(".opencode").join("skills"));
-    }
-
-    let plugins_dir = ws_path.join(".aetheria").join("plugins");
-    if plugins_dir.is_dir() {
-        if let Ok(entries) = std::fs::read_dir(&plugins_dir) {
-            for entry in entries.flatten() {
-                let p = entry.path();
-                if p.is_dir() {
-                    search_dirs.push(p.clone());
-                    search_dirs.push(p.join("skills"));
-                }
-            }
-        }
-    }
-
-    let mut discovered: Vec<(String, String, PathBuf)> = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-
-    for dir in search_dirs {
-        if let Ok(entries) = std::fs::read_dir(&dir) {
-            for entry in entries.flatten() {
-                let skill_dir = entry.path();
-                let skill_md = skill_dir.join("SKILL.md");
-                if skill_md.is_file() {
-                    let dir_name = skill_dir
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("")
-                        .to_string();
-                    if !seen.insert(dir_name.clone()) {
-                        continue;
-                    }
-                    if let Ok(content) = std::fs::read_to_string(&skill_md) {
-                        let mut name = dir_name.clone();
-                        let mut desc = String::new();
-                        let lines: Vec<&str> = content.lines().take(30).collect();
-                        for line in lines {
-                            let trimmed = line.trim();
-                            if let Some(rest) = trimmed.strip_prefix("name:") {
-                                name = rest.trim().to_string();
-                            } else if let Some(rest) = trimmed.strip_prefix("description:") {
-                                desc = rest.trim().to_string();
-                            }
-                        }
-                        if desc.is_empty() {
-                            desc = format!("Skill: {}", name);
-                        }
-                        discovered.push((name, desc, skill_md));
-                    }
-                }
-            }
-        }
-    }
-
-    if discovered.is_empty() {
-        return String::new();
-    }
-
-    let mut out = String::from(
-        "<skills>\nYou have access to specialized skills in this workspace. When crafting videos, motion graphics, or code, you may read these skill instructions and design references:\n",
-    );
-    for (name, desc, path) in discovered {
-        out.push_str(&format!(
-            "- {}: {} (Path: {})\n",
-            name,
-            desc,
-            path.display()
-        ));
-    }
-    out.push_str("</skills>\n");
-    out
+    discover_workspace_skills_for_turn(workspace_dir, "")
 }
 
-/// Discovers and loads active plugin rules from `.aetheria/plugins/*/rules/*.md`.
+pub fn discover_workspace_skills_for_turn(workspace_dir: &str, prompt_text: &str) -> String {
+    let cfg = crate::provider::read_aetheria_config();
+    let caps = super::dynamic_context::DynamicContextCaps::from_config(&cfg);
+    let entries = super::dynamic_context::scan_workspace_skill_entries(workspace_dir);
+    let (rendered, kept, total, truncated) =
+        super::dynamic_context::filter_and_cap_skills(&entries, prompt_text, caps.skills_chars);
+    if truncated && total > 0 {
+        crate::paths::log_engine(
+            "context",
+            &format!(
+                "[F6_CONTEXT_CAP] block=skills kept={}/{} chars={} cap={}",
+                kept,
+                total,
+                rendered.chars().count(),
+                caps.skills_chars
+            ),
+        );
+    }
+    rendered
+}
+
+/// Discovers and loads active plugin rules from `.aetheria/plugins/*/rules/*.md` under cap.
 pub fn discover_workspace_plugin_rules(workspace_dir: &str) -> String {
-    let ws_path = Path::new(workspace_dir);
-    let plugins_dir = ws_path.join(".aetheria").join("plugins");
-    if !plugins_dir.is_dir() {
-        return String::new();
-    }
+    discover_workspace_plugin_rules_for_turn(workspace_dir, "")
+}
 
-    let mut rules_out = String::new();
-    if let Ok(entries) = std::fs::read_dir(&plugins_dir) {
-        for entry in entries.flatten() {
-            let p = entry.path();
-            if p.is_dir() {
-                let plugin_name = p.file_name().and_then(|n| n.to_str()).unwrap_or("plugin");
-                let rules_dir = p.join("rules");
-                if rules_dir.is_dir() {
-                    if let Ok(rule_files) = std::fs::read_dir(&rules_dir) {
-                        for rf in rule_files.flatten() {
-                            let rpath = rf.path();
-                            if rpath.extension().and_then(|e| e.to_str()) == Some("md") {
-                                if let Ok(rule_text) = std::fs::read_to_string(&rpath) {
-                                    rules_out.push_str(&format!(
-                                        "\n<!-- Rule from plugin: {} ({}) -->\n{}\n",
-                                        plugin_name,
-                                        rpath.file_name().and_then(|f| f.to_str()).unwrap_or(""),
-                                        rule_text.trim()
-                                    ));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+pub fn discover_workspace_plugin_rules_for_turn(workspace_dir: &str, prompt_text: &str) -> String {
+    let cfg = crate::provider::read_aetheria_config();
+    let caps = super::dynamic_context::DynamicContextCaps::from_config(&cfg);
+    let rules = super::dynamic_context::scan_workspace_plugin_rules(workspace_dir);
+    let (rendered, kept, truncated) = super::dynamic_context::filter_and_cap_plugin_rules(
+        &rules,
+        prompt_text,
+        caps.plugin_rules_chars,
+    );
+    if truncated && !rules.is_empty() {
+        crate::paths::log_engine(
+            "context",
+            &format!(
+                "[F6_CONTEXT_CAP] block=plugin_rules kept={}/{} chars={} cap={}",
+                kept,
+                rules.len(),
+                rendered.chars().count(),
+                caps.plugin_rules_chars
+            ),
+        );
     }
-
-    if rules_out.is_empty() {
-        return String::new();
-    }
-
-    format!("<plugin_rules>\n{}\n</plugin_rules>", rules_out)
+    rendered
 }
 
 const EMBEDDED_AM_API_REFERENCE: &str = include_str!("../../../../../.aetheria/reference/AM_API.md");
@@ -203,6 +128,11 @@ pub fn should_inject_am_api_reference(
 
 /// Assembles complete system prompt with environment block, living memory, knowledge base, skills, and plugin rules.
 pub fn assemble_system_prompt(workspace_dir: &str) -> String {
+    assemble_system_prompt_for_turn(workspace_dir, "")
+}
+
+/// Assembles base system prompt plus turn-filtered & budget-capped dynamic context blocks (`F6`).
+pub fn assemble_system_prompt_for_turn(workspace_dir: &str, prompt_text: &str) -> String {
     let base_prompt_template = include_str!("../prompt/default.txt");
     let now = chrono::Local::now();
     let today_date_str = now.format("%Y-%m-%d").to_string();
@@ -225,35 +155,143 @@ pub fn assemble_system_prompt(workspace_dir: &str) -> String {
         current_time_str
     );
 
-    let living_mem = crate::session::memory::get_living_memory_for_workspace(workspace_dir);
-    if !living_mem.trim().is_empty() {
-        sys_prompt.push_str("\n\n<living_memory>\n");
-        sys_prompt.push_str(living_mem.trim());
-        sys_prompt.push_str("\n</living_memory>");
+    let cfg = crate::provider::read_aetheria_config();
+    let caps = super::dynamic_context::DynamicContextCaps::from_config(&cfg);
+
+    let raw_mem = crate::session::memory::get_living_memory_for_workspace(workspace_dir);
+    let raw_mem_chars = raw_mem.trim().chars().count();
+    let (mut mem_body, mem_reduced) = super::dynamic_context::filter_and_cap_living_memory(
+        &raw_mem,
+        prompt_text,
+        caps.living_memory_chars,
+    );
+    if mem_reduced && raw_mem_chars > 0 {
+        crate::paths::log_engine(
+            "context",
+            &format!(
+                "[F6_CONTEXT_CAP] block=living_memory raw_chars={} kept_chars={} cap={}",
+                raw_mem_chars,
+                mem_body.chars().count(),
+                caps.living_memory_chars
+            ),
+        );
     }
 
     let active_kn = get_active_knowledge_for_workspace(workspace_dir);
-    if !active_kn.is_empty() {
-        sys_prompt.push_str("\n\n<knowledge_base>\n");
-        for n in active_kn.iter().take(10) {
-            let t = n.get("title").and_then(|v| v.as_str()).unwrap_or("Note");
-            let c = n.get("content").and_then(|v| v.as_str()).unwrap_or("");
-            let snippet: String = c.chars().take(4000).collect();
-            sys_prompt.push_str(&format!("--- {} ---\n{}\n", t, snippet));
+    let raw_kn_chars: usize = active_kn
+        .iter()
+        .map(|n| {
+            n.get("title").and_then(|v| v.as_str()).unwrap_or("").len()
+                + n.get("content").and_then(|v| v.as_str()).unwrap_or("").len()
+        })
+        .sum();
+    let (mut kn_body, kn_kept, kn_total, kn_reduced) =
+        super::dynamic_context::filter_and_cap_knowledge(&active_kn, prompt_text, caps.knowledge_chars);
+    if kn_reduced && kn_total > 0 {
+        crate::paths::log_engine(
+            "context",
+            &format!(
+                "[F6_CONTEXT_CAP] block=knowledge_base kept={}/{} raw_chars={} kept_chars={} cap={}",
+                kn_kept,
+                kn_total,
+                raw_kn_chars,
+                kn_body.chars().count(),
+                caps.knowledge_chars
+            ),
+        );
+    }
+
+    let skill_entries = super::dynamic_context::scan_workspace_skill_entries(workspace_dir);
+    let raw_skills_chars: usize = skill_entries
+        .iter()
+        .map(|e| e.name.len() + e.description.len() + e.path.len() + 14)
+        .sum();
+    let (mut skills_block, sk_kept, sk_total, sk_reduced) =
+        super::dynamic_context::filter_and_cap_skills(&skill_entries, prompt_text, caps.skills_chars);
+    if sk_reduced && sk_total > 0 {
+        crate::paths::log_engine(
+            "context",
+            &format!(
+                "[F6_CONTEXT_CAP] block=skills kept={}/{} raw_chars={} kept_chars={} cap={}",
+                sk_kept,
+                sk_total,
+                raw_skills_chars,
+                skills_block.chars().count(),
+                caps.skills_chars
+            ),
+        );
+    }
+
+    let rule_entries = super::dynamic_context::scan_workspace_plugin_rules(workspace_dir);
+    let raw_rules_chars: usize = rule_entries
+        .iter()
+        .map(|r| r.plugin_name.len() + r.rule_name.len() + r.content.len() + 16)
+        .sum();
+    let (mut rules_block, rl_kept, rl_reduced) = super::dynamic_context::filter_and_cap_plugin_rules(
+        &rule_entries,
+        prompt_text,
+        caps.plugin_rules_chars,
+    );
+    if rl_reduced && !rule_entries.is_empty() {
+        crate::paths::log_engine(
+            "context",
+            &format!(
+                "[F6_CONTEXT_CAP] block=plugin_rules kept={}/{} raw_chars={} kept_chars={} cap={}",
+                rl_kept,
+                rule_entries.len(),
+                raw_rules_chars,
+                rules_block.chars().count(),
+                caps.plugin_rules_chars
+            ),
+        );
+    }
+
+    let mut mem_block = if mem_body.trim().is_empty() {
+        String::new()
+    } else {
+        format!("<living_memory>\n{}\n</living_memory>", mem_body.trim())
+    };
+    let mut kn_block = if kn_body.trim().is_empty() {
+        String::new()
+    } else {
+        format!("<knowledge_base>\n{}\n</knowledge_base>", kn_body.trim())
+    };
+    mem_body.clear();
+    kn_body.clear();
+
+    let global_trimmed = super::dynamic_context::apply_global_dynamic_budget(
+        &mut mem_block,
+        &mut kn_block,
+        &mut skills_block,
+        &mut rules_block,
+        caps.total_dynamic_chars,
+    );
+    let final_dyn_chars = mem_block.chars().count()
+        + kn_block.chars().count()
+        + skills_block.chars().count()
+        + rules_block.chars().count();
+    let raw_dyn_total = raw_mem_chars + raw_kn_chars + raw_skills_chars + raw_rules_chars;
+    if raw_dyn_total > 0 || final_dyn_chars > 0 {
+        crate::paths::log_engine(
+            "context",
+            &format!(
+                "[F6_DYNAMIC_CONTEXT] raw_chars={} final_chars={} mem={} kn={} skills={} rules={} global_trimmed={}",
+                raw_dyn_total,
+                final_dyn_chars,
+                mem_block.chars().count(),
+                kn_block.chars().count(),
+                skills_block.chars().count(),
+                rules_block.chars().count(),
+                global_trimmed,
+            ),
+        );
+    }
+
+    for block in [&mem_block, &kn_block, &skills_block, &rules_block] {
+        if !block.is_empty() {
+            sys_prompt.push_str("\n\n");
+            sys_prompt.push_str(block);
         }
-        sys_prompt.push_str("</knowledge_base>");
-    }
-
-    let ws_skills = discover_workspace_skills(workspace_dir);
-    if !ws_skills.is_empty() {
-        sys_prompt.push_str("\n\n");
-        sys_prompt.push_str(&ws_skills);
-    }
-
-    let plugin_rules = discover_workspace_plugin_rules(workspace_dir);
-    if !plugin_rules.is_empty() {
-        sys_prompt.push_str("\n\n");
-        sys_prompt.push_str(&plugin_rules);
     }
 
     if let Some(ms_block) =
