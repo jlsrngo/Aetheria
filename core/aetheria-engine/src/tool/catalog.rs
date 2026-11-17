@@ -6,7 +6,7 @@
 use serde_json::{json, Value};
 
 use super::{
-    apply_patch, bash, codemode, edit, fetch_web_image, film_scaffold, glob, grep, lsp,
+    apply_patch, bash, codemode, edit, fetch_web_image, film_audio, film_scaffold, glob, grep, lsp,
     preview_film, question, read, ref_extractor, render, sfx, skill_manager, snapshot, storyboard,
     tasks, todo, voicebox, webfetch, websearch, write,
 };
@@ -61,6 +61,7 @@ pub fn should_attach_document_tools(prompt_text: &str, _history: &[Value]) -> bo
 
 pub fn build_tool_definitions() -> Vec<Value> {
     let mut tools = vec![
+        film_audio::film_audio_tool_definition(),
         film_scaffold::film_scaffold_tool_definition(),
         storyboard::produce_video_tool_definition(),
         render::render_video_tool_definition(),

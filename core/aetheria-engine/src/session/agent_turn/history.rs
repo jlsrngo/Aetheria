@@ -6,7 +6,7 @@ fn normalize_tool_failure_buckets(name: &str, input: &Value) -> Vec<(String, Str
     let lower = name.trim().to_ascii_lowercase();
     if matches!(
         lower.as_str(),
-        "edit" | "write" | "apply_patch" | "film_scaffold" | "codemode"
+        "edit" | "write" | "apply_patch" | "film_scaffold" | "film_audio" | "codemode"
     ) {
         return crate::session::doom_loop::extract_tool_target_keys(&lower, input)
             .into_iter()
@@ -32,7 +32,7 @@ fn partner_resolved_buckets(tool_lower: &str, bucket: &(String, String)) -> Vec<
             && (bucket.1 == "index.html" || bucket.1.ends_with("/index.html"))
         {
             extras.push(("mutate".to_string(), "__workspace__".to_string()));
-        } else if matches!(tool_lower, "film_scaffold" | "codemode")
+        } else if matches!(tool_lower, "film_scaffold" | "film_audio" | "codemode")
             && bucket.1 == "__workspace__"
         {
             extras.push(("mutate".to_string(), "index.html".to_string()));

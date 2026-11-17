@@ -22,6 +22,7 @@ pub fn canonicalize_tool_name(raw_name: &str) -> &str {
         | "run_subagent" | "subagent" => "task",
         "produce_video" | "storyboard_video" | "build_storyboard_video" => "produce_video",
         "film_scaffold" | "scaffold_film" | "init_film" => "film_scaffold",
+        "film_audio" | "audio_film" | "generate_film_audio" => "film_audio",
         "render_video" | "remotion_render" | "export_video" | "render_nexus_video" => "render_video",
         "voicebox_speak" | "voicebox" | "generate_speech" | "tts" => "voicebox_speak",
         "generate_smart_sfx" | "smart_sfx" | "sfx_cues" | "sfx" => "generate_smart_sfx",

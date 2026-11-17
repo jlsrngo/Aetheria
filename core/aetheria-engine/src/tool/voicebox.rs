@@ -181,7 +181,9 @@ pub async fn execute_voicebox(workspace_dir: &str, arguments: &Value) -> Value {
         .arg("--out")
         .arg(&target_out)
         .arg("--lang")
-        .arg(lang);
+        .arg(lang)
+        .arg("--workspace")
+        .arg(&ws);
 
     if let Some(spoken) = arguments.get("spokenText").or_else(|| arguments.get("spoken_text")).and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
         cmd.arg("--spoken-text").arg(spoken);

@@ -8,6 +8,7 @@ pub mod codemode;
 pub mod edit;
 pub mod edit_matchers;
 pub mod fetch_web_image;
+pub mod film_audio;
 pub mod film_feedback;
 pub mod film_scaffold;
 pub mod glob;
@@ -146,7 +147,7 @@ pub async fn execute_tool_call(
         });
     }
     let timeout_secs = match canonical {
-        "render_video" | "produce_video" | "task" | "question" => 600,
+        "render_video" | "produce_video" | "film_audio" | "task" | "question" => 600,
         _ => 180,
     };
 
@@ -212,6 +213,7 @@ async fn execute_tool_call_inner(
     workspace_dir: &str,
 ) -> Value {
     match name {
+        "film_audio" => film_audio::execute_film_audio(session_id, workspace_dir, arguments).await,
         "film_scaffold" | "scaffold_film" | "init_film" => {
             film_scaffold::execute_film_scaffold(session_id, workspace_dir, arguments)
         }

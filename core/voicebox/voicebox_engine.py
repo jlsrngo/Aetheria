@@ -134,14 +134,22 @@ def normalize_year_to_indonesian_words(year: int) -> str:
     return indonesian_number_to_words(year)
 
 
-_CACHED_PRONUNCIATION_LEXICON: Optional[Dict[str, str]] = None
+_CACHED_PRONUNCIATION_LEXICON: Dict[tuple[str, str], Dict[str, str]] = {}
 
 
-def load_pronunciation_lexicon(custom_path: Optional[str] = None) -> Dict[str, str]:
-    """Loads and merges global and workspace custom pronunciation lexicons."""
-    global _CACHED_PRONUNCIATION_LEXICON
-    if _CACHED_PRONUNCIATION_LEXICON is not None and not custom_path:
-        return _CACHED_PRONUNCIATION_LEXICON
+def load_pronunciation_lexicon(
+    custom_path: Optional[str] = None,
+    workspace_dir: Optional[str] = None,
+) -> Dict[str, str]:
+    """
+    Loads and merges the built-in base pronunciation lexicon with active project/workspace
+    custom lexicons (strictly scoped to `workspace_dir` / `custom_path`, never repo `workspace/`).
+    """
+    ws_eff = (workspace_dir or os.environ.get("VOICEBOX_WORKSPACE") or "").strip()
+    custom_eff = (custom_path or "").strip()
+    cache_key = (ws_eff, custom_eff)
+    if cache_key in _CACHED_PRONUNCIATION_LEXICON:
+        return _CACHED_PRONUNCIATION_LEXICON[cache_key]
 
     lexicon: Dict[str, str] = {}
     base_lex_path = SCRIPT_DIR / "lexicon" / "pronunciation_lexicon.json"
@@ -154,31 +162,42 @@ def load_pronunciation_lexicon(custom_path: Optional[str] = None) -> Dict[str, s
         except Exception as e:
             print(f"[voicebox] Warning: Failed to load base lexicon: {e}")
 
-    # Check workspace-level custom lexicon
-    ws_lex_path = SCRIPT_DIR.parent.parent / "workspace" / "pronunciation_lexicon.json"
-    if ws_lex_path.is_file():
-        try:
-            with open(ws_lex_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                terms = data.get("terms", data) if isinstance(data, dict) else {}
-                lexicon.update(terms)
-        except Exception as e:
-            print(f"[voicebox] Warning: Failed to load workspace lexicon: {e}")
+    # Load isolated active workspace / project custom lexicons only (per AGENTS.md §4)
+    if ws_eff:
+        ws_root = pathlib.Path(ws_eff)
+        for ws_lex_path in (
+            ws_root / ".aetheria" / "pronunciation_lexicon.json",
+            ws_root / "pronunciation_lexicon.json",
+        ):
+            if ws_lex_path.is_file():
+                try:
+                    with open(ws_lex_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        terms = data.get("terms", data) if isinstance(data, dict) else {}
+                        if isinstance(terms, dict):
+                            lexicon.update(terms)
+                except Exception as e:
+                    print(f"[voicebox] Warning: Failed to load workspace lexicon {ws_lex_path}: {e}")
 
-    if custom_path and pathlib.Path(custom_path).is_file():
+    if custom_eff and pathlib.Path(custom_eff).is_file():
         try:
-            with open(custom_path, "r", encoding="utf-8") as f:
+            with open(custom_eff, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 terms = data.get("terms", data) if isinstance(data, dict) else {}
-                lexicon.update(terms)
+                if isinstance(terms, dict):
+                    lexicon.update(terms)
         except Exception as e:
             print(f"[voicebox] Warning: Failed to load custom lexicon: {e}")
 
-    _CACHED_PRONUNCIATION_LEXICON = lexicon
+    _CACHED_PRONUNCIATION_LEXICON[cache_key] = lexicon
     return lexicon
 
 
-def normalize_indonesian_speech_text(text: str, custom_lexicon: Optional[Dict[str, str]] = None) -> str:
+def normalize_indonesian_speech_text(
+    text: str,
+    custom_lexicon: Optional[Dict[str, str]] = None,
+    workspace_dir: Optional[str] = None,
+) -> str:
     """
     Comprehensive Indonesian TTS phonetic & prosody normalizer:
     1. Strips non-spoken elements (#hashtags, markdown symbols, URLs).
@@ -198,9 +217,9 @@ def normalize_indonesian_speech_text(text: str, custom_lexicon: Optional[Dict[st
     res = re.sub(r'[*`~_]+', '', res)
 
     # 2. Apply Pronunciation Lexicon (longest match first)
-    lex = load_pronunciation_lexicon()
+    lex = dict(load_pronunciation_lexicon(workspace_dir=workspace_dir))
     if custom_lexicon:
-        lex = {**lex, **custom_lexicon}
+        lex.update(custom_lexicon)
 
     if lex:
         sorted_terms = sorted(lex.keys(), key=len, reverse=True)
@@ -640,42 +659,47 @@ def preprocess_reference_audio(
         return audio_path
 
 
-def trim_tts_output(
+def trim_tts_output_with_map(
     audio_data: np.ndarray,
     sample_rate: int,
     top_db: float = 42.0,
     max_internal_silence_ms: int = 380,
-) -> np.ndarray:
+) -> tuple[np.ndarray, List[tuple[float, float, float, float]]]:
     """
     Trims leading/trailing silence and compacts unnatural internal pauses (>380ms)
-    in synthesized TTS audio (adapted from jamiepine/voicebox `trim_tts_output`).
-    Applies a 15ms cosine crossfade whenever an internal silence gap is shortened
-    so breath transitions and vowel tails never sound choked or held back ("ketahan").
+    while returning piecewise time segments `(orig_start, orig_end, out_start, out_end)`
+    so engine word boundaries can be remapped onto the final waveform without drift.
     """
-    if len(audio_data) < sample_rate * 0.15:
-        return audio_data
+    sr = max(1, int(sample_rate))
+    raw_len = len(audio_data)
+    if raw_len < sr * 0.15:
+        dur = raw_len / float(sr)
+        return audio_data, [(0.0, dur, 0.0, dur)] if dur > 0 else []
 
     data = audio_data.astype(np.float32)
     if data.ndim > 1:
         data = data.flatten()
 
-    win = max(1, int(sample_rate * 0.02))  # 20ms frame
+    win = max(1, int(sr * 0.02))  # 20ms frame
     n_frames = len(data) // win
     if n_frames < 5:
-        return data
+        dur = len(data) / float(sr)
+        return data, [(0.0, dur, 0.0, dur)] if dur > 0 else []
 
     frames = data[: n_frames * win].reshape(n_frames, win)
     rms = np.sqrt(np.mean(frames * frames, axis=1))
     peak_rms = float(np.max(rms))
     if peak_rms < 1e-4:
-        return data
+        dur = len(data) / float(sr)
+        return data, [(0.0, dur, 0.0, dur)] if dur > 0 else []
 
     thresh = max(0.0015, peak_rms * (10.0 ** (-top_db / 20.0)))
     is_voiced = rms >= thresh
 
     voiced_indices = np.where(is_voiced)[0]
     if len(voiced_indices) == 0:
-        return data
+        dur = len(data) / float(sr)
+        return data, [(0.0, dur, 0.0, dur)] if dur > 0 else []
 
     # 1. Trim leading and trailing silence with 40ms lead and 140ms trailing tail margin
     first_f = max(0, int(voiced_indices[0]) - 2)
@@ -684,12 +708,31 @@ def trim_tts_output(
     # 2. Compact internal silence gaps exceeding max_internal_silence_ms with smooth fade
     max_silent_frames = max(4, int(max_internal_silence_ms / 20))
     kept_frames: List[np.ndarray] = []
+    segments: List[List[float]] = []
+    frame_sec = win / float(sr)
     silent_run = 0
+
+    def record_kept_frame(in_idx: int, out_idx: int) -> None:
+        in0 = in_idx * frame_sec
+        in1 = (in_idx + 1) * frame_sec
+        out0 = out_idx * frame_sec
+        out1 = (out_idx + 1) * frame_sec
+        if (
+            segments
+            and abs(segments[-1][1] - in0) < 1e-9
+            and abs(segments[-1][3] - out0) < 1e-9
+        ):
+            segments[-1][1] = in1
+            segments[-1][3] = out1
+        else:
+            segments.append([in0, in1, out0, out1])
 
     for idx in range(first_f, last_f):
         if is_voiced[idx]:
             silent_run = 0
+            out_idx = len(kept_frames)
             kept_frames.append(frames[idx].copy())
+            record_kept_frame(idx, out_idx)
         else:
             silent_run += 1
             if silent_run <= max_silent_frames:
@@ -698,12 +741,133 @@ def trim_tts_output(
                     # Gentle fade-out on the last kept silent frame so cut is imperceptible
                     fade = np.linspace(1.0, 0.15, len(frame_copy), dtype=np.float32)
                     frame_copy *= fade
+                out_idx = len(kept_frames)
                 kept_frames.append(frame_copy)
+                record_kept_frame(idx, out_idx)
 
     if not kept_frames:
-        return data
+        dur = len(data) / float(sr)
+        return data, [(0.0, dur, 0.0, dur)] if dur > 0 else []
 
-    return np.concatenate(kept_frames).astype(np.float32)
+    out_audio = np.concatenate(kept_frames).astype(np.float32)
+    return out_audio, [(s[0], s[1], s[2], s[3]) for s in segments]
+
+
+def trim_tts_output(
+    audio_data: np.ndarray,
+    sample_rate: int,
+    top_db: float = 42.0,
+    max_internal_silence_ms: int = 380,
+) -> np.ndarray:
+    """Backward-compatible wrapper around `trim_tts_output_with_map`."""
+    trimmed, _ = trim_tts_output_with_map(
+        audio_data,
+        sample_rate,
+        top_db=top_db,
+        max_internal_silence_ms=max_internal_silence_ms,
+    )
+    return trimmed
+
+
+def sanitize_voice_audio_with_map(
+    audio_data: np.ndarray,
+    sample_rate: int,
+) -> tuple[np.ndarray, List[tuple[float, float, float, float]]]:
+    """
+    Sanitizes voiceover audio and returns `(sanitized_audio, time_map)` where `time_map`
+    maps `(orig_start, orig_end, final_start, final_end)` across transient cuts,
+    internal silence compaction, and 35ms lead-in padding.
+    """
+    sr = max(1, int(sample_rate))
+    if len(audio_data) < sr * 0.1:
+        dur = len(audio_data) / float(sr)
+        return audio_data, [(0.0, dur, 0.0, dur)] if dur > 0 else []
+
+    data = audio_data.astype(np.float32)
+    if data.ndim > 1:
+        data = data.flatten()
+
+    # Check for pre-speech transient bursts (e.g. 10-100ms noise burst followed by quiet before main speech)
+    cut_sec = 0.0
+    step = int(sr * 0.02)
+    if len(data) >= step * 10:
+        first_rms = [np.sqrt(np.mean(data[i*step:(i+1)*step]**2)) for i in range(8)]
+        # If chunk 1-3 has sudden spike followed by a drop (<0.02) before another rise, trim the spike
+        if max(first_rms[1:4]) > 0.1 and min(first_rms[4:7]) < 0.02 and max(first_rms[6:]) > 0.1:
+            valley_idx = 4 + int(np.argmin(first_rms[4:7]))
+            cut_point = valley_idx * step
+            cut_sec = cut_point / float(sr)
+            data = data[cut_point:]
+
+    # Compact dead-air silence & trim leading/trailing silence (TikTok snappy pacing)
+    data, trim_segs = trim_tts_output_with_map(data, sr, top_db=42.0, max_internal_silence_ms=380)
+
+    # Smooth 25ms cosine fade in
+    fade_in_len = min(int(sr * 0.025), len(data))
+    fade_in = 0.5 * (1.0 - np.cos(np.linspace(0.0, np.pi, fade_in_len)))
+    data[:fade_in_len] *= fade_in
+
+    # Smooth 25ms cosine fade out
+    fade_out_len = min(int(sr * 0.025), len(data))
+    fade_out = 0.5 * (1.0 + np.cos(np.linspace(0.0, np.pi, fade_out_len)))
+    data[-fade_out_len:] *= fade_out
+
+    # 35ms gentle lead-in and 60ms tail breath pad
+    pad_in = np.zeros(int(sr * 0.035), dtype=np.float32)
+    pad_out = np.zeros(int(sr * 0.06), dtype=np.float32)
+    pad_in_sec = len(pad_in) / float(sr)
+    final_map = [
+        (in0 + cut_sec, in1 + cut_sec, out0 + pad_in_sec, out1 + pad_in_sec)
+        for (in0, in1, out0, out1) in trim_segs
+    ]
+    return np.concatenate([pad_in, data, pad_out]), final_map
+
+
+def map_timestamp_via_segments(
+    t_orig: float,
+    segments: List[tuple[float, float, float, float]],
+    final_duration: float,
+) -> float:
+    """Projects a raw pre-sanitization timestamp onto the compacted final WAV timeline."""
+    if not segments:
+        return max(0.0, min(final_duration, float(t_orig)))
+    t = float(t_orig)
+    if t <= segments[0][0]:
+        return max(0.0, min(final_duration, segments[0][2]))
+    for idx, (in0, in1, out0, out1) in enumerate(segments):
+        if t <= in1:
+            if t >= in0:
+                mapped = out0 + (t - in0)
+            else:
+                # Fell inside a dropped internal pause gap between seg[idx-1] and seg[idx]
+                mapped = out0
+            return max(0.0, min(final_duration, mapped))
+        if idx + 1 < len(segments) and t < segments[idx + 1][0]:
+            return max(0.0, min(final_duration, segments[idx + 1][2]))
+    return max(0.0, min(final_duration, segments[-1][3]))
+
+
+def remap_word_timings(
+    words: List[Dict[str, Any]],
+    segments: List[tuple[float, float, float, float]],
+    final_duration: float,
+) -> List[Dict[str, Any]]:
+    """Remaps raw engine word boundaries (`WordBoundary`) using the exact sanitization time map."""
+    remapped: List[Dict[str, Any]] = []
+    for w in words:
+        raw_start = float(w.get("start", 0.0))
+        raw_end = float(w.get("end", raw_start + float(w.get("duration", 0.08))))
+        s = map_timestamp_via_segments(raw_start, segments, final_duration)
+        e = map_timestamp_via_segments(raw_end, segments, final_duration)
+        if e <= s:
+            e = min(final_duration, s + 0.04)
+            s = min(s, max(0.0, e - 0.04))
+        entry = dict(w)
+        entry["start"] = round(s, 3)
+        entry["end"] = round(e, 3)
+        entry["duration"] = round(max(0.0, e - s), 3)
+        remapped.append(entry)
+    return remapped
 
 
 def sanitize_voice_audio(audio_data: np.ndarray, sample_rate: int) -> np.ndarray:
@@ -712,40 +876,8 @@ def sanitize_voice_audio(audio_data: np.ndarray, sample_rate: int) -> np.ndarray
     compacting dead-air pauses via `trim_tts_output`, padding 35ms of natural breath
     silence, and applying smooth 25ms cosine fade-in/fade-out so there is zero click.
     """
-    if len(audio_data) < sample_rate * 0.1:
-        return audio_data
-
-    data = audio_data.astype(np.float32)
-    if data.ndim > 1:
-        data = data.flatten()
-
-    # Check for pre-speech transient bursts (e.g. 10-100ms noise burst followed by quiet before main speech)
-    step = int(sample_rate * 0.02)
-    if len(data) >= step * 10:
-        first_rms = [np.sqrt(np.mean(data[i*step:(i+1)*step]**2)) for i in range(8)]
-        # If chunk 1-3 has sudden spike followed by a drop (<0.02) before another rise, trim the spike
-        if max(first_rms[1:4]) > 0.1 and min(first_rms[4:7]) < 0.02 and max(first_rms[6:]) > 0.1:
-            valley_idx = 4 + int(np.argmin(first_rms[4:7]))
-            cut_point = valley_idx * step
-            data = data[cut_point:]
-
-    # Compact dead-air silence & trim leading/trailing silence (TikTok snappy pacing)
-    data = trim_tts_output(data, sample_rate, top_db=42.0, max_internal_silence_ms=380)
-
-    # Smooth 25ms cosine fade in
-    fade_in_len = min(int(sample_rate * 0.025), len(data))
-    fade_in = 0.5 * (1.0 - np.cos(np.linspace(0.0, np.pi, fade_in_len)))
-    data[:fade_in_len] *= fade_in
-
-    # Smooth 25ms cosine fade out
-    fade_out_len = min(int(sample_rate * 0.025), len(data))
-    fade_out = 0.5 * (1.0 + np.cos(np.linspace(0.0, np.pi, fade_out_len)))
-    data[-fade_out_len:] *= fade_out
-
-    # 35ms gentle lead-in and 60ms tail breath pad
-    pad_in = np.zeros(int(sample_rate * 0.035), dtype=np.float32)
-    pad_out = np.zeros(int(sample_rate * 0.06), dtype=np.float32)
-    return np.concatenate([pad_in, data, pad_out])
+    out, _ = sanitize_voice_audio_with_map(audio_data, sample_rate)
+    return out
 
 
 
@@ -1248,6 +1380,7 @@ def generate_speech(
     clone_ref: Optional[str] = None,
     reset_voice_lock: bool = False,
     style: Optional[str] = None,
+    workspace_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Unified entry point for voice generation with Project Voice Lock & Selectable Preset Styles.
@@ -1308,8 +1441,8 @@ def generate_speech(
 
     # Normalize Indonesian numbers & abbreviations so '21' is spoken as 'dua puluh satu', never 'twenty one'
     if lang.lower() == "id" or (voice and "id-ID" in voice) or preset_key == "aetheria":
-        custom_lex = load_pronunciation_lexicon(lexicon_path) if lexicon_path else None
-        text = normalize_indonesian_speech_text(spoken_candidate, custom_lexicon=custom_lex)
+        custom_lex = load_pronunciation_lexicon(lexicon_path, workspace_dir=workspace_dir)
+        text = normalize_indonesian_speech_text(spoken_candidate, custom_lexicon=custom_lex, workspace_dir=workspace_dir)
     else:
         text = spoken_candidate
 
@@ -1449,7 +1582,7 @@ def generate_speech(
             used_engine = "kokoro"
 
     # Sanitize voiceover audio (trim pre-speech transient spikes, compact dead-air pauses, cosine fade-in/out)
-    audio_data = sanitize_voice_audio(audio_data, sample_rate)
+    audio_data, time_map = sanitize_voice_audio_with_map(audio_data, sample_rate)
 
     # Apply Voicebox studio DSP mastering (use gentle transparent compressor for cloned voices so pitch peaks aren't squashed)
     if apply_dsp:
@@ -1463,9 +1596,12 @@ def generate_speech(
     sf.write(str(out_file), mastered_audio, sample_rate)
     duration_sec = len(mastered_audio) / sample_rate
 
-    # Re-align word timings against the final compacted & mastered waveform if not provided by Edge WordBoundary
+    # Re-align word timings against the final compacted & mastered waveform if not provided by Edge WordBoundary;
+    # for Edge-Neural WordBoundary, remap timestamps via exact sanitization cut/compaction segments.
     if used_engine in ("voxcpm2", "kokoro") or not words:
         words = align_words_to_audio_energy(visual_text, mastered_audio, sample_rate)
+    elif used_engine == "edge-neural":
+        words = remap_word_timings(words, time_map, duration_sec)
 
     # Write word alignment for Remotion kinetic subtitles
     with open(words_json_path, "w", encoding="utf-8") as f:
@@ -1577,6 +1713,7 @@ if __name__ == "__main__":
     parser.add_argument("--text", type=str, help="Text to speak")
     parser.add_argument("--spoken-text", type=str, default=None, help="Explicit phonetic spoken text overrides visual text for TTS synthesis")
     parser.add_argument("--lexicon", type=str, default=None, help="Path to custom pronunciation lexicon JSON")
+    parser.add_argument("--workspace", type=str, default=None, help="Isolated project/workspace root for custom pronunciation lexicon")
     parser.add_argument("--out", type=str, default="output/voicebox_test.wav", help="Output WAV path")
     parser.add_argument("--voice", type=str, default=None, help="Voice name (e.g. 'aetheria', 'aetheria_en', or 'aetheria:energetic')")
     parser.add_argument("--style", type=str, default=None, help="Preset delivery style: default, energetic, mystery, casual, serious")
@@ -1613,6 +1750,7 @@ if __name__ == "__main__":
             voice_design=args.voice_design,
             clone_ref=args.clone_ref,
             reset_voice_lock=args.reset_voice_lock,
+            workspace_dir=args.workspace,
         )
         print(json.dumps(res, indent=2))
     else:

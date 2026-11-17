@@ -303,8 +303,8 @@ fn resolve_dynamic_style_or_skill_command_inner(
                             } else if has_custom_stage_kit {
                                 format!(
                                     "MANDATORY RULES FOR THIS GENERATION:\n\
-                                    1. Coordinate via the 3-Track Subagent Pipeline: delegate voiceover/SFX synthesis to `task(subagent_type: \"audio-director\")` and delegate modular per-scene scripts (`{project_rel_prefix}script/scene1.js`..`sceneN.js`) + custom stage `{project_rel_prefix}index.html` (`manageIndexHtml: false`) to `task(subagent_type: \"motion-designer\")`.\n\
-                                    2. Pass the active skill path (`{path_display}`), target project subfolder (`{project_rel_prefix}`), and `examples/` kit instructions directly in your prompt to `motion-designer` and `audio-director`. Preserve the skill's dual-canvas Three.js + `ClayKit` (`#stage-webgl` with `preserveDrawingBuffer: true` + `#stage-hud`) and Neobrutalism `AM.drawSubtitles` architecture rather than falling back to plain 2D Canvas.\n\
+                                    1. Generate narrated voiceover/SFX directly via `film_audio` from the coordinator (or optional `task(subagent_type: \"audio-director\")`) and delegate modular per-scene scripts (`{project_rel_prefix}script/scene1.js`..`sceneN.js`) + custom stage `{project_rel_prefix}index.html` (`manageIndexHtml: false`) to `task(subagent_type: \"motion-designer\")`.\n\
+                                    2. Pass the active skill path (`{path_display}`), target project subfolder (`{project_rel_prefix}`), and `examples/` kit instructions directly in your prompt to `motion-designer`. Preserve the skill's dual-canvas Three.js + `ClayKit` (`#stage-webgl` with `preserveDrawingBuffer: true` + `#stage-hud`) and Neobrutalism `AM.drawSubtitles` architecture rather than falling back to plain 2D Canvas.\n\
                                     3. If `script/*-kit.js` (e.g. `clay-kit.js`) is already seeded in `{project_rel_prefix}script/`, DO NOT overwrite it — load it alongside `/script/three.min.js` and `/script/aetheria-motion.js`.\n\
                                     4. Strictly apply the skill's tokens, camera movement rules, and motion curves (`AM.spring`, `AM.anticipation`, `AM.stagger`).",
                                     path_display = path.display()
@@ -312,9 +312,9 @@ fn resolve_dynamic_style_or_skill_command_inner(
                             } else {
                                 format!(
                                     "MANDATORY RULES FOR THIS GENERATION:\n\
-                                    1. Coordinate via the 3-Track Subagent Pipeline: delegate voiceover/SFX synthesis to `task(subagent_type: \"audio-director\")` and delegate modular per-scene scripts (`{project_rel_prefix}script/scene1.js`..`sceneN.js`) to `task(subagent_type: \"motion-designer\")`.\n\
+                                    1. Generate narrated voiceover/SFX directly via `film_audio` from the coordinator (or optional `task(subagent_type: \"audio-director\")`) so durations derive cleanly from WAV, and delegate modular per-scene scripts (`{project_rel_prefix}script/scene1.js`..`sceneN.js`) to `task(subagent_type: \"motion-designer\")`.\n\
                                     2. Call `film_scaffold` FIRST to generate `{project_rel_prefix}film.json`, managed `{project_rel_prefix}index.html`, and `{project_rel_prefix}script/scene1.js`..`sceneN.js` stubs — do NOT hand-write `index.html`.\n\
-                                    3. Pass the active skill path (`{path_display}`) and target project subfolder (`{project_rel_prefix}`) directly in your prompt to `motion-designer` and `audio-director`.\n\
+                                    3. Pass the active skill path (`{path_display}`) and target project subfolder (`{project_rel_prefix}`) directly in your prompt to `motion-designer`.\n\
                                     4. Follow the skill's design tokens, palette, typography, motion curves (`AM.spring`, `AM.anticipation`, `AM.stagger`), and signature Do's & Don'ts.",
                                     path_display = path.display()
                                 )

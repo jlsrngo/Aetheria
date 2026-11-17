@@ -81,7 +81,7 @@ pub(crate) fn extract_tool_target_keys(tool_name: &str, args_val: &Value) -> Vec
         }
     }
 
-    if matches!(t_norm.as_str(), "film_scaffold" | "codemode") {
+    if matches!(t_norm.as_str(), "film_scaffold" | "film_audio" | "codemode") {
         return vec!["__workspace__".to_string()];
     }
 
@@ -264,8 +264,10 @@ impl DoomLoopDetector {
         if !is_failed {
             for target_key in &target_keys {
                 self.failure_streaks.remove(&(t_norm.clone(), target_key.clone()));
-                if matches!(t_norm.as_str(), "write" | "apply_patch" | "film_scaffold" | "codemode")
-                {
+                if matches!(
+                    t_norm.as_str(),
+                    "write" | "apply_patch" | "film_scaffold" | "film_audio" | "codemode"
+                ) {
                     if !target_key.is_empty() {
                         self.failure_streaks
                             .remove(&("edit".to_string(), target_key.clone()));
@@ -291,7 +293,7 @@ impl DoomLoopDetector {
             }
             if matches!(
                 t_norm.as_str(),
-                "write" | "edit" | "apply_patch" | "codemode" | "film_scaffold"
+                "write" | "edit" | "apply_patch" | "codemode" | "film_scaffold" | "film_audio"
             ) {
                 self.call_counts.retain(|(tool, _), _| {
                     !matches!(tool.as_str(), "capture_film_preview" | "render_video")
