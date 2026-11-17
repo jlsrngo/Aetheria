@@ -23,8 +23,8 @@ pub fn build_subagent_system_prompt(subagent_type: &str, workspace_dir: &str) ->
              - You support ANY visual pipeline chosen by the active `/skill` or task brief — including 2D HTML5 Canvas/SVG (`window.AM` via `/script/aetheria-motion.js`) AND 3D WebGL / Three.js (`/script/three.min.js`, built-in offline in the engine) — driven deterministically by `window.renderAt(t)`.\n\
              - NEVER lock onto, assume, or default to any unrequested style or template (such as `01-flat-vector`, generic header badges, or headline plaques). If the delegated task provides standalone HTML/SVG/CSS animation code to clean or convert, extract ONLY the visual stage (`<svg>`/`<canvas>`, defs, layers), strip control bars/CDNs (`tailwindcss`, Google Fonts, `<input>`/`<button>`), convert CSS `@keyframes` / `requestAnimationFrame` / `Math.random()` into deterministic `window.renderAt(t)` + `AM.rand(seed)`, and set `window.__filmMeta` + `window.__ready = true`. Otherwise, if no style/skill/reference was supplied, ask the coordinator to confirm the style/skill.\n\
              - Keep scripts strictly modular under `script/` (`script/scene1.js` .. `script/sceneN.js` and optional helper modules) with entry at `index.html`; NEVER create React/Remotion folders (`src/`, `public/`, `Root.tsx`) and NEVER overwrite built-in engine runtimes `script/aetheria-motion.js` or `script/three.min.js`.\n\
-             - Read the active skill (`<skills>` -> `SKILL.md`, `tokens.json`, `examples/`) OR active video reference (`ref/extracted/ref_report.md`, `ref/extracted/style.json`) FIRST and strictly follow its aesthetic, resolution, per-scene palette, HUD choices, and subtitle options.\n\
-             - When matching a video reference (`Active Video Reference Blueprint`), replicate its measured `SCENES` timings, per-scene `bgHex`/`surfaceHex`/`textHex`/`accentHex` palette, spatial bounding boxes, and motion cadence (`AM.evalKeyframes`, `AM.spring`, `AM.pop`, `AM.drawSVGPath`, `AM.textReveal`), then call `capture_film_preview` (`compareToReference: true`) to check RGB SSIM + `comparison_strip.jpg` and iteratively refine low-scoring scenes.\n\
+             - PRECEDENCE RULE: If an Active Video Reference Blueprint (`ref/extracted/ref_report.md`, `ref/extracted/style.json`) or reference frames exist, the reference's resolution, FPS, scene timings, palette (`bgHex`/`surfaceHex`/`textHex`/`accentHex`), layout bounding boxes, and typography STRICTLY OVERRIDE any active `/skill` aesthetics/palette! Only when NO reference exists should an active `/skill` govern visual aesthetics. If a `/skill` is also active alongside a reference, use the skill solely for technical `AM`/WebGL implementation patterns.\n\
+             - When matching a video reference (`Active Video Reference Blueprint`), inspect both the attached reference keyframe images AND `ref_report.md`/`style.json`, replicate its measured `SCENES` timings, per-scene `bgHex`/`surfaceHex`/`textHex`/`accentHex` palette, spatial bounding boxes, and motion cadence (`AM.evalKeyframes`, `AM.spring`, `AM.pop`, `AM.drawSVGPath`, `AM.textReveal`), then call `capture_film_preview` (`compareToReference: true`) to check RGB SSIM + `comparison_strip.jpg` and iteratively refine low-scoring scenes.\n\
              - When the active `/skill` provides `examples/index.html` and `examples/script/*-kit.js` (such as `clay-kit.js`), preserve that dual-canvas/WebGL architecture (`#stage-webgl` with `preserveDrawingBuffer: true` + `#stage-hud`), skill subtitle config (e.g. `style: \"neobrutalism\"`), and full kit builders (auto-seeded into `script/` by the engine; inspect with `read` — NEVER shrink it into a minimal stub or fall back to plain 2D Canvas).\n\
              - If using `THREE.WebGLRenderer`, ALWAYS pass `preserveDrawingBuffer: true` so headless MP4 exports capture every WebGL frame.\n\
              - `AM.drawTopHeader`, `AM.drawHeadlinePlaque`, and dark pill `AM.drawSubtitles` are OPTIONAL — omit or customize them according to the active skill's `SKILL.md` and `tokens.json`.\n\
@@ -179,6 +179,83 @@ mod prompt_tests {
         });
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn reference_overrides_skill_and_collects_vision_images_for_child_session() {
+        let dir = std::env::temp_dir().join(format!(
+            "aetheria_subagent_ref_prec_{}",
+            crate::paths::now_ms()
+        ));
+        let frames_dir = dir.join("ref").join("extracted").join("frames");
+        std::fs::create_dir_all(&frames_dir).unwrap();
+        std::fs::write(frames_dir.join("ref_scene_01.jpg"), b"img1").unwrap();
+        std::fs::write(frames_dir.join("ref_scene_02.jpg"), b"img2").unwrap();
+        std::fs::write(
+            dir.join("ref").join("extracted").join("ref_report.md"),
+            "# Reference Report\n- Primary BG: `#0A0B10`\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("ref").join("extracted").join("style.json"),
+            serde_json::to_string(&json!({
+                "scenes": [
+                    { "index": 1, "id": "scene_1", "start": 0.0, "duration": 2.0, "keyframe": "ref/extracted/frames/ref_scene_01.jpg" },
+                    { "index": 2, "id": "scene_2", "start": 2.0, "duration": 2.0, "keyframe": "ref/extracted/frames/ref_scene_02.jpg" }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let parent_id = format!("test_parent_prec_{}", crate::paths::now_ms());
+        with_store(|store| {
+            store.messages.insert(
+                parent_id.clone(),
+                vec![json!({
+                    "info": { "role": "user" },
+                    "parts": [{ "type": "text", "text": "/mg-soft-clay-story clone video referensi" }]
+                })],
+            );
+        });
+
+        let injected = resolve_parent_skill_or_voice_directive(
+            &parent_id,
+            &dir.to_string_lossy(),
+            "motion-designer",
+        )
+        .expect("expected combined reference + skill directive");
+        let ref_pos = injected.find("Active Video Reference Blueprint").unwrap();
+        let skill_pos = injected.find("SKILL DIRECTIVES").unwrap();
+        assert!(ref_pos < skill_pos, "reference blueprint must precede skill directives");
+        assert!(injected.contains("REFERENCE OVERRIDES SKILL AESTHETICS"));
+
+        let vis = collect_reference_vision_images(&dir.to_string_lossy(), 8);
+        assert_eq!(vis.len(), 2);
+        assert_eq!(vis[0].0, "ref/extracted/frames/ref_scene_01.jpg");
+        assert!(vis[0].1.starts_with("data:image/jpeg;base64,"));
+
+        let urls: Vec<String> = vis.into_iter().map(|(_, u)| u).collect();
+        let (child_id, msgs, _) = load_or_init_child_session_with_images(
+            &parent_id,
+            None,
+            "motion-designer",
+            "Build scenes",
+            1,
+            "sys",
+            "clone",
+            &urls,
+        );
+        let content_arr = msgs[1]["content"].as_array().expect("multimodal user content array");
+        assert_eq!(content_arr.len(), 3);
+        assert_eq!(content_arr[1]["type"], "image_url");
+
+        with_store(|store| {
+            store.messages.remove(&parent_id);
+            store.messages.remove(&child_id);
+            store.sessions.remove(&child_id);
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 /// Resolves the parent session's active `/skill` or `/audio:` directive so specialized
@@ -209,11 +286,35 @@ pub fn resolve_parent_skill_or_voice_directive(
                 .join("\n");
             if combined.trim().is_empty() { None } else { Some(combined) }
         })
-    })?;
+    })
+    .unwrap_or_default();
 
     match subagent_type {
         "motion-designer" | "qa-verifier" => {
             let mut blocks = Vec::new();
+            let ref_bp =
+                crate::session::agent_turn::command_resolvers::resolve_reference_report(workspace_dir);
+            let has_ref_blueprint = ref_bp.is_some();
+            if let Some(bp) = ref_bp {
+                blocks.push(bp);
+            }
+
+            let ref_kfs = crate::studio::reference_compare::discover_reference_keyframes(
+                std::path::Path::new(workspace_dir),
+                12.0,
+            );
+            if !ref_kfs.is_empty() {
+                let kf_list: Vec<String> = ref_kfs
+                    .iter()
+                    .take(12)
+                    .map(|k| format!("- t={:.2}s -> `{}`", k.timestamp, k.rel_path))
+                    .collect();
+                blocks.push(format!(
+                    "[Extracted Reference Keyframes on Disk]:\n{}\nUse `read` on any keyframe or `.aetheria/preview/comparison_strip.jpg` to inspect pixels directly, and run `capture_film_preview` (`compareToReference: true`) to measure RGB SSIM.",
+                    kf_list.join("\n")
+                ));
+            }
+
             if let Some(style_or_proj) =
                 crate::session::agent_turn::command_resolvers::resolve_motioncraft_style_readonly(
                     workspace_dir,
@@ -225,29 +326,14 @@ pub fn resolve_parent_skill_or_voice_directive(
                     )
                 })
             {
-                blocks.push(style_or_proj);
-            }
-
-            if let Some(ref_bp) =
-                crate::session::agent_turn::command_resolvers::resolve_reference_report(workspace_dir)
-            {
-                blocks.push(ref_bp);
-            }
-
-            let ref_kfs = crate::studio::reference_compare::discover_reference_keyframes(
-                std::path::Path::new(workspace_dir),
-                10.0,
-            );
-            if !ref_kfs.is_empty() {
-                let kf_list: Vec<String> = ref_kfs
-                    .iter()
-                    .take(10)
-                    .map(|k| format!("- t={:.2}s -> `{}`", k.timestamp, k.rel_path))
-                    .collect();
-                blocks.push(format!(
-                    "[Extracted Reference Keyframes on Disk]:\n{}\nUse `capture_film_preview` (`compareToReference: true`) to score RGB SSIM & inspect `.aetheria/preview/comparison_strip.jpg`.",
-                    kf_list.join("\n")
-                ));
+                if has_ref_blueprint && style_or_proj.contains("SKILL DIRECTIVES") {
+                    blocks.push(format!(
+                        "[REFERENCE OVERRIDES SKILL AESTHETICS — The Active Video Reference Blueprint above strictly overrides this skill's default colors, aspect ratio, dark/light polarity, and scene durations. Use the skill below only for technical `AM`/WebGL architecture:]\n{}",
+                        style_or_proj
+                    ));
+                } else {
+                    blocks.push(style_or_proj);
+                }
             }
 
             if blocks.is_empty() {
@@ -309,8 +395,101 @@ pub fn get_session_depth(session_id: &str) -> usize {
     })
 }
 
-/// Loads an existing child session for continuation or creates a new isolated child session in `SESSION_STORE`.
-pub fn load_or_init_child_session(
+/// Collects temporally balanced reference keyframe `(rel_path, data_url)` pairs for subagent vision attachment.
+pub fn collect_reference_vision_images(
+    workspace_dir: &str,
+    max_frames: usize,
+) -> Vec<(String, String)> {
+    use base64::prelude::*;
+    if workspace_dir.trim().is_empty() || max_frames == 0 {
+        return Vec::new();
+    }
+    let ws = std::path::Path::new(workspace_dir);
+    let frames_dir = ws.join("ref").join("extracted").join("frames");
+    let style_path = ws.join("ref").join("extracted").join("style.json");
+
+    let mut candidate_paths = if frames_dir.is_dir() {
+        crate::tool::ref_extractor::select_extracted_vision_keyframes(
+            &frames_dir,
+            style_path.is_file().then_some(style_path.as_path()),
+            max_frames,
+        )
+    } else {
+        Vec::new()
+    };
+
+    if candidate_paths.is_empty() {
+        let ref_dir = ws.join("ref");
+        if ref_dir.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&ref_dir) {
+                let mut imgs: Vec<std::path::PathBuf> = entries
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|p| {
+                        p.is_file()
+                            && p.extension()
+                                .and_then(|e| e.to_str())
+                                .map(|e| {
+                                    matches!(
+                                        e.to_ascii_lowercase().as_str(),
+                                        "jpg" | "jpeg" | "png" | "webp"
+                                    )
+                                })
+                                .unwrap_or(false)
+                    })
+                    .collect();
+                imgs.sort();
+                candidate_paths = imgs.into_iter().take(max_frames).collect();
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    for p in candidate_paths {
+        let Ok(bytes) = std::fs::read(&p) else {
+            continue;
+        };
+        if bytes.is_empty() {
+            continue;
+        }
+        let mime = match p
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("png") => "image/png",
+            Some("webp") => "image/webp",
+            _ => "image/jpeg",
+        };
+        let rel = p
+            .strip_prefix(ws)
+            .unwrap_or(&p)
+            .to_string_lossy()
+            .replace('\\', "/");
+        out.push((
+            rel,
+            format!("data:{};base64,{}", mime, BASE64_STANDARD.encode(&bytes)),
+        ));
+    }
+    out
+}
+
+fn build_user_msg_payload(user_prompt: &str, image_urls: &[String]) -> Value {
+    if image_urls.is_empty() {
+        json!({ "role": "user", "content": user_prompt })
+    } else {
+        let mut parts = vec![json!({ "type": "text", "text": user_prompt })];
+        for url in image_urls {
+            parts.push(json!({ "type": "image_url", "image_url": { "url": url } }));
+        }
+        json!({ "role": "user", "content": parts })
+    }
+}
+
+/// Loads an existing child session for continuation or creates a new isolated child session in `SESSION_STORE`
+/// with optional initial multimodal `image_url` frames attached to the user message.
+pub fn load_or_init_child_session_with_images(
     parent_session_id: &str,
     requested_child_id: Option<&str>,
     subagent_type: &str,
@@ -318,16 +497,14 @@ pub fn load_or_init_child_session(
     child_depth: usize,
     sys_prompt: &str,
     user_prompt: &str,
+    image_urls: &[String],
 ) -> (String, Vec<Value>, bool) {
     let now = now_ms();
     with_store(|store| {
         if let Some(existing_id) = requested_child_id.filter(|s| !s.trim().is_empty()) {
             if let Some(existing_msgs) = store.messages.get_mut(existing_id) {
                 if !existing_msgs.is_empty() {
-                    existing_msgs.push(json!({
-                        "role": "user",
-                        "content": user_prompt
-                    }));
+                    existing_msgs.push(build_user_msg_payload(user_prompt, image_urls));
                     let cloned = existing_msgs.clone();
                     if let Some(sess) = store.sessions.get_mut(existing_id) {
                         sess["updatedAt"] = json!(now);
@@ -375,13 +552,35 @@ pub fn load_or_init_child_session(
 
         let initial_msgs = vec![
             json!({ "role": "system", "content": sys_prompt }),
-            json!({ "role": "user", "content": user_prompt }),
+            build_user_msg_payload(user_prompt, image_urls),
         ];
         store.messages.insert(new_id.clone(), initial_msgs.clone());
         save_store(store);
 
         (new_id, initial_msgs, false)
     })
+}
+
+/// Loads an existing child session for continuation or creates a new isolated child session in `SESSION_STORE`.
+pub fn load_or_init_child_session(
+    parent_session_id: &str,
+    requested_child_id: Option<&str>,
+    subagent_type: &str,
+    description: &str,
+    child_depth: usize,
+    sys_prompt: &str,
+    user_prompt: &str,
+) -> (String, Vec<Value>, bool) {
+    load_or_init_child_session_with_images(
+        parent_session_id,
+        requested_child_id,
+        subagent_type,
+        description,
+        child_depth,
+        sys_prompt,
+        user_prompt,
+        &[],
+    )
 }
 
 /// Saves the child session's updated messages and completion state in `SESSION_STORE`.

@@ -205,6 +205,22 @@ fn resolve_agent_configured_model(
     None
 }
 
+pub(crate) fn resolve_child_vision_capability(
+    parent_session_id: &str,
+    agent_name: &str,
+    model_override: Option<&str>,
+) -> (String, String, bool) {
+    let cfg = read_aetheria_config();
+    let (parent_provider_id, parent_model_id) = resolve_parent_model_ref(parent_session_id);
+    let (provider_id, model_id) = model_override
+        .and_then(|spec| parse_model_spec(&cfg, spec, &parent_provider_id))
+        .or_else(|| resolve_agent_configured_model(&cfg, agent_name, &parent_provider_id))
+        .unwrap_or((parent_provider_id, parent_model_id));
+    let supports_vision =
+        super::runner::model_supports_vision_from_config(Some(&cfg), &provider_id, &model_id);
+    (provider_id, model_id, supports_vision)
+}
+
 pub(crate) async fn resolve_subagent_provider_config_for_call(
     parent_session_id: &str,
     agent_name: &str,
@@ -378,6 +394,35 @@ mod tests {
             resolve_subagent_reasoning_effort(&cfg, "motion-designer", "local-cli", "kiro/auto"),
             None
         );
+    }
+
+    #[test]
+    fn resolve_child_vision_capability_respects_override_and_parent() {
+        let sid = "sess_subagent_vision_cap_test";
+        with_store(|store| {
+            store.sessions.insert(
+                sid.to_string(),
+                json!({
+                    "id": sid,
+                    "model": {
+                        "providerID": "custom",
+                        "id": "gpt-4o"
+                    }
+                }),
+            );
+        });
+        let (_p1, m1, vis1) = resolve_child_vision_capability(sid, "motion-designer", None);
+        assert_eq!(m1, "gpt-4o");
+        assert!(vis1);
+
+        let (_p2, m2, vis2) =
+            resolve_child_vision_capability(sid, "motion-designer", Some("deepseek-chat"));
+        assert_eq!(m2, "deepseek-chat");
+        assert!(!vis2);
+
+        with_store(|store| {
+            store.sessions.remove(sid);
+        });
     }
 }
 

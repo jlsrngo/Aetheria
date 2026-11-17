@@ -135,7 +135,11 @@ pub(crate) async fn execute_subagent_tool_calls(
                 aborted_reason = Some(reason);
             }
         }
-        super::vision::extract_tool_vision_images(&mut tool_result, &mut collected_vision_images);
+        super::vision::extract_tool_vision_images_with_notice(
+            &mut tool_result,
+            &mut collected_vision_images,
+            model_supports_vision,
+        );
         let is_err = !was_executed
             || tool_result.get("error").is_some()
             || tool_result.get("ok").and_then(|v| v.as_bool()) == Some(false);

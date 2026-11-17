@@ -476,6 +476,29 @@ pub(crate) fn extract_tool_vision_images(tool_out: &mut Value, collected: &mut V
     }
 }
 
+/// Variant of `extract_tool_vision_images` that leaves an explicit non-silent diagnostic
+/// inside the serialized tool output when a text-only model strips visual frames.
+pub(crate) fn extract_tool_vision_images_with_notice(
+    tool_out: &mut Value,
+    collected: &mut Vec<String>,
+    model_supports_vision: bool,
+) {
+    let before = collected.len();
+    extract_tool_vision_images(tool_out, collected);
+    let omitted = collected.len().saturating_sub(before);
+    if omitted > 0 && !model_supports_vision {
+        if let Some(obj) = tool_out.as_object_mut() {
+            obj.insert("visionOmittedCount".to_string(), serde_json::json!(omitted));
+            obj.insert(
+                "visionNotice".to_string(),
+                serde_json::json!(format!(
+                    "Active model is text-only: {omitted} image frame(s) were omitted from the vision stream. Rely strictly on structured numeric metrics (overallFidelity, ssimMean, colorMatchMean, edgeMatchMean, worstFrames, style.json, ref_report.md) and disclose transparently if direct visual inspection was incomplete."
+                )),
+            );
+        }
+    }
+}
+
 /// Appends a multimodal user inspection message containing images returned by tools (e.g. `capture_film_preview`)
 /// only when `model_supports_vision` is true.
 pub(crate) fn append_tool_vision_message(
@@ -611,6 +634,31 @@ mod tests {
         assert!(ws.join("ref/extracted/ref_report.md").is_file());
 
         let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn extract_tool_vision_images_with_notice_warns_text_only_models() {
+        let mut out_text_only = serde_json::json!({
+            "ok": true,
+            "_vision_images": ["data:image/jpeg;base64,AAAA"]
+        });
+        let mut collected = Vec::new();
+        extract_tool_vision_images_with_notice(&mut out_text_only, &mut collected, false);
+        assert_eq!(out_text_only["visionOmittedCount"], 1);
+        assert!(out_text_only["visionNotice"]
+            .as_str()
+            .unwrap()
+            .contains("text-only"));
+        assert_eq!(collected.len(), 1);
+
+        let mut out_vision = serde_json::json!({
+            "ok": true,
+            "_vision_images": ["data:image/jpeg;base64,BBBB"]
+        });
+        let mut collected2 = Vec::new();
+        extract_tool_vision_images_with_notice(&mut out_vision, &mut collected2, true);
+        assert!(out_vision.get("visionOmittedCount").is_none());
+        assert!(out_vision.get("visionNotice").is_none());
     }
 }
 

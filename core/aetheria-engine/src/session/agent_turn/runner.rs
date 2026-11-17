@@ -807,14 +807,19 @@ fn assemble_user_message_from_parts(
 ) -> Value {
     let model_supports_vision = model_supports_vision_from_config(Some(cfg), provider_id, model_id);
 
-    if !image_urls.is_empty() && !model_supports_vision && !has_auto_vision_caption {
-        context_additions.push(format!(
-            "[SYSTEM NOTICE: Active model '{model_id}' is text-only and CANNOT receive raw image attachments directly. \
-             Instead of giving up or guessing, use `codemode` to numerically inspect the saved reference image(s) in `ref/` \
-             (extract dimensions, 5 dominant hex colors, and average brightness/contrast) and report the measured palette \
-             before translating it into procedural Canvas/WebGL code. Also inform the user they can switch to a vision-capable model \
-             (e.g. Gemini, Claude, GPT-4o/5, GLM-4.6V, Kimi, Qwen-VL, or Kiro Auto) for full semantic visual inspection.]"
-        ));
+    if !image_urls.is_empty() && !model_supports_vision {
+        if has_auto_vision_caption {
+            context_additions.push(format!(
+                "[TEXT-ONLY MODEL NOTICE: Active model '{model_id}' did NOT receive raw reference image frames directly — rely only on the auto vision breakdown and extracted blueprint metadata above. Explicitly state any unverified visual/OCR details rather than guessing.]"
+            ));
+        } else {
+            context_additions.push(format!(
+                "[SYSTEM NOTICE: Active model '{model_id}' is text-only and CANNOT receive raw image attachments directly. \
+                 Instead of giving up or guessing, inspect extracted `style.json`/`ref_report.md` and use `codemode` to numerically inspect the saved reference image(s) in `ref/` \
+                 (extract dimensions, 5 dominant hex colors, and average brightness/contrast). Report measured limitations honestly if visual/OCR inspection is incomplete, and inform the user they can switch to a vision-capable model \
+                 (e.g. Gemini, Claude, GPT-4o/5, GLM-4.6V, Kimi, Qwen-VL, or Kiro Auto) for full semantic visual inspection.]"
+            ));
+        }
     }
 
     let enriched_user_text = if context_additions.is_empty() {

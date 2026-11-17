@@ -190,6 +190,7 @@ pub fn resolve_reference_report(workspace_dir: &str) -> Option<String> {
     Some(format!(
         "[Active Video Reference Blueprint (MotionClone-Grade Reference)]:\n\"\"\"\n{}\n\"\"\"\n\
         GUIDELINES WHEN PRODUCING FROM REFERENCE:\n\
+        0. STRICT REFERENCE PRECEDENCE OVER SKILLS: This Active Video Reference Blueprint STRICTLY OVERRIDES any active `/skill` aesthetic defaults (palette, background lightness/darkness, resolution, FPS, aspect ratio, layout boxes, or scene timings). Never replace the reference's measured style with a skill preset.\n\
         1. VISUAL & TEMPORAL FIDELITY: Match the extracted `SCENES` timings, measured per-scene `bgHex`/`surfaceHex`/`textHex`/`accentHex` palette, spatial layout bounding boxes, and motion cadence.\n\
         2. 3-TRACK SUBAGENT DELEGATION: Delegate voiceover/SFX synthesis to `task(subagent_type: \"audio-director\")` (with `spokenText` for foreign names/acronyms) and delegate modular scene scripts (`script/scene1.js`..`script/sceneN.js` + `index.html`) to `task(subagent_type: \"motion-designer\")`.\n\
         3. DETERMINISTIC HTML ENGINE: Drive all motion via `window.renderAt(t)` and `window.AM` (`AM.evalKeyframes`, `AM.spring`, `AM.pop`, `AM.drawSVGPath`, `AM.textReveal`). NEVER load `ref/ref_*` directly on the canvas.\n\

@@ -175,7 +175,11 @@ pub(crate) async fn execute_tool_batch(
         if tool_out.get("aborted").and_then(|v| v.as_bool()) == Some(true) {
             was_interrupted = true;
         }
-        super::vision::extract_tool_vision_images(&mut tool_out, &mut collected_vision_images);
+        super::vision::extract_tool_vision_images_with_notice(
+            &mut tool_out,
+            &mut collected_vision_images,
+            model_supports_vision,
+        );
 
         let tool_out_str =
             serde_json::to_string_pretty(&tool_out).unwrap_or_else(|_| "{}".to_string());

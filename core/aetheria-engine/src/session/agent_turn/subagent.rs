@@ -3,9 +3,9 @@
 //! Delegates store setup (`subagent_store`), config (`subagent_provider`), and tool loops (`subagent_tool_batch`).
 
 pub use super::subagent_store::{
-    build_subagent_system_prompt, build_subagent_tools, get_session_depth,
-    load_or_init_child_session, persist_child_session_state,
-    resolve_parent_skill_or_voice_directive, MAX_SUBAGENT_DEPTH,
+    build_subagent_system_prompt, build_subagent_tools, collect_reference_vision_images,
+    get_session_depth, load_or_init_child_session, load_or_init_child_session_with_images,
+    persist_child_session_state, resolve_parent_skill_or_voice_directive, MAX_SUBAGENT_DEPTH,
 };
 
 use serde_json::{json, Value};
@@ -17,8 +17,8 @@ use super::resilience::{
     SYNTHETIC_OUTPUT_LIMIT_PROMPT,
 };
 use super::subagent_provider::{
-    resolve_subagent_max_tokens, resolve_subagent_provider_config_for_call,
-    resolve_subagent_reasoning_effort,
+    resolve_child_vision_capability, resolve_subagent_max_tokens,
+    resolve_subagent_provider_config_for_call, resolve_subagent_reasoning_effort,
 };
 use super::subagent_tool_batch::execute_subagent_tool_calls;
 use crate::paths::now_ms;
@@ -155,6 +155,8 @@ pub fn execute_subagent<'a>(
             sys_prompt.push_str("\n\n");
             sys_prompt.push_str(&active_directive);
         }
+        let mut effective_prompt = prompt.to_string();
+        let mut initial_image_urls: Vec<String> = Vec::new();
         if matches!(
             subagent_type.trim().to_ascii_lowercase().as_str(),
             "motion-designer" | "qa-verifier"
@@ -165,15 +167,45 @@ pub fn execute_subagent<'a>(
                 sys_prompt.push_str("\n\n");
                 sys_prompt.push_str(&ms_override);
             }
+            let ref_vision_imgs = collect_reference_vision_images(workspace_dir, 8);
+            if !ref_vision_imgs.is_empty() {
+                let (child_pid, child_mid, child_vision_ok) = resolve_child_vision_capability(
+                    parent_session_id,
+                    subagent_type,
+                    model_override.as_deref(),
+                );
+                let frame_list = ref_vision_imgs
+                    .iter()
+                    .map(|(rel, _)| format!("`{}`", rel))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                if child_vision_ok {
+                    initial_image_urls = ref_vision_imgs.into_iter().map(|(_, url)| url).collect();
+                    effective_prompt.push_str(&format!(
+                        "\n\n[Attached Reference Keyframes ({} vision frames inline): {} — inspect these frames directly for layout, contrast, composition, and typography; call `read` on any extra frames under `ref/extracted/frames/` or `.aetheria/preview/comparison_strip.jpg` if needed.]",
+                        initial_image_urls.len(),
+                        frame_list
+                    ));
+                } else {
+                    effective_prompt.push_str(&format!(
+                        "\n\n[TEXT-ONLY SUBAGENT VISION GAP WARNING: Child model `{}/{}` is text-only, so {} extracted reference keyframes ({}) could NOT be attached visually. Rely strictly on measured `style.json`/`ref_report.md` coordinates, hex palettes, and text zones (plus `codemode` pixel/contrast analysis if needed), and explicitly report that raw visual inspection was skipped due to the text-only model.]",
+                        child_pid,
+                        child_mid,
+                        ref_vision_imgs.len(),
+                        frame_list
+                    ));
+                }
+            }
         }
-        let (child_session_id, chat_messages, is_resumed) = load_or_init_child_session(
+        let (child_session_id, chat_messages, is_resumed) = load_or_init_child_session_with_images(
             parent_session_id,
             requested_session_id,
             subagent_type,
             description,
             child_depth,
             &sys_prompt,
-            prompt,
+            &effective_prompt,
+            &initial_image_urls,
         );
 
         crate::session::coordinator::begin_session_turn(&child_session_id);
