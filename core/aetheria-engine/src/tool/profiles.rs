@@ -169,6 +169,11 @@ pub fn resolve_coordinator_profile(
     history: &[Value],
 ) -> ToolProfile {
     let lower = prompt_text.to_ascii_lowercase();
+    let explicitly_non_video = lower.contains("non-video")
+        || lower.contains("non video")
+        || lower.contains("bukan video")
+        || lower.contains("not a video");
+
     let has_slash_media = lower.contains("/mg-")
         || lower.contains("/adobe-stock")
         || lower.contains("/conspiracy-crime-board")
@@ -178,38 +183,40 @@ pub fn resolve_coordinator_profile(
         || lower.contains("/preset:")
         || lower.contains("/ref");
 
-    let has_video_keywords = [
-        "video",
-        "film",
-        "animasi",
-        "animation",
-        "motion graphics",
-        "motion design",
-        "storyboard",
-        "film_scaffold",
-        "film_audio",
-        "capture_film_preview",
-        "extract_video_reference",
-        "render_video",
-        "render mp4",
-        "ekspor mp4",
-        "render sekarang",
-        "aetheria-motion",
-        "tiktok",
-        "reels",
-        "shorts",
-        "microstock",
-        "voiceover",
-        "sulih suara",
-        "narasi",
-        "scene1",
-        "scene ",
-        "adegan",
-    ]
-    .iter()
-    .any(|k| lower.contains(k));
+    let has_video_keywords = !explicitly_non_video
+        && [
+            "video",
+            "film",
+            "animasi",
+            "animation",
+            "motion graphics",
+            "motion design",
+            "storyboard",
+            "film_scaffold",
+            "film_audio",
+            "capture_film_preview",
+            "extract_video_reference",
+            "render_video",
+            "render mp4",
+            "ekspor mp4",
+            "render sekarang",
+            "aetheria-motion",
+            "tiktok",
+            "reels",
+            "shorts",
+            "microstock",
+            "voiceover",
+            "sulih suara",
+            "narasi",
+            "scene1",
+            "scene ",
+            "adegan",
+        ]
+        .iter()
+        .any(|k| lower.contains(k));
 
-    let in_video_flow = !prompt_looks_like_general_engineering(prompt_text)
+    let in_video_flow = !explicitly_non_video
+        && !prompt_looks_like_general_engineering(prompt_text)
         && (has_slash_media
             || has_video_keywords
             || crate::studio::microstock::active_microstock_lock(workspace_dir).is_some()
@@ -365,6 +372,10 @@ mod tests {
         );
         assert_eq!(
             resolve_coordinator_profile(&ws, "Periksa error cargo test di backend", &[]),
+            ToolProfile::General
+        );
+        assert_eq!(
+            resolve_coordinator_profile(&ws, "Tugas non-video: buat file hello.txt", &[]),
             ToolProfile::General
         );
         assert_eq!(

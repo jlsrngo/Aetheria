@@ -139,14 +139,19 @@ async function sendAndWaitTurn(baseUrl, authHeader, dirQuery, sessionID, text, m
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     await new Promise((r) => setTimeout(r, 2500));
-    const msgRes = await api(baseUrl, `/api/session/${sessionID}/message?order=asc&${dirQuery}`, {
-      authHeader,
-      timeoutMs: 20_000,
-    });
+    const [msgRes, jobsRes] = await Promise.all([
+      api(baseUrl, `/api/session/${sessionID}/message?order=asc&${dirQuery}`, {
+        authHeader,
+        timeoutMs: 20_000,
+      }),
+      api(baseUrl, `/api/session/${sessionID}/jobs`, { authHeader, timeoutMs: 10_000 }).catch(() => null),
+    ]);
     if (!msgRes.ok) continue;
     const msgs = extractMessages(msgRes.json);
     const assistants = msgs.filter((m) => (m.info?.role ?? m.role) === "assistant");
-    if (assistants.length > prevCount && isTurnFinished(msgs)) {
+    const jobs = jobsRes?.json?.data ?? [];
+    const hasRunningJob = Array.isArray(jobs) && jobs.some((j) => j.status === "running");
+    if (assistants.length > prevCount && isTurnFinished(msgs) && !hasRunningJob) {
       await new Promise((r) => setTimeout(r, 800));
       return msgs;
     }
@@ -293,7 +298,7 @@ async function main() {
       videoLintValid: filmMeta?.lint?.valid === true,
       videoNoForbiddenTools,
     };
-    console.log("[F3_CHECKS]", JSON.stringify(checks, null, 2));
+    console.log("[F3_CHECKS]", JSON.stringify({ ...checks, genCalls, videoRoleCallsCount: videoRoleCalls.length }, null, 2));
     if (!Object.values(checks).every(Boolean)) {
       throw new Error(`F3 E2E failed checks: ${JSON.stringify(checks)}`);
     }
