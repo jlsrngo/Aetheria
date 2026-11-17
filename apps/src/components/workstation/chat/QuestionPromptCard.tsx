@@ -160,7 +160,7 @@ export const QuestionPromptCard = memo(function QuestionPromptCard({
 
           return (
             <button
-              key={idx}
+              key={optLabel}
               type="button"
               disabled={disabled || isSubmitting}
               onClick={() => handleSelect(optLabel)}

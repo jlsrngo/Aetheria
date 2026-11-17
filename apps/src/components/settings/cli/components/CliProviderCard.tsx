@@ -179,7 +179,7 @@ export const CliProviderCard = memo(function CliProviderCard({
     return (
       <ol className="space-y-0.5 text-[10px] text-[var(--text-muted)]">
         {steps.map((s, i) => (
-          <li key={i} className="flex gap-1.5">
+          <li key={`${s.text}-${s.href ?? ""}`} className="flex gap-1.5">
             <span className="text-[var(--text-dim)]">{i + 1}.</span>
             <span className="flex items-center gap-1 flex-wrap">
               <span>{s.text}</span>

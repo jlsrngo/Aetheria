@@ -462,7 +462,7 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
                     <div className="flex flex-wrap gap-2 mb-2.5">
                       {attachedImages.map((img, i) => (
                         <div
-                          key={i}
+                          key={`${img.url || img.name}-${i}`}
                           className="group/img relative rounded-xl overflow-hidden border border-[var(--border-strong)] bg-black/25 cursor-pointer hover:border-[var(--border-primary)] transition-all p-1"
                           onClick={() => onPreviewImage?.(img.url)}
                           title="Click to view full image"
@@ -547,7 +547,7 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
                 <div className="flex flex-wrap gap-2 mb-2.5">
                   {attachedImages.map((img, i) => (
                     <div
-                      key={i}
+                      key={`${img.url || img.name}-${i}`}
                       className="group/img relative rounded-xl overflow-hidden border border-[var(--border-strong)] bg-black/25 cursor-pointer hover:border-[var(--border-primary)] transition-all p-1"
                       onClick={() => onPreviewImage?.(img.url)}
                       title="Click to view full image"
@@ -577,7 +577,7 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
                 <div className="flex flex-wrap gap-2 mb-2.5">
                   {attachedOtherFiles.map((file, i) => (
                     <div
-                      key={i}
+                      key={`${file.name || "file"}-${i}`}
                       className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-[var(--border-strong)] bg-[var(--bg-panel)]"
                     >
                       <div className="text-[var(--text-muted)] shrink-0">

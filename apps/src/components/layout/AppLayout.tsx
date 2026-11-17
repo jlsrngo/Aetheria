@@ -1,11 +1,16 @@
 import { lazy, Suspense, useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import { cn } from "../../lib/utils";
-import { UnifiedWorkstationPage } from "../../pages/UnifiedWorkstationPage";
 import { AppHeader } from "./AppHeader";
 import { AppFooter } from "./AppFooter";
 import { useAppNetworkStatus } from "./hooks/useAppNetworkStatus";
 import { useActiveFolderSync } from "./hooks/useActiveFolderSync";
+
+const UnifiedWorkstationPage = lazy(() =>
+  import("../../pages/UnifiedWorkstationPage").then((m) => ({
+    default: m.UnifiedWorkstationPage,
+  }))
+);
 
 const StockVaultPage = lazy(() =>
   import("../../pages/StockVaultPage").then((m) => ({ default: m.StockVaultPage }))
@@ -58,7 +63,9 @@ export function AppLayout() {
             !isStudioRoute && "hidden"
           )}
         >
-          <UnifiedWorkstationPage />
+          <Suspense fallback={<div className="w-full h-full flex-1 bg-[var(--bg-app)]" />}>
+            <UnifiedWorkstationPage />
+          </Suspense>
         </div>
 
         <Suspense fallback={<div className="w-full h-full flex-1 bg-[var(--bg-app)]" />}>

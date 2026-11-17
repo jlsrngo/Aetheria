@@ -30,7 +30,7 @@ export const ChatQueuedPrompts = memo(function ChatQueuedPrompts({
         const attachmentCount = promptItem.files?.length ?? 0;
         return (
           <div
-            key={idx}
+            key={`${promptItem.text}-${attachmentCount}-${idx}`}
             className="flex items-center justify-between gap-2 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg px-2.5 py-1 text-xs text-[var(--text-primary)]"
           >
             <div className="flex items-center gap-1.5 min-w-0">

@@ -99,13 +99,27 @@ export default defineConfig({
     minify: 'esbuild',
     rollupOptions: {
       output: {
-        manualChunks: {
-          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-          'vendor-query': ['@tanstack/react-query'],
-          'vendor-icons': ['lucide-react'],
-          'vendor-xlsx': ['xlsx'],
-          'vendor-xyflow': ['@xyflow/react'],
-          'vendor-markdown': ['react-markdown'],
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('react-dom') || id.includes('react-router') || /[/\\]node_modules[/\\]react[/\\]/.test(id)) {
+            return 'vendor-react';
+          }
+          if (id.includes('@tanstack/react-query')) return 'vendor-query';
+          if (id.includes('lucide-react')) return 'vendor-icons';
+          if (id.includes('@tauri-apps')) return 'vendor-tauri';
+          if (
+            id.includes('react-markdown') ||
+            id.includes('remark-') ||
+            id.includes('rehype-') ||
+            id.includes('micromark') ||
+            id.includes('mdast') ||
+            id.includes('hast') ||
+            id.includes('unist') ||
+            id.includes('unified')
+          ) {
+            return 'vendor-markdown';
+          }
+          return undefined;
         },
       },
     },

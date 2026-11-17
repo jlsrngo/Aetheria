@@ -69,9 +69,9 @@ export const SearchContentMatchGroup = memo(function SearchContentMatchGroup({
       {/* Matched Lines */}
       {!isCollapsed && (
         <div className="pl-6 space-y-0.5">
-          {group.lines.map((line, idx) => (
+          {group.lines.map((line) => (
             <button
-              key={idx}
+              key={`${group.filePath}:${line.lineNumber}`}
               type="button"
               onClick={() => onOpenFileTab(group.filePath, group.fileName)}
               className="w-full flex items-baseline gap-2 px-2 py-1 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-md transition-colors text-left cursor-pointer font-mono"
