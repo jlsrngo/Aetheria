@@ -22,8 +22,9 @@ Dokumen pelacakan item UI dan integrasi eksternal yang saat ini **ditunda** agar
      - **TikTok:** Content Posting API (`open.tiktokapis.com`) + metrik performa akun (views, likes, followers).
      - **YouTube:** YouTube Data API v3 (upload video/Shorts, `publishAt` scheduling) + YouTube Analytics API.
      - **Instagram:** Instagram Graph API (Reels media container + publish + IG Insights).
-   - **Jalur Pihak ke-3 (Aggregator BYO API Key):**
-     - **Buffer GraphQL API:** mendukung koneksi multi-channel (TikTok/YT/IG) memakai *rolling push* dari antrean lokal agar bebas limit 10 antrean pada paket Free (`$0`).
+   - **Jalur Pihak ke-3 (Aggregator BYO API Key / MCP):**
+     - **Buffer GraphQL API (utama untuk posting):** mendukung koneksi multi-channel (TikTok/YT/IG) memakai *rolling push* dari antrean lokal agar bebas limit 10 antrean pada paket Free (`$0`) dan tanpa batas 20 post/bulan.
+     - **Metricool MCP Server (khusus analitik `$0`, on-demand):** dipakai hanya untuk membaca metrik akun, performa konten, dan rekomendasi *best time to post* di menu Analitik/asisten LLM — **bukan** untuk eksekusi posting (paket Free Metricool dibatasi 20 post/bulan, sedangkan REST API langsung `X-Mc-Auth` hanya tersedia di paket Advanced).
      - **Publer REST API (opsional):** mendukung akun bisnis yang membutuhkan kontrol carousel/duet/stitch serta analitik lanjutan via API.
 
 ---
@@ -32,9 +33,9 @@ Dokumen pelacakan item UI dan integrasi eksternal yang saat ini **ditunda** agar
 
 | ID | Area / File | Cakupan Pekerjaan | Status | Ketergantungan Utama |
 |---|---|---|---|---|
-| **U-05** | `apps/src/pages/AnalyticsPage.tsx` | Integrasi backend/provider metrik analitik akun (TikTok, YouTube, Instagram, atau aggregator Buffer/Publer) menggantikan pesan sync stub. | `akan dikerjakan` | Backend endpoint analitik + `U-28` |
+| **U-05** | `apps/src/pages/AnalyticsPage.tsx` | Integrasi backend/provider metrik analitik akun (direct API TikTok/YouTube/Instagram, aggregator Buffer/Publer, atau **Metricool MCP khusus analitik on-demand**) menggantikan pesan sync stub. | `akan dikerjakan` | Backend endpoint analitik + `U-28` |
 | **U-06** | `apps/src/pages/SchedulePage.tsx` | Antrean stok & jadwal lokal tanpa batas + trigger `Publish Now` / *rolling schedule* nyata serta tombol asisten LLM khusus generate caption/hashtag/judul. | `akan dikerjakan` | Trait `SocialPublisher` + `nexus-scheduler` (`U-29`) |
-| **U-16** | `apps/src/pages/SettingsPage.tsx` / akun Pro | Alur login akun Pro, pengaturan BYO API key (Buffer/Publer/TikTok/YouTube/Instagram), dan status koneksi channel persisten. | `akan dikerjakan` | `cred_store/` (`U-28`) & endpoint akun |
+| **U-16** | `apps/src/pages/SettingsPage.tsx` / akun Pro | Alur login akun Pro, pengaturan BYO API key / MCP token (Buffer/Publer/Metricool/TikTok/YouTube/Instagram), dan status koneksi channel persisten. | `akan dikerjakan` | `cred_store/` (`U-28`) & endpoint akun |
 | **U-17** | `AnalyticsPage.tsx`, `SchedulePage.tsx`, `StockVaultPage.tsx` | Polish dialog/modal konfirmasi, error state empty/offline/rate-limit, dan sinkronisasi penuh antrean stok lokal. | `akan dikerjakan` | `U-05`, `U-06`, `U-29` |
 | **U-28** | `core/aetheria-engine/src/cred_store/` | Penyimpanan aman & terisolasi untuk OAuth token langsung (TikTok, YouTube, Instagram) dan API key pihak ke-3 (Buffer, Publer) beserta refresh & revocation. | `akan dikerjakan` | Skema credential per-provider |
 | **U-29** | `core/aetheria-engine/src/studio/` | Implementasi trait `SocialPublisher` (adapter Buffer, Publer, TikTok, YouTube, Instagram) + worker *rolling queue* di `nexus-scheduler` dengan retry & log status ke UI. | `akan dikerjakan` | `U-06`, `U-28` |
