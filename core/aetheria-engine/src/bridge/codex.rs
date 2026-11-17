@@ -168,6 +168,23 @@ pub(crate) async fn handle_codex_request(body: Value, model: &str, is_stream: bo
         "stream": true,
         "store": false
     });
+    if let Some(effort) = body
+        .get("reasoning_effort")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_ascii_lowercase())
+    {
+        if matches!(effort.as_str(), "minimal" | "low" | "medium" | "high") {
+            codex_payload["reasoning"] = json!({ "effort": effort });
+        } else {
+            crate::paths::log_engine(
+                "bridge",
+                &format!(
+                    "Ignoring unsupported Codex reasoning_effort='{}' on model '{}'.",
+                    effort, model
+                ),
+            );
+        }
+    }
 
     if let Some(tools) = body.get("tools").and_then(|v| v.as_array()) {
         let mapped: Vec<Value> = tools

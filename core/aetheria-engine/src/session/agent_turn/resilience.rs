@@ -36,6 +36,58 @@ pub async fn send_resilient_chat_completion(
     temperature: f64,
     max_tokens: u64,
 ) -> Result<ResilientCompletionOutput, String> {
+    send_resilient_chat_completion_with_options(
+        client,
+        base_url,
+        api_key,
+        model_id,
+        chat_messages,
+        tools,
+        temperature,
+        max_tokens,
+        None,
+    )
+    .await
+}
+
+pub(crate) fn build_resilient_chat_payload(
+    model_id: &str,
+    chat_messages: &[Value],
+    tools: &[Value],
+    temperature: f64,
+    max_tokens: u64,
+    reasoning_effort: Option<&str>,
+) -> Value {
+    let mut payload = json!({
+        "model": model_id,
+        "messages": chat_messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": true
+    });
+    if let Some(effort) = reasoning_effort.map(str::trim).filter(|s| !s.is_empty()) {
+        payload["reasoning_effort"] = json!(effort);
+    }
+    if !tools.is_empty() {
+        payload["tools"] = json!(tools);
+        payload["tool_choice"] = json!("auto");
+    }
+    payload
+}
+
+/// Variant of `send_resilient_chat_completion` accepting per-role `reasoning_effort` override.
+#[allow(clippy::too_many_arguments)]
+pub async fn send_resilient_chat_completion_with_options(
+    client: &reqwest::Client,
+    base_url: &mut String,
+    api_key: &mut String,
+    model_id: &mut String,
+    chat_messages: &mut Vec<Value>,
+    tools: &[Value],
+    temperature: f64,
+    max_tokens: u64,
+    reasoning_effort: Option<&str>,
+) -> Result<ResilientCompletionOutput, String> {
     let max_retries: usize = 6;
     let mut attempt: usize = 0;
     let mut timeout_retries: usize = 0;
@@ -44,18 +96,14 @@ pub async fn send_resilient_chat_completion(
 
     loop {
         let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-        let mut payload = json!({
-            "model": *model_id,
-            "messages": *chat_messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": true
-        });
-
-        if !tools.is_empty() {
-            payload["tools"] = json!(tools);
-            payload["tool_choice"] = json!("auto");
-        }
+        let payload = build_resilient_chat_payload(
+            model_id,
+            chat_messages,
+            tools,
+            temperature,
+            max_tokens,
+            reasoning_effort,
+        );
 
         let mut req = client
             .post(&url)

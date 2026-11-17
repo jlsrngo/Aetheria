@@ -65,7 +65,7 @@ We use a deterministic **Modular HTML Motion Engine** (supporting HTML5 2D Canva
 
 1. **Why Per-Scene Modular Scripts (`script/scene1.js` .. `sceneN.js`) Are Mandatory**:
    - NEVER cram all scenes of a multi-scene video into a single giant `index.html` file. Writing 1,000+ lines in one file hits LLM output token limits and degrades animation quality on later scenes.
-   - Instead, write **one modular script per scene** in `script/scene1.js`, `script/scene2.js`, ..., `script/sceneN.js` (~120–180 lines each).
+   - Instead, write **one modular script per scene** in `script/scene1.js`, `script/scene2.js`, ..., `script/sceneN.js` (~120–180 lines each), and use full-file `write` (not multi-line `edit` diffs) when creating or updating short scene scripts (reserve `edit` with `startLine`/`endLine` for tiny <=25-line tweaks).
    - Each `script/sceneK.js` registers its renderer via `AM.registerScene`:
      ```js
      (function () {

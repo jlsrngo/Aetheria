@@ -864,7 +864,7 @@ async fn build_user_message_with_vision_fallback(
     )
 }
 
-fn find_model_config<'a>(cfg: &'a Value, provider_id: &str, model_id: &str) -> Option<&'a Value> {
+pub(crate) fn find_model_config<'a>(cfg: &'a Value, provider_id: &str, model_id: &str) -> Option<&'a Value> {
     if !provider_id.is_empty() {
         if let Some(m) = cfg
             .pointer("/provider")
@@ -942,6 +942,62 @@ pub(crate) fn model_supports_vision_from_config(
         || lower.contains("qvq")
         || lower.contains("minicpm-v")
         || has_openai_reasoning_vision
+}
+
+fn local_bridge_supports_reasoning_effort(provider_id: &str, model_id: &str) -> Option<bool> {
+    let p = provider_id.trim().to_ascii_lowercase();
+    let m = model_id.trim().to_ascii_lowercase();
+    let uses_bridge = matches!(
+        p.as_str(),
+        "local-cli" | "antigravity" | "antigravity-local" | "kiro" | "opencode"
+    );
+    if !uses_bridge && !m.starts_with("kiro/") && !m.starts_with("opencode/") {
+        return None;
+    }
+    if m.starts_with("kiro/") || m.starts_with("opencode/") || m == "big-pickle" || m.ends_with("-free") {
+        return Some(false);
+    }
+    if m.starts_with("gemini-") {
+        return Some(true);
+    }
+    if m.starts_with("claude-") {
+        // Antigravity/Claude OAuth bridge uses fixed model variants and ignores OpenAI reasoning_effort.
+        return Some(false);
+    }
+    let is_openai_reasoning = m.starts_with("gpt-5")
+        || m.starts_with("o1")
+        || m.starts_with("o3")
+        || m.starts_with("o4")
+        || m.contains("codex");
+    Some(is_openai_reasoning)
+}
+
+/// Checks whether a provider/model advertises configurable reasoning effort in config or bridge routing.
+pub(crate) fn model_supports_reasoning_from_config(
+    cfg: Option<&Value>,
+    provider_id: &str,
+    model_id: &str,
+) -> bool {
+    let explicit = cfg
+        .and_then(|c| find_model_config(c, provider_id, model_id))
+        .and_then(|m| {
+            m.get("reasoning")
+                .or_else(|| m.pointer("/capabilities/reasoning"))
+                .and_then(Value::as_bool)
+        });
+    if explicit == Some(false) {
+        return false;
+    }
+    if let Some(bridge_supported) = local_bridge_supports_reasoning_effort(provider_id, model_id) {
+        return bridge_supported;
+    }
+    if let Some(v) = explicit {
+        return v;
+    }
+    let lower = model_id.trim().to_ascii_lowercase();
+    ["o1", "o3", "o4", "gpt-5", "gemini-2.5", "gemini-3", "deepseek-r"]
+        .iter()
+        .any(|prefix| lower.contains(prefix))
 }
 
 async fn resolve_provider_connection(

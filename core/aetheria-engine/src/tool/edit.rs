@@ -11,6 +11,55 @@ use super::edit_matchers::{
 use super::resolve_writable_isolated_path;
 use crate::session::message::emit_event;
 
+/// Default line limit for un-ranged `oldString` replacements without explicit `startLine`/`endLine`.
+pub const DEFAULT_MAX_UNRANGED_EDIT_LINES: usize = 25;
+
+fn resolve_max_unranged_edit_lines() -> usize {
+    crate::provider::read_aetheria_config()
+        .pointer("/tool/editMaxOldLines")
+        .and_then(|v| v.as_u64())
+        .filter(|&n| n >= 5)
+        .map(|n| n as usize)
+        .unwrap_or(DEFAULT_MAX_UNRANGED_EDIT_LINES)
+}
+
+fn is_short_scene_script(path: &std::path::Path) -> bool {
+    let file_name = path
+        .file_name()
+        .and_then(|v| v.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_default();
+    let norm = path.to_string_lossy().replace('\\', "/").to_ascii_lowercase();
+    norm.contains("/script/") && file_name.starts_with("scene") && file_name.ends_with(".js")
+}
+
+/// Enforces line-ranged or full-`write` edits instead of fragile multi-line `oldString` blobs.
+pub fn validate_edit_strategy(
+    path: &std::path::Path,
+    norm_old: &str,
+    start_line: Option<usize>,
+    end_line: Option<usize>,
+    max_unranged_lines: usize,
+) -> Result<(), String> {
+    if start_line.is_some() && end_line.is_some() {
+        return Ok(());
+    }
+    let old_lines = norm_old.lines().count();
+    if old_lines > max_unranged_lines {
+        if is_short_scene_script(path) {
+            return Err(format!(
+                "Refusing un-ranged multi-line edit ({} lines > {} line limit) on scene script. Use full-file 'write' to update short scene scripts (<= ~200 lines), or use 'grep' and pass explicit 'startLine' and 'endLine' to 'edit'.",
+                old_lines, max_unranged_lines
+            ));
+        }
+        return Err(format!(
+            "oldString is too large ({} lines > {} line limit) without startLine/endLine. Locate exact lines with 'grep' and pass 'startLine' and 'endLine' to 'edit' (or use 'write' for short files).",
+            old_lines, max_unranged_lines
+        ));
+    }
+    Ok(())
+}
+
 pub fn edit_tool_definition() -> Value {
     json!({
         "type": "function",
@@ -276,6 +325,15 @@ pub fn execute_edit(session_id: &str, workspace_dir: &str, arguments: &Value) ->
                 let norm_content = normalize_line_endings(&content_old);
                 let norm_old = normalize_line_endings(target);
                 let norm_new = normalize_line_endings(replacement);
+                let max_unranged = resolve_max_unranged_edit_lines();
+                if let Err(strat_err) =
+                    validate_edit_strategy(&p, &norm_old, start_line, end_line, max_unranged)
+                {
+                    return json!({
+                        "ok": false,
+                        "error": format!("{} (file: '{}')", strat_err, fp)
+                    });
+                }
 
                 let edit_res = if let (Some(sl), Some(el)) = (start_line, end_line) {
                     replace_line_range(&norm_content, sl, el, &norm_new)
@@ -384,5 +442,48 @@ mod tests {
         assert_eq!(count, 1);
         assert!(updated.contains("1.60"));
         assert!(!updated.contains("1.48"));
+    }
+
+    #[test]
+    fn test_validate_edit_strategy_rejects_large_unranged_old_string() {
+        let large_old = (1..=30)
+            .map(|i| format!("line {};", i))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let scene_path = std::path::Path::new("projects/demo/script/scene1.js");
+        let scene_err =
+            validate_edit_strategy(scene_path, &large_old, None, None, DEFAULT_MAX_UNRANGED_EDIT_LINES)
+                .unwrap_err();
+        assert!(scene_err.contains("write"));
+        assert!(scene_err.contains("startLine"));
+        assert!(scene_err.contains("endLine"));
+        assert!(scene_err.contains("grep"));
+
+        let other_path = std::path::Path::new("src/utils.ts");
+        let other_err =
+            validate_edit_strategy(other_path, &large_old, None, None, DEFAULT_MAX_UNRANGED_EDIT_LINES)
+                .unwrap_err();
+        assert!(other_err.contains("startLine"));
+        assert!(other_err.contains("endLine"));
+        assert!(other_err.contains("grep"));
+
+        assert!(validate_edit_strategy(
+            scene_path,
+            &large_old,
+            Some(10),
+            Some(40),
+            DEFAULT_MAX_UNRANGED_EDIT_LINES,
+        )
+        .is_ok());
+
+        let small_old = "const a = 1;\nconst b = 2;";
+        assert!(validate_edit_strategy(
+            other_path,
+            small_old,
+            None,
+            None,
+            DEFAULT_MAX_UNRANGED_EDIT_LINES,
+        )
+        .is_ok());
     }
 }

@@ -6,6 +6,97 @@ use crate::session::model::default_model_ref;
 use crate::session::session::with_store;
 use serde_json::Value;
 
+/// Baseline default max_tokens for lightweight non-coding subagent roles (`explore`, `audio-director`, `qa-verifier`).
+pub(crate) const DEFAULT_SUBAGENT_MAX_TOKENS: u64 = 4096;
+
+/// Measured default for `motion-designer` (`F4.2`): historical P90 scene `write` is 9,913 chars (~2,479 tok)
+/// and max is 12,511 chars (~3,128 tok + JSON escaping + thinking tokens), causing 22.7% historical sessions (5/22)
+/// and 2/3 live runs on 4096 to hit `finish_reason == "length"`. Capped to `model.limit.output` when lower.
+pub(crate) const DEFAULT_MOTION_DESIGNER_MAX_TOKENS: u64 = 12_288;
+
+pub(crate) fn resolve_subagent_max_tokens(
+    cfg: &Value,
+    subagent_type: &str,
+    provider_id: &str,
+    model_id: &str,
+) -> u64 {
+    let role = subagent_type.trim();
+    if let Some(configured) = cfg
+        .pointer(&format!("/agent/{}/max_tokens", role))
+        .or_else(|| cfg.pointer(&format!("/agent/{}/maxTokens", role)))
+        .and_then(Value::as_u64)
+        .filter(|&n| n >= 256)
+    {
+        return configured;
+    }
+    let role_default = if role.eq_ignore_ascii_case("motion-designer") {
+        DEFAULT_MOTION_DESIGNER_MAX_TOKENS
+    } else {
+        DEFAULT_SUBAGENT_MAX_TOKENS
+    };
+    if let Some(model_cap) = super::runner::find_model_config(cfg, provider_id, model_id)
+        .and_then(|m| m.pointer("/limit/output"))
+        .and_then(Value::as_u64)
+        .filter(|&n| n >= 256)
+    {
+        return role_default.min(model_cap);
+    }
+    role_default
+}
+
+fn parse_reasoning_setting(raw: &Value) -> Option<String> {
+    if let Some(flag) = raw.as_bool() {
+        return if flag { None } else { Some("none".to_string()) };
+    }
+    let s = raw.as_str()?.trim().to_ascii_lowercase();
+    match s.as_str() {
+        "none" | "off" | "false" | "disable" | "disabled" => Some("none".to_string()),
+        "minimal" | "low" | "medium" | "high" => Some(s),
+        _ => None,
+    }
+}
+
+/// Resolves per-role `agent.<id>.reasoning` when configured and supported by the active model.
+/// Returns `None` when unset so global provider/model defaults stay completely untouched.
+pub(crate) fn resolve_subagent_reasoning_effort(
+    cfg: &Value,
+    subagent_type: &str,
+    provider_id: &str,
+    model_id: &str,
+) -> Option<String> {
+    let role = subagent_type.trim();
+    let raw = cfg
+        .pointer(&format!("/agent/{}/reasoning", role))
+        .or_else(|| cfg.pointer(&format!("/agent/{}/reasoningEffort", role)))
+        .or_else(|| cfg.pointer(&format!("/agent/{}/reasoning_effort", role)))?;
+    let effort = match parse_reasoning_setting(raw) {
+        Some(v) => v,
+        None => {
+            if !raw.is_null() && !raw.is_boolean() {
+                crate::paths::log_engine(
+                    "subagent",
+                    &format!(
+                        "Ignoring unrecognized agent.{}.reasoning value {}; leaving model default.",
+                        role, raw
+                    ),
+                );
+            }
+            return None;
+        }
+    };
+    if !super::runner::model_supports_reasoning_from_config(Some(cfg), provider_id, model_id) {
+        crate::paths::log_engine(
+            "subagent",
+            &format!(
+                "Ignoring agent.{}.reasoning='{}': model '{}/{}' does not support per-request reasoning control.",
+                role, effort, provider_id, model_id
+            ),
+        );
+        return None;
+    }
+    Some(effort)
+}
+
 pub(crate) fn resolve_parent_model_ref(parent_session_id: &str) -> (String, String) {
     let parent_model = with_store(|store| {
         store
@@ -216,6 +307,77 @@ mod tests {
         );
         assert_eq!(url, "https://kenari.id/v1");
         assert_eq!(key, "kn-test");
+    }
+
+    #[test]
+    fn subagent_max_tokens_and_reasoning_respect_config_and_model_capabilities() {
+        let cfg = json!({
+            "agent": {
+                "motion-designer": {
+                    "max_tokens": 12288,
+                    "reasoning": "low"
+                },
+                "qa-verifier": {
+                    "maxTokens": 6144,
+                    "reasoning": "none"
+                }
+            },
+            "provider": {
+                "local-cli": {
+                    "models": {
+                        "big-pickle": { "reasoning": false, "limit": { "output": 8192 } },
+                        "gemini-2.5-flash": { "reasoning": true, "limit": { "output": 32768 } }
+                    }
+                },
+                "custom-openai": {
+                    "models": {
+                        "plain-chat": { "reasoning": false },
+                        "reasoner-pro": { "reasoning": true }
+                    }
+                }
+            }
+        });
+
+        assert_eq!(resolve_subagent_max_tokens(&cfg, "motion-designer", "local-cli", "gemini-2.5-flash"), 12288);
+        assert_eq!(resolve_subagent_max_tokens(&cfg, "qa-verifier", "local-cli", "gemini-2.5-flash"), 6144);
+        assert_eq!(resolve_subagent_max_tokens(&cfg, "explore", "local-cli", "gemini-2.5-flash"), DEFAULT_SUBAGENT_MAX_TOKENS);
+
+        // Unconfigured motion-designer uses measured 12288 on high-output models and clamps safely to model.limit.output.
+        let bare_cfg = json!({
+            "provider": cfg["provider"].clone()
+        });
+        assert_eq!(
+            resolve_subagent_max_tokens(&bare_cfg, "motion-designer", "local-cli", "gemini-2.5-flash"),
+            DEFAULT_MOTION_DESIGNER_MAX_TOKENS
+        );
+        assert_eq!(
+            resolve_subagent_max_tokens(&bare_cfg, "motion-designer", "local-cli", "big-pickle"),
+            8192
+        );
+
+        // Unconfigured role leaves global defaults completely untouched.
+        assert_eq!(
+            resolve_subagent_reasoning_effort(&cfg, "audio-director", "local-cli", "gemini-2.5-flash"),
+            None
+        );
+        // Supported Gemini bridge model & custom reasoning model apply per-role setting.
+        assert_eq!(
+            resolve_subagent_reasoning_effort(&cfg, "motion-designer", "local-cli", "gemini-2.5-flash").as_deref(),
+            Some("low")
+        );
+        assert_eq!(
+            resolve_subagent_reasoning_effort(&cfg, "qa-verifier", "custom-openai", "reasoner-pro").as_deref(),
+            Some("none")
+        );
+        // Unsupported model/provider ignores setting cleanly.
+        assert_eq!(
+            resolve_subagent_reasoning_effort(&cfg, "motion-designer", "custom-openai", "plain-chat"),
+            None
+        );
+        assert_eq!(
+            resolve_subagent_reasoning_effort(&cfg, "motion-designer", "local-cli", "kiro/auto"),
+            None
+        );
     }
 }
 

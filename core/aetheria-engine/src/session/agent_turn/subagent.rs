@@ -12,8 +12,14 @@ use serde_json::{json, Value};
 use std::time::Duration;
 
 use super::kiro_standby::{acquire_subagent_turn_standby, register_subagent_pending};
-use super::resilience::{send_resilient_chat_completion, SYNTHETIC_OUTPUT_LIMIT_PROMPT};
-use super::subagent_provider::resolve_subagent_provider_config_for_call;
+use super::resilience::{
+    send_resilient_chat_completion, send_resilient_chat_completion_with_options,
+    SYNTHETIC_OUTPUT_LIMIT_PROMPT,
+};
+use super::subagent_provider::{
+    resolve_subagent_max_tokens, resolve_subagent_provider_config_for_call,
+    resolve_subagent_reasoning_effort,
+};
 use super::subagent_tool_batch::execute_subagent_tool_calls;
 use crate::paths::now_ms;
 use crate::session::doom_loop::DoomLoopDetector;
@@ -408,6 +414,11 @@ async fn run_subagent_loop(
         }
     });
     let tools = build_subagent_tools(subagent_type, child_depth);
+    let subagent_cfg = crate::provider::read_aetheria_config();
+    let subagent_max_tokens =
+        resolve_subagent_max_tokens(&subagent_cfg, subagent_type, &provider_id, &model_id);
+    let subagent_reasoning =
+        resolve_subagent_reasoning_effort(&subagent_cfg, subagent_type, &provider_id, &model_id);
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(15))
         .timeout(Duration::from_secs(120))
@@ -421,6 +432,7 @@ async fn run_subagent_loop(
     let mut steps_run: usize = 0;
     let max_steps: usize = 24;
     let mut output_limit_continuations: usize = 0;
+    let mut length_hits_total: usize = 0;
     let mut doom_detector = DoomLoopDetector::default();
     let mut exit_outcome = SubagentExitOutcome::Completed;
 
@@ -467,15 +479,44 @@ async fn run_subagent_loop(
         }
 
         steps_run += 1;
-        let completion = match send_resilient_chat_completion(
-            &client, &mut base_url, &mut api_key, &mut model_id, &mut chat_messages, &tools, 0.3, 4096,
-        ).await {
+        let completion = match send_resilient_chat_completion_with_options(
+            &client,
+            &mut base_url,
+            &mut api_key,
+            &mut model_id,
+            &mut chat_messages,
+            &tools,
+            0.3,
+            subagent_max_tokens,
+            subagent_reasoning.as_deref(),
+        )
+        .await
+        {
             Ok(out) => out,
             Err(err_msg) => {
                 exit_outcome = SubagentExitOutcome::Error(err_msg);
                 break;
             }
         };
+
+        if completion.finish_reason == "length" || completion.finish_reason == "max_tokens" {
+            length_hits_total += 1;
+            crate::paths::log_engine(
+                "subagent",
+                &format!(
+                    "[F4_LENGTH_LIMIT] session={} role={} step={} continuation={}/2 model={}/{} max_tokens={} text_chars={} tool_calls={}",
+                    child_session_id,
+                    subagent_type,
+                    steps_run,
+                    output_limit_continuations,
+                    provider_id,
+                    model_id,
+                    subagent_max_tokens,
+                    completion.assistant_text.len(),
+                    completion.tool_calls.len(),
+                ),
+            );
+        }
 
         if !completion.assistant_text.trim().is_empty() {
             if !final_text.is_empty() && output_limit_continuations > 0 {
@@ -594,6 +635,21 @@ async fn run_subagent_loop(
     };
 
     persist_child_session_state(&child_session_id, &chat_messages, state_str);
+    crate::paths::log_engine(
+        "subagent",
+        &format!(
+            "[F4_SUBAGENT_SUMMARY] session={} role={} state={} steps={} max_tokens={} reasoning={} length_hits={} model={}/{}",
+            child_session_id,
+            subagent_type,
+            state_str,
+            steps_run,
+            subagent_max_tokens,
+            subagent_reasoning.as_deref().unwrap_or("default"),
+            length_hits_total,
+            provider_id,
+            model_id,
+        ),
+    );
     emit_event(
         workspace_dir,
         "subagent.completed",
@@ -601,6 +657,7 @@ async fn run_subagent_loop(
             "parentSessionId": parent_session_id, "subagentSessionId": child_session_id,
             "subagentType": subagent_type, "description": description, "state": state_str,
             "ok": ok_flag, "stepsRun": steps_run, "toolsExecuted": tools_executed,
+            "outputLimitHits": length_hits_total, "maxTokensUsed": subagent_max_tokens,
             "error": error_field, "timestamp": now_ms()
         }),
     );
@@ -621,7 +678,9 @@ async fn run_subagent_loop(
     let mut result = json!({
         "ok": ok_flag, "state": state_str, "sessionID": child_session_id,
         "subagent_type": subagent_type, "description": description, "resumed": is_resumed,
-        "steps_executed": steps_run, "tools_called": tools_executed, "output": formatted_envelope
+        "steps_executed": steps_run, "tools_called": tools_executed,
+        "outputLimitHits": length_hits_total, "maxTokensUsed": subagent_max_tokens,
+        "output": formatted_envelope
     });
     if let Some(err_msg) = error_field {
         result["error"] = json!(err_msg);

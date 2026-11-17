@@ -286,13 +286,39 @@ async fn handle_antigravity_with_cred(
         "maxOutputTokens": body.get("max_tokens").and_then(|v| v.as_u64()).unwrap_or(16384),
         "temperature": body.get("temperature").and_then(|v| v.as_f64()).unwrap_or(1.0)
     });
-    if let Some(lvl) = thinking_level {
-        if upstream_model.starts_with("gemini-3") {
+    let effort_override = body
+        .get("reasoning_effort")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_ascii_lowercase());
+    if upstream_model.starts_with("gemini-3") {
+        if let Some(ref effort) = effort_override {
+            let is_pro = upstream_model.contains("pro");
+            let mapped = match effort.as_str() {
+                "none" => (false, if is_pro { "low" } else { "minimal" }),
+                "minimal" => (true, if is_pro { "low" } else { "minimal" }),
+                "low" => (true, "low"),
+                "medium" => (true, if is_pro { "high" } else { "medium" }),
+                "high" => (true, "high"),
+                _ => (true, thinking_level.unwrap_or("medium")),
+            };
+            gen_cfg["thinkingConfig"] = json!({
+                "includeThoughts": mapped.0,
+                "thinkingLevel": mapped.1
+            });
+        } else if let Some(lvl) = thinking_level {
             gen_cfg["thinkingConfig"] = json!({
                 "includeThoughts": true,
                 "thinkingLevel": lvl
             });
         }
+    } else if let Some(ref effort) = effort_override {
+        crate::paths::log_engine(
+            "bridge",
+            &format!(
+                "Ignoring reasoning_effort='{}' for Antigravity model '{}' (only Gemini-3 supports thinkingConfig).",
+                effort, upstream_model
+            ),
+        );
     }
 
     let project_id = match cred

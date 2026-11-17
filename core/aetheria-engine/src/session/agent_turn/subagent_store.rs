@@ -30,7 +30,7 @@ pub fn build_subagent_system_prompt(subagent_type: &str, workspace_dir: &str) ->
              - `AM.drawTopHeader`, `AM.drawHeadlinePlaque`, and dark pill `AM.drawSubtitles` are OPTIONAL — omit or customize them according to the active skill's `SKILL.md` and `tokens.json`.\n\
              - Never use `requestAnimationFrame`, `Math.random()`, `Date.now()`, or `setTimeout`/`setInterval`; drive all motion from `t` and read `audio/*.words.json` timings.\n\
              - After writing or modifying scripts/HTML, call `capture_film_preview` to verify zero runtimeErrors and clean visuals before finishing.\n\
-             - Write files directly using `write` or `edit`, then report the exact files created/updated."
+             - For short modular scene scripts (`script/scene*.js`, <= ~200 lines), write or update the full file with `write` by default instead of large `edit` diffs; reserve `edit` with `startLine`/`endLine` for tiny targeted patches (<= 25 lines) or large files, then report the exact files created/updated."
         }
         "audio-director" => {
             "You are the **Audio Director Subagent** (Voiceover & SFX Specialist).\n\
