@@ -357,43 +357,70 @@ function measureRoles(allTools) {
       : "";
 
   function extractAllowlist(matchSrc, personaKey) {
-    const idx = matchSrc.indexOf(`"${personaKey}"`);
+    const idx = matchSrc.indexOf(`"${personaKey}" =>`);
     if (idx < 0) return null;
     const armEnd = matchSrc.indexOf("=>", idx);
-    const slice = matchSrc.slice(armEnd, armEnd + 500);
+    // Stop before next match arm so we never bleed into an earlier/later arm's matches!()
+    const nextArmRel = matchSrc.slice(armEnd + 2).search(/\n\s*"[a-z-]+"\s*=>|\n\s*_\s*=>/);
+    const slice =
+      nextArmRel >= 0
+        ? matchSrc.slice(armEnd, armEnd + 2 + nextArmRel)
+        : matchSrc.slice(armEnd, armEnd + 700);
+    const negMatch = slice.match(/!matches!\s*\(\s*name\s*,([\s\S]*?)\)/);
+    if (negMatch) {
+      return {
+        negated: true,
+        names: Array.from(negMatch[1].matchAll(/"([^"]+)"/g)).map((m) => m[1]),
+      };
+    }
     const matchesBlock = slice.match(/matches!\s*\(\s*name\s*,([\s\S]*?)\)/);
     if (!matchesBlock) return null;
-    return Array.from(matchesBlock[1].matchAll(/"([^"]+)"/g)).map((m) => m[1]);
+    return {
+      negated: false,
+      names: Array.from(matchesBlock[1].matchAll(/"([^"]+)"/g)).map((m) => m[1]),
+    };
   }
 
   const roles = {};
+  const profilesFile = path.join(REPO_ROOT, "core", "aetheria-engine", "src", "tool", "profiles.rs");
+  const rawProfilesSrc = fs.existsSync(profilesFile) ? fs.readFileSync(profilesFile, "utf8") : "";
+  const fnIdx = rawProfilesSrc.indexOf("pub fn is_tool_allowed_in_role");
+  const pSrc = fnIdx >= 0 ? rawProfilesSrc.slice(fnIdx) : rawProfilesSrc;
+
   const coordExcluded = new Set();
   if (coordBody.includes("!matches!")) {
     const excl = coordBody.match(/!matches!\s*\(\s*name\s*,([\s\S]*?)\)/);
     if (excl) {
       for (const m of excl[1].matchAll(/"([^"]+)"/g)) coordExcluded.add(m[1]);
     }
+  } else if (pSrc) {
+    const genSpec = extractAllowlist(pSrc, "general");
+    if (genSpec && genSpec.negated) {
+      for (const n of genSpec.names) coordExcluded.add(n);
+    }
   }
   roles.coordinator_default = allTools.filter((t) => !coordExcluded.has(t.name));
 
   // If F3 tool profiles exist (tool/profiles.rs), read them explicitly too
-  const profilesFile = path.join(REPO_ROOT, "core", "aetheria-engine", "src", "tool", "profiles.rs");
-  if (fs.existsSync(profilesFile)) {
-    const pSrc = fs.readFileSync(profilesFile, "utf8");
+  if (pSrc) {
     for (const pName of ["director", "motion-designer", "qa-verifier", "audio-director", "general"]) {
-      const allow = extractAllowlist(pSrc, pName);
-      if (allow) {
-        const allowSet = new Set(allow);
-        roles[`profile:${pName}`] = allTools.filter((t) => allowSet.has(t.name));
+      const spec = extractAllowlist(pSrc, pName);
+      if (spec) {
+        const nameSet = new Set(spec.names);
+        roles[`profile:${pName}`] = spec.negated
+          ? allTools.filter((t) => !nameSet.has(t.name))
+          : allTools.filter((t) => nameSet.has(t.name));
       }
     }
   }
 
   for (const persona of ["explore", "audio-director", "motion-designer", "qa-verifier"]) {
-    const allow = extractAllowlist(subBody, persona);
-    if (allow) {
-      const allowSet = new Set(allow);
-      roles[`subagent:${persona}`] = allTools.filter((t) => allowSet.has(t.name));
+    const spec = extractAllowlist(subBody, persona) || (pSrc ? extractAllowlist(pSrc, persona) : null);
+    if (spec) {
+      const nameSet = new Set(spec.names);
+      roles[`subagent:${persona}`] = spec.negated
+        ? allTools.filter((t) => !nameSet.has(t.name))
+        : allTools.filter((t) => nameSet.has(t.name));
     } else {
       // Fallback `_ => true` removes `question` and (at max depth) `task`
       roles[`subagent:${persona}`] = allTools.filter((t) => t.name !== "question");

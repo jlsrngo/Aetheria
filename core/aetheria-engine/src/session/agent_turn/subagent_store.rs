@@ -25,7 +25,7 @@ pub fn build_subagent_system_prompt(subagent_type: &str, workspace_dir: &str) ->
              - Keep scripts strictly modular under `script/` (`script/scene1.js` .. `script/sceneN.js` and optional helper modules) with entry at `index.html`; NEVER create React/Remotion folders (`src/`, `public/`, `Root.tsx`) and NEVER overwrite built-in engine runtimes `script/aetheria-motion.js` or `script/three.min.js`.\n\
              - Read the active skill (`<skills>` -> `SKILL.md`, `tokens.json`, `examples/`) OR active video reference (`ref/extracted/ref_report.md`, `ref/extracted/style.json`) FIRST and strictly follow its aesthetic, resolution, per-scene palette, HUD choices, and subtitle options.\n\
              - When matching a video reference (`Active Video Reference Blueprint`), replicate its measured `SCENES` timings, per-scene `bgHex`/`surfaceHex`/`textHex`/`accentHex` palette, spatial bounding boxes, and motion cadence (`AM.evalKeyframes`, `AM.spring`, `AM.pop`, `AM.drawSVGPath`, `AM.textReveal`), then call `capture_film_preview` (`compareToReference: true`) to check RGB SSIM + `comparison_strip.jpg` and iteratively refine low-scoring scenes.\n\
-             - When the active `/skill` provides `examples/index.html` and `examples/script/*-kit.js` (such as `clay-kit.js`), you MUST preserve that exact dual-canvas/WebGL architecture (`#stage-webgl` with `preserveDrawingBuffer: true` + `#stage-hud`), skill subtitle config (e.g. `style: \"neobrutalism\"`), and full kit builders (copy the kit file verbatim via `bash` or write it in full — NEVER shrink it into a minimal stub or fall back to plain 2D Canvas even if the storyboard mentions thematic mood/colors).\n\
+             - When the active `/skill` provides `examples/index.html` and `examples/script/*-kit.js` (such as `clay-kit.js`), preserve that dual-canvas/WebGL architecture (`#stage-webgl` with `preserveDrawingBuffer: true` + `#stage-hud`), skill subtitle config (e.g. `style: \"neobrutalism\"`), and full kit builders (auto-seeded into `script/` by the engine; inspect with `read` — NEVER shrink it into a minimal stub or fall back to plain 2D Canvas).\n\
              - If using `THREE.WebGLRenderer`, ALWAYS pass `preserveDrawingBuffer: true` so headless MP4 exports capture every WebGL frame.\n\
              - `AM.drawTopHeader`, `AM.drawHeadlinePlaque`, and dark pill `AM.drawSubtitles` are OPTIONAL — omit or customize them according to the active skill's `SKILL.md` and `tokens.json`.\n\
              - Never use `requestAnimationFrame`, `Math.random()`, `Date.now()`, or `setTimeout`/`setInterval`; drive all motion from `t` and read `audio/*.words.json` timings.\n\
@@ -79,10 +79,22 @@ pub fn build_subagent_system_prompt(subagent_type: &str, workspace_dir: &str) ->
         String::new()
     };
 
+    let platform_note = if matches!(
+        subagent_type.trim().to_ascii_lowercase().as_str(),
+        "motion-designer" | "qa-verifier" | "audio-director" | "explore"
+    ) {
+        format!("Platform: `{}` (use built-in `read`, `grep`, and `glob` tools).", std::env::consts::OS)
+    } else {
+        format!(
+            "Platform: `{}` (On `windows`, `bash` executes in PowerShell — prefer built-in `read`, `grep`, and `glob` first).",
+            std::env::consts::OS
+        )
+    };
+
     format!(
         "{}{}\n\n\
          Active Project Workspace: `{}`\n\
-         Platform: `{}` (On `windows`, the `bash` tool executes in PowerShell — NEVER use bash-only syntax like `set -e`, `|| true`, `&&`, or external `rg`; prefer built-in `read`, `grep`, and `glob` tools first, or use `;` / `if ($LASTEXITCODE -eq 0)` in PowerShell.)\n\
+         {}\n\
          IMPORTANT RULES:\n\
          1. Focus strictly on the delegated subtask.\n\
          2. Do NOT ask the user questions; make reasonable engineering decisions autonomously.\n\
@@ -90,7 +102,7 @@ pub fn build_subagent_system_prompt(subagent_type: &str, workspace_dir: &str) ->
         persona_rules,
         skills_section,
         workspace_dir,
-        std::env::consts::OS
+        platform_note
     )
 }
 
@@ -262,10 +274,20 @@ pub fn resolve_parent_skill_or_voice_directive(
     }
 }
 
-/// Filters the tool definitions available to a specific subagent persona.
+/// Filters the tool definitions available to a specific subagent persona via `tool::profiles`.
 pub fn build_subagent_tools(subagent_type: &str, current_depth: usize) -> Vec<Value> {
-    let mut all_tools = crate::tool::build_tool_definitions();
-    all_tools.retain(|t| {
+    let profile = match subagent_type.trim().to_ascii_lowercase().as_str() {
+        "explore" => crate::tool::profiles::ToolProfile::Explore,
+        "audio-director" => crate::tool::profiles::ToolProfile::AudioDirector,
+        "motion-designer" => crate::tool::profiles::ToolProfile::MotionDesigner,
+        "qa-verifier" => crate::tool::profiles::ToolProfile::QaVerifier,
+        _ => crate::tool::profiles::ToolProfile::General,
+    };
+    let mut filtered = crate::tool::profiles::filter_tools_for_profile(
+        profile,
+        crate::tool::build_tool_definitions(),
+    );
+    filtered.retain(|t| {
         let name = t
             .pointer("/function/name")
             .and_then(|v| v.as_str())
@@ -276,31 +298,9 @@ pub fn build_subagent_tools(subagent_type: &str, current_depth: usize) -> Vec<Va
         if name == "task" && current_depth >= MAX_SUBAGENT_DEPTH {
             return false;
         }
-        match subagent_type {
-            "explore" => matches!(name, "read" | "glob" | "grep" | "websearch" | "webfetch"),
-            "audio-director" => matches!(
-                name,
-                "voicebox_speak" | "generate_smart_sfx" | "read" | "write" | "glob"
-            ),
-            "motion-designer" => matches!(
-                name,
-                "film_scaffold"
-                    | "read"
-                    | "write"
-                    | "edit"
-                    | "apply_patch"
-                    | "glob"
-                    | "grep"
-                    | "fetch_web_image"
-                    | "websearch"
-                    | "bash"
-                    | "codemode"
-                    | "capture_film_preview"
-            ),
-            _ => true,
-        }
+        true
     });
-    all_tools
+    filtered
 }
 
 /// Reads the subagent recursion depth of a session from `SESSION_STORE` (`0` for root sessions).

@@ -18,6 +18,7 @@ pub mod json_syntax_helpers;
 pub mod lsp;
 pub mod path_guard;
 pub mod preview_film;
+pub mod profiles;
 pub mod question;
 pub mod read;
 pub mod ref_extractor;

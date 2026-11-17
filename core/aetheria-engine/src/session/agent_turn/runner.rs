@@ -145,7 +145,9 @@ pub async fn run_agent_turn(
     } = resolve_provider_connection(session_id, provider_id, &current_provider_id, &cfg).await;
 
     let tools_def = if should_attach_document_tools(prompt_text, history) {
-        build_main_coordinator_tools()
+        let profile =
+            crate::tool::profiles::resolve_coordinator_profile(workspace_dir, prompt_text, history);
+        crate::tool::profiles::filter_tools_for_profile(profile, build_tool_definitions())
     } else {
         Vec::new()
     };
@@ -1500,17 +1502,13 @@ fn handle_no_tool_calls(
     }
 }
 
-/// Filters main-coordinator tools so voiceover/SFX synthesis must go through `audio-director`.
+/// Returns general coordinator tools (`General` profile — full catalog minus subagent-only audio).
+#[allow(dead_code)] // Retained for backward-compatible tests alongside `profiles::resolve_coordinator_profile`.
 fn build_main_coordinator_tools() -> Vec<Value> {
-    let mut defs = build_tool_definitions();
-    defs.retain(|t| {
-        let name = t
-            .pointer("/function/name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        !matches!(name, "voicebox_speak" | "generate_smart_sfx")
-    });
-    defs
+    crate::tool::profiles::filter_tools_for_profile(
+        crate::tool::profiles::ToolProfile::General,
+        build_tool_definitions(),
+    )
 }
 
 #[cfg(test)]
