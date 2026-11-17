@@ -94,6 +94,7 @@ export function useTimelineActions({
       if (res.ok) {
         const json = (await res.json()) as {
           success?: boolean;
+          error?: string;
           data?: { renderId?: string; outputPath?: string };
         };
         if (json.data?.renderId) {
@@ -106,35 +107,20 @@ export function useTimelineActions({
           setIsExporting(false);
           return;
         }
+        throw new Error(json.error || "Render worker did not return a valid renderId");
       }
-    } catch {
-      // Handled by local progress feedback below when backend endpoint is unavailable
+      throw new Error(`Render request failed with status ${res.status}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Engine render worker is unavailable";
+      actions.upsertRenderJob({
+        ...initialJob,
+        status: "error",
+        percent: 0,
+        error: msg,
+      });
+      setIsExporting(false);
+      toast.error(`Export failed: ${msg}`);
     }
-
-    let stepCount = 1;
-    const interval = setInterval(() => {
-      stepCount += 1;
-      const pct = Math.min(100, stepCount * 25);
-      const frames = Math.round((pct / 100) * durationInFrames);
-      if (pct >= 100) {
-        clearInterval(interval);
-        actions.upsertRenderJob({
-          ...initialJob,
-          status: "done",
-          percent: 100,
-          renderedFrames: durationInFrames,
-        });
-        setIsExporting(false);
-        toast.success(`Export complete: out/${cleanName}`);
-      } else {
-        actions.upsertRenderJob({
-          ...initialJob,
-          status: "rendering",
-          percent: pct,
-          renderedFrames: frames,
-        });
-      }
-    }, 650);
   };
 
   const handleToggleLayerVisibility = (layer: VideoLayerSpec) => {

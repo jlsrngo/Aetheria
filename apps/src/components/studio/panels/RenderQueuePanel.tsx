@@ -142,6 +142,7 @@ export function RenderQueuePanel({
       if (res.ok) {
         const json = (await res.json()) as {
           success?: boolean;
+          error?: string;
           data?: { renderId?: string; outputPath?: string };
         };
         if (json.data?.renderId) {
@@ -155,33 +156,19 @@ export function RenderQueuePanel({
           });
           return;
         }
+        throw new Error(json.error || "Render worker did not return a renderId");
       }
-    } catch {}
-
-    // Local progress simulation fallback if backend CLI worker is offline
-    let step = 1;
-    const interval = setInterval(() => {
-      step += 1;
-      const pct = Math.min(100, step * 25);
-      const frames = Math.round((pct / 100) * durationInFrames);
-      if (pct >= 100) {
-        clearInterval(interval);
-        actions.upsertRenderJob({
-          ...initialJob,
-          status: "done",
-          percent: 100,
-          renderedFrames: durationInFrames,
-        });
-        toast.success(`Render finished: out/${cleanName}`);
-      } else {
-        actions.upsertRenderJob({
-          ...initialJob,
-          status: "rendering",
-          percent: pct,
-          renderedFrames: frames,
-        });
-      }
-    }, 650);
+      throw new Error(`Render request failed with status ${res.status}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Engine render worker is unavailable";
+      actions.upsertRenderJob({
+        ...initialJob,
+        status: "error",
+        percent: 0,
+        error: msg,
+      });
+      toast.error(`Render failed: ${msg}`);
+    }
   };
 
   return (

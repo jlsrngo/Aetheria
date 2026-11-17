@@ -85,7 +85,7 @@ export const AboutAetheriaModal = memo(function AboutAetheriaModal({
           if (active && info) setEngineInfo(info);
           return;
         }
-        const res = await fetch("/api/desktop/engine-info");
+        const res = await apiFetch(`${API_BASE}/desktop/engine-info`);
         if (res.ok) {
           const info = await res.json();
           if (active && info) setEngineInfo(info);
@@ -101,7 +101,7 @@ export const AboutAetheriaModal = memo(function AboutAetheriaModal({
   const checkForUpdates = useCallback(async () => {
     setCheckingUpdate(true);
     try {
-      const res = await fetch("/api/desktop/check-updates");
+      const res = await apiFetch(`${API_BASE}/desktop/check-updates`);
       if (res.ok) {
         const data = await res.json();
         setUpdateResult({
@@ -134,7 +134,7 @@ export const AboutAetheriaModal = memo(function AboutAetheriaModal({
   const checkArtcraftUpdates = useCallback(async () => {
     setCheckingArtcraft(true);
     try {
-      const res = await fetch("/api/desktop/check-artcraft-updates");
+      const res = await apiFetch(`${API_BASE}/desktop/check-artcraft-updates`);
       if (res.ok) {
         const data = await res.json();
         setArtcraftStatus(data);

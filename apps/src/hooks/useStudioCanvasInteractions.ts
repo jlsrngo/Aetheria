@@ -72,10 +72,15 @@ export function useStudioCanvasInteractions({
 
   useEffect(() => {
     const handleGlobalSpaceKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
       if (
-        e.target instanceof HTMLInputElement ||
-        e.target instanceof HTMLTextAreaElement ||
-        (e.target as HTMLElement)?.isContentEditable
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        target instanceof HTMLButtonElement ||
+        target instanceof HTMLAnchorElement ||
+        target?.isContentEditable ||
+        Boolean(target?.closest("[role='dialog']"))
       ) {
         return;
       }

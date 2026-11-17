@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Sparkles,
   PanelLeftClose,
@@ -98,9 +98,19 @@ export function ElementsCaptionsPanel({
   };
 
   const currentCaptionHex = resolveCaptionHex(captionStyle);
+  const [hexDraft, setHexDraft] = useState<string>(currentCaptionHex);
+
+  useEffect(() => {
+    setHexDraft(currentCaptionHex);
+  }, [currentCaptionHex]);
+
+  const isHexDraftValid = /^#[0-9a-fA-F]{6}$/.test(hexDraft.trim());
 
   const handleCaptionColorChange = (nextColor: string) => {
-    const normalized = nextColor.toUpperCase();
+    setHexDraft(nextColor);
+    const trimmed = nextColor.trim();
+    if (!/^#[0-9a-fA-F]{6}$/.test(trimmed)) return;
+    const normalized = trimmed.toUpperCase();
     if (subtitleCues.length > 0) {
       const updated = subtitleCues.map((cue) => ({
         ...cue,
@@ -349,10 +359,17 @@ export function ElementsCaptionsPanel({
                 </label>
                 <input
                   type="text"
-                  value={currentCaptionHex}
+                  value={hexDraft}
                   onChange={(e) => handleCaptionColorChange(e.target.value)}
+                  onBlur={() => {
+                    if (!isHexDraftValid) setHexDraft(currentCaptionHex);
+                  }}
+                  aria-invalid={!isHexDraftValid}
                   placeholder="#00F2FE"
-                  className="w-20 h-5 px-1 bg-transparent text-[11px] font-mono text-[var(--text-primary)] outline-none"
+                  className={cn(
+                    "w-20 h-5 px-1 bg-transparent text-[11px] font-mono outline-none",
+                    isHexDraftValid ? "text-[var(--text-primary)]" : "text-rose-400"
+                  )}
                 />
               </div>
 

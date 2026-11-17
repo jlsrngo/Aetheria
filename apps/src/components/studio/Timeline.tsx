@@ -45,7 +45,7 @@ export const Timeline: React.FC<TimelineProps> = ({
 
   const [isTimelineCollapsed, setIsTimelineCollapsed] = useState<boolean>(false);
   const [timelineZoom, setTimelineZoom] = useState<number>(0);
-  const [selectedLayerId, setSelectedLayerId] = useState<string | null>("text-hook");
+  const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
   const [modalLayer, setModalLayer] = useState<VideoLayerSpec | null>(null);
   const [isSnapping, setIsSnapping] = useState<boolean>(true);
 

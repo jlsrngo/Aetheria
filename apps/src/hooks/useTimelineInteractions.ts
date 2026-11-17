@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
 import type { StudioCanvasSettings } from "../types/studio";
 import type { NexusVideoProps, VideoLayerSpec } from "../types/video";
 import type { TimelineDragOverride } from "../components/studio/timeline/timelineLayerUtils";
@@ -103,31 +102,17 @@ export function useTimelineInteractions({
 
   useEffect(() => {
     const handleTimelineKeys = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
       if (
-        e.target instanceof HTMLInputElement ||
-        e.target instanceof HTMLTextAreaElement ||
-        (e.target as HTMLElement)?.isContentEditable
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        target?.isContentEditable ||
+        Boolean(target?.closest("[role='dialog']"))
       ) {
         return;
       }
       const isCtrlOrMeta = e.ctrlKey || e.metaKey;
-
-      if (isCtrlOrMeta && !e.shiftKey && (e.key === "z" || e.key === "Z")) {
-        e.preventDefault();
-        hotkeyHandlersRef.current.onUndo();
-        toast.info("Undo: Reverted change", { duration: 1200 });
-        return;
-      }
-
-      if (
-        (isCtrlOrMeta && (e.key === "y" || e.key === "Y")) ||
-        (isCtrlOrMeta && e.shiftKey && (e.key === "z" || e.key === "Z"))
-      ) {
-        e.preventDefault();
-        hotkeyHandlersRef.current.onRedo();
-        toast.info("Redo: Reapplied change", { duration: 1200 });
-        return;
-      }
 
       if (isCtrlOrMeta && (e.key === "d" || e.key === "D")) {
         e.preventDefault();

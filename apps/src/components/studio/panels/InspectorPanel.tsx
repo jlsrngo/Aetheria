@@ -76,6 +76,8 @@ export function InspectorPanel({
     try {
       await actions.syncFromBackend();
       toast.success("Synced HTML film metadata");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to sync film metadata");
     } finally {
       setIsRefreshingFilm(false);
     }
@@ -108,10 +110,14 @@ export function InspectorPanel({
       if (res.ok) {
         toast.success(`Saved defaultProps for "${activeComposition.name}"`);
       } else {
-        toast.success(`Saved props locally for "${activeComposition.name}"`);
+        toast.error(`Failed to save defaultProps to disk (HTTP ${res.status})`);
       }
-    } catch {
-      toast.success(`Saved props locally for "${activeComposition.name}"`);
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? `Failed to save defaultProps: ${err.message}`
+          : "Engine unreachable — could not save defaultProps to disk"
+      );
     } finally {
       setIsSaving(false);
     }

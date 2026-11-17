@@ -146,6 +146,8 @@ export function useWorkstationChat({
   useEffect(() => {
     return () => {
       clearWatchdog();
+      isLocalSendingRef.current = false;
+      isStreamingRef.current = false;
       if (abortControllerRef.current) {
         try {
           abortControllerRef.current.abort();
@@ -169,7 +171,7 @@ export function useWorkstationChat({
     },
     enabled: !!activeChatId,
     refetchOnWindowFocus: true,
-    refetchInterval: () => (isStreaming ? false : 2000),
+    refetchInterval: () => (isStreamingRef.current ? false : 2000),
   });
 
   const {

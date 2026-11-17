@@ -84,7 +84,31 @@ const listeners = new Set<() => void>();
 const frameListeners = new Set<() => void>();
 let frameState = 0;
 let storageTimer: ReturnType<typeof setTimeout> | null = null;
-let backendSyncTimer: ReturnType<typeof setTimeout> | null = null;
+const backendSyncTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function scheduleBackendPropsSync(
+  compositionId: string,
+  props: NexusVideoProps,
+  epoch: number
+) {
+  const prevTimer = backendSyncTimers.get(compositionId);
+  if (prevTimer) clearTimeout(prevTimer);
+  const timer = setTimeout(() => {
+    backendSyncTimers.delete(compositionId);
+    void apiFetch(`${API_BASE}/update-default-props`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ compositionId, props }),
+    })
+      .then((res) => {
+        if (res.ok && mutationEpochById.get(compositionId) === epoch) {
+          dirtyCompositionIds.delete(compositionId);
+        }
+      })
+      .catch(() => {});
+  }, 300);
+  backendSyncTimers.set(compositionId, timer);
+}
 
 function emit() {
   listeners.forEach((l) => l());
@@ -178,21 +202,7 @@ export const studioActions = {
       redoStack: recordHistory ? [] : state.redoStack,
     };
     emit();
-
-    if (backendSyncTimer) clearTimeout(backendSyncTimer);
-    backendSyncTimer = setTimeout(() => {
-      void apiFetch(`${API_BASE}/update-default-props`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ compositionId: mutatedId, props: nextProps }),
-      })
-        .then((res) => {
-          if (res.ok && mutationEpochById.get(mutatedId) === epoch) {
-            dirtyCompositionIds.delete(mutatedId);
-          }
-        })
-        .catch(() => {});
-    }, 300);
+    scheduleBackendPropsSync(mutatedId, nextProps, epoch);
   },
 
   updateActiveMetadata(
@@ -213,9 +223,11 @@ export const studioActions = {
       DEFAULT_WORKSPACE_COMPOSITION,
       (comp) => ({ ...comp, ...partial })
     );
-    bumpMutationEpoch(mutatedId);
+    const epoch = bumpMutationEpoch(mutatedId);
+    const updated = nextComps.find((c) => c.id === mutatedId) ?? active;
     state = { ...state, compositions: nextComps, activeCompositionId: mutatedId };
     emit();
+    scheduleBackendPropsSync(mutatedId, updated.props, epoch);
   },
 
   resetActiveProps() {
@@ -235,7 +247,7 @@ export const studioActions = {
       DEFAULT_WORKSPACE_COMPOSITION,
       (comp) => ({ ...comp, props: prev })
     );
-    bumpMutationEpoch(mutatedId);
+    const epoch = bumpMutationEpoch(mutatedId);
     state = {
       ...state,
       compositions: nextComps,
@@ -244,6 +256,7 @@ export const studioActions = {
       redoStack: [currentCloned, ...state.redoStack.slice(0, 29)],
     };
     emit();
+    scheduleBackendPropsSync(mutatedId, prev, epoch);
   },
 
   redoProps() {
@@ -259,7 +272,7 @@ export const studioActions = {
       DEFAULT_WORKSPACE_COMPOSITION,
       (comp) => ({ ...comp, props: next })
     );
-    bumpMutationEpoch(mutatedId);
+    const epoch = bumpMutationEpoch(mutatedId);
     state = {
       ...state,
       compositions: nextComps,
@@ -268,6 +281,7 @@ export const studioActions = {
       redoStack: state.redoStack.slice(1),
     };
     emit();
+    scheduleBackendPropsSync(mutatedId, next, epoch);
   },
 
   createComposition(input: {
