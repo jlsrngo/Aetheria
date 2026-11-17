@@ -86,7 +86,7 @@ crates/**/target/
 *.pub
 
 docs/*
-!docs/harness-fokus-visual.md
+!docs/backlog-integrasi-sosial-dan-akun.md
 demo/
 demo-workspace/
 

@@ -8,8 +8,8 @@ Aturan untuk agent AI (dan manusia) yang mengubah repo ini. Isinya sudah dicocok
 
 * **Target:** aplikasi desktop Windows (`.exe` / `.msi`) — Tauri v2 + Rust + React + mesin motion HTML5/JS modular.
 * **Prioritas:** TikTok-first (P0); render lokal tanpa biaya cloud (headless browser CDP murni-Rust + FFmpeg); stok video; penjadwalan; analitik akun (views, likes, followers).
-* **Peta repo:** `apps/` (React + Vite), `core/aetheria-engine/` (engine Rust), `src-tauri/` (shell Tauri), `scripts/` (dev/smoke/bundle & skrip E2E harness `test-f1..f6`), `.aetheria/skills/` (skill motion untuk Studio), `.aetheria/reference/` (`AM_API.md` kontrak tunggal runtime `window.AM`).
-* **Rujukan UI & Harness:** [`apps/design.md`](apps/design.md) untuk visual UI (bila berbeda dengan variabel di `apps/src/index.css`, yang berlaku adalah kode yang berjalan; laporkan selisihnya), dan [`docs/harness-fokus-visual.md`](docs/harness-fokus-visual.md) untuk kontrak harness fokus visual (F0–F7).
+* **Peta repo:** `apps/` (React + Vite), `core/aetheria-engine/` (engine Rust), `src-tauri/` (shell Tauri), `scripts/` (dev/smoke/bundle & skrip E2E harness `test-f1..f6`), `.aetheria/skills/` (skill motion untuk Studio), `.aetheria/reference/` (`AM_API.md` kontrak tunggal runtime `window.AM`), `e2e/` (suite Playwright E2E), [`docs/backlog-integrasi-sosial-dan-akun.md`](docs/backlog-integrasi-sosial-dan-akun.md) (backlog fitur sosial/akun yang ditunda).
+* **Rujukan UI:** [`apps/design.md`](apps/design.md) untuk visual UI (bila berbeda dengan variabel di `apps/src/index.css`, yang berlaku adalah kode yang berjalan; laporkan selisihnya). `bash` dan `codemode` tetap aktif di agent harness dengan guard anti-eksfiltrasi kredensial/SSRF dan isolasi scratch per sesi.
 
 ---
 
@@ -37,7 +37,7 @@ Repo ini **tidak punya CI** (`.github/` ada di `.gitignore`), jadi gate di bawah
 ```bash
 npm run typecheck             # tsc -b apps/tsconfig.json (strict)
 npm run build                 # tsc --noEmit + vite build
-(cd apps && npx vitest run)   # suite frontend (26 file / 102 tes termasuk skill-lint & paritas AM_API di apps/src/lib/motionHarnessSpec.test.ts)
+(cd apps && npx vitest run)   # suite frontend (26 file / 103 tes termasuk skill-lint & paritas AM_API di apps/src/lib/motionHarnessSpec.test.ts)
 ```
 
 `npm run verify` **bukan** bukti yang cukup: ia tidak menjalankan Vitest, dan `test:smoke` di dalamnya butuh engine yang sedang hidup.
@@ -101,9 +101,9 @@ Catatan lingkungan: target resmi adalah Windows. Di Linux, `cargo test` gagal bi
 **Catatan engine & lingkungan**
 
 * Untuk dev dan skenario E2E, bangun biner dev incremental dengan `npm run build:engine`, lalu jalankan engine dev (`npm run dev:engine`, `npm run dev:desktop`, atau `npm run dev:app`) dan jalankan skenario E2E. Dilarang memakai `--release` untuk dev/E2E; release hanya untuk `tauri:build`, `bundle:prepare`, dan pengukuran performa. Autentikasi memakai Basic auth; kredensial ada di `~/.aetheria/dev-server-password` (format `user:password`).
-* **Port tidak konsisten di repo:** `scripts/dev-app.cjs` memakai `:4096`, sedangkan proxy Vite dan default skrip smoke/knowledge memakai `:4196`. Set `AETHERIA_HEALTH` dan `AETHERIA_API` bila engine tidak di `:4196`. Jangan mengandalkan auto-start di `scripts/test-knowledge-e2e.ts`: ia menjalankan engine di `:4096` tetapi memeriksa health di `:4196`.
+* **Port dev di repo:** `scripts/dev-app.cjs` memakai `:4096`, sedangkan proxy Vite, default `test:smoke`, dan `scripts/test-knowledge-e2e.ts` memakai `:4196` (mengikuti port `AETHERIA_HEALTH` bila diset). Set `AETHERIA_HEALTH` dan `AETHERIA_API` bila engine tidak di `:4196`.
 * `test:knowledge` dan `test:smoke` memanggil model sungguhan (`AETHERIA_TEST_PROVIDER`, `AETHERIA_TEST_MODEL`). Tanpa kredensial provider, statusnya **Terblokir**, bukan lulus.
-* **Belum ada** `playwright.config.ts`, spec Playwright, maupun browser yang terunduh. Tugas UI pertama yang membutuhkan E2E membuat sebagai perubahan terpisah: konfigurasi minimal (`baseURL` `http://127.0.0.1:5173`), spec di `e2e/`, skrip `test:e2e` di `package.json`, dan `npx playwright install chromium`. Laporkan perubahan itu.
+* **Suite Playwright (`playwright.config.ts` & `e2e/`):** konfigurasi Playwright, helper live stack (`e2e/live-stack.mjs`), spec `e2e/*.spec.ts`, dan Chromium sudah terpasang. Jalankan tes UI dengan `npx playwright test e2e/<spec>.spec.ts`.
 * E2E butuh engine nyata, yang target resminya Windows. Agent yang tidak bisa menghidupkan engine **tidak boleh** menulis "Selesai"; pakai "Selesai sebagian" atau "Terblokir".
 
 ### 3.4 Kebersihan diff
@@ -170,7 +170,7 @@ Stack: React 19, Vite, Tailwind 4, TanStack Query, TypeScript strict (`apps/tsco
 7. `useEffect` hanya untuk sinkronisasi dengan sistem luar (DOM API, timer, listener keyboard/window, `requestAnimationFrame`, `ResizeObserver`, jaringan), dengan dependency lengkap dan fungsi cleanup. Efek yang panjang ditarik ke hook terfokus di `apps/src/hooks/` (contoh: `useMotionPlayback.ts`).
 8. State lokal dulu (`useState`); naikkan hanya seperlunya. State lintas-komponen memakai store berbasis `useSyncExternalStore` di `apps/src/hooks/` (pola `useStudioStore.ts`, `useScheduleStore.ts`). Jangan menambah Context atau library state baru tanpa persetujuan.
 9. Data dari engine yang perlu di-cache/di-refetch: pakai TanStack Query (`QueryClient` sudah dikonfigurasi di `App.tsx`), jangan menulis cache manual di `useEffect`. Pola yang ada beragam (hook + `apiFetch`, store); jangan memakai dua mekanisme untuk data yang sama.
-10. **Semua panggilan ke engine lewat `apiFetch` (`lib/api.ts`) atau adapter `lib/engine.ts`.** `fetch()` langsung kehilangan kredensial Basic auth dan base URL. (`AboutAetheriaModal.tsx` masih memanggil `fetch("/api/desktop/...")` langsung: warisan; laporkan, jangan menirunya.)
+10. **Semua panggilan ke engine lewat `apiFetch` (`lib/api.ts`) atau adapter `lib/engine.ts`.** `fetch()` langsung kehilangan kredensial Basic auth dan base URL.
 11. Daftar dinamis memakai `key` stabil dari ID data, bukan index (ada 11 pemakaian index warisan; jangan menambah).
 
 **Performa**
@@ -196,7 +196,7 @@ Stack: Rust edition 2021, `axum` 0.7, `tokio` (full), `reqwest` (rustls), `serde
 **Struktur**
 
 1. **1 file = 1 tanggung jawab kohesif** (kohesi, bukan batas baris; file panjang boleh bila satu domain utuh beserta tesnya). Contoh pemisahan di `core/aetheria-engine/src/studio/`: `motion_linter.rs` (linter) terpisah dari `film_inspector.rs` (inspektor scene), `film_static_server.rs` (static HTTP), `ffmpeg_pipeline.rs` (pipeline FFmpeg), `html_renderer.rs` (orkestrator browser CDP); serta pada lapisan harness: `tool/film_audio.rs` (sintesis audio + parser durasi WAV RIFF + validator durasi scene), `tool/profiles.rs` (allowlist tool berbasis peran), `tool/film_state.rs` (status progres scene berbasis disk & validasi completion gate), `tool/edit.rs` (guard `oldString` >25 baris tanpa range), dan `session/agent_turn/dynamic_context.rs` (filter relevansi & cap blok dinamis).
-2. **Baseline konteks harness (terukur `scripts/measure-harness-context.mjs`, formula kasar `ceil(chars/4)`):** Baseline F0 (`7861f99`) pada `default.txt` = `19,482` chr (`~4,871` tok), definisi tool koordinator default = `28` tool (`33,078` chr), `qa-verifier` = `29` tool (`37,100` chr), `mg-soft-clay-story/SKILL.md` = `12,199` chr, blok dinamis `E:\JS\Aetheria-Workspace` = `5,073` chr; setelah F1–F6 (`52892f1`), `default.txt` = `16,741` chr, `profile:director` = `10` tool (`16,442` chr), `motion-designer` = `8` tool (`10,951` chr), `qa-verifier` = `7` tool (`10,050` chr), `mg-soft-clay-story/SKILL.md` = `8,955` chr, blok dinamis video unstyled = `2,027` chr (explicit skill = `715` chr, non-video = `427` chr, greeting = `0` chr). Lihat [`docs/harness-fokus-visual.md`](docs/harness-fokus-visual.md).
+2. **Baseline konteks harness (terukur `scripts/measure-harness-context.mjs`, formula kasar `ceil(chars/4)`):** Baseline F0 (`7861f99`) pada `default.txt` = `19,482` chr (`~4,871` tok), definisi tool koordinator default = `28` tool (`33,078` chr), `qa-verifier` = `29` tool (`37,100` chr), `mg-soft-clay-story/SKILL.md` = `12,199` chr, blok dinamis `E:\JS\Aetheria-Workspace` = `5,073` chr; setelah F1–F6 (`52892f1`), `default.txt` = `16,741` chr, `profile:director` = `10` tool (`16,442` chr), `motion-designer` = `8` tool (`10,951` chr), `qa-verifier` = `7` tool (`10,050` chr), `mg-soft-clay-story/SKILL.md` = `8,955` chr, blok dinamis video unstyled = `2,027` chr (explicit skill = `715` chr, non-video = `427` chr, greeting = `0` chr).
 2. **Handler tipis, service kohesif.** Handler Axum dan command Tauri (`src-tauri/src/*_cmds.rs`: `cli_auth_cmds`, `studio_cmds`, `window_cmds`) hanya memvalidasi input, mendelegasikan ke modul domain, lalu memformat respons. Logika domain tetap di engine, bukan di `src-tauri/`. Jangan mencampur handler dengan parser/linter, peluncur subprocess, atau protocol client dalam satu file.
 3. **Fungsi ramping.** Ekstrak helper privat saat sebuah fungsi menyentuh beberapa langkah I/O atau level abstraksi; jangan memecah file hanya karena panjang.
 4. Ikuti konvensi folder yang ada (15 folder memakai `mod.rs`, selebihnya file bernama); jangan mengubah gaya modul sebuah folder di luar tugas.
