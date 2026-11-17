@@ -244,8 +244,8 @@ fn resolve_dynamic_style_or_skill_command_inner(
                                             .to_string();
                                         let note = format!(
                                             "\nACTIVE VIDEO PROJECT SUBFOLDER: {rel}/ (Title: \"{title}\")\n\
-                                            - Write ALL project files inside `{rel}/` (e.g. `{rel}/index.html`, `{rel}/script/scene1.js`..`sceneN.js`, `{rel}/audio/scene1.wav`, `{rel}/audio/scene1.words.json`, `{rel}/audio/sfx_*.json`).\n\
-                                            - Inside `{rel}/index.html`, keep relative asset URLs as `script/...` and `audio/...` (Studio serves directly from `{rel}/`).\n\
+                                            - Write ALL scene and audio files inside `{rel}/` (e.g. `{rel}/film.json`, `{rel}/script/scene1.js`..`sceneN.js`, `{rel}/audio/scene1.wav`, `{rel}/audio/scene1.words.json`, `{rel}/audio/sfx_*.json`).\n\
+                                            - When running `film_scaffold`, `{rel}/index.html` and relative `script/...` / `audio/...` URLs are managed automatically by the harness.\n\
                                             - Do NOT write scene or audio files into the workspace root.\n",
                                             rel = proj.relative_path,
                                             title = proj.title
@@ -273,28 +273,49 @@ fn resolve_dynamic_style_or_skill_command_inner(
                                 )
                             };
 
+                            let has_custom_stage_kit = !seeded_kits.is_empty()
+                                || path.join("examples").join("index.html").is_file();
                             let microstock_override =
                                 crate::studio::microstock::build_microstock_hard_override_block(
                                     workspace_dir,
                                 );
                             let rules_block = if let Some(ref ms_override) = microstock_override {
+                                if has_custom_stage_kit {
+                                    format!(
+                                        "MANDATORY RULES FOR THIS GENERATION (MICROSTOCK MODE 'M' LOCKED):\n\
+                                        1. Delegate modular scene scripts (`{project_rel_prefix}script/scene1.js`..`sceneN.js`) + `{project_rel_prefix}index.html` (`manageIndexHtml: false` with `examples/index.html` dual-canvas template) to `task(subagent_type: \"motion-designer\")`. DO NOT call `audio-director`, `voicebox_speak`, or `generate_smart_sfx` (Adobe Stock requires silent `-an` streams).\n\
+                                        2. Pass the active skill path (`{path_display}`) and target project subfolder (`{project_rel_prefix}`) to `motion-designer`, keeping ONLY its 3D Three.js + `ClayKit` / lighting / pastel material aesthetic adapted cleanly to the locked Microstock canvas dimensions.\n\
+                                        3. If `script/*-kit.js` (e.g. `clay-kit.js`) is already seeded in `{project_rel_prefix}script/`, DO NOT overwrite it — load it alongside `/script/three.min.js` and `/script/aetheria-motion.js`, and pass the Microstock-locked `width, height` to `ClayKit.initStage(canvas, width, height)`.\n\
+                                        4. Enforce ZERO subtitles (`AM.drawSubtitles`), ZERO `fillText`/`strokeText`/DOM text, and update `{project_rel_prefix}microstock/manifest.json` metadata.\n\n\
+                                        {ms_override}",
+                                        path_display = path.display()
+                                    )
+                                } else {
+                                    format!(
+                                        "MANDATORY RULES FOR THIS GENERATION (MICROSTOCK MODE 'M' LOCKED):\n\
+                                        1. Call `film_scaffold` FIRST so `{project_rel_prefix}film.json` and `{project_rel_prefix}index.html` use the locked Microstock dimensions; delegate `script/scene1.js`..`sceneN.js` to `task(subagent_type: \"motion-designer\")`.\n\
+                                        2. DO NOT call `audio-director`, `voicebox_speak`, or `generate_smart_sfx` (Adobe Stock requires silent `-an` streams).\n\
+                                        3. Pass the active skill path (`{path_display}`) and target project subfolder (`{project_rel_prefix}`) to `motion-designer`, enforcing ZERO subtitles (`AM.drawSubtitles`), ZERO `fillText`/`strokeText`/DOM text, and updating `{project_rel_prefix}microstock/manifest.json` metadata.\n\n\
+                                        {ms_override}",
+                                        path_display = path.display()
+                                    )
+                                }
+                            } else if has_custom_stage_kit {
                                 format!(
-                                    "MANDATORY RULES FOR THIS GENERATION (MICROSTOCK MODE 'M' LOCKED):\n\
-                                    1. Delegate modular scene scripts (`{project_rel_prefix}script/scene1.js`..`sceneN.js`) + `{project_rel_prefix}index.html` to `task(subagent_type: \"motion-designer\")`. DO NOT call `audio-director`, `voicebox_speak`, or `generate_smart_sfx` (Adobe Stock requires silent `-an` streams).\n\
-                                    2. Pass the active skill path (`{path_display}`) and target project subfolder (`{project_rel_prefix}`) to `motion-designer`, keeping ONLY its 3D Three.js + `ClayKit` / lighting / pastel material aesthetic adapted cleanly to the locked Microstock canvas dimensions.\n\
-                                    3. If `script/*-kit.js` (e.g. `clay-kit.js`) is already seeded in `{project_rel_prefix}script/`, DO NOT overwrite it — load it alongside `/script/three.min.js` and `/script/aetheria-motion.js`, and pass the Microstock-locked `width, height` to `ClayKit.initStage(canvas, width, height)`.\n\
-                                    4. Enforce ZERO subtitles (`AM.drawSubtitles`), ZERO `fillText`/`strokeText`/DOM text, and update `{project_rel_prefix}microstock/manifest.json` metadata.\n\n\
-                                    {ms_override}",
+                                    "MANDATORY RULES FOR THIS GENERATION:\n\
+                                    1. Coordinate via the 3-Track Subagent Pipeline: delegate voiceover/SFX synthesis to `task(subagent_type: \"audio-director\")` and delegate modular per-scene scripts (`{project_rel_prefix}script/scene1.js`..`sceneN.js`) + custom stage `{project_rel_prefix}index.html` (`manageIndexHtml: false`) to `task(subagent_type: \"motion-designer\")`.\n\
+                                    2. Pass the active skill path (`{path_display}`), target project subfolder (`{project_rel_prefix}`), and `examples/` kit instructions directly in your prompt to `motion-designer` and `audio-director`. Preserve the skill's dual-canvas Three.js + `ClayKit` (`#stage-webgl` with `preserveDrawingBuffer: true` + `#stage-hud`) and Neobrutalism `AM.drawSubtitles` architecture rather than falling back to plain 2D Canvas.\n\
+                                    3. If `script/*-kit.js` (e.g. `clay-kit.js`) is already seeded in `{project_rel_prefix}script/`, DO NOT overwrite it — load it alongside `/script/three.min.js` and `/script/aetheria-motion.js`.\n\
+                                    4. Strictly apply the skill's tokens, camera movement rules, and motion curves (`AM.spring`, `AM.anticipation`, `AM.stagger`).",
                                     path_display = path.display()
                                 )
                             } else {
                                 format!(
                                     "MANDATORY RULES FOR THIS GENERATION:\n\
-                                    1. Coordinate via the 3-Track Subagent Pipeline: delegate voiceover/SFX synthesis to `task(subagent_type: \"audio-director\")` and delegate modular per-scene scripts (`{project_rel_prefix}script/scene1.js`..`sceneN.js`) + `{project_rel_prefix}index.html` to `task(subagent_type: \"motion-designer\")`.\n\
-                                    2. Pass the active skill path (`{path_display}`), target project subfolder (`{project_rel_prefix}`), and `examples/` kit instructions directly in your prompt to `motion-designer` and `audio-director`. The active skill's rendering architecture (e.g., 3D Three.js + `ClayKit` dual-canvas `#stage-webgl` with `preserveDrawingBuffer: true` + `#stage-hud`, smooth outlines, Neobrutalism subtitles) is NON-NEGOTIABLE — adapt storyboard mood/props *inside* the skill's architecture rather than falling back to plain 2D Canvas.\n\
-                                    3. If `script/*-kit.js` (e.g. `clay-kit.js`) is already seeded in `{project_rel_prefix}script/`, DO NOT overwrite it — load it in `{project_rel_prefix}index.html` alongside `/script/three.min.js` and `/script/aetheria-motion.js`, preserve `examples/index.html`'s dual-canvas + `AM.drawSubtitles(..., {{ style: \"neobrutalism\", ... }})` structure, and build real 3D meshes in `scene3D` inside `{project_rel_prefix}script/scene1.js`..`sceneN.js`.\n\
-                                    4. Strictly apply these exact colors, fonts, camera movement rules, scale law (`u(refPx)`), and motion curves (`AM.spring`, `AM.anticipation`, `AM.stagger`).\n\
-                                    5. Follow the Do's and Don'ts from the skill guidelines and exact brief specifications.",
+                                    1. Coordinate via the 3-Track Subagent Pipeline: delegate voiceover/SFX synthesis to `task(subagent_type: \"audio-director\")` and delegate modular per-scene scripts (`{project_rel_prefix}script/scene1.js`..`sceneN.js`) to `task(subagent_type: \"motion-designer\")`.\n\
+                                    2. Call `film_scaffold` FIRST to generate `{project_rel_prefix}film.json`, managed `{project_rel_prefix}index.html`, and `{project_rel_prefix}script/scene1.js`..`sceneN.js` stubs — do NOT hand-write `index.html`.\n\
+                                    3. Pass the active skill path (`{path_display}`) and target project subfolder (`{project_rel_prefix}`) directly in your prompt to `motion-designer` and `audio-director`.\n\
+                                    4. Follow the skill's design tokens, palette, typography, motion curves (`AM.spring`, `AM.anticipation`, `AM.stagger`), and signature Do's & Don'ts.",
                                     path_display = path.display()
                                 )
                             };

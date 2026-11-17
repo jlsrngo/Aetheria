@@ -143,6 +143,64 @@ pub fn discover_workspace_plugin_rules(workspace_dir: &str) -> String {
     format!("<plugin_rules>\n{}\n</plugin_rules>", rules_out)
 }
 
+const EMBEDDED_AM_API_REFERENCE: &str = include_str!("../../../../../.aetheria/reference/AM_API.md");
+
+/// Returns the `window.AM` runtime reference document for video / motion-designer turns.
+pub fn load_am_api_reference(workspace_dir: &str) -> String {
+    if !workspace_dir.trim().is_empty() {
+        let ws_override = Path::new(workspace_dir)
+            .join(".aetheria")
+            .join("reference")
+            .join("AM_API.md");
+        if ws_override.is_file() {
+            if let Ok(content) = std::fs::read_to_string(&ws_override) {
+                if !content.trim().is_empty() {
+                    return content;
+                }
+            }
+        }
+    }
+    EMBEDDED_AM_API_REFERENCE.to_string()
+}
+
+/// Returns `true` only on active video / motion turns so general chat never pays AM API token overhead.
+pub fn should_inject_am_api_reference(
+    workspace_dir: &str,
+    prompt_text: &str,
+    has_style_or_ref: bool,
+) -> bool {
+    if crate::tool::catalog::is_greeting_prompt(prompt_text) {
+        return false;
+    }
+    if has_style_or_ref
+        || crate::studio::microstock::active_microstock_lock(workspace_dir).is_some()
+    {
+        return true;
+    }
+    let lower = prompt_text.to_ascii_lowercase();
+    const VIDEO_HINTS: &[&str] = &[
+        "video",
+        "motion",
+        "animasi",
+        "animation",
+        "scene",
+        "adegan",
+        "film_scaffold",
+        "capture_film_preview",
+        "aetheria-motion",
+        "renderat",
+        "canvas",
+        "<svg",
+        "three.js",
+        "webgl",
+        "tiktok",
+        "reels",
+        "shorts",
+        "storyboard",
+    ];
+    VIDEO_HINTS.iter().any(|k| lower.contains(k))
+}
+
 /// Assembles complete system prompt with environment block, living memory, knowledge base, skills, and plugin rules.
 pub fn assemble_system_prompt(workspace_dir: &str) -> String {
     let base_prompt_template = include_str!("../prompt/default.txt");
@@ -224,6 +282,37 @@ mod tests {
         let _ = std::fs::create_dir_all(&tmp);
         let assembled = assemble_system_prompt(&tmp.to_string_lossy());
         assert!(assembled.contains("Working directory:"));
+        assert!(!assembled.contains("window.AM Runtime API Reference"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn default_txt_deduped_and_am_api_selective() {
+        let prompt = include_str!("../prompt/default.txt");
+        assert!(!prompt.contains("Lightweight Stage Orchestrator Contract"));
+        assert!(prompt.contains("AM.registerScene"));
+        assert!(prompt.contains("Math.random()"));
+        assert!(prompt.contains("requestAnimationFrame"));
+
+        let tmp = std::env::temp_dir().join("aetheria_am_select_test");
+        let _ = std::fs::create_dir_all(&tmp);
+        let ws = tmp.to_string_lossy();
+        assert!(!super::should_inject_am_api_reference(&ws, "halo", false));
+        assert!(!super::should_inject_am_api_reference(
+            &ws,
+            "explain Rust lifetimes and borrow checker",
+            false
+        ));
+        assert!(super::should_inject_am_api_reference(
+            &ws,
+            "/mg-flat-vector buatkan intro",
+            true
+        ));
+        assert!(super::should_inject_am_api_reference(
+            &ws,
+            "buatkan video animasi 2 scene tentang kopi",
+            false
+        ));
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

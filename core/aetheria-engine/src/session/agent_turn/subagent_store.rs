@@ -60,6 +60,14 @@ pub fn build_subagent_system_prompt(subagent_type: &str, workspace_dir: &str) ->
             s.push_str("\n\n");
             s.push_str(&discovered);
         }
+        if subagent_type.trim().eq_ignore_ascii_case("motion-designer") {
+            let am_ref = super::context::load_am_api_reference(workspace_dir);
+            if !am_ref.trim().is_empty() {
+                s.push_str("\n\n<am_runtime_api_reference>\n");
+                s.push_str(am_ref.trim());
+                s.push_str("\n</am_runtime_api_reference>");
+            }
+        }
         if let Some(ms_block) =
             crate::studio::microstock::build_active_microstock_prompt_block(workspace_dir)
         {
@@ -107,6 +115,13 @@ mod prompt_tests {
         assert!(prompt.contains("preserveDrawingBuffer: true"));
         assert!(prompt.contains("custom-3d-skill"));
         assert!(prompt.contains("OPTIONAL"));
+        assert!(prompt.contains("<am_runtime_api_reference>"));
+
+        let explore_prompt = build_subagent_system_prompt("explore", &dir.to_string_lossy());
+        assert!(!explore_prompt.contains("<am_runtime_api_reference>"));
+
+        let audio_prompt = build_subagent_system_prompt("audio-director", &dir.to_string_lossy());
+        assert!(!audio_prompt.contains("<am_runtime_api_reference>"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -29,6 +29,7 @@ ref/
 references/*
 !references/aetheria-motion/
 reference/
+!.aetheria/reference/
 
 # Scratch & test artifacts
 output/

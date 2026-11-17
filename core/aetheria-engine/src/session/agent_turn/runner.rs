@@ -684,7 +684,9 @@ async fn prepare_initial_chat_messages(
     let is_greeting = is_greeting_prompt(prompt_text);
     if !is_greeting {
         extra_context.extend(resolve_mentioned_files(workspace_dir, prompt_text));
+        let mut has_style_or_ref = false;
         if let Some(style_ctx) = resolve_motioncraft_style_command(workspace_dir, prompt_text) {
+            has_style_or_ref = true;
             extra_context.push(style_ctx);
         }
         if let Some(audio_ctx) = resolve_voice_preset_command(prompt_text) {
@@ -718,7 +720,21 @@ async fn prepare_initial_chat_messages(
             || !social_images.is_empty();
         if wants_reference {
             if let Some(ref_report) = resolve_reference_report(workspace_dir) {
+                has_style_or_ref = true;
                 extra_context.push(ref_report);
+            }
+        }
+        if super::context::should_inject_am_api_reference(
+            workspace_dir,
+            prompt_text,
+            has_style_or_ref,
+        ) {
+            let am_ref = super::context::load_am_api_reference(workspace_dir);
+            if !am_ref.trim().is_empty() {
+                extra_context.push(format!(
+                    "<am_runtime_api_reference>\n{}\n</am_runtime_api_reference>",
+                    am_ref.trim()
+                ));
             }
         }
     }

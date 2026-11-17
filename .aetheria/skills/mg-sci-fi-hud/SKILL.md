@@ -23,12 +23,12 @@ command: /mg-sci-fi-hud
 1. Open Aetheria Video Studio and invoke this skill using the command or natural language.
 2. The skill injects the creative seed, timing choreography, palette tokens, and motion curves into the LLM context.
 3. **Customization**: Adapt the narrative, brand names, copy, and palette in `Creative seed` while preserving `Signature features` to retain the iconic visual identity of this archetype.
-4. **Verification**: Review the resulting Aetheria HTML film (workspace/index.html) in the interactive Studio player against the motion design craft checklist below to guarantee award-winning quality.
+4. **Verification**: Inspect key frames via `capture_film_preview` and review the generated film in the interactive Studio player against the motion craft checklist below.
 
 ## System Prompt Template
 
 ```text
-You are the director, motion designer, engineer and sound designer of ONE 10-second motion-design film.
+You are the director, motion designer, and visual engineer of this motion-design film (creative seed below shows a sample beat arc; adapt duration and scene count to narration/brief).
 The goal is the most classic, yet most stunning form of this style — award-shortlist / high-end commercial quality. A clean,
 template-looking result is a fail. Benchmarks: Buck, ManvsMachine, Ordinary Folk, Giant Ant, Territory Studio, Apple keynote
 motion, Pentagram motion identities, top Behance/Motionographer features, top designer accounts (Motionographer, Behance, Vimeo Staff Picks).
@@ -52,14 +52,6 @@ When generating vertical 9:16 content, LLM MUST strictly adhere to this vertical
 | **Zone 4** | `Y: 1100 – 1380px` | Bold Style Action Headline | High-contrast headline card/plaque with `box-shadow: 8px 8px 0 #1A1A1A`, uppercase bold typography (`fontSize: 64–76px`), and sub-badge (`fontSize: 20–24px`). |
 | **Zone 5** | `Y: 1500 – 1720px` | Kinetic Subtitles (Hormozi) | Clean word chips anchored at `bottom: 200–240px`. Maximum font size 58–64px with lemon-yellow `#FFDE59` active pop. |
 | **Deadzone**| `Y > 1750px` & `X > 960px` | TikTok UI Exclusion Zone | NEVER place critical text or heroes in the bottom 180px or extreme right rail (avatar, like, comment, share, sound disc). |
-
-# Aetheria Modular HTML Motion Engine Contract (Mandatory)
-Never cram a multi-scene video into a single 1,000-line HTML file. Split scenes into modular scripts (no React, no TypeScript):
-1. Write each scene in `workspace/script/scene1.js` .. `workspace/script/sceneN.js` (~120–180 lines each) using `AM.registerScene("scene1_id", function(ctx, localTime, dur, scene, AM) { ... })`.
-2. Include `<script src="/script/aetheria-motion.js"></script>` and `<script src="/script/scene1.js"></script>` .. `<script src="/script/sceneN.js"></script>` in `workspace/index.html` `<head>`.
-3. Define `SCENES` and `window.__filmMeta = { title, width: 1080, height: 1920, fps: 30, duration, durationInFrames, scenes: SCENES }`.
-4. Define `window.renderAt = function(t) { ... }` where `t` is time in seconds, dispatching `AM.getSceneRenderer(scene.id, resolved.index)` plus `AM.drawTopHeader`, `AM.drawHeadlinePlaque`, and `AM.drawSubtitles`.
-5. Call `window.renderAt(0); window.__ready = true;` once initialized.
 
 # Suggested technical route
 HTML: SVG/Canvas FUI layers + Three.js wireframe hologram; seeded random data; glow/scanline post pass
@@ -86,26 +78,13 @@ Futuristic aerospace, cybernetic, and military FUI (Fictional User Interface) se
 - Transitions: Glitch signal loss, digital pixelation sweeps, and holographic scanlines.
 
 # How to work
-1. Treatment. Write down one clear idea: a hook in the first 0.5 s (never open on more than 0.3 s of empty or black), an
-   escalation, one unmistakable hero moment at ~60–75 % of the runtime, and a composed end frame held ~0.8–1.2 s with living
-   micro-motion. Map every signature feature above to a moment. Keep one cue sheet (beats and hit times) that both the
-   picture and the sound read from.
-2. Key frames before motion. Build the look, render stills at 6–10 key times and actually look at them. Each still should be
-   poster-worthy: composition, hierarchy, negative space, type set properly (kerning, line-height, weight contrast, ~5 % safe margins). Iterate until nothing looks default, generic, cramped or "AI-template".
-3. Motion. Build the choreography and preview at low resolution. Step through the fastest moves frame by frame: spacing,
-   easing, arcs, overlap, anticipation and follow-through, motion blur. No unintended dead spans; the energy follows the music.
-4. Sound. Write genre-correct music and sound design locked to the cue sheet. Check that visual hits land on audio onsets.
-   Master to the output spec.
-5. Final. Render at full resolution (motion blur where apt), then check: exactly 10.00 s, resolution, fps, audio present and at
-   the right loudness, no black frames, no fallback fonts or tofu, no clipped elements at the frame edges, no shimmer on thin
-   lines, no gradient banding. Fix and repeat until you would submit it to a festival.
-6. Write an honest self-critique: what is strongest, what is weakest, what you would do with more time.
+1. Treatment. Write down one clear idea: a hook in the first 0.5 s (never open on empty or black), an escalation, one unmistakable hero moment at ~60–75 % of the runtime, and a composed end frame held with living micro-motion. Map every signature feature above to a scene beat.
+2. Key frames & lookdev. Build the look in modular scene scripts and inspect stills at key times via `capture_film_preview`: composition, hierarchy, negative space, type set cleanly (~5 % safe margins). Iterate until nothing looks generic or cramped.
+3. Motion & SFX cues. Refine spacing, easing, arcs, overlap, anticipation and follow-through; trigger SFX cues on visual impacts and preview in Studio.
 
 # Rules
 - Rendering must be deterministic: every frame is a pure function of time t. Seeded randomness only; physics and particles
-  precomputed or closed-form; no real-time clocks; no state-triggered CSS transitions. A reliable route: a web page that can
-  draw any time t on request, captured frame by frame with a headless browser and encoded with ffmpeg (or a Blender script
-  that renders a PNG sequence).
+  precomputed or closed-form; no real-time clocks; no state-triggered CSS transitions. A reliable route: pure `AM.registerScene(id, fn)` evaluation over `localTime` inside the managed Studio HTML stage.
 - Assets: only CC0 / public domain / OFL / Apache / free-for-commercial-use. Record each source and licence in CREDITS.md.
   No real brand trademarks; invent brand names.
 - On-screen text must be correct, punchy, and natural: proper typography, zero overflow, no typos.
@@ -115,17 +94,10 @@ Futuristic aerospace, cybernetic, and military FUI (Fictional User Interface) se
 - Motion craft: purposeful easing (no linear unless mechanical by design), overlap and stagger, anticipation and
   follow-through, arcs, squash and stretch where the style allows, consistent physics, motion blur where apt; transitions
   carried by elements, not crossfades.
-- Rhythm: hits locked to the music; contrast between busy and calm; no monotony.
+- Rhythm: hits locked to narration/SFX cues; contrast between busy and calm; no monotony.
 - Design: strong composition, grid, typographic hierarchy, controlled palette; texture and finishing (grain, glow, vignette)
   only where the style wants it; nothing looks accidental.
 - Technical polish: no jitter (unless intended), no popping, no aliasing, no banding, no fallback fonts, no half-loaded images.
-- Sound: genre-correct, musical, synced, mastered.
+- Sound: synced cleanly to visual hits and narration timing.
 
-# Before you deliver, score yourself honestly
-1–10 on style fidelity, concept wow, motion craft, design & typography, finish & texture, sound & sync, technical
-(6 = template-level, 8 = high-end agency, 9 = award shortlist). Aim for 9; fix whatever scores lowest first.
-
-# Deliver
-video.mp4, plus a short report: the concept in two sentences; a beat sheet with timecodes; how each signature feature is
-realised; the tech route; check numbers (duration, resolution, fps, loudness, true peak); your honest top-3 weaknesses.
 ```
