@@ -113,9 +113,18 @@ pub async fn init_engine_and_bind(
     let bind_addr = format!("{}:{}", hostname, port);
     let listener = match tokio::net::TcpListener::bind(&bind_addr).await {
         Ok(l) => l,
-        Err(_) => tokio::net::TcpListener::bind(format!("{}:0", hostname))
-            .await
-            .expect("Failed to bind aetheria-engine"),
+        Err(first_err) => {
+            paths::log_engine(
+                "http",
+                &format!(
+                    "⚠️ Port {} busy ({}); falling back to ephemeral port on {}",
+                    bind_addr, first_err, hostname
+                ),
+            );
+            tokio::net::TcpListener::bind(format!("{}:0", hostname))
+                .await
+                .unwrap_or_else(|e| panic!("Failed to bind aetheria-engine on {}: {}", hostname, e))
+        }
     };
 
     let actual_port = listener.local_addr().map(|a| a.port()).unwrap_or(port);
@@ -145,7 +154,9 @@ pub async fn init_engine_and_bind(
 }
 
 pub async fn run_axum_server(listener: tokio::net::TcpListener, _actual_port: u16) {
-    axum::serve(listener, build_router()).await.unwrap();
+    if let Err(e) = axum::serve(listener, build_router()).await {
+        paths::log_engine("http", &format!("❌ Axum server exited with error: {}", e));
+    }
 }
 
 pub fn build_router() -> Router {

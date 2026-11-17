@@ -59,6 +59,13 @@ pub async fn execute_websearch(arguments: &Value) -> Value {
     let resp = client.get(&url).send().await;
     match resp {
         Ok(r) => {
+            let status = r.status();
+            if !status.is_success() {
+                return json!({
+                    "ok": false,
+                    "error": format!("DuckDuckGo search returned HTTP {}", status.as_u16())
+                });
+            }
             if let Ok(data) = r.json::<Value>().await {
                 let abstract_txt = data
                     .get("AbstractText")
@@ -93,6 +100,7 @@ pub async fn execute_websearch(arguments: &Value) -> Value {
 
                 if results.is_empty() {
                     json!({
+                        "ok": true,
                         "query": query,
                         "results": [],
                         "output": format!("No instant results found for '{}'.", query)
@@ -100,6 +108,7 @@ pub async fn execute_websearch(arguments: &Value) -> Value {
                 } else {
                     let total = results.len();
                     json!({
+                        "ok": true,
                         "query": query,
                         "matches": total,
                         "results": results,
@@ -107,9 +116,12 @@ pub async fn execute_websearch(arguments: &Value) -> Value {
                     })
                 }
             } else {
-                json!({ "output": format!("Completed search for '{}'", query) })
+                json!({
+                    "ok": false,
+                    "error": format!("DuckDuckGo returned a non-JSON response for '{}'", query)
+                })
             }
         }
-        Err(e) => json!({ "error": format!("Web search failed: {}", e) }),
+        Err(e) => json!({ "ok": false, "error": format!("Web search failed: {}", e) }),
     }
 }

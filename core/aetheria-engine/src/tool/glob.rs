@@ -105,9 +105,11 @@ fn wildcard_match_core(pattern: &str, target: &str) -> bool {
 }
 
 pub fn execute_glob(workspace_dir: &str, arguments: &Value) -> Value {
+    const MAX_GLOB_FILES: usize = 500;
     let mut out_paths = Vec::new();
     let base_p = Path::new(workspace_dir);
-    collect_files_recursive(base_p, base_p, &mut out_paths, 500);
+    collect_files_recursive(base_p, base_p, &mut out_paths, MAX_GLOB_FILES);
+    let truncated = out_paths.len() >= MAX_GLOB_FILES;
 
     let pattern = arguments
         .get("pattern")
@@ -126,7 +128,12 @@ pub fn execute_glob(workspace_dir: &str, arguments: &Value) -> Value {
         }
     }
     filtered.sort();
-    json!({ "files": filtered })
+    json!({
+        "ok": true,
+        "count": filtered.len(),
+        "truncated": truncated,
+        "files": filtered
+    })
 }
 
 #[cfg(test)]

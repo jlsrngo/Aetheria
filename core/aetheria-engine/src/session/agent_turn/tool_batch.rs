@@ -19,7 +19,11 @@ struct PreparedCall {
     tool_start: u64,
 }
 
-/// Returns `true` when execution was aborted/interrupted so `runner` can finalize immediately.
+pub(crate) struct ToolBatchOutcome {
+    pub was_interrupted: bool,
+    pub all_blocked: bool,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_tool_batch(
     session_id: &str,
@@ -31,7 +35,7 @@ pub(crate) async fn execute_tool_batch(
     doom_loop_detector: &mut DoomLoopDetector,
     content_parts: &mut Vec<Value>,
     chat_messages: &mut Vec<Value>,
-) -> bool {
+) -> ToolBatchOutcome {
     let mut prepared_calls = Vec::with_capacity(tool_calls.len());
     for tc in tool_calls {
         let call_id = tc
@@ -132,6 +136,10 @@ pub(crate) async fn execute_tool_batch(
 
     let results = futures_util::future::join_all(futures_vec).await;
     let mut was_interrupted = crate::session::coordinator::is_session_interrupted(session_id).is_some();
+    let all_blocked = !results.is_empty()
+        && results
+            .iter()
+            .all(|(out, _)| out.get("blocked").and_then(|v| v.as_bool()) == Some(true));
 
     let mut collected_vision_images = Vec::new();
     for (pc, (mut tool_out, is_failed)) in prepared_calls.into_iter().zip(results.into_iter()) {
@@ -140,9 +148,9 @@ pub(crate) async fn execute_tool_batch(
         let fn_name = pc.fn_name;
         let args_val = pc.args_val;
         let tool_start = pc.tool_start;
-        if pc.syntax_error.is_none() && pc.loop_warning.is_none() && !tools_disabled {
+        if pc.loop_warning.is_none() && !tools_disabled {
             if let Some(intervention) =
-                doom_loop_detector.record_outcome(&fn_name, &args_val, is_failed)
+                doom_loop_detector.record_outcome(&fn_name, &args_val, is_failed || pc.syntax_error.is_some())
             {
                 if let Some(obj) = tool_out.as_object_mut() {
                     obj.insert("harnessIntervention".to_string(), json!(intervention));
@@ -249,7 +257,10 @@ pub(crate) async fn execute_tool_batch(
         collected_vision_images,
     );
 
-    was_interrupted
+    ToolBatchOutcome {
+        was_interrupted,
+        all_blocked,
+    }
 }
 
 #[cfg(test)]

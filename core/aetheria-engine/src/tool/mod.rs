@@ -325,6 +325,12 @@ async fn execute_tool_call_inner(
                 Err(e) => json!({ "error": e }),
             }
         }
-        _ => json!({ "error": format!("Unknown tool: {}", name) }),
+        _ => json!({
+            "ok": false,
+            "error": format!(
+                "Unknown tool '{}'. Use one of: read, edit, write, apply_patch, glob, grep, bash, codemode, film_scaffold, film_audio, preview_film, render_video, task.",
+                name
+            )
+        }),
     }
 }

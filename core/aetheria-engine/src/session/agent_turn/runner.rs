@@ -212,10 +212,18 @@ pub async fn run_agent_turn(
 
     let (configured_steps, max_loop_steps) =
         mark_active_turn_and_resolve_steps(session_id, workspace_dir, started_ms, &cfg);
+    const MAX_TURN_WALL_CLOCK_MS: u64 = 15 * 60 * 1000;
     let mut step = 0usize;
     let mut overflow_compacted_this_step = false;
+    let mut consecutive_blocked_batches = 0usize;
 
     while step < max_loop_steps {
+        if crate::paths::now_ms().saturating_sub(started_ms) >= MAX_TURN_WALL_CLOCK_MS {
+            reached_max_steps = true;
+            final_text = "Turn wall-clock time budget (15m) reached; finalizing cleanly.".to_string();
+            final_text_streamed = true;
+            break;
+        }
         let step_limit_reached = configured_steps.map(|limit| step + 1 >= limit).unwrap_or(false);
         if let Some(reason) = crate::session::coordinator::is_session_interrupted(session_id) {
             crate::paths::log_engine(
@@ -516,7 +524,7 @@ pub async fn run_agent_turn(
         chat_messages.push(msg);
         let step_vision_enabled =
             model_supports_vision_from_config(Some(&cfg), &current_provider_id, &current_model_id);
-        let was_interrupted = execute_tool_batch(
+        let batch = execute_tool_batch(
             session_id,
             workspace_dir,
             &assistant_msg_id,
@@ -529,7 +537,7 @@ pub async fn run_agent_turn(
         )
         .await;
 
-        if was_interrupted {
+        if batch.was_interrupted {
             emit_session_error(
                 workspace_dir,
                 session_id,
@@ -563,6 +571,20 @@ pub async fn run_agent_turn(
         );
 
         emit_step_ended_event(&target, step_finish, None, step_usage.as_ref());
+
+        if batch.all_blocked {
+            consecutive_blocked_batches += 1;
+            if consecutive_blocked_batches >= 3 {
+                reached_max_steps = true;
+                final_text =
+                    "Stopped repeated blocked/malformed tool loop after 3 consecutive blocked turns."
+                        .to_string();
+                final_text_streamed = true;
+                break;
+            }
+        } else {
+            consecutive_blocked_batches = 0;
+        }
 
         if step_limit_reached {
             reached_max_steps = true;
@@ -726,11 +748,18 @@ async fn prepare_initial_chat_messages(
                 extra_context.push(ref_report);
             }
         }
-        if super::context::should_inject_am_api_reference(
-            workspace_dir,
-            prompt_text,
-            has_style_or_ref,
-        ) {
+        let already_injected_am_api = chat_messages.iter().any(|m| {
+            m.get("content")
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| s.contains("<am_runtime_api_reference>"))
+        });
+        if !already_injected_am_api
+            && super::context::should_inject_am_api_reference(
+                workspace_dir,
+                prompt_text,
+                has_style_or_ref,
+            )
+        {
             let am_ref = super::context::load_am_api_reference(workspace_dir);
             if !am_ref.trim().is_empty() {
                 extra_context.push(format!(

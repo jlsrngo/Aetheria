@@ -286,6 +286,31 @@ pub fn replace_content(
     ))
 }
 
+fn build_edited_snippet(norm_updated: &str, norm_new: &str, start_line: Option<usize>) -> String {
+    let lines: Vec<&str> = norm_updated.lines().collect();
+    if lines.is_empty() {
+        return String::new();
+    }
+    let anchor_1 = start_line.unwrap_or_else(|| {
+        let first_new_line = norm_new.lines().next().unwrap_or("");
+        if first_new_line.is_empty() {
+            1
+        } else {
+            lines
+                .iter()
+                .position(|l| l.contains(first_new_line))
+                .map(|i| i + 1)
+                .unwrap_or(1)
+        }
+    });
+    let from = anchor_1.saturating_sub(4).max(1);
+    let to = (anchor_1 + 6).min(lines.len());
+    (from..=to)
+        .map(|ln| format!("{}: {}", ln, lines[ln - 1]))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub fn execute_edit(session_id: &str, workspace_dir: &str, arguments: &Value) -> Value {
     let fp = arguments
         .get("filePath")
@@ -382,11 +407,14 @@ pub fn execute_edit(session_id: &str, workspace_dir: &str, arguments: &Value) ->
                                         "after": updated
                                     }),
                                 );
+                                let snippet =
+                                    build_edited_snippet(&norm_updated, &norm_new, start_line);
                                 let mut res = json!({
                                     "ok": true,
                                     "output": "Edit applied successfully.",
                                     "occurrencesReplaced": count,
-                                    "resolvedPath": resolved_rel
+                                    "resolvedPath": resolved_rel,
+                                    "editedSnippet": snippet
                                 });
                                 if let Some(fr) = film_root_rel {
                                     res["filmRoot"] = json!(fr);
@@ -518,5 +546,9 @@ mod tests {
         let (updated, count) = replace_content(content, "let x = 1;", "let x = 9;", true).unwrap();
         assert_eq!(count, 2);
         assert_eq!(updated, "let x = 9;\nlet y = 2;\nlet x = 9;\n");
+
+        let snippet = build_edited_snippet(&updated, "let x = 9;", Some(1));
+        assert!(snippet.contains("1: let x = 9;"));
+        assert!(snippet.contains("3: let x = 9;"));
     }
 }

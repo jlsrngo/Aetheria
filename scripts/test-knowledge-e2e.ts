@@ -37,7 +37,14 @@ async function ensureEngineRunning(): Promise<{ proc?: any; startedByUs: boolean
     return { startedByUs: false }
   }
 
-  console.log("-> Engine is not running. Starting Aetheria engine on port 4096...")
+  const targetPort = (() => {
+    try {
+      return new URL(HEALTH_URL).port || "4196"
+    } catch {
+      return "4196"
+    }
+  })()
+  console.log(`-> Engine is not running. Starting Aetheria engine on port ${targetPort}...`)
   const serverAuth = require("../scripts/server-auth.cjs")
   const auth = serverAuth.create()
 
@@ -54,7 +61,7 @@ async function ensureEngineRunning(): Promise<{ proc?: any; startedByUs: boolean
     [
       "serve",
       "--port",
-      "4096",
+      targetPort,
     ],
     {
       cwd: repoDir,

@@ -62,9 +62,12 @@ pub fn jobs_store_file_path() -> PathBuf {
 
 fn load_job_store() -> JobStoreData {
     let p = jobs_store_file_path();
-    if let Ok(raw) = std::fs::read_to_string(&p) {
-        if let Ok(parsed) = serde_json::from_str::<JobStoreData>(&raw) {
-            return parsed;
+    let bak = p.with_extension("json.bak");
+    for candidate in [&p, &bak] {
+        if let Ok(raw) = std::fs::read_to_string(candidate) {
+            if let Ok(parsed) = serde_json::from_str::<JobStoreData>(&raw) {
+                return parsed;
+            }
         }
     }
     JobStoreData::default()
@@ -76,7 +79,22 @@ fn save_job_store(store: &JobStoreData) {
         let _ = std::fs::create_dir_all(parent);
     }
     if let Ok(raw) = serde_json::to_string(store) {
-        let _ = std::fs::write(p, raw);
+        let tmp = p.with_extension(format!("json.tmp.{}", std::process::id()));
+        let bak = p.with_extension("json.bak");
+        let write_ok = (|| -> std::io::Result<()> {
+            use std::io::Write;
+            let mut f = std::fs::File::create(&tmp)?;
+            f.write_all(raw.as_bytes())?;
+            f.sync_all()?;
+            if p.exists() {
+                let _ = std::fs::copy(&p, &bak);
+            }
+            std::fs::rename(&tmp, &p)?;
+            Ok(())
+        })();
+        if write_ok.is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
     }
 }
 
