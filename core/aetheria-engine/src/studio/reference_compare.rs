@@ -154,8 +154,15 @@ pub fn discover_reference_keyframes(ws_root: &Path, film_duration: f64) -> Vec<R
                                 continue;
                             };
                             let lower_p = path_str.to_ascii_lowercase();
+                            if lower_p.contains("_beats.") {
+                                continue;
+                            }
                             let phase = if lower_p.contains("_start.") {
                                 "start"
+                            } else if lower_p.contains("_q1.") {
+                                "q1"
+                            } else if lower_p.contains("_q3.") {
+                                "q3"
                             } else if lower_p.contains("_end.") {
                                 "end"
                             } else {
@@ -163,6 +170,8 @@ pub fn discover_reference_keyframes(ws_root: &Path, film_duration: f64) -> Vec<R
                             };
                             let fallback_ts = match phase {
                                 "start" => start + (dur * 0.15).min(0.15),
+                                "q1" => start + dur * 0.28,
+                                "q3" => start + dur * 0.70,
                                 "end" => (end - (dur * 0.15).min(0.15)).max(start + dur * 0.5),
                                 _ => start + dur * 0.5,
                             };
@@ -387,6 +396,8 @@ pub fn discover_reference_keyframes_for_film(
             let f_end = f_start + f_dur;
             let mapped_ts = match kf.phase.as_deref() {
                 Some("start") => f_start + (f_dur * 0.15).min(0.15),
+                Some("q1") => f_start + f_dur * 0.28,
+                Some("q3") => f_start + f_dur * 0.70,
                 Some("end") => (f_end - (f_dur * 0.15).min(0.15)).max(f_start + f_dur * 0.5),
                 _ => f_start + f_dur * 0.5,
             };
@@ -453,25 +464,39 @@ fn select_timestamps_from_keyframes(kfs: &[ReferenceKeyframe], max_frames: usize
         .filter(|k| k.phase.as_deref() == Some("mid"))
         .map(|k| k.timestamp)
         .collect();
-    let others: Vec<f64> = kfs
+    // Prioritize intra-scene morph phases (`q1` ~28%, `q3` ~70%) before edge fade frames (`start`/`end`)
+    // so comparison_strip.jpg directly evaluates opening morphs, marquees, and secondary screens.
+    let morph_beats: Vec<f64> = kfs
         .iter()
-        .filter(|k| k.phase.as_deref() != Some("mid"))
+        .filter(|k| matches!(k.phase.as_deref(), Some("q1") | Some("q3")))
+        .map(|k| k.timestamp)
+        .collect();
+    let edge_phases: Vec<f64> = kfs
+        .iter()
+        .filter(|k| !matches!(k.phase.as_deref(), Some("mid") | Some("q1") | Some("q3")))
         .map(|k| k.timestamp)
         .collect();
 
     let mut chosen = Vec::with_capacity(max_frames);
     if mids.is_empty() {
-        for idx in sample_kf_indices(others.len(), max_frames) {
-            chosen.push(others[idx]);
+        let all_others: Vec<f64> = morph_beats.into_iter().chain(edge_phases).collect();
+        for idx in sample_kf_indices(all_others.len(), max_frames) {
+            chosen.push(all_others[idx]);
         }
     } else {
         for idx in sample_kf_indices(mids.len(), max_frames) {
             chosen.push(mids[idx]);
         }
-        let rem = max_frames.saturating_sub(chosen.len());
-        if rem > 0 {
-            for idx in sample_kf_indices(others.len(), rem) {
-                chosen.push(others[idx]);
+        let rem_morph = max_frames.saturating_sub(chosen.len());
+        if rem_morph > 0 && !morph_beats.is_empty() {
+            for idx in sample_kf_indices(morph_beats.len(), rem_morph) {
+                chosen.push(morph_beats[idx]);
+            }
+        }
+        let rem_edge = max_frames.saturating_sub(chosen.len());
+        if rem_edge > 0 && !edge_phases.is_empty() {
+            for idx in sample_kf_indices(edge_phases.len(), rem_edge) {
+                chosen.push(edge_phases[idx]);
             }
         }
     }

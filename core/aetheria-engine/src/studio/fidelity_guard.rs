@@ -217,10 +217,14 @@ pub fn build_target_worst_scenes(
     film_root: &Path,
     comparison: &Value,
 ) -> Vec<Value> {
-    let Some(worst_arr) = comparison.get("worstFrames").and_then(Value::as_array) else {
-        return Vec::new();
-    };
-    if worst_arr.is_empty() {
+    let source_frames: Vec<&Value> = comparison
+        .get("perFrame")
+        .and_then(Value::as_array)
+        .filter(|arr| !arr.is_empty())
+        .or_else(|| comparison.get("worstFrames").and_then(Value::as_array))
+        .map(|arr| arr.iter().collect())
+        .unwrap_or_default();
+    if source_frames.is_empty() {
         return Vec::new();
     }
 
@@ -247,9 +251,22 @@ pub fn build_target_worst_scenes(
         })
         .collect();
 
-    let mut seen_keys = HashSet::new();
-    let mut out = Vec::new();
-    for wf in worst_arr {
+    // Rank weakness combining combinedScore and edge deficit so dark-backdrop scenes
+    // with wrong foreground shapes/fonts (high SSIM on black pixels, low edgeSimilarity) still surface.
+    let weakness_rank = |f: &Value| -> f64 {
+        let comb = f.get("combinedScore").and_then(Value::as_f64).unwrap_or(0.5);
+        let edge_penalty = match f.get("edgeSimilarity").and_then(Value::as_f64) {
+            Some(e) if e < 0.35 => (0.35 - e) * 0.65,
+            _ => 0.0,
+        };
+        comb - edge_penalty
+    };
+
+    // Keep the weakest single frame per unique scene so one scene with 2-3 phases
+    // cannot starve other weak scenes out of polish feedback.
+    let mut best_per_scene: HashMap<String, (f64, &Value, Option<String>, Option<String>)> =
+        HashMap::new();
+    for wf in &source_frames {
         let ts = wf.get("timestamp").and_then(Value::as_f64).unwrap_or(0.0);
         let hint_scene_id = wf.get("sceneId").and_then(Value::as_str).map(str::to_string);
         let matched = manifest_scenes
@@ -266,18 +283,109 @@ pub fn build_target_worst_scenes(
         let dedup_key = scene_id
             .clone()
             .unwrap_or_else(|| format!("t={:.2}", ts));
-        if !seen_keys.insert(dedup_key) {
+        let rank = weakness_rank(wf);
+        let replace = match best_per_scene.get(&dedup_key) {
+            Some((prev_rank, _, _, _)) => rank < *prev_rank,
+            None => true,
+        };
+        if replace {
+            best_per_scene.insert(dedup_key, (rank, *wf, scene_id, script_path));
+        }
+    }
+
+    let mut ranked: Vec<(f64, &Value, Option<String>, Option<String>)> =
+        best_per_scene.into_values().collect();
+    ranked.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    let using_per_frame = comparison
+        .get("perFrame")
+        .and_then(Value::as_array)
+        .is_some_and(|arr| !arr.is_empty());
+
+    let mut out = Vec::new();
+    for (_, wf, scene_id, script_path) in ranked {
+        let comb_v = wf.get("combinedScore").and_then(Value::as_f64);
+        let edge_v = wf.get("edgeSimilarity").and_then(Value::as_f64);
+        if using_per_frame
+            && comb_v.unwrap_or(0.0) >= 0.80
+            && edge_v.unwrap_or(1.0) >= 0.35
+        {
             continue;
         }
+        let ts = wf.get("timestamp").and_then(Value::as_f64).unwrap_or(0.0);
+        let phase = wf.get("phase").and_then(Value::as_str);
+        let ssim_v = wf.get("ssim").and_then(Value::as_f64);
+        let color_v = wf.get("colorSimilarity").and_then(Value::as_f64);
+        let luma_delta = wf.get("luminanceDelta").and_then(Value::as_f64);
+        let luma_corr = wf.get("lumaCorrelation").and_then(Value::as_f64);
+        let blank_detected = wf
+            .get("blankFrameDetected")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+        let mut diag_hints: Vec<String> = Vec::new();
+        if blank_detected {
+            diag_hints.push(
+                "BLANK/CRASHED FRAME (preview rendered empty backdrop — check scene JS for ReferenceError/TypeError or missing draw calls at this timestamp)".to_string(),
+            );
+        }
+        if luma_corr.is_some_and(|c| c < 0.15) {
+            diag_hints.push(format!(
+                "INVERTED POLARITY/ORIENTATION vs ref (lumaCorrelation={:.2} — match measured tile map/polarity or flip foreground/background lightness in left column)",
+                luma_corr.unwrap_or(0.0)
+            ));
+        }
+        if phase == Some("start") && edge_v.is_some_and(|e| e < 0.25) {
+            diag_hints.push(format!(
+                "early-beat mismatch at start (t={:.2}s — follow subBeats/contact_sheet early transition instead of jumping straight to mid layout)",
+                ts
+            ));
+        }
+        if edge_v.is_some_and(|e| e < 0.55) {
+            diag_hints.push(
+                "edge mismatch (match measured pixel boxes/fontSize/fontWeight, exact hero silhouette/3D arrow/card aspect, or tilt angle)".to_string(),
+            );
+        }
+        if color_v.is_some_and(|c| c < 0.85) {
+            diag_hints.push(
+                "palette mismatch (use cleanPlate.fillHex for canvas bg and match surface/accent hexes)".to_string(),
+            );
+        }
+        if let Some(ld) = luma_delta {
+            if ld < -0.06 {
+                diag_hints.push(format!(
+                    "TOO DARK vs ref (luminanceDelta={:.3} — brighten canvas bg/card fill toward cleanPlate.fillHex)",
+                    ld
+                ));
+            } else if ld > 0.06 {
+                diag_hints.push(format!(
+                    "too bright vs ref (luminanceDelta={:.3} — darken backdrop/surface tone)",
+                    ld
+                ));
+            }
+        }
+        if ssim_v.is_some_and(|s| s < 0.78) && diag_hints.is_empty() {
+            diag_hints.push("structural layout drift (inspect comparison_strip Diff Heatmap)".to_string());
+        }
+
         out.push(json!({
             "sceneId": scene_id,
             "script": script_path,
             "timestamp": ts,
-            "combinedScore": wf.get("combinedScore").and_then(Value::as_f64),
-            "ssim": wf.get("ssim").and_then(Value::as_f64),
+            "phase": phase,
+            "combinedScore": comb_v,
+            "ssim": ssim_v,
+            "edgeSimilarity": edge_v,
+            "colorSimilarity": color_v,
+            "luminanceDelta": luma_delta,
+            "lumaCorrelation": luma_corr,
+            "diagnosis": diag_hints.join("; "),
             "refRelPath": wf.get("refRelPath").and_then(Value::as_str),
             "previewRelPath": wf.get("previewRelPath").and_then(Value::as_str),
         }));
+        if out.len() >= 5 {
+            break;
+        }
     }
     out
 }
@@ -363,6 +471,24 @@ mod tests {
         assert_eq!(targeted.len(), 1);
         assert_eq!(targeted[0]["sceneId"], "s2_payoff");
         assert_eq!(targeted[0]["script"], "script/scene2.js");
+
+        // When perFrame is present, deduplicate per scene and surface low-edge dark-backdrop scenes
+        // plus early-beat start mismatches even if dark-background SSIM looks high.
+        let cmp_per_frame = json!({
+            "perFrame": [
+                { "sceneId": "s1_hook", "phase": "start", "timestamp": 0.15, "combinedScore": 0.77, "ssim": 0.93, "edgeSimilarity": 0.09 },
+                { "sceneId": "s1_hook", "phase": "mid", "timestamp": 1.0, "combinedScore": 0.79, "ssim": 0.89, "edgeSimilarity": 0.30 },
+                { "sceneId": "s2_payoff", "phase": "mid", "timestamp": 3.5, "combinedScore": 0.88, "ssim": 0.94, "edgeSimilarity": 0.65 }
+            ]
+        });
+        let targeted_pf = build_target_worst_scenes(&ws, &cmp_per_frame);
+        assert_eq!(targeted_pf.len(), 1);
+        assert_eq!(targeted_pf[0]["sceneId"], "s1_hook");
+        assert_eq!(targeted_pf[0]["phase"], "start");
+        assert!(targeted_pf[0]["diagnosis"]
+            .as_str()
+            .unwrap_or("")
+            .contains("early-beat mismatch"));
 
         let _ = std::fs::remove_dir_all(&ws);
     }

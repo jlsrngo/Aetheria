@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
-const MAX_PREVIEW_FRAMES: usize = 12;
+const MAX_PREVIEW_FRAMES: usize = 16;
 pub(crate) const DEFAULT_REFERENCE_PASS_THRESHOLD: f64 = 0.85;
 pub const RELATIVE_PREVIEW_POSITIONS: [f64; 4] = [0.10, 0.35, 0.60, 0.85];
 
@@ -169,6 +169,11 @@ pub async fn capture_film_preview_frames(
     capture_film_preview_with_options(workspace_dir, requested_timestamps, None, None).await
 }
 
+fn preview_capture_mutex() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
 /// Captures preview frames and optionally runs MotionClone-style RGB SSIM + side-by-side comparison
 /// against extracted `ref/` keyframes.
 pub async fn capture_film_preview_with_options(
@@ -177,6 +182,7 @@ pub async fn capture_film_preview_with_options(
     compare_to_reference: Option<bool>,
     pass_threshold: Option<f64>,
 ) -> Result<FilmPreviewCaptureResult, String> {
+    let _capture_guard = preview_capture_mutex().lock().await;
     let html_path = resolve_active_html_film_path(Some(workspace_dir))
         .ok_or_else(|| "No index.html found in active project folder".to_string())?;
     let film_root = html_path
@@ -309,7 +315,10 @@ pub async fn capture_film_preview_with_options(
     if let Ok(err_eval) = cdp
         .call(
             "Runtime.evaluate",
-            json!({ "expression": "Array.isArray(window.__aetheriaErrors) ? window.__aetheriaErrors.slice(0, 8) : []", "returnByValue": true }),
+            json!({
+                "expression": "(() => { const errs = Array.isArray(window.__aetheriaErrors) ? window.__aetheriaErrors.slice(0, 8) : []; if (window.__runtimeError && !errs.includes(String(window.__runtimeError))) errs.push(String(window.__runtimeError)); return errs; })()",
+                "returnByValue": true
+            }),
         )
         .await
     {
@@ -408,7 +417,7 @@ mod tests {
         let custom = normalize_preview_timestamps(&[-1.0, 0.25, 0.255, 99.0, 2.0, 3.0, 4.0], 6.0);
         assert_eq!(custom, vec![0.25, 5.95, 2.0, 3.0, 4.0]);
 
-        let many: Vec<f64> = (1..=15).map(|i| i as f64 * 0.5).collect();
+        let many: Vec<f64> = (1..=20).map(|i| i as f64 * 0.5).collect();
         let capped = normalize_preview_timestamps(&many, 20.0);
         assert_eq!(capped.len(), MAX_PREVIEW_FRAMES);
     }

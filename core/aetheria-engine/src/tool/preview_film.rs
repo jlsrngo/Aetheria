@@ -43,7 +43,8 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
         .and_then(|v| v.as_bool());
     let pass_threshold = arguments
         .get("passThreshold")
-        .and_then(|v| v.as_f64());
+        .and_then(|v| v.as_f64())
+        .map(|t| t.clamp(0.65, 0.99));
 
     match crate::studio::preview_capture::capture_film_preview_with_options(
         workspace_dir,
@@ -67,10 +68,13 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
                 .collect();
             let mut vision_images: Vec<Value> = Vec::new();
             if let Some(strip_url) = res.comparison_strip_data_url {
+                // Attach ONLY the unified side-by-side comparison strip (Ref | Preview | Diff Heatmap)
+                // instead of duplicating 12 raw preview frames that flood vision context on multi-pass polish.
                 vision_images.push(Value::String(strip_url));
-            }
-            for f in &res.frames {
-                vision_images.push(Value::String(f.data_url.clone()));
+            } else {
+                for f in &res.frames {
+                    vision_images.push(Value::String(f.data_url.clone()));
+                }
             }
             let unchanged_warning = if res.changed_since_last_capture == Some(false) {
                 Some("WARNING: Captured frames are byte-identical to the previous preview capture. No code/visual change took effect — check whether recent edit calls failed or target different elements.")
@@ -99,10 +103,16 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
                             let sc = item.get("script").and_then(Value::as_str).unwrap_or("script/scene*.js");
                             let ts = item.get("timestamp").and_then(Value::as_f64).unwrap_or(0.0);
                             let comb = item.get("combinedScore").and_then(Value::as_f64).unwrap_or(0.0);
-                            format!("{sid} ({sc} @ t={ts:.2}s, score={comb:.3})")
+                            let edge = item.get("edgeSimilarity").and_then(Value::as_f64).unwrap_or(0.0);
+                            let diag = item.get("diagnosis").and_then(Value::as_str).unwrap_or("");
+                            if diag.is_empty() {
+                                format!("{sid} ({sc} @ t={ts:.2}s, comb={comb:.3}, edge={edge:.3})")
+                            } else {
+                                format!("{sid} ({sc} @ t={ts:.2}s, comb={comb:.3}, edge={edge:.3}: {diag})")
+                            }
                         })
                         .collect::<Vec<_>>()
-                        .join(", ")
+                        .join("; ")
                 });
 
             let summary_extra = match &res.reference_comparison {

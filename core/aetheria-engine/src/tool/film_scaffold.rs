@@ -308,7 +308,12 @@ pub(crate) fn render_managed_index_html(
         try {{
           renderFn(ctx, localTime, scene.duration, scene, window.AM);
         }} catch (err) {{
-          window.__runtimeError = String(err && err.stack ? err.stack : err);
+          var errMsg = "[" + (scene && scene.id ? scene.id : "scene") + " @ t=" + sec.toFixed(2) + "s] " + String(err && err.stack ? err.stack : err);
+          window.__runtimeError = errMsg;
+          window.__aetheriaErrors = Array.isArray(window.__aetheriaErrors) ? window.__aetheriaErrors : [];
+          if (window.__aetheriaErrors.length < 16 && window.__aetheriaErrors.indexOf(errMsg) === -1) {{
+            window.__aetheriaErrors.push(errMsg);
+          }}
           if (typeof console !== "undefined" && console.error) console.error(err);
         }}
         ctx.restore();
