@@ -309,7 +309,7 @@ pub fn ref_extractor_tool_definition() -> Value {
         "type": "function",
         "function": {
             "name": "extract_video_reference",
-            "description": "Analyzes a reference video file (or downloaded video) to extract its complete visual & stylistic blueprint: scene cut timestamps, color palette, audio BPM/tempo, typography layout, and motion cadence. Produces a style_spec.json and blueprint with >90% similarity target so generated videos faithfully match the reference.",
+            "description": "Decompiles a reference video file into a complete visual, temporal, and Motion AST blueprint (`style_ast.json`, `style.json`, `temporal.json`, `ref_report.md`, and per-scene `skeletons/scene*.js`): extracts clean plate backgrounds, scene cut timestamps snapped to audio beats/BPM, color palettes, OCR text/layout bounding boxes, Farneback dense optical-flow motion vectors (`direction`, `velocity`), and regressed `AM.spring` / `AM.ease.outCubic` easing curves.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -319,7 +319,7 @@ pub fn ref_extractor_tool_definition() -> Value {
                     },
                     "outputDir": {
                         "type": "string",
-                        "description": "Optional output folder to save extracted blueprints, frames, and palette. Defaults to 'ref/extracted'."
+                        "description": "Optional output folder to save extracted blueprints, Motion AST (`style_ast.json`), frames, and palette. Defaults to 'ref/extracted'."
                     }
                 },
                 "required": ["videoPath"]
@@ -507,6 +507,9 @@ pub async fn execute_ref_extractor(workspace_dir: &str, arguments: &Value) -> Va
         let py_bin = crate::paths::locate_python_binary();
         let mut cmd = Command::new(&py_bin);
         crate::paths::configure_hidden_tokio_command(&mut cmd);
+        if let Some(ff_bin) = crate::paths::locate_ffmpeg_binary() {
+            cmd.env("AETHERIA_FFMPEG", ff_bin);
+        }
         cmd.arg(&script_path).arg(&video_path).arg(&out_dir);
 
         if let Ok(res) = cmd.output().await {
@@ -516,8 +519,19 @@ pub async fn execute_ref_extractor(workspace_dir: &str, arguments: &Value) -> Va
                     if parsed.get("error").is_none() {
                         let frames_dir = out_dir.join("frames");
                         let vision_bundle = collect_extracted_frames_response(&ws, &frames_dir, "opencv");
+                        let ast_path = out_dir.join("style_ast.json");
                         if let Some(obj) = parsed.as_object_mut() {
                             obj.insert("ok".to_string(), json!(true));
+                            if ast_path.is_file() {
+                                obj.insert("astPath".to_string(), json!(ast_path.to_string_lossy()));
+                                if obj.get("motionAst").is_none() {
+                                    if let Ok(ast_raw) = std::fs::read_to_string(&ast_path) {
+                                        if let Ok(ast_val) = serde_json::from_str::<Value>(&ast_raw) {
+                                            obj.insert("motionAst".to_string(), ast_val);
+                                        }
+                                    }
+                                }
+                            }
                             if let Some(imgs) = vision_bundle.get("_vision_images").cloned() {
                                 obj.insert("_vision_images".to_string(), imgs);
                             }

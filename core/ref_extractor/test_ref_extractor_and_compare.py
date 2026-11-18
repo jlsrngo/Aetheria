@@ -42,6 +42,24 @@ class RefExtractorAndCompareTests(unittest.TestCase):
             self.assertEqual(len(bp["scenes"]), 2)
             self.assertTrue((out / "ref_report.md").is_file())
             self.assertTrue((out / "style.json").is_file())
+            self.assertTrue((out / "style_ast.json").is_file())
+            self.assertIn("motionAst", res)
+            ast_doc = res["motionAst"]
+            self.assertEqual(ast_doc["version"], 3)
+            self.assertIn("bpm", ast_doc)
+            self.assertEqual(len(ast_doc["scenes"]), 2)
+            self.assertIn("cleanPlate", ast_doc["scenes"][0])
+            self.assertIn("fillHex", ast_doc["scenes"][0]["cleanPlate"])
+            self.assertGreaterEqual(len(ast_doc["scenes"][0]["layers"]), 1)
+            first_layer = ast_doc["scenes"][0]["layers"][0]
+            self.assertIn("motion", first_layer)
+            self.assertIn("entrance", first_layer["motion"])
+            self.assertIn("curve", first_layer["motion"]["entrance"])
+            self.assertIn("direction", first_layer["motion"]["entrance"])
+            self.assertIn("amCodeSkeleton", ast_doc["scenes"][0])
+            self.assertIn("AM.registerScene", ast_doc["scenes"][0]["amCodeSkeleton"])
+            self.assertTrue((out / "skeletons" / "scene1.js").is_file())
+            self.assertTrue((out / "skeletons" / "scene2.js").is_file())
 
     def test_ref_compare_strict_threshold_and_aspect_ratio_guard(self) -> None:
         with tempfile.TemporaryDirectory(prefix="mc_py_cmp_") as tmp:

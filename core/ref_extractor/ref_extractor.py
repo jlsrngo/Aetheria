@@ -22,9 +22,437 @@ except ImportError as e:
     sys.exit(1)
 
 import os
+import shutil
+import subprocess
+import tempfile
+import wave
 
 _RAPID_OCR = None
 _RAPID_OCR_LOADED = False
+
+
+def _resolve_ffmpeg_bin() -> str:
+    env_ff = os.environ.get("AETHERIA_FFMPEG", "").strip()
+    if env_ff and Path(env_ff).is_file():
+        return env_ff
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    local_app = os.environ.get("LOCALAPPDATA", "").strip()
+    if local_app:
+        capcut_root = Path(local_app) / "CapCut" / "Apps"
+        if capcut_root.is_dir():
+            candidates = sorted(capcut_root.glob("*/ffmpeg.exe"), reverse=True)
+            for c in candidates:
+                if c.is_file():
+                    return str(c)
+    return "ffmpeg"
+
+
+def extract_audio_bpm_and_beats(video_path: Path, temp_dir: Path) -> Tuple[float, List[float]]:
+    """Demuxes reference audio to 22.05kHz mono WAV and extracts BPM + transient beat timestamps."""
+    wav_path = temp_dir / "ref_audio.wav"
+    ff_bin = _resolve_ffmpeg_bin()
+    cmd = [
+        ff_bin,
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(video_path),
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        "22050",
+        str(wav_path),
+    ]
+    try:
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20, check=False)
+    except Exception:
+        return 120.0, []
+
+    if not wav_path.is_file():
+        return 120.0, []
+
+    try:
+        with wave.open(str(wav_path), "rb") as w:
+            sr = int(w.getframerate() or 22050)
+            n_frames = w.getnframes()
+            if n_frames <= 0:
+                return 120.0, []
+            raw_bytes = w.readframes(n_frames)
+        samples = np.frombuffer(raw_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+        if samples.size < sr // 2:
+            return 120.0, []
+
+        hop = max(256, int(round(sr * 0.05)))  # 50ms windows
+        energies: List[float] = []
+        flux: List[float] = []
+        prev_mag: Optional[np.ndarray] = None
+        for i in range(0, len(samples) - hop, hop):
+            chunk = samples[i:i + hop]
+            rms = float(np.sqrt(np.mean(chunk * chunk)))
+            energies.append(rms)
+            mag = np.abs(np.fft.rfft(chunk * np.hanning(len(chunk))))
+            if prev_mag is not None and prev_mag.shape == mag.shape:
+                diff = mag - prev_mag
+                half_rect = 0.5 * (diff + np.abs(diff))
+                flux.append(float(np.sum(half_rect)))
+            else:
+                flux.append(0.0)
+            prev_mag = mag
+
+        if not energies or float(np.max(energies)) < 1e-4:
+            return 120.0, []
+
+        e_arr = np.asarray(energies, dtype=np.float32)
+        f_arr = np.asarray(flux, dtype=np.float32)
+        if float(np.max(f_arr)) > 0:
+            f_arr = f_arr / float(np.max(f_arr))
+        if float(np.max(e_arr)) > 0:
+            e_arr = e_arr / float(np.max(e_arr))
+        combined = 0.55 * f_arr + 0.45 * e_arr
+        threshold = max(0.18, float(np.mean(combined)) * 1.45)
+
+        beat_times: List[float] = []
+        win_sec = hop / float(sr)
+        for idx, val in enumerate(combined):
+            is_local_peak = (
+                (idx == 0 or val >= combined[idx - 1])
+                and (idx + 1 == len(combined) or val >= combined[idx + 1])
+            )
+            if val >= threshold and is_local_peak:
+                t_sec = round(idx * win_sec, 3)
+                if not beat_times or (t_sec - beat_times[-1]) >= 0.22:
+                    beat_times.append(t_sec)
+
+        if len(beat_times) >= 3:
+            intervals = [
+                beat_times[k + 1] - beat_times[k]
+                for k in range(len(beat_times) - 1)
+                if 0.25 <= (beat_times[k + 1] - beat_times[k]) <= 1.2
+            ]
+            if intervals:
+                median_ioi = float(np.median(intervals))
+                raw_bpm = 60.0 / max(0.25, median_ioi)
+                while raw_bpm < 75.0:
+                    raw_bpm *= 2.0
+                while raw_bpm > 175.0:
+                    raw_bpm *= 0.5
+                bpm = round(raw_bpm, 1)
+            else:
+                bpm = 120.0
+        else:
+            bpm = 120.0
+        return bpm, beat_times
+    except Exception:
+        return 120.0, []
+
+
+def snap_cuts_to_beats(cut_timestamps: List[float], beat_times: List[float], duration: float, max_snap_sec: float = 0.12) -> List[float]:
+    """Snaps visual cut timestamps (except 0.0) to the nearest audio beat onset within `max_snap_sec`."""
+    if not beat_times:
+        return cut_timestamps
+    snapped: List[float] = []
+    for t in cut_timestamps:
+        if t <= 0.01:
+            snapped.append(0.0)
+            continue
+        nearest = min(beat_times, key=lambda b: abs(b - t))
+        candidate = round(nearest, 3) if abs(nearest - t) <= max_snap_sec else round(t, 3)
+        if candidate <= 0.25 or candidate >= max(0.5, duration - 0.25):
+            candidate = round(t, 3)
+        if not snapped or (candidate - snapped[-1]) >= 0.40:
+            snapped.append(candidate)
+    return snapped if snapped else [0.0]
+
+
+def extract_clean_plate_background(frames: List[np.ndarray], fallback_hex: str = "#141418") -> Dict[str, Any]:
+    """Computes temporal median clean plate background across sampled scene sub-frames."""
+    valid = [f for f in frames if f is not None and f.size > 0]
+    if not valid:
+        return {
+            "fillHex": fallback_hex,
+            "bottomHex": fallback_hex,
+            "hasGradient": False,
+        }
+    target_h, target_w = 96, 96
+    resized = [
+        cv2.resize(f, (target_w, target_h), interpolation=cv2.INTER_AREA).astype(np.float32)
+        for f in valid
+    ]
+    median_plate = np.median(np.stack(resized, axis=0), axis=0).astype(np.uint8)
+    border = 8
+    top_strip = median_plate[0:border, :, :].reshape(-1, 3)
+    bot_strip = median_plate[-border:, :, :].reshape(-1, 3)
+    left_strip = median_plate[:, 0:border, :].reshape(-1, 3)
+    right_strip = median_plate[:, -border:, :].reshape(-1, 3)
+    all_border = np.vstack([top_strip, bot_strip, left_strip, right_strip])
+
+    bg_bgr = np.median(all_border, axis=0)
+    top_bgr = np.median(top_strip, axis=0)
+    bot_bgr = np.median(bot_strip, axis=0)
+    grad_dist = _color_distance(top_bgr, bot_bgr)
+    has_gradient = bool(grad_dist >= 18.0)
+
+    return {
+        "fillHex": _bgr_to_hex(top_bgr if has_gradient else bg_bgr),
+        "bottomHex": _bgr_to_hex(bot_bgr if has_gradient else bg_bgr),
+        "hasGradient": has_gradient,
+    }
+
+
+def analyze_layer_motion_curve(
+    cap_or_frames: Any,
+    start_frame: int,
+    end_frame: int,
+    box: Tuple[int, int, int, int],
+    scene_duration: float = 2.5,
+) -> Dict[str, Any]:
+    """
+    Measures layer motion vectors using Farneback dense optical flow and fits an AM easing curve
+    (`AM.spring` with `{ tension, friction }`, `AM.ease.outCubic`, or `linear`).
+    Accepts either a pre-sampled `List[np.ndarray]` of scene frames or an open `cv2.VideoCapture`.
+    """
+    x, y, w, h = box
+    sampled_frames: List[np.ndarray] = []
+    if isinstance(cap_or_frames, list):
+        sampled_frames = [f for f in cap_or_frames if f is not None and f.size > 0]
+    elif hasattr(cap_or_frames, "set") and hasattr(cap_or_frames, "read"):
+        step = max(1, (end_frame - start_frame) // 6)
+        for f_idx in range(start_frame, max(start_frame + 1, end_frame), step):
+            cap_or_frames.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
+            ok, fr = cap_or_frames.read()
+            if ok and fr is not None:
+                sampled_frames.append(fr)
+
+    if len(sampled_frames) < 2 or w < 8 or h < 8:
+        return {
+            "type": "spring_pop",
+            "direction": "pop",
+            "trajectory": [0.0, 0.0],
+            "curve": "AM.spring",
+            "springParams": {"tension": 150, "friction": 14},
+            "velocity": 0.0,
+            "startSec": 0.08,
+            "durationSec": round(min(0.55, max(0.25, scene_duration * 0.25)), 2),
+        }
+
+    fh, fw = sampled_frames[0].shape[:2]
+    x0 = max(0, min(fw - 8, int(x)))
+    y0 = max(0, min(fh - 8, int(y)))
+    x1 = max(x0 + 8, min(fw, int(x + w)))
+    y1 = max(y0 + 8, min(fh, int(y + h)))
+
+    crop_dim = 72
+    prev_crop = cv2.cvtColor(sampled_frames[0][y0:y1, x0:x1], cv2.COLOR_BGR2GRAY)
+    prev_crop = cv2.resize(prev_crop, (crop_dim, crop_dim), interpolation=cv2.INTER_AREA)
+    trajectories: List[Tuple[float, float]] = []
+    speeds: List[float] = []
+    divergences: List[float] = []
+
+    half = crop_dim // 2
+    for fr in sampled_frames[1:]:
+        cur_crop = cv2.cvtColor(fr[y0:y1, x0:x1], cv2.COLOR_BGR2GRAY)
+        cur_crop = cv2.resize(cur_crop, (crop_dim, crop_dim), interpolation=cv2.INTER_AREA)
+        flow = cv2.calcOpticalFlowFarneback(
+            prev_crop, cur_crop, None, 0.5, 3, 15, 3, 5, 1.2, 0
+        )
+        u = flow[:, :, 0]
+        v = flow[:, :, 1]
+        mean_u = float(np.mean(u))
+        mean_v = float(np.mean(v))
+        # Spatial divergence: outward flow (right - left) + (bottom - top)
+        div_x = float(np.mean(u[:, half:]) - np.mean(u[:, :half]))
+        div_y = float(np.mean(v[half:, :]) - np.mean(v[:half, :]))
+        divergences.append(div_x + div_y)
+        trajectories.append((mean_u, mean_v))
+        speeds.append(float(np.hypot(mean_u, mean_v)))
+        prev_crop = cur_crop
+
+    avg_u = float(np.mean([t[0] for t in trajectories])) if trajectories else 0.0
+    avg_v = float(np.mean([t[1] for t in trajectories])) if trajectories else 0.0
+    avg_div = float(np.mean(divergences)) if divergences else 0.0
+    velocity = round(float(np.hypot(avg_u, avg_v)), 2)
+
+    if abs(avg_v) > abs(avg_u) and avg_v < -0.55:
+        dir_name = "slide_up"
+    elif abs(avg_v) > abs(avg_u) and avg_v > 0.55:
+        dir_name = "slide_down"
+    elif abs(avg_u) > abs(avg_v) and abs(avg_u) > 0.55:
+        dir_name = "slide_right" if avg_u > 0 else "slide_left"
+    elif avg_div > 0.45:
+        dir_name = "scale_up"
+    else:
+        dir_name = "pop"
+
+    # Cumulative displacement curve fitting (Overshoot vs OutCubic vs Linear)
+    cum_disp: List[float] = [0.0]
+    for s in speeds:
+        cum_disp.append(cum_disp[-1] + s)
+    total_disp = cum_disp[-1] if cum_disp[-1] > 1e-4 else 1.0
+    norm_p = [d / total_disp for d in cum_disp]
+
+    has_overshoot = False
+    if len(trajectories) >= 3:
+        v_signs = [np.sign(t[1]) for t in trajectories if abs(t[1]) > 0.15]
+        u_signs = [np.sign(t[0]) for t in trajectories if abs(t[0]) > 0.15]
+        if (len(set(v_signs)) > 1) or (len(set(u_signs)) > 1):
+            has_overshoot = True
+
+    n_pts = max(2, len(norm_p))
+    t_grid = np.linspace(0.0, 1.0, n_pts)
+    p_arr = np.asarray(norm_p, dtype=np.float32)
+    cubic_pred = 1.0 - np.power(1.0 - t_grid, 3)
+    lin_pred = t_grid
+    ss_tot = float(np.sum((p_arr - np.mean(p_arr)) ** 2)) or 1.0
+    r2_cubic = round(1.0 - float(np.sum((p_arr - cubic_pred) ** 2)) / ss_tot, 3)
+    r2_linear = round(1.0 - float(np.sum((p_arr - lin_pred) ** 2)) / ss_tot, 3)
+
+    is_decelerating = (len(speeds) >= 2 and speeds[0] > speeds[-1] * 1.15) or (r2_cubic > r2_linear + 0.05)
+    if has_overshoot or dir_name in ("pop", "scale_up", "slide_up"):
+        curve = "AM.spring"
+        overshoot_ratio = min(0.45, max(0.05, velocity / 12.0))
+        tension = int(round(140.0 * (1.0 + overshoot_ratio)))
+        spring_params: Optional[Dict[str, int]] = {"tension": tension, "friction": 14}
+    elif is_decelerating or dir_name in ("slide_down", "slide_left", "slide_right"):
+        curve = "AM.ease.outCubic"
+        spring_params = None
+    else:
+        curve = "linear"
+        spring_params = None
+
+    entrance_type = "spring_pop" if dir_name in ("pop", "scale_up") else dir_name
+    out: Dict[str, Any] = {
+        "type": entrance_type,
+        "direction": dir_name,
+        "trajectory": [round(avg_u / float(crop_dim), 3), round(avg_v / float(crop_dim), 3)],
+        "curve": curve,
+        "velocity": velocity,
+        "r2OutCubic": r2_cubic,
+        "startSec": 0.08,
+        "durationSec": round(min(0.60, max(0.28, scene_duration * 0.24)), 2),
+    }
+    if spring_params is not None:
+        out["springParams"] = spring_params
+    return out
+
+
+def compile_scene_am_skeleton(ast_scene: Dict[str, Any], width: int, height: int) -> str:
+    """Compiles a decompiled Motion AST scene into a deterministic `window.AM.registerScene` JS skeleton."""
+    scene_id = ast_scene.get("id", "scene1")
+    cp = ast_scene.get("cleanPlate") or {}
+    fill_hex = cp.get("fillHex", "#0F1115")
+    bot_hex = cp.get("bottomHex", fill_hex)
+    has_grad = bool(cp.get("hasGradient", False))
+    layers = ast_scene.get("layers") or []
+
+    lines = [
+        f"// Auto-decompiled Motion Ghidra AST skeleton for {scene_id} ({width}x{height})",
+        "(function () {",
+        '  "use strict";',
+        "  var AM = window.AM;",
+        f'  AM.registerScene("{scene_id}", function (ctx, localTime, dur, scene, AM) {{',
+        f"    var W = {width}, H = {height};",
+        "    ctx.save();",
+    ]
+    if has_grad and fill_hex != bot_hex:
+        lines.extend([
+            "    var bgGrad = ctx.createLinearGradient(0, 0, 0, H);",
+            f'    bgGrad.addColorStop(0, "{fill_hex}");',
+            f'    bgGrad.addColorStop(1, "{bot_hex}");',
+            "    ctx.fillStyle = bgGrad;",
+            "    ctx.fillRect(0, 0, W, H);",
+        ])
+    else:
+        lines.extend([
+            f'    ctx.fillStyle = "{fill_hex}";',
+            "    ctx.fillRect(0, 0, W, H);",
+        ])
+
+    for idx, layer in enumerate(layers[:8]):
+        kind = layer.get("kind", "card")
+        box = layer.get("box") or {"x": 0.15, "y": 0.25, "w": 0.7, "h": 0.2}
+        st = layer.get("style") or {}
+        mot = (layer.get("motion") or {}).get("entrance") or {}
+        start_s = float(mot.get("startSec", round(0.06 * idx, 2)))
+        dur_s = max(0.2, float(mot.get("durationSec", 0.45)))
+        curve = mot.get("curve", "AM.spring")
+        direction = mot.get("direction", "pop")
+        sp = mot.get("springParams") or {"tension": 150, "friction": 14}
+
+        lx = int(round(float(box.get("x", 0.15)) * width))
+        ly = int(round(float(box.get("y", 0.25)) * height))
+        lw = max(24, int(round(float(box.get("w", 0.7)) * width)))
+        lh = max(24, int(round(float(box.get("h", 0.2)) * height)))
+
+        p_var = f"p{idx + 1}"
+        if curve == "AM.spring":
+            lines.append(
+                f"    var {p_var} = AM.spring(Math.max(0, localTime - {start_s:.2f}), {{ stiffness: {int(sp.get('tension', 150))}, damping: {int(sp.get('friction', 14))} }});"
+            )
+        elif curve == "AM.ease.outCubic":
+            lines.append(
+                f"    var {p_var} = AM.ease.outCubic(AM.clamp((localTime - {start_s:.2f}) / {dur_s:.2f}, 0, 1));"
+            )
+        else:
+            lines.append(
+                f"    var {p_var} = AM.clamp((localTime - {start_s:.2f}) / {dur_s:.2f}, 0, 1);"
+            )
+
+        dx_expr = "0"
+        dy_expr = "0"
+        if direction == "slide_up":
+            dy_expr = f"40 * (1 - {p_var})"
+        elif direction == "slide_down":
+            dy_expr = f"-40 * (1 - {p_var})"
+        elif direction == "slide_right":
+            dx_expr = f"-60 * (1 - {p_var})"
+        elif direction == "slide_left":
+            dx_expr = f"60 * (1 - {p_var})"
+
+        if kind == "text":
+            txt = json.dumps(layer.get("text") or scene_id)
+            f_hex = st.get("fillHex", "#F8FAFC")
+            f_size = int(st.get("fontSize", 44))
+            f_weight = st.get("fontWeight", "800")
+            align = st.get("align", "center")
+            tx = lx + lw // 2 if align == "center" else lx
+            ty = ly + int(round(lh * 0.72))
+            lines.extend([
+                "    ctx.save();",
+                f"    ctx.globalAlpha = AM.clamp({p_var}, 0, 1);",
+                f'    ctx.fillStyle = "{f_hex}";',
+                f'    ctx.font = "{f_weight} {f_size}px Inter, sans-serif";',
+                f'    ctx.textAlign = "{align}";',
+                f"    ctx.fillText({txt}, {tx} + ({dx_expr}), {ty} + ({dy_expr}));",
+                "    ctx.restore();",
+            ])
+        else:
+            f_hex = st.get("fillHex", "#1E293B")
+            s_hex = st.get("strokeHex", "#38BDF8")
+            rad = int(st.get("radius", 16))
+            lines.extend([
+                "    ctx.save();",
+                f"    ctx.globalAlpha = AM.clamp({p_var}, 0, 1);",
+                f'    ctx.fillStyle = "{f_hex}";',
+                f'    ctx.strokeStyle = "{s_hex}";',
+                "    ctx.lineWidth = 2;",
+                f"    AM.roundRect(ctx, {lx} + ({dx_expr}), {ly} + ({dy_expr}), {lw}, {lh}, {rad});",
+                "    ctx.fill();",
+                "    ctx.stroke();",
+                "    ctx.restore();",
+            ])
+
+    lines.extend([
+        "    ctx.restore();",
+        "  });",
+        "})();",
+        "",
+    ])
+    return "\n".join(lines)
 
 
 def _get_ocr_engine() -> Optional[Any]:
@@ -421,23 +849,29 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
     duration = total_frames / fps if total_frames > 0 else 10.0
     aspect_ratio = "9:16" if height > width else ("1:1" if abs(width - height) <= 16 else "16:9")
 
-    # 1. MotionClone-style full temporal scan
+    # 1. MotionClone-style full temporal scan + audio beat/BPM decompilation
+    with tempfile.TemporaryDirectory(prefix="aetheria_ref_audio_") as tmp_audio_dir:
+        bpm, beat_timestamps = extract_audio_bpm_and_beats(v_path, Path(tmp_audio_dir))
     temporal = scan_motion_timeline(cap, total_frames, fps, duration)
-    cut_timestamps = temporal["cutTimestamps"]
+    cut_timestamps = snap_cuts_to_beats(temporal["cutTimestamps"], beat_timestamps, duration)
+    temporal["cutTimestamps"] = cut_timestamps
+    temporal["bpm"] = bpm
+    temporal["beatTimestamps"] = beat_timestamps
 
-    # 2. Plan all target timestamps (thumbs + per-scene start/mid/end) and fetch in ONE forward pass
+    # 2. Plan all target timestamps (thumbs + per-scene start/mid/end + sub-frame trajectories) and fetch in ONE forward pass
     thumb_ratios = [0.10, 0.35, 0.60, 0.85]
     thumb_timestamps: List[float] = [
         round(min(max(0.0, duration - 0.05), duration * ratio), 3)
         for ratio in thumb_ratios
     ]
 
-    scene_specs: List[Tuple[int, float, float, float, str, float, float, float]] = []
+    scene_specs: List[Tuple[int, float, float, float, str, float, float, float, List[float]]] = []
     roles = ["hook", "problem_or_context", "proof_or_demo", "cta"]
     needed_indices = set()
     for ts in thumb_timestamps:
         needed_indices.add(min(max(0, total_frames - 1), max(0, int(round(ts * fps)))))
 
+    sub_sample_ratios = [0.05, 0.16, 0.28, 0.42, 0.56, 0.70, 0.84, 0.95]
     for i, start in enumerate(cut_timestamps):
         end = cut_timestamps[i + 1] if i + 1 < len(cut_timestamps) else round(duration, 3)
         dur = max(0.35, round(end - start, 3))
@@ -445,8 +879,12 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
         ts_start = round(min(duration - 0.04, start + min(0.15, dur * 0.15)), 3)
         ts_mid = round(min(duration - 0.04, start + dur * 0.50), 3)
         ts_end = round(min(duration - 0.04, max(ts_mid, end - min(0.15, dur * 0.15))), 3)
-        scene_specs.append((i, start, end, dur, role, ts_start, ts_mid, ts_end))
-        for ts in (ts_start, ts_mid, ts_end):
+        sub_ts_list = [
+            round(min(max(0.0, duration - 0.03), start + dur * r), 3)
+            for r in sub_sample_ratios
+        ]
+        scene_specs.append((i, start, end, dur, role, ts_start, ts_mid, ts_end, sub_ts_list))
+        for ts in [ts_start, ts_mid, ts_end] + sub_ts_list:
             needed_indices.add(min(max(0, total_frames - 1), max(0, int(round(ts * fps)))))
 
     cached_frames: Dict[int, np.ndarray] = {}
@@ -475,8 +913,9 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
         if frame is not None:
             cv2.imwrite(str(frames_dir / f"thumb_{idx:03d}.jpg"), frame, [cv2.IMWRITE_JPEG_QUALITY, 92])
 
-    # 3. Extract per-scene keyframes, true palettes, spatial layouts & motion energy
+    # 3. Extract per-scene keyframes, true palettes, spatial layouts, clean plate & Motion AST layers
     scenes: List[Dict[str, Any]] = []
+    ast_scenes: List[Dict[str, Any]] = []
     scene_palettes: List[Dict[str, Any]] = []
     ocr_engine = _get_ocr_engine()
     ocr_available = ocr_engine is not None
@@ -491,10 +930,16 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
                 "or rapidocr-onnxruntime to extract reference text strings."
             )
 
-    for i, start, end, dur, role, ts_start, ts_mid, ts_end in scene_specs:
+    for i, start, end, dur, role, ts_start, ts_mid, ts_end, sub_ts_list in scene_specs:
         fr_start = _frame_at(ts_start)
         fr_mid = _frame_at(ts_mid)
         fr_end = _frame_at(ts_end)
+        scene_sub_frames = [
+            f for f in (_frame_at(t) for t in sub_ts_list)
+            if f is not None
+        ]
+        if not scene_sub_frames:
+            scene_sub_frames = [f for f in (fr_start, fr_mid, fr_end) if f is not None]
 
         # Intra-scene motion energy from timeline deltas + start/end frame delta
         scene_deltas = [
@@ -527,10 +972,73 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
             cv2.imwrite(str(frames_dir / end_name), fr_end, [cv2.IMWRITE_JPEG_QUALITY, 88])
             sub_keyframes.append({"t": ts_end, "path": f"frames/{end_name}"})
 
-        scene_palettes.append(layout_info["palette"])
+        pal = layout_info["palette"]
+        clean_plate = extract_clean_plate_background(scene_sub_frames, pal["bgHex"])
+        start_f_idx = max(0, int(round(start * fps)))
+        end_f_idx = min(max(1, total_frames), int(round(end * fps)))
+
+        ast_layers: List[Dict[str, Any]] = []
+        for r_idx, reg in enumerate(layout_info.get("regions", [])[:10]):
+            px = reg.get("px") or [
+                int(round(reg.get("x", 0.1) * width)),
+                int(round(reg.get("y", 0.1) * height)),
+                int(round(reg.get("w", 0.3) * width)),
+                int(round(reg.get("h", 0.15) * height)),
+            ]
+            motion_curve = analyze_layer_motion_curve(
+                scene_sub_frames,
+                start_f_idx,
+                end_f_idx,
+                (int(px[0]), int(px[1]), int(px[2]), int(px[3])),
+                dur,
+            )
+            motion_curve["startSec"] = round(min(0.45, 0.06 * r_idx), 2)
+            reg["motion"] = motion_curve
+
+            kind = reg.get("kind", "card")
+            layer_id = f"layer_{kind}_{r_idx + 1}"
+            box_norm = {
+                "x": reg.get("x", 0.0),
+                "y": reg.get("y", 0.0),
+                "w": reg.get("w", 0.2),
+                "h": reg.get("h", 0.1),
+            }
+            if kind == "text":
+                est_font_px = max(18, int(round(float(box_norm["h"]) * height * 0.72)))
+                ast_layers.append({
+                    "id": layer_id,
+                    "kind": "text",
+                    "text": reg.get("text", ""),
+                    "zone": reg.get("zone", "hero"),
+                    "box": box_norm,
+                    "style": {
+                        "fontFamily": "Inter, sans-serif",
+                        "fillHex": pal["textHex"],
+                        "fontSize": est_font_px,
+                        "fontWeight": "800" if reg.get("zone") == "hero" else "600",
+                        "align": "center" if abs((box_norm["x"] + box_norm["w"] * 0.5) - 0.5) <= 0.15 else "left",
+                    },
+                    "motion": {"entrance": motion_curve},
+                })
+            else:
+                ast_layers.append({
+                    "id": layer_id,
+                    "kind": kind,
+                    "box": box_norm,
+                    "style": {
+                        "fillHex": reg.get("fillHex", pal["surfaceHex"]),
+                        "strokeHex": pal["accentHex"],
+                        "radius": 999 if kind == "pill" else 16,
+                    },
+                    "motion": {"entrance": motion_curve},
+                })
+
+        layout_info["cleanPlate"] = clean_plate
+        scene_id = f"scene{i + 1}_{role}"
+        scene_palettes.append(pal)
         scenes.append({
             "index": i + 1,
-            "id": f"scene{i + 1}_{role}",
+            "id": scene_id,
             "role": role,
             "start": round(start, 3),
             "end": round(end, 3),
@@ -541,8 +1049,28 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
             "keyframeTimestamp": ts_mid,
             "keyframe": f"frames/{scene_kf_name}",
             "keyframes": sub_keyframes,
+            "cleanPlate": clean_plate,
             "layout": layout_info,
         })
+        ast_scene_obj = {
+            "id": scene_id,
+            "index": i + 1,
+            "role": role,
+            "start": round(start, 3),
+            "end": round(end, 3),
+            "duration": dur,
+            "cleanPlate": clean_plate,
+            "layers": ast_layers,
+        }
+        skeleton_code = compile_scene_am_skeleton(ast_scene_obj, width, height)
+        skeletons_dir = out_dir / "skeletons"
+        skeletons_dir.mkdir(parents=True, exist_ok=True)
+        skeleton_rel = f"skeletons/scene{i + 1}.js"
+        with open(skeletons_dir / f"scene{i + 1}.js", "w", encoding="utf-8") as sf:
+            sf.write(skeleton_code)
+        ast_scene_obj["skeletonPath"] = f"ref/extracted/{skeleton_rel}"
+        ast_scene_obj["amCodeSkeleton"] = skeleton_code
+        ast_scenes.append(ast_scene_obj)
 
     cap.release()
 
@@ -561,6 +1089,8 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
         "duration": round(duration, 3),
         "totalFrames": total_frames,
         "scannedFrames": temporal["scannedFrames"],
+        "bpm": bpm,
+        "beatTimestamps": beat_timestamps[:64],
         "visualJumpTimestamps": temporal["visualJumpTimestamps"],
         "cutTimestamps": cut_timestamps,
         "thumbTimestamps": thumb_timestamps,
@@ -569,6 +1099,21 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
     with open(temporal_json_path, "w", encoding="utf-8") as f:
         json.dump(temporal_payload, f, indent=2)
 
+    style_ast = {
+        "version": 3,
+        "source": v_path.name,
+        "fps": int(round(fps)),
+        "width": width,
+        "height": height,
+        "aspectRatio": aspect_ratio,
+        "bpm": bpm,
+        "beatTimestamps": beat_timestamps[:64],
+        "scenes": ast_scenes,
+    }
+    ast_json_path = out_dir / "style_ast.json"
+    with open(ast_json_path, "w", encoding="utf-8") as f:
+        json.dump(style_ast, f, indent=2)
+
     style_spec = {
         "version": 2,
         "title": f"Extracted Reference Style ({v_path.name})",
@@ -576,6 +1121,7 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
         "fidelityTarget": 0.90,
         "totalDuration": round(duration, 3),
         "fps": int(round(fps)),
+        "bpm": bpm,
         "aspectRatio": aspect_ratio,
         "width": width,
         "height": height,
@@ -601,6 +1147,7 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
         "ocrAvailable": ocr_available,
         "ocrWarning": ocr_warning,
         "extractorBackend": "python_cv2_rapidocr" if ocr_available else "python_cv2_no_ocr",
+        "astPath": "ref/extracted/style_ast.json",
         "scenes": scenes,
     }
 
@@ -622,10 +1169,11 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
 
     md = f"""# Reference Video Analysis Report (MotionClone Blueprint)
 **Source:** `{v_path.name}`
-**Duration:** {duration:.2f}s | **FPS:** {int(round(fps))} | **Resolution:** {width}x{height} ({aspect_ratio})
+**Duration:** {duration:.2f}s | **FPS:** {int(round(fps))} | **BPM:** {bpm:.1f} | **Resolution:** {width}x{height} ({aspect_ratio})
 **Detected Tone:** {theme_label} (Mean Luma: {avg_luma:.1f})
 **Detected Scene Cuts:** {len(cut_timestamps)} scenes (`{", ".join(f"{t:.2f}s" for t in cut_timestamps)}`)
 **Extractor Backend:** `{style_spec['extractorBackend']}` (`ocrAvailable={ocr_available}`)
+**Decompiled Motion AST:** `ref/extracted/style_ast.json` (version 3)
 {ocr_banner}
 
 ## Measured Color Tokens (From Reference Pixels)
@@ -650,7 +1198,9 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
     for s in scenes:
         ly = s["layout"]
         pal = ly["palette"]
+        cp = s.get("cleanPlate") or {"fillHex": pal["bgHex"], "hasGradient": False}
         md += f"\n### Scene {s['index']}: `{s['id']}` ({s['start']:.2f}s - {s['end']:.2f}s, {s['duration']:.2f}s)\n"
+        md += f"- **Clean Plate Background:** fill=`{cp.get('fillHex')}`, hasGradient=`{cp.get('hasGradient')}`\n"
         md += f"- **Measured Palette:** bg=`{pal['bgHex']}`, surface=`{pal['surfaceHex']}`, text=`{pal['textHex']}`, accent=`{pal['accentHex']}`\n"
         md += f"- **Visual Archetype:** `{ly.get('visual_archetype')}`\n"
         md += f"- **Density:** `{ly.get('card_count', 0)}` cards, `{ly.get('pill_count', 0)}` pills, `{ly.get('scatter_count', 0)}` scatter elements | **Motion Energy:** `{s['motionEnergy']:.3f}` (`{s['motion']}`)\n"
@@ -661,17 +1211,20 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
         if ly.get("bottom"):
             md += f"- **Bottom Text Zone:** {', '.join([json.dumps(t) for t in ly['bottom'][:3]])}\n"
         if ly.get("regions"):
-            reg_summaries = [
-                f"{r['kind']}@({r['x']},{r['y']},{r['w']}x{r['h']})"
-                for r in ly["regions"][:6]
-            ]
-            md += f"- **Normalized Bounding Boxes (x,y,w,h):** `{', '.join(reg_summaries)}`\n"
+            reg_summaries = []
+            for r in ly["regions"][:6]:
+                mot = r.get("motion") or {}
+                curve_label = f"{mot.get('direction', 'pop')}:{mot.get('curve', 'AM.spring')}"
+                reg_summaries.append(
+                    f"{r['kind']}@({r['x']},{r['y']},{r['w']}x{r['h']})[{curve_label}]"
+                )
+            md += f"- **Normalized Bounding Boxes & Decompiled Motion (x,y,w,h)[dir:curve]:** `{', '.join(reg_summaries)}`\n"
 
     md += f"""
 ## Aetheria Modular HTML5/JS Reconstruction Directives
-1. **EXACT TIMING & SCENES (`index.html` + `script/scene1..{len(scenes)}.js`)**: Mirror the measured `SCENES` timings and `{width}x{height}` (`{int(round(fps))}fps`) `window.__filmMeta` contract. Register each scene with `window.AM.registerScene("sceneK_...", ...)` and drive every frame deterministically via `window.renderAt(t)`.
-2. **PER-SCENE PALETTE FIDELITY**: Switch backgrounds/accents per scene to match each scene's measured `bgHex` and `accentHex` above — never substitute generic default colors.
-3. **MULTI-POSE MOTION CLONING**: Use `AM.evalKeyframes(frames, localTime, easing)` (`linear` | `smooth` | `out` | `step`), `AM.spring`, `AM.pop`, `AM.drawSVGPath`, and `AM.textReveal` to reconstruct exact entrance/mid/exit trajectories at the measured bounding boxes `(x, y, w, h)`.
+1. **READ DECOMPILED MOTION AST (`ref/extracted/style_ast.json`)**: Inspect `style_ast.json` for each scene's `cleanPlate` and `layers[]` (`box`, `style`, and `motion.entrance`). Map `curve == "AM.spring"` directly to `AM.spring(localTime - startSec, ...)` and `direction == "slide_up"` to Y-offset `yBox + 40 * (1 - p)` instead of guessing random easing formulas.
+2. **EXACT TIMING & SCENES (`index.html` + `script/scene1..{len(scenes)}.js`)**: Mirror the measured `SCENES` timings and `{width}x{height}` (`{int(round(fps))}fps`) `window.__filmMeta` contract. Register each scene with `window.AM.registerScene("sceneK_...", ...)` and drive every frame deterministically via `window.renderAt(t)`.
+3. **PER-SCENE PALETTE FIDELITY**: Switch backgrounds/accents per scene to match each scene's measured `cleanPlate.fillHex`, `bgHex`, and `accentHex` above — never substitute generic default colors.
 4. **CLOSED-LOOP VISUAL VERIFICATION**: After writing `index.html` and `script/scene*.js`, call `capture_film_preview` with `compareToReference: true` to measure per-frame RGB SSIM + color/edge similarity and inspect `.aetheria/preview/comparison_strip.jpg`. Refine any low-scoring scenes iteratively until visual metrics and the 5-axis rubric pass!
 """
 
@@ -683,8 +1236,10 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
         "reportPath": str(report_md),
         "stylePath": str(style_json),
         "specPath": str(style_json),
+        "astPath": str(ast_json_path),
         "temporalPath": str(temporal_json_path),
         "blueprint": style_spec,
+        "motionAst": style_ast,
     }
 
 

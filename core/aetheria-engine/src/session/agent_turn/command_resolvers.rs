@@ -25,6 +25,7 @@ fn compact_scene_entry(sc: &serde_json::Value, max_regions: usize) -> serde_json
         "keyframes",
         "motion",
         "motionEnergy",
+        "cleanPlate",
     ] {
         if let Some(v) = obj.get(key) {
             out.insert(key.to_string(), v.clone());
@@ -75,7 +76,7 @@ fn compact_scene_entry(sc: &serde_json::Value, max_regions: usize) -> serde_json
                             return r.clone();
                         };
                         let mut ro_out = serde_json::Map::new();
-                        for key in ["kind", "zone", "text", "x", "y", "w", "h", "fillHex"] {
+                        for key in ["kind", "zone", "text", "x", "y", "w", "h", "fillHex", "motion"] {
                             if let Some(v) = ro.get(key) {
                                 ro_out.insert(key.to_string(), v.clone());
                             }
@@ -162,9 +163,15 @@ pub fn resolve_reference_report(workspace_dir: &str) -> Option<String> {
         ws_path.join("ref").join("style.json"),
         ws_path.join("workspace").join("ref").join("extracted").join("style.json"),
     ];
+    let ast_candidates = [
+        ws_path.join("ref").join("extracted").join("style_ast.json"),
+        ws_path.join("ref").join("style_ast.json"),
+        ws_path.join("workspace").join("ref").join("extracted").join("style_ast.json"),
+    ];
 
     let target_report = report_candidates.into_iter().find(|p| p.exists());
     let target_style = style_candidates.into_iter().find(|p| p.exists());
+    let target_ast = ast_candidates.into_iter().find(|p| p.exists());
 
     let mut sections = Vec::new();
     if let Some(report_path) = target_report {
@@ -182,6 +189,14 @@ pub fn resolve_reference_report(workspace_dir: &str) -> Option<String> {
             }
         }
     }
+    if let Some(ast_path) = target_ast {
+        if let Ok(ast_raw) = std::fs::read_to_string(&ast_path) {
+            let snippet: String = ast_raw.trim().chars().take(6000).collect();
+            if !snippet.is_empty() {
+                sections.push(format!("Decompiled Motion AST (ref/extracted/style_ast.json):\n{}", snippet));
+            }
+        }
+    }
 
     if sections.is_empty() {
         return None;
@@ -191,8 +206,11 @@ pub fn resolve_reference_report(workspace_dir: &str) -> Option<String> {
         "[Active Video Reference Blueprint (MotionClone-Grade Reference)]:\n\"\"\"\n{}\n\"\"\"\n\
         GUIDELINES WHEN PRODUCING FROM REFERENCE:\n\
         0. STRICT REFERENCE PRECEDENCE OVER SKILLS: This Active Video Reference Blueprint STRICTLY OVERRIDES any active `/skill` aesthetic defaults (palette, background lightness/darkness, resolution, FPS, aspect ratio, layout boxes, or scene timings). Never replace the reference's measured style with a skill preset.\n\
-        1. VISUAL & TEMPORAL FIDELITY: Match the extracted `SCENES` timings, measured per-scene `bgHex`/`surfaceHex`/`textHex`/`accentHex` palette, spatial layout bounding boxes, and motion cadence.\n\
-        2. 3-TRACK SUBAGENT DELEGATION: Delegate voiceover/SFX synthesis to `task(subagent_type: \"audio-director\")` (with `spokenText` for foreign names/acronyms) and delegate modular scene scripts (`script/scene1.js`..`script/sceneN.js` + `index.html`) to `task(subagent_type: \"motion-designer\")`.\n\
+        1. READ DECOMPILED MOTION AST (`ref/extracted/style_ast.json` & `ref/extracted/skeletons/scene*.js`): Inspect `style_ast.json` for each scene's `cleanPlate` (`fillHex`, `hasGradient`) and `layers[]` (`box`, `style`, `motion.entrance`). Do NOT guess random easing formulas — map AST nodes directly to `window.AM`:\n\
+           - `curve == \"AM.spring\"` -> `AM.spring(Math.max(0, localTime - startSec), springParams)`\n\
+           - `direction == \"slide_up\"` -> Y-offset `yBox + 40 * (1 - p)`\n\
+           - `kind == \"text\"` -> render exact OCR `text` string at measured `box` and `style`\n\
+        2. 3-TRACK SUBAGENT DELEGATION: Generate narrated voiceover/SFX via `film_audio` (or `task(subagent_type: \"audio-director\")`) and delegate modular scene scripts (`script/scene1.js`..`script/sceneN.js` + `index.html`) to `task(subagent_type: \"motion-designer\")`.\n\
         3. DETERMINISTIC HTML ENGINE: Drive all motion via `window.renderAt(t)` and `window.AM` (`AM.evalKeyframes`, `AM.spring`, `AM.pop`, `AM.drawSVGPath`, `AM.textReveal`). NEVER load `ref/ref_*` directly on the canvas.\n\
         4. CLOSED-LOOP COMPARISON: Call `capture_film_preview` with `compareToReference: true` to measure RGB SSIM + color/edge similarity and inspect `.aetheria/preview/comparison_strip.jpg`. Refine any low-scoring scenes iteratively before finishing.",
         sections.join("\n\n---\n\n")
