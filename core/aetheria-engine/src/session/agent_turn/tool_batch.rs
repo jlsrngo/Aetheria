@@ -149,7 +149,26 @@ pub(crate) async fn execute_tool_batch(
         }
     });
 
-    let results = futures_util::future::join_all(futures_vec).await;
+    let serialize_heavy_calls = prepared_calls
+        .iter()
+        .filter(|pc| {
+            matches!(
+                pc.fn_name.as_str(),
+                "task" | "subagent" | "capture_film_preview" | "film_render"
+            )
+        })
+        .count()
+        > 1;
+
+    let results = if serialize_heavy_calls {
+        let mut seq_results = Vec::with_capacity(prepared_calls.len());
+        for fut in futures_vec {
+            seq_results.push(fut.await);
+        }
+        seq_results
+    } else {
+        futures_util::future::join_all(futures_vec).await
+    };
     let mut was_interrupted = crate::session::coordinator::is_session_interrupted(session_id).is_some();
     let all_blocked = !results.is_empty()
         && results

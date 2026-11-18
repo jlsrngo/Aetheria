@@ -54,10 +54,45 @@ pub(crate) async fn execute_subagent_tool_calls(
             .and_then(|v| v.as_str())
             .unwrap_or("{}");
 
-        let (parsed_args, syntax_error) = match parse_or_repair_tool_args(raw_args) {
+        let (mut parsed_args, syntax_error) = match parse_or_repair_tool_args(raw_args) {
             Ok(val) => (val, None),
             Err(repair_err) => (json!({}), Some(repair_err)),
         };
+
+        if syntax_error.is_none()
+            && subagent_type.trim().eq_ignore_ascii_case("motion-designer")
+            && fn_name == "capture_film_preview"
+        {
+            let has_explicit_ts = parsed_args
+                .get("timestamps")
+                .and_then(Value::as_array)
+                .is_some_and(|a| !a.is_empty());
+            if !has_explicit_ts && parsed_args.get("targetSceneIndices").is_none() {
+                if let Some(first_user_text) = chat_messages
+                    .iter()
+                    .find(|m| m.get("role").and_then(Value::as_str) == Some("user"))
+                    .and_then(|m| m.get("content").and_then(Value::as_str))
+                {
+                    let prompt_head: String = first_user_text
+                        .split("<active_video_reference_report>")
+                        .next()
+                        .unwrap_or(first_user_text)
+                        .chars()
+                        .take(1200)
+                        .collect();
+                    let target_scenes =
+                        super::subagent_scene_scope::extract_target_scene_indices(&prompt_head);
+                    if super::subagent_scene_scope::is_focused_scene_subset(
+                        workspace_dir,
+                        &target_scenes,
+                    ) {
+                        if let Some(obj) = parsed_args.as_object_mut() {
+                            obj.insert("targetSceneIndices".to_string(), json!(target_scenes));
+                        }
+                    }
+                }
+            }
+        }
 
         let sub_profile = crate::tool::profiles::ToolProfile::from_subagent_type(subagent_type);
         let policy_error = if fn_name == "question" {

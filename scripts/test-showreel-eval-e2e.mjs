@@ -175,7 +175,7 @@ function startEvalScriptedLlm() {
                   name: "write",
                   arguments: JSON.stringify({
                     filePath: "script/scene1.js",
-                    content: `(function(){var AM=window.AM;AM.registerScene("scene1_hook",function(ctx,t,dur){var r=28+10*Math.min(1,t/1.0);ctx.fillStyle="#0E0E0E";ctx.fillRect(0,0,640,360);ctx.fillStyle="#5D3EB2";ctx.beginPath();ctx.arc(320,180,r,0,Math.PI*2);ctx.fill();});})();\n`,
+                    content: `(function(){var AM=window.AM;AM.registerScene("scene1_hook",function(ctx,t,dur){var r=40+14*Math.min(1,t/1.0);ctx.fillStyle="#0E0E0E";ctx.fillRect(0,0,640,360);ctx.fillStyle="#6B46D8";ctx.beginPath();ctx.arc(320,180,r,0,Math.PI*2);ctx.fill();ctx.fillStyle="#E8E4EC";ctx.font="400 36px Inter,sans-serif";ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText("SHOW",320,182);});})();\n`,
                   }),
                 },
               },
@@ -197,7 +197,7 @@ function startEvalScriptedLlm() {
                   name: "write",
                   arguments: JSON.stringify({
                     filePath: "script/scene3.js",
-                    content: `(function(){var AM=window.AM;AM.registerScene("scene3_proof_or_demo",function(ctx,t,dur){var dy=14*Math.min(1,t/1.0);ctx.fillStyle="#151B2E";ctx.fillRect(0,0,640,360);ctx.fillStyle="#246E94";ctx.fillRect(200,130+dy,240,90);});})();\n`,
+                    content: `(function(){var AM=window.AM;AM.registerScene("scene3_proof_or_demo",function(ctx,t,dur){var dy=14*Math.min(1,t/1.0);ctx.fillStyle="#151B2E";ctx.fillRect(0,0,640,360);ctx.fillStyle="#2FA4DC";ctx.fillRect(175,110+dy,290,126);ctx.fillStyle="#14161C";ctx.font="700 32px Inter,sans-serif";ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText("PRO",320,174+dy);});})();\n`,
                   }),
                 },
               },
