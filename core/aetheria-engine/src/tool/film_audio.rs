@@ -50,8 +50,12 @@ pub fn film_audio_tool_definition() -> Value {
                                 "title": { "type": "string" },
                                 "sfxCues": {
                                     "type": "array",
-                                    "description": "Optional SFX cues (`{ type: 'whoosh'|'pop'|'impact'|'chime'|'riser'|'typewriter', time?: sec, frame?: n, volume?: 0..1 }` or shorthand cue name).",
+                                    "description": "SFX cues for this scene (`{ type: 'whoosh'|'pop'|'impact'|'chime'|'riser'|'typewriter', time?: sec, frame?: n, volume?: 0..1 }` or shorthand cue name). When omitted, deterministic transition & beat SFX cues are generated automatically into `audio/sfx_<id>.wav`.",
                                     "items": {}
+                                },
+                                "disableSfx": {
+                                    "type": "boolean",
+                                    "description": "Set true only if this scene must have no SFX track."
                                 }
                             },
                             "required": ["id", "narration"]
@@ -75,6 +79,14 @@ pub fn film_audio_tool_definition() -> Value {
                     "engine": { "type": "string", "enum": ["auto", "voxcpm", "edge", "kokoro"] },
                     "lexicon": { "type": "string", "description": "Optional relative path to custom pronunciation lexicon JSON inside project." },
                     "resetVoiceLock": { "type": "boolean" },
+                    "disableSfx": {
+                        "type": "boolean",
+                        "description": "Set true only if the user explicitly requested voiceover without sound effects."
+                    },
+                    "disableMicrostock": {
+                        "type": "boolean",
+                        "description": "Set true to disable Adobe Stock Microstock Mode ('M') before synthesizing narrated audio."
+                    },
                     "durationTolerance": {
                         "type": "number",
                         "description": "Excess dead-air warning threshold in seconds above WAV duration (default 2.0)."
@@ -442,6 +454,55 @@ Path(out_json_s).write_text(json.dumps({"duration": round(dur, 3), "cues": place
     Ok(())
 }
 
+/// Generates deterministic default SFX cues (transition + beat accents) when `sfxCues` is omitted.
+pub fn default_sfx_cues_for_scene(
+    scene_idx: usize,
+    total_scenes: usize,
+    computed_duration: f64,
+    wav_duration: f64,
+) -> Vec<Value> {
+    let dur = computed_duration.max(0.5);
+    let wav = wav_duration.max(0.4).min(dur);
+    let entry_type = if scene_idx == 0 { "impact" } else { "whoosh" };
+    let entry_vol = if scene_idx == 0 { 0.34 } else { 0.32 };
+    let mut cues = vec![json!({
+        "type": entry_type,
+        "time": 0.04,
+        "volume": entry_vol
+    })];
+
+    let mid_time = round3((wav * 0.42).clamp(0.45, (dur - 0.35).max(0.45)));
+    if mid_time + 0.15 < dur {
+        cues.push(json!({
+            "type": "pop",
+            "time": mid_time,
+            "volume": 0.30
+        }));
+    }
+
+    if dur >= 3.2 {
+        let is_last = total_scenes > 1 && scene_idx + 1 == total_scenes;
+        let tail_type = if is_last {
+            "chime"
+        } else if scene_idx % 2 == 1 {
+            "typewriter"
+        } else {
+            "pop"
+        };
+        let tail_vol = if is_last { 0.34 } else { 0.27 };
+        let tail_time = round3((wav * 0.78).clamp((mid_time + 0.55).min(dur - 0.25), (dur - 0.25).max(0.6)));
+        if tail_time > mid_time + 0.25 && tail_time + 0.12 < dur {
+            cues.push(json!({
+                "type": tail_type,
+                "time": tail_time,
+                "volume": tail_vol
+            }));
+        }
+    }
+
+    cues
+}
+
 pub async fn execute_film_audio(
     session_id: &str,
     workspace_dir: &str,
@@ -462,6 +523,31 @@ pub async fn execute_film_audio(
         }
     };
 
+    let disable_microstock = arguments
+        .get("disableMicrostock")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if disable_microstock {
+        if let Some(prev_lock) = active_microstock_lock(workspace_dir) {
+            let _ = crate::studio::microstock::manifest::save_workspace_mode(
+                ws_root,
+                false,
+                &prev_lock.preset_id,
+                prev_lock.fps,
+            );
+            if let Ok(mut m) =
+                crate::studio::microstock::manifest::load_manifest(ws_root, &prev_lock.project_dir)
+            {
+                m.enabled = false;
+                let _ = crate::studio::microstock::manifest::save_manifest(
+                    ws_root,
+                    &prev_lock.project_dir,
+                    &m,
+                );
+            }
+        }
+    }
+
     let lock = active_microstock_lock(workspace_dir);
     let mut seen_ids = HashSet::new();
     for (idx, item) in raw_scenes.iter().enumerate() {
@@ -478,7 +564,7 @@ pub async fn execute_film_audio(
                 "ok": false,
                 "code": "MICROSTOCK_AUDIO_FORBIDDEN",
                 "error": format!(
-                    "Adobe Stock Mode ('M') requires silent video (-an); remove audio/sfx from scene '{}'.",
+                    "Adobe Stock Mode ('M') requires silent video (-an); remove audio/sfx from scene '{}' (or pass disableMicrostock: true to film_audio if the user requested a narrated video).",
                     clean_id
                 )
             });
@@ -639,8 +725,27 @@ pub async fn execute_film_audio(
         let final_wav_dur = words_dur.map(|wd| wd.max(wav_dur)).unwrap_or(wav_dur);
         let computed_duration = round3(min_scene_sec.max(final_wav_dur + buffer_sec));
 
-        let sfx_cues = item.get("sfxCues").and_then(|v| v.as_array()).filter(|a| !a.is_empty());
-        let sfx_rel = if let Some(cues) = sfx_cues {
+        let global_disable_sfx = arguments
+            .get("disableSfx")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let scene_disable_sfx = item
+            .get("disableSfx")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(global_disable_sfx);
+        let explicit_cues = item
+            .get("sfxCues")
+            .and_then(|v| v.as_array())
+            .filter(|a| !a.is_empty())
+            .cloned();
+        let resolved_cues = if scene_disable_sfx {
+            None
+        } else {
+            Some(explicit_cues.unwrap_or_else(|| {
+                default_sfx_cues_for_scene(idx, raw_scenes.len(), computed_duration, final_wav_dur)
+            }))
+        };
+        let sfx_rel = if let Some(ref cues) = resolved_cues {
             let rel = format!("audio/sfx_{}.wav", clean_id);
             let sfx_wav = film_dir.join(&rel);
             let sfx_json = film_dir.join(format!("audio/sfx_{}.json", clean_id));
@@ -902,6 +1007,27 @@ mod tests {
         assert_eq!(res["ok"], false);
         assert_eq!(res["code"], "MICROSTOCK_AUDIO_FORBIDDEN");
         assert!(res["error"].as_str().unwrap().contains("Adobe Stock Mode ('M') requires silent video (-an)"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn default_sfx_cues_synthesize_valid_scene_wav_and_json() {
+        let dir = std::env::temp_dir().join(format!("aetheria_auto_sfx_{}", crate::paths::now_ms()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let cues = default_sfx_cues_for_scene(0, 3, 4.5, 3.9);
+        assert!(cues.len() >= 2);
+        let sfx_wav = dir.join("sfx_scene1.wav");
+        let sfx_json = dir.join("sfx_scene1.json");
+        synthesize_scene_sfx(&sfx_wav, &sfx_json, &cues, 4.5, 30)
+            .await
+            .expect("SFX synthesis should succeed");
+        assert!(sfx_wav.is_file());
+        assert!(sfx_json.is_file());
+        let dur = read_wav_duration_secs(&sfx_wav).expect("valid SFX WAV header");
+        assert!((dur - 4.5).abs() < 0.05);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

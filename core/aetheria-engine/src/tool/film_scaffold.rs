@@ -121,6 +121,10 @@ pub fn film_scaffold_tool_definition() -> Value {
                         "type": "number",
                         "description": "Excess dead-air warning threshold in seconds above WAV duration (default 2.0)."
                     },
+                    "disableMicrostock": {
+                        "type": "boolean",
+                        "description": "Set true to disable Adobe Stock Microstock Mode ('M') before scaffolding a portrait or narrated video."
+                    },
                     "scenes": {
                         "type": "array",
                         "description": "Ordered list of film scenes. IDs must be unique.",
@@ -445,6 +449,31 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
         }
     };
 
+    let disable_microstock = arguments
+        .get("disableMicrostock")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if disable_microstock {
+        if let Some(prev_lock) = active_microstock_lock(workspace_dir) {
+            let _ = crate::studio::microstock::manifest::save_workspace_mode(
+                ws_root,
+                false,
+                &prev_lock.preset_id,
+                prev_lock.fps,
+            );
+            if let Ok(mut m) =
+                crate::studio::microstock::manifest::load_manifest(ws_root, &prev_lock.project_dir)
+            {
+                m.enabled = false;
+                let _ = crate::studio::microstock::manifest::save_manifest(
+                    ws_root,
+                    &prev_lock.project_dir,
+                    &m,
+                );
+            }
+        }
+    }
+
     let lock = active_microstock_lock(workspace_dir);
     let preset = arguments.get("preset").and_then(|v| v.as_str()).unwrap_or("");
     let (preset_w, preset_h) = match preset {
@@ -471,7 +500,7 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
                     "ok": false,
                     "code": "MICROSTOCK_RATIO_MISMATCH",
                     "error": format!(
-                        "Adobe Stock Mode ('M') locks dimensions to {}x{} ({}), cannot scaffold {}x{}. Omit width/height or pass {}x{}.",
+                        "Adobe Stock Mode ('M') locks dimensions to {}x{} ({}), cannot scaffold {}x{}. Omit width/height, pass {}x{}, or pass disableMicrostock: true if the user requested a portrait/narrated video.",
                         lk.width, lk.height, lk.ratio, w, h, lk.width, lk.height
                     )
                 });
@@ -603,7 +632,14 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
         });
         let sfx = normalize_asset_ref(parsed.sfx).or_else(|| {
             if lock.is_none() {
-                prev.and_then(|p| p.sfx.clone())
+                prev.and_then(|p| p.sfx.clone()).or_else(|| {
+                    let auto_rel = format!("audio/sfx_{}.wav", clean_id);
+                    if film_dir.join(&auto_rel).is_file() {
+                        Some(auto_rel)
+                    } else {
+                        None
+                    }
+                })
             } else {
                 None
             }

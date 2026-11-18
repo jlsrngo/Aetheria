@@ -136,11 +136,10 @@ pub fn extract_explicit_video_title(prompt: &str) -> Option<String> {
     None
 }
 
-/// Returns true when the prompt is an instruction to edit/restyle/fix the current active project
-/// rather than starting a brand-new named video project.
-pub fn is_revision_or_style_adjustment_prompt(prompt: &str) -> bool {
+/// Returns true when the prompt explicitly requests a brand-new video or multi-scene storyboard.
+pub fn is_new_video_creation_prompt(prompt: &str) -> bool {
     if extract_explicit_video_title(prompt).is_some() {
-        return false;
+        return true;
     }
     let lower = prompt.to_ascii_lowercase();
     if [
@@ -149,12 +148,58 @@ pub fn is_revision_or_style_adjustment_prompt(prompt: &str) -> bool {
         "proyek baru",
         "project baru",
         "new project",
+        "buatkan video",
+        "buat video",
+        "bikin video",
+        "create a video",
+        "create video",
+        "make a video",
+        "video profil",
+        "video dokumenter",
+        "video edukasi",
+        "video promosi",
+        "video tentang",
     ]
     .iter()
     .any(|kw| lower.contains(kw))
     {
+        return true;
+    }
+    lower.contains("scene 1") && lower.contains("scene 2")
+}
+
+/// Returns true when the prompt explicitly asks for a narrated or short-form social video
+/// (TikTok/Reels/Shorts/voiceover) rather than a silent Adobe Stock microstock clip.
+pub fn is_explicit_social_or_narrated_video_prompt(prompt: &str) -> bool {
+    let lower = prompt.to_ascii_lowercase();
+    if lower.contains("microstock")
+        || lower.contains("micsrostock")
+        || lower.contains("adobe stock")
+        || lower.contains("stok adobe")
+        || lower.contains("/adobe-stock")
+    {
         return false;
     }
+    [
+        "tiktok",
+        "reels",
+        "youtube shorts",
+        "voiceover",
+        "voice over",
+        "narasi",
+        "narrated",
+    ]
+    .iter()
+    .any(|kw| lower.contains(kw))
+}
+
+/// Returns true when the prompt is an instruction to edit/restyle/fix the current active project
+/// rather than starting a brand-new named video project.
+pub fn is_revision_or_style_adjustment_prompt(prompt: &str) -> bool {
+    if is_new_video_creation_prompt(prompt) {
+        return false;
+    }
+    let lower = prompt.to_ascii_lowercase();
     [
         "pakai style",
         "style ini",
@@ -180,6 +225,42 @@ pub fn is_revision_or_style_adjustment_prompt(prompt: &str) -> bool {
     .any(|kw| lower.contains(kw))
 }
 
+fn is_url_only_or_reference_intro_line(lower_line: &str) -> bool {
+    let tokens: Vec<&str> = lower_line.split_whitespace().collect();
+    if tokens.is_empty() {
+        return true;
+    }
+    let has_url = tokens
+        .iter()
+        .any(|t| t.starts_with("http://") || t.starts_with("https://"));
+    if !has_url {
+        return false;
+    }
+    let non_url_words: Vec<&str> = tokens
+        .into_iter()
+        .filter(|t| !t.starts_with("http://") && !t.starts_with("https://"))
+        .collect();
+    non_url_words.len() <= 4
+        && non_url_words.iter().all(|w| {
+            matches!(
+                w.trim_matches(|c: char| !c.is_ascii_alphanumeric()),
+                "ini"
+                    | "contoh"
+                    | "contohnya"
+                    | "referensi"
+                    | "referensinya"
+                    | "ref"
+                    | "link"
+                    | "url"
+                    | "style"
+                    | "gaya"
+                    | "seperti"
+                    | "dari"
+                    | "video"
+            )
+        })
+}
+
 /// Extracts a human-readable video title from a user prompt or storyboard text.
 pub fn extract_video_title_from_prompt(prompt: &str) -> Option<String> {
     if let Some(explicit) = extract_explicit_video_title(prompt) {
@@ -200,6 +281,9 @@ pub fn extract_video_title_from_prompt(prompt: &str) -> Option<String> {
         }
         let cleaned_line = without_cmds.join(" ");
         let lower = cleaned_line.to_ascii_lowercase();
+        if is_url_only_or_reference_intro_line(&lower) {
+            continue;
+        }
         if !lower.starts_with("format:") && !lower.starts_with("musik") && !lower.starts_with("detik")
         {
             let unquoted = cleaned_line
@@ -458,9 +542,27 @@ pub fn ensure_project_for_prompt(ws_root: &Path, prompt: &str) -> Result<StudioP
             })?;
         }
         write_active_project_slug(ws_root, Some(&base_slug))?;
+        if is_explicit_social_or_narrated_video_prompt(prompt) {
+            clear_microstock_lock_for_project(ws_root, &existing);
+        }
         return Ok(inspect_project_dir(&existing, &base_slug));
     }
-    create_studio_project(ws_root, &title)
+    let created = create_studio_project(ws_root, &title)?;
+    if is_explicit_social_or_narrated_video_prompt(prompt) {
+        let proj_dir = ws_root.join(PROJECTS_DIR_NAME).join(&created.id);
+        clear_microstock_lock_for_project(ws_root, &proj_dir);
+    }
+    Ok(created)
+}
+
+fn clear_microstock_lock_for_project(ws_root: &Path, project_dir: &Path) {
+    let _ = crate::studio::microstock::manifest::save_workspace_mode(ws_root, false, "1920x1080", 30);
+    if let Ok(mut manifest) = crate::studio::microstock::manifest::load_manifest(ws_root, project_dir) {
+        if manifest.enabled {
+            manifest.enabled = false;
+            let _ = crate::studio::microstock::manifest::save_manifest(ws_root, project_dir, &manifest);
+        }
+    }
 }
 
 /// Returns true when the workspace has an active project selection or existing `projects/` subfolders.
@@ -773,6 +875,32 @@ mod tests {
         assert_eq!(
             resolve_active_film_root(&ws).unwrap(),
             ws.join("projects").join("fresh-project")
+        );
+
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn tiktok_storyline_with_reference_url_creates_new_project_and_clears_stale_microstock_lock() {
+        let ws = make_temp_ws("aetheria_proj_tiktok_vs_ms");
+        let old_ms = create_studio_project(&ws, "buat animasinya ini untuk micsrostock").unwrap();
+        let old_dir = ws.join("projects").join(&old_ms.id);
+        let mut ms_manifest = crate::studio::microstock::manifest::MicrostockManifest::default();
+        ms_manifest.enabled = true;
+        ms_manifest.preset = "3840x2160".to_string();
+        crate::studio::microstock::manifest::save_manifest(&ws, &old_dir, &ms_manifest).unwrap();
+        crate::studio::microstock::manifest::save_workspace_mode(&ws, true, "3840x2160", 30).unwrap();
+
+        let prompt = "ini contohnya https://pin.it/3L9k7puLg\n\nBuatkan video profil produk tentang \"Aetheria (ArunakiNexus)\" untuk format TikTok / Reels (9:16, 1080x1920, 30fps, durasi sekitar 30–35 detik).\n\nScene 1 — Hook\nScene 2 — Solusi dan kartu fitur yang rapi dengan rasio portrait.";
+        assert!(!is_revision_or_style_adjustment_prompt(prompt));
+
+        let created = ensure_project_for_prompt(&ws, prompt).unwrap();
+        assert_ne!(created.id, old_ms.id);
+        assert!(created.id.contains("aetheria"));
+        assert!(!created.id.contains("pin-it"));
+        assert!(
+            crate::studio::microstock::active_microstock_lock(&ws.to_string_lossy()).is_none(),
+            "new TikTok project must not inherit stale Adobe Stock lock"
         );
 
         let _ = std::fs::remove_dir_all(&ws);

@@ -451,6 +451,47 @@ pub fn collect_film_completion_blockers(workspace_dir: &str) -> Vec<String> {
         }
     }
 
+    if crate::studio::microstock::active_microstock_lock(workspace_dir).is_none() {
+        let manifest_path = film_dir.join("film.json");
+        if contains_path(&film_dir, &manifest_path) && manifest_path.is_file() {
+            if let Ok(raw) = std::fs::read_to_string(&manifest_path) {
+                if let Ok(manifest) =
+                    serde_json::from_str::<super::film_scaffold::FilmManifestJson>(&raw)
+                {
+                    for sc in &manifest.scenes {
+                        let Some(ref audio_rel) = sc.audio else {
+                            continue;
+                        };
+                        let audio_full = film_dir.join(normalize_rel_script(audio_rel));
+                        if !contains_path(&film_dir, &audio_full) || !audio_full.is_file() {
+                            blockers.push(format!(
+                                "Scene '{}' references missing voiceover audio '{}'",
+                                sc.id, audio_rel
+                            ));
+                        }
+                        match sc.sfx.as_deref() {
+                            Some(sfx_rel) => {
+                                let sfx_full = film_dir.join(normalize_rel_script(sfx_rel));
+                                if !contains_path(&film_dir, &sfx_full) || !sfx_full.is_file() {
+                                    blockers.push(format!(
+                                        "Scene '{}' references missing SFX file '{}'; re-run film_audio to synthesize SFX",
+                                        sc.id, sfx_rel
+                                    ));
+                                }
+                            }
+                            None => {
+                                blockers.push(format!(
+                                    "Scene '{}' has voiceover audio '{}' but no SFX track ('audio/sfx_{}.wav'); run film_audio or attach sfx in film.json",
+                                    sc.id, audio_rel, sc.id
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     blockers
 }
 
@@ -527,6 +568,43 @@ mod tests {
         // Completion blockers report scene2 stub cleanly
         let blockers = collect_film_completion_blockers(&ws_str);
         assert!(blockers.iter().any(|b| b.contains("scene2_body") && b.contains("stub")));
+
+        // Narrated scene without SFX track is flagged by completion gate until SFX exists
+        std::fs::write(
+            film_dir.join("script").join("scene2.js"),
+            "window.AM.registerScene('scene2_body', function(ctx, localTime, dur) { ctx.fillStyle = '#223344'; ctx.fillRect(0,0,1080,1920); });\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(film_dir.join("audio")).unwrap();
+        std::fs::write(film_dir.join("audio").join("scene1_hook.wav"), b"RIFF0000WAVE").unwrap();
+        let manifest_no_sfx = json!({
+            "schemaVersion": 1,
+            "manageIndexHtml": true,
+            "title": "State Test",
+            "width": 1080,
+            "height": 1920,
+            "fps": 30,
+            "background": "#0f1115",
+            "useThree": false,
+            "scenes": [
+                { "id": "scene1_hook", "title": "S1", "script": "script/scene1.js", "start": 0.0, "duration": 2.5, "audio": "audio/scene1_hook.wav", "sfx": null, "words": null, "accent": "#f59e0b" },
+                { "id": "scene2_body", "title": "S2", "script": "script/scene2.js", "start": 2.5, "duration": 2.5, "audio": null, "sfx": null, "words": null, "accent": "#f59e0b" }
+            ]
+        });
+        std::fs::write(film_dir.join("film.json"), serde_json::to_string_pretty(&manifest_no_sfx).unwrap()).unwrap();
+        let sfx_blockers = collect_film_completion_blockers(&ws_str);
+        assert!(
+            sfx_blockers.iter().any(|b| b.contains("scene1_hook") && b.contains("audio/sfx_scene1_hook.wav")),
+            "expected missing SFX blocker, got {:?}",
+            sfx_blockers
+        );
+
+        std::fs::write(film_dir.join("audio").join("sfx_scene1_hook.wav"), b"RIFF0000WAVE").unwrap();
+        let mut manifest_with_sfx = manifest_no_sfx;
+        manifest_with_sfx["scenes"][0]["sfx"] = json!("audio/sfx_scene1_hook.wav");
+        std::fs::write(film_dir.join("film.json"), serde_json::to_string_pretty(&manifest_with_sfx).unwrap()).unwrap();
+        let clean_blockers = collect_film_completion_blockers(&ws_str);
+        assert!(clean_blockers.is_empty(), "expected zero blockers once SFX is attached, got {:?}", clean_blockers);
 
         let _ = std::fs::remove_dir_all(&root);
     }

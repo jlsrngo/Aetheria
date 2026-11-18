@@ -255,5 +255,27 @@ describe("studioTrackUtils", () => {
     expect(merged[0].sessionId).toBe("sub_burst_1");
     expect(merged[0].title).toBe("Research Assistant");
   });
+
+  it("routes film_audio to audio column, keeps .json out of script column, and resolves retried column status", () => {
+    const steps: StepItem[] = [
+      { id: "s1", label: "Executing film_scaffold", status: "failed", iconType: "tool", toolName: "film_scaffold" },
+      { id: "s2", label: "Executing film_audio", status: "failed", iconType: "tool", toolName: "film_audio" },
+      { id: "s3", label: "Reading film.json", status: "failed", iconType: "tool", toolName: "read" },
+      { id: "s4", label: "Writing manifest.json", status: "failed", iconType: "tool", toolName: "write_to_file" },
+      { id: "s5", label: "Executed film_audio", status: "completed", iconType: "tool", toolName: "film_audio" },
+      { id: "s6", label: "Executed film_scaffold", status: "completed", iconType: "tool", toolName: "film_scaffold" },
+    ];
+    const cols = deriveStudioColumns(steps, []);
+    // director column receives film_scaffold + .json reads/writes, and finishes "completed" once the retry succeeds
+    expect(cols[0].role).toBe("director");
+    expect(cols[0].status).toBe("completed");
+    // audio column receives film_audio steps (not idle!) and finishes "completed"
+    expect(cols[1].role).toBe("audio");
+    expect(cols[1].status).toBe("completed");
+    expect(cols[1].entries.map((e) => e.label)).toEqual(["Executing film_audio", "Executed film_audio"]);
+    // script column does NOT get polluted with film.json or manifest.json
+    expect(cols[2].role).toBe("script");
+    expect(cols[2].entries).toHaveLength(0);
+  });
 });
 

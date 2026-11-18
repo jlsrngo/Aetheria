@@ -36,9 +36,13 @@ export function classifyStudioColumn(hint: string, label = ""): StudioColumnRole
   if (
     combined.includes("audio-director") ||
     combined.includes("audio producer") ||
+    combined.includes("film_audio") ||
+    combined.includes("generate_smart_sfx") ||
     combined.includes("voicebox") ||
     combined.includes("generate_speech") ||
     combined.includes("voiceover") ||
+    combined.includes("sfx_") ||
+    combined.includes("sound effect") ||
     combined.includes(".wav") ||
     combined.includes(".words.json")
   ) {
@@ -52,7 +56,7 @@ export function classifyStudioColumn(hint: string, label = ""): StudioColumnRole
     combined.includes("scene") ||
     combined.includes("aetheria-motion") ||
     combined.includes("index.html") ||
-    combined.includes(".js") ||
+    /\.js(?!on\b)/i.test(combined) ||
     combined.includes("storyboard")
   ) {
     return "script";
@@ -219,6 +223,8 @@ export function shouldShowStudioColumns(
     const l = (step.label || "").toLowerCase();
     return (
       t === "task" ||
+      t === "film_audio" ||
+      t === "film_scaffold" ||
       t.includes("voicebox") ||
       t === "todowrite" ||
       t.includes("render") ||
@@ -248,13 +254,17 @@ function summarizeColumnStatus(
   ) {
     return "standby";
   }
-  if (
-    trackStatuses.includes("failed") ||
-    entries.some((e) => e.status === "failed")
-  ) {
+  if (trackStatuses.includes("failed")) {
     return "failed";
   }
-  if (trackStatuses.length > 0 || entries.length > 0) {
+  if (entries.length > 0) {
+    const lastEntry = entries[entries.length - 1];
+    if (lastEntry.status === "failed") {
+      return "failed";
+    }
+    return "completed";
+  }
+  if (trackStatuses.length > 0) {
     return "completed";
   }
   return "idle";
