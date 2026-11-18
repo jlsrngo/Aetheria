@@ -88,6 +88,7 @@ crates/**/target/
 docs/*
 !docs/backlog-integrasi-sosial-dan-akun.md
 !docs/analisis-gap-kualitas-agen-vs-remake-manual.md
+!docs/laporan-evaluasi-v12-dan-roadmap-perbaikan-berikutnya.md
 demo/
 demo-workspace/
 
