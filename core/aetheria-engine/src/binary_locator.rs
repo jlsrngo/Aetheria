@@ -3,6 +3,46 @@
 use crate::paths::{aetheria_dot_dir, home_dir, project_root};
 use std::path::PathBuf;
 
+/// Collects candidate Windows `AppData\Local` directories, including fallbacks via `APPDATA`
+/// and `USERNAME` so isolated test harnesses that override `LOCALAPPDATA` still locate
+/// host-installed FFmpeg and Chromium binaries.
+fn windows_local_appdata_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    let mut push_unique = |p: PathBuf| {
+        if !p.as_os_str().is_empty() && !dirs.contains(&p) {
+            dirs.push(p);
+        }
+    };
+    if let Ok(local_app) = std::env::var("LOCALAPPDATA") {
+        let trimmed = local_app.trim();
+        if !trimmed.is_empty() {
+            push_unique(PathBuf::from(trimmed));
+        }
+    }
+    if let Ok(roaming) = std::env::var("APPDATA") {
+        let trimmed = roaming.trim();
+        if !trimmed.is_empty() {
+            if let Some(parent) = PathBuf::from(trimmed).parent() {
+                push_unique(parent.join("Local"));
+            }
+        }
+    }
+    if let Ok(username) = std::env::var("USERNAME") {
+        let user_trimmed = username.trim();
+        if !user_trimmed.is_empty() {
+            let sys_drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_string());
+            push_unique(
+                PathBuf::from(format!("{}\\", sys_drive.trim_end_matches('\\')))
+                    .join("Users")
+                    .join(user_trimmed)
+                    .join("AppData")
+                    .join("Local"),
+            );
+        }
+    }
+    dirs
+}
+
 /// Finds a Chromium build (Edge or Chrome) the headless CDP exporter can drive.
 /// Edge ships with every Windows 10/11; Chrome is the fallback.
 pub fn detect_browser_executable() -> Option<PathBuf> {
@@ -19,11 +59,16 @@ pub fn detect_browser_executable() -> Option<PathBuf> {
     ];
 
     let mut candidates = Vec::new();
-    for root in ["PROGRAMFILES(X86)", "PROGRAMFILES", "LOCALAPPDATA"] {
+    for root in ["PROGRAMFILES(X86)", "PROGRAMFILES"] {
         if let Some(root) = base(root) {
             for (vendor, product, exe) in browsers {
                 candidates.push(root.join(vendor).join(product).join("Application").join(exe));
             }
+        }
+    }
+    for local in windows_local_appdata_dirs() {
+        for (vendor, product, exe) in browsers {
+            candidates.push(local.join(vendor).join(product).join("Application").join(exe));
         }
     }
 
@@ -61,8 +106,7 @@ pub fn locate_ffmpeg_binary() -> Option<PathBuf> {
     ];
 
     if cfg!(windows) {
-        if let Ok(local_app) = std::env::var("LOCALAPPDATA") {
-            let local = PathBuf::from(&local_app);
+        for local in windows_local_appdata_dirs() {
             fixed.push(local.join("Microsoft").join("WinGet").join("Links").join("ffmpeg.exe"));
             let winget_pkgs = local.join("Microsoft").join("WinGet").join("Packages");
             if let Ok(pkgs) = std::fs::read_dir(&winget_pkgs) {

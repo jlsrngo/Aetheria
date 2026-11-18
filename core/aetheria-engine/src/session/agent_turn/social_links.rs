@@ -411,7 +411,7 @@ pub async fn process_social_links(
                         None
                     };
                     let blueprint_line = blueprint_path
-                        .map(|p| format!("\n                        - MotionClone Blueprint Extracted: {}, ref/extracted/style.json, ref/extracted/temporal.json", p))
+                        .map(|p| format!("\n                        - MotionClone Blueprint & Motion Ghidra AST Decompiled: {}, ref/extracted/style_ast.json, ref/extracted/skeletons/scene*.js, ref/extracted/style.json, ref/extracted/temporal.json", p))
                         .unwrap_or_default();
 
                     ocr_transcriptions.push(format!(
