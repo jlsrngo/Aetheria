@@ -40,8 +40,9 @@ pub fn film_audio_tool_definition() -> Value {
                             "type": "object",
                             "properties": {
                                 "id": { "type": "string", "description": "Scene ID matching `film.json` / `AM.registerScene`." },
-                                "narration": { "type": "string", "description": "Clean subtitle/display narration text." },
+                                "narration": { "type": "string", "description": "Clean subtitle/display narration text (optional/empty when mode='showreel')." },
                                 "spokenText": { "type": "string", "description": "Optional phonetic override for foreign names or unmapped acronyms." },
+                                "duration": { "type": "number", "description": "Target duration seconds for non-narrated showreel scenes (optional alias for minScene)." },
                                 "voice": { "type": "string", "description": "Optional voice override (e.g. 'aetheria', 'id-ID-ArdiNeural', 'af_heart')." },
                                 "style": { "type": "string", "description": "Optional delivery style ('default', 'energetic', 'mystery', 'casual', 'serious', 'horror', 'crime_conspiracy')." },
                                 "lang": { "type": "string", "enum": ["id", "en"] },
@@ -59,8 +60,17 @@ pub fn film_audio_tool_definition() -> Value {
                                     "description": "Set true only if this scene must have no SFX track."
                                 }
                             },
-                            "required": ["id", "narration"]
+                            "required": ["id"]
                         }
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["narrated", "showreel"],
+                        "description": "Use 'showreel' for beat-synced music + SFX tracks without Voicebox narration/subtitle cards (ideal for visual motion showreels without spoken dialogue)."
+                    },
+                    "bpm": {
+                        "type": "number",
+                        "description": "BPM tempo for beat-synced 'showreel' BGM/SFX grooves (defaults to reference style.json BPM or 120)."
                     },
                     "buffer": {
                         "type": "number",
@@ -475,6 +485,53 @@ Path(out_json_s).write_text(json.dumps({"duration": round(dur, 3), "cues": place
     Ok(())
 }
 
+async fn synthesize_showreel_bgm(
+    bgm_wav_path: &Path,
+    duration_sec: f64,
+    bpm: f64,
+    scene_index: usize,
+    scene_start_sec: f64,
+) -> Result<(), String> {
+    let voicebox_dir = project_root().join("core").join("voicebox");
+    let py_code = r#"
+import sys
+from pathlib import Path
+vb_dir, out_wav_s, dur_s, bpm_s, idx_s, start_s = sys.argv[1:7]
+if vb_dir not in sys.path:
+    sys.path.insert(0, vb_dir)
+import sfx_engine
+sfx_engine.generate_showreel_bgm_track(
+    Path(out_wav_s),
+    float(dur_s),
+    float(bpm_s),
+    int(idx_s),
+    float(start_s),
+)
+"#;
+    let mut cmd = Command::new("python");
+    crate::paths::configure_hidden_tokio_command(&mut cmd);
+    cmd.arg("-c")
+        .arg(py_code)
+        .arg(&voicebox_dir)
+        .arg(bgm_wav_path)
+        .arg(format!("{:.4}", duration_sec.max(0.35)))
+        .arg(format!("{:.2}", bpm))
+        .arg(scene_index.to_string())
+        .arg(format!("{:.4}", scene_start_sec.max(0.0)));
+
+    let out = cmd
+        .output()
+        .await
+        .map_err(|e| format!("Failed launching showreel BGM synthesis: {}", e))?;
+    if !out.status.success() {
+        return Err(format!(
+            "Showreel BGM synthesis failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    Ok(())
+}
+
 /// Generates deterministic default SFX cues (transition + beat accents) when `sfxCues` is omitted.
 pub fn default_sfx_cues_for_scene(
     scene_idx: usize,
@@ -569,6 +626,45 @@ pub async fn execute_film_audio(
         }
     }
 
+    let ref_style_val: Option<Value> = [
+        ws_root.join("ref").join("extracted").join("style.json"),
+        ws_root.join("ref").join("style.json"),
+    ]
+    .into_iter()
+    .find(|p| p.is_file())
+    .and_then(|p| std::fs::read_to_string(p).ok())
+    .and_then(|s| serde_json::from_str::<Value>(&s).ok());
+
+    let explicit_mode = arguments
+        .get("mode")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .map(|s| s.to_ascii_lowercase());
+    let music_only_flag = arguments.get("musicOnly").and_then(|v| v.as_bool()).unwrap_or(false);
+    let all_empty_narration = raw_scenes.iter().all(|item| {
+        item.get("narration")
+            .or_else(|| item.get("text"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().is_empty())
+            .unwrap_or(true)
+    });
+    let showreel_mode = explicit_mode.as_deref() == Some("showreel")
+        || music_only_flag
+        || (explicit_mode.is_none() && all_empty_narration);
+
+    let bpm = arguments
+        .get("bpm")
+        .and_then(|v| v.as_f64())
+        .filter(|b| b.is_finite() && *b >= 60.0 && *b <= 200.0)
+        .or_else(|| {
+            ref_style_val
+                .as_ref()
+                .and_then(|v| v.get("bpm"))
+                .and_then(|v| v.as_f64())
+                .filter(|b| b.is_finite() && *b >= 60.0 && *b <= 200.0)
+        })
+        .unwrap_or(120.0);
+
     let lock = active_microstock_lock(workspace_dir);
     let mut seen_ids = HashSet::new();
     for (idx, item) in raw_scenes.iter().enumerate() {
@@ -603,10 +699,10 @@ pub async fn execute_film_audio(
             .and_then(|v| v.as_str())
             .map(str::trim)
             .unwrap_or("");
-        if narration.is_empty() {
+        if !showreel_mode && narration.is_empty() {
             return json!({
                 "ok": false,
-                "error": format!("Scene '{}' requires non-empty 'narration' text.", clean_id)
+                "error": format!("Scene '{}' requires non-empty 'narration' text (or set mode='showreel' for BGM/SFX-only).", clean_id)
             });
         }
     }
@@ -656,6 +752,7 @@ pub async fn execute_film_audio(
     let mut generated_summaries = Vec::new();
     let mut updated_map: HashMap<String, FilmManifestScene> = HashMap::new();
     let mut ordered_ids = Vec::with_capacity(raw_scenes.len());
+    let mut showreel_cursor_sec = 0.0f64;
 
     for (idx, item) in raw_scenes.iter().enumerate() {
         let clean_id = sanitize_id(item.get("id").and_then(|v| v.as_str()).unwrap_or(""));
@@ -682,80 +779,103 @@ pub async fn execute_film_audio(
             .filter(|s| !s.is_empty())
             .or(explicit_default_lang)
             .unwrap_or_else(|| infer_default_lang(voice, engine));
+        let ref_scene_dur = ref_style_val
+            .as_ref()
+            .and_then(|v| v.get("scenes"))
+            .and_then(|v| v.as_array())
+            .and_then(|arr| arr.get(idx))
+            .and_then(|s| s.get("duration"))
+            .and_then(|d| d.as_f64())
+            .filter(|d| d.is_finite() && *d > 0.0);
         let scene_min_sec = item
-            .get("minScene")
+            .get("duration")
+            .or_else(|| item.get("minScene"))
             .and_then(|v| v.as_f64())
-            .filter(|m| m.is_finite() && *m >= 0.0)
+            .filter(|m| m.is_finite() && *m > 0.0)
+            .or(ref_scene_dur)
             .unwrap_or(min_scene_sec);
         let title_opt = item.get("title").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty());
         let accent = item.get("accent").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).unwrap_or("#f59e0b");
 
-        let audio_rel = format!("audio/{}.wav", clean_id);
-        let words_rel = format!("audio/{}.words.json", clean_id);
-        let wav_path = film_dir.join(&audio_rel);
-        let words_path = film_dir.join(&words_rel);
+        let (audio_rel, words_rel_opt, final_wav_dur, computed_duration) = if showreel_mode {
+            let target_dur = round3(scene_min_sec.max(1.0));
+            let bgm_rel = format!("audio/bgm_{}.wav", clean_id);
+            let bgm_wav_path = film_dir.join(&bgm_rel);
+            let safe_wav_dur = (target_dur - 0.04).max(0.35);
+            if let Err(e) = synthesize_showreel_bgm(&bgm_wav_path, safe_wav_dur, bpm, idx, showreel_cursor_sec).await {
+                return json!({ "ok": false, "sceneId": clean_id, "error": e });
+            }
+            showreel_cursor_sec += target_dur;
+            (bgm_rel, None, safe_wav_dur, target_dur)
+        } else {
+            let a_rel = format!("audio/{}.wav", clean_id);
+            let w_rel = format!("audio/{}.words.json", clean_id);
+            let wav_path = film_dir.join(&a_rel);
+            let words_path = film_dir.join(&w_rel);
 
-        let mut cmd = Command::new("python");
-        crate::paths::configure_hidden_tokio_command(&mut cmd);
-        cmd.arg(&script_path)
-            .arg("--text")
-            .arg(narration)
-            .arg("--out")
-            .arg(&wav_path)
-            .arg("--lang")
-            .arg(lang)
-            .arg("--workspace")
-            .arg(&film_dir);
-        if let Some(sp) = spoken_text {
-            cmd.arg("--spoken-text").arg(sp);
-        }
-        if let Some(ref lp) = lexicon_path {
-            cmd.arg("--lexicon").arg(lp);
-        }
-        if let Some(v) = voice {
-            cmd.arg("--voice").arg(v);
-        }
-        if let Some(st) = style {
-            cmd.arg("--style").arg(st);
-        }
-        if let Some(eng) = engine {
-            cmd.arg("--engine").arg(eng);
-        }
-        if reset_lock && idx == 0 {
-            cmd.arg("--reset-voice-lock");
-        }
+            let mut cmd = Command::new("python");
+            crate::paths::configure_hidden_tokio_command(&mut cmd);
+            cmd.arg(&script_path)
+                .arg("--text")
+                .arg(narration)
+                .arg("--out")
+                .arg(&wav_path)
+                .arg("--lang")
+                .arg(lang)
+                .arg("--workspace")
+                .arg(&film_dir);
+            if let Some(sp) = spoken_text {
+                cmd.arg("--spoken-text").arg(sp);
+            }
+            if let Some(ref lp) = lexicon_path {
+                cmd.arg("--lexicon").arg(lp);
+            }
+            if let Some(v) = voice {
+                cmd.arg("--voice").arg(v);
+            }
+            if let Some(st) = style {
+                cmd.arg("--style").arg(st);
+            }
+            if let Some(eng) = engine {
+                cmd.arg("--engine").arg(eng);
+            }
+            if reset_lock && idx == 0 {
+                cmd.arg("--reset-voice-lock");
+            }
 
-        let output = match cmd.output().await {
-            Ok(o) => o,
-            Err(e) => {
+            let output = match cmd.output().await {
+                Ok(o) => o,
+                Err(e) => {
+                    return json!({
+                        "ok": false,
+                        "sceneId": clean_id,
+                        "error": format!("Failed running Voicebox for scene '{}': {}", clean_id, e)
+                    });
+                }
+            };
+            if !output.status.success() {
                 return json!({
                     "ok": false,
                     "sceneId": clean_id,
-                    "error": format!("Failed running Voicebox for scene '{}': {}", clean_id, e)
+                    "error": format!(
+                        "Voicebox synthesis failed for '{}': {}",
+                        clean_id,
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    )
                 });
             }
-        };
-        if !output.status.success() {
-            return json!({
-                "ok": false,
-                "sceneId": clean_id,
-                "error": format!(
-                    "Voicebox synthesis failed for '{}': {}",
-                    clean_id,
-                    String::from_utf8_lossy(&output.stderr).trim()
-                )
-            });
-        }
 
-        let wav_dur = match read_wav_duration_secs(&wav_path) {
-            Ok(d) => d,
-            Err(e) => {
-                return json!({ "ok": false, "sceneId": clean_id, "error": e });
-            }
+            let wav_dur = match read_wav_duration_secs(&wav_path) {
+                Ok(d) => d,
+                Err(e) => {
+                    return json!({ "ok": false, "sceneId": clean_id, "error": e });
+                }
+            };
+            let words_dur = read_words_duration_secs(&words_path);
+            let f_dur = words_dur.map(|wd| wd.max(wav_dur)).unwrap_or(wav_dur);
+            let c_dur = round3(scene_min_sec.max(f_dur + buffer_sec));
+            (a_rel, Some(w_rel), f_dur, c_dur)
         };
-        let words_dur = read_words_duration_secs(&words_path);
-        let final_wav_dur = words_dur.map(|wd| wd.max(wav_dur)).unwrap_or(wav_dur);
-        let computed_duration = round3(scene_min_sec.max(final_wav_dur + buffer_sec));
 
         let global_disable_sfx = arguments
             .get("disableSfx")
@@ -781,7 +901,8 @@ pub async fn execute_film_audio(
             let rel = format!("audio/sfx_{}.wav", clean_id);
             let sfx_wav = film_dir.join(&rel);
             let sfx_json = film_dir.join(format!("audio/sfx_{}.json", clean_id));
-            if let Err(e) = synthesize_scene_sfx(&sfx_wav, &sfx_json, cues, computed_duration, fps).await {
+            let sfx_dur = if showreel_mode { (computed_duration - 0.04).max(0.35) } else { computed_duration };
+            if let Err(e) = synthesize_scene_sfx(&sfx_wav, &sfx_json, cues, sfx_dur, fps).await {
                 return json!({ "ok": false, "sceneId": clean_id, "error": e });
             }
             Some(rel)
@@ -799,18 +920,19 @@ pub async fn execute_film_audio(
                 duration: computed_duration,
                 audio: Some(audio_rel.clone()),
                 sfx: sfx_rel.clone(),
-                words: Some(words_rel.clone()),
+                words: words_rel_opt.clone(),
                 accent: accent.to_string(),
             },
         );
 
         generated_summaries.push(json!({
             "id": clean_id,
+            "mode": if showreel_mode { "showreel" } else { "narrated" },
             "duration": computed_duration,
             "wavDuration": round3(final_wav_dur),
             "bufferApplied": round3(computed_duration - final_wav_dur),
             "audio": audio_rel,
-            "words": words_rel,
+            "words": words_rel_opt,
             "sfx": sfx_rel
         }));
     }
@@ -818,16 +940,45 @@ pub async fn execute_film_audio(
     // Update or create film.json preserving existing layout/scenes when updating subset
     let film_json_path = film_dir.join("film.json");
     let index_path = film_dir.join("index.html");
+    let default_w = ref_style_val
+        .as_ref()
+        .and_then(|v| v.get("width"))
+        .and_then(Value::as_u64)
+        .map(|n| n as u32)
+        .filter(|&n| n >= 16)
+        .unwrap_or(1080);
+    let default_h = ref_style_val
+        .as_ref()
+        .and_then(|v| v.get("height"))
+        .and_then(Value::as_u64)
+        .map(|n| n as u32)
+        .filter(|&n| n >= 16)
+        .unwrap_or(1920);
+    let default_fps = ref_style_val
+        .as_ref()
+        .and_then(|v| v.get("fps"))
+        .and_then(Value::as_u64)
+        .map(|n| (n as u32).max(1))
+        .unwrap_or(fps);
+    let default_bg = ref_style_val
+        .as_ref()
+        .and_then(|v| v.pointer("/palette/primary"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("#0f1115")
+        .to_string();
+
     let mut manifest = if film_json_path.is_file() {
         let raw = std::fs::read_to_string(&film_json_path).unwrap_or_default();
         serde_json::from_str::<FilmManifestJson>(&raw).unwrap_or_else(|_| FilmManifestJson {
             schema_version: 1,
             manage_index_html: true,
             title: "Motion Film".to_string(),
-            width: 1080,
-            height: 1920,
-            fps,
-            background: "#0f1115".to_string(),
+            width: default_w,
+            height: default_h,
+            fps: default_fps,
+            background: default_bg.clone(),
             use_three: false,
             scenes: Vec::new(),
         })
@@ -836,10 +987,10 @@ pub async fn execute_film_audio(
             schema_version: 1,
             manage_index_html: true,
             title: "Motion Film".to_string(),
-            width: 1080,
-            height: 1920,
-            fps,
-            background: "#0f1115".to_string(),
+            width: default_w,
+            height: default_h,
+            fps: default_fps,
+            background: default_bg,
             use_three: false,
             scenes: Vec::new(),
         }
@@ -1072,5 +1223,42 @@ mod tests {
         assert_eq!(infer_default_lang(None, Some("kokoro")), "en");
         assert_eq!(infer_default_lang(Some("aetheria"), None), "id");
         assert_eq!(infer_default_lang(None, None), "id");
+    }
+
+    #[tokio::test]
+    async fn film_audio_showreel_mode_generates_bpm_bgm_and_sfx_without_words() {
+        let dir = std::env::temp_dir().join(format!("aetheria_showreel_aud_{}", crate::paths::now_ms()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ws = dir.to_string_lossy().to_string();
+
+        let res = execute_film_audio(
+            "ses_showreel",
+            &ws,
+            &json!({
+                "mode": "showreel",
+                "bpm": 114.5,
+                "scenes": [
+                    { "id": "scene1_hook", "narration": "", "duration": 2.4 },
+                    { "id": "scene2_grid", "narration": "", "duration": 2.0 }
+                ]
+            }),
+        )
+        .await;
+        assert_eq!(res["ok"], true, "unexpected showreel audio error: {:?}", res);
+        let project_root = resolve_active_project_or_film_root(&dir).unwrap();
+        assert!(project_root.join("audio/bgm_scene1_hook.wav").is_file());
+        assert!(project_root.join("audio/sfx_scene1_hook.wav").is_file());
+        assert!(!project_root.join("audio/scene1_hook.words.json").exists());
+
+        let manifest: FilmManifestJson = serde_json::from_str(
+            &std::fs::read_to_string(project_root.join("film.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(manifest.scenes.len(), 2);
+        assert!(manifest.scenes[0].words.is_none());
+        assert_eq!(manifest.scenes[0].audio.as_deref(), Some("audio/bgm_scene1_hook.wav"));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

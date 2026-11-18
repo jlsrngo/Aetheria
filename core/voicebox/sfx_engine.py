@@ -83,6 +83,78 @@ def write_wav(file_path: Path, samples: List[float]):
         raw = struct.pack(f"<{len(int_samples)}h", *int_samples)
         w.writeframes(raw)
 
+
+def generate_showreel_bgm_track(
+    file_path: Path,
+    duration_sec: float,
+    bpm: float = 120.0,
+    scene_index: int = 0,
+    scene_start_sec: float = 0.0,
+) -> float:
+    """Synthesizes a deterministic beat-locked studio chord pad + kick/tick groove without TTS."""
+    safe_bpm = min(175.0, max(75.0, float(bpm or 120.0)))
+    beat = 60.0 / safe_bpm
+    safe_dur = max(0.35, float(duration_sec))
+    num_samples = max(1, int(safe_dur * SAMPLE_RATE))
+    buf = [0.0] * num_samples
+
+    chords = [
+        [130.81, 196.00, 246.94, 311.13],
+        [116.54, 174.61, 220.00, 277.18],
+        [155.56, 233.08, 293.66, 392.00],
+        [174.61, 261.63, 311.13, 415.30],
+    ]
+    chord = chords[scene_index % len(chords)]
+
+    # Warm ambient pad with gentle fade in/out so cuts glue cleanly without clipping.
+    attack = min(0.10, safe_dur * 0.15)
+    release = min(0.18, safe_dur * 0.25)
+    for f in chord:
+        omega1 = 2.0 * math.pi * f / SAMPLE_RATE
+        omega2 = 2.0 * math.pi * (f * 2.0) / SAMPLE_RATE
+        scale = 0.14 / len(chord)
+        for i in range(num_samples):
+            lt = i / SAMPLE_RATE
+            env = min(1.0, lt / max(0.001, attack)) * min(1.0, max(0.0, (safe_dur - lt) / max(0.001, release)))
+            buf[i] += (math.sin(omega1 * i) + 0.22 * math.sin(omega2 * i)) * env * scale
+
+    # Beat-locked low-end kick & subtle hi-hat tick aligned across global timeline.
+    first_beat = math.ceil(max(0.0, scene_start_sec) / beat) * beat
+    t_b = first_beat
+    while t_b < scene_start_sec + safe_dur - 0.05:
+        lt = t_b - scene_start_sec
+        if lt >= 0.0:
+            i0 = int(lt * SAMPLE_RATE)
+            n_k = int(0.17 * SAMPLE_RATE)
+            phase = 0.0
+            k_amp = 0.30 if scene_index >= 1 else 0.18
+            for k in range(n_k):
+                idx = i0 + k
+                if idx >= num_samples:
+                    break
+                kt = k / SAMPLE_RATE
+                freq = 132.0 * math.exp(-22.0 * kt) + 46.0
+                phase += 2.0 * math.pi * freq / SAMPLE_RATE
+                buf[idx] += math.sin(phase) * math.exp(-13.0 * kt) * k_amp
+            # Subtle upbeat tick at half beat
+            ht = lt + beat * 0.5
+            if ht + 0.04 < safe_dur:
+                h0 = int(ht * SAMPLE_RATE)
+                n_h = int(0.04 * SAMPLE_RATE)
+                h_phase = 0.0
+                for k in range(n_h):
+                    idx = h0 + k
+                    if idx >= num_samples:
+                        break
+                    kt = k / SAMPLE_RATE
+                    hf = 2400.0 * math.exp(-16.0 * kt) + 340.0
+                    h_phase += 2.0 * math.pi * hf / SAMPLE_RATE
+                    buf[idx] += math.sin(h_phase) * math.exp(-72.0 * kt) * 0.09
+        t_b += beat
+
+    write_wav(file_path, buf)
+    return round(num_samples / SAMPLE_RATE, 3)
+
 def ensure_soundbank(sfx_dir: Path):
     """Generates the studio soundbank files in both sfx_dir and its parent public dir."""
     sfx_dir.mkdir(parents=True, exist_ok=True)
