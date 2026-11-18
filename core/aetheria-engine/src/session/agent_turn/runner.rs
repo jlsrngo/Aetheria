@@ -1550,7 +1550,11 @@ fn handle_no_tool_calls(
         return NoToolCallAction::Continue;
     }
 
-    if step_finish == FinishReason::Stop
+    let has_pending_subagents =
+        super::kiro_standby::pending_subagent_count(target.session_id) > 0;
+
+    if !has_pending_subagents
+        && step_finish == FinishReason::Stop
         && *premature_announce_retries < 2
         && is_premature_tool_announcement(&msg_text)
     {
@@ -1566,10 +1570,12 @@ fn handle_no_tool_calls(
 
     let latest_fidelity_hint = super::subagent::extract_latest_fidelity_refinement_hint(content_parts);
     let max_verify_retries = if latest_fidelity_hint.is_some() { 2 } else { 1 };
-    if matches!(
-        step_finish,
-        FinishReason::Stop | FinishReason::ToolCalls | FinishReason::Unknown
-    ) && *verification_gate_retries < max_verify_retries
+    if !has_pending_subagents
+        && matches!(
+            step_finish,
+            FinishReason::Stop | FinishReason::ToolCalls | FinishReason::Unknown
+        )
+        && *verification_gate_retries < max_verify_retries
     {
         let blockers =
             super::history::collect_turn_completion_blockers(content_parts, target.workspace_dir);
@@ -1729,5 +1735,95 @@ mod tests {
         assert!(model_supports_vision_from_config(Some(&cfg), "local-cli", "kiro/claude-sonnet-4.5"));
         assert!(!model_supports_vision_from_config(Some(&cfg), "local-cli", "kiro/deepseek-3.2"));
         assert!(!model_supports_vision_from_config(Some(&cfg), "local-cli", "kiro/glm-5"));
+    }
+
+    #[test]
+    fn pending_background_subagent_skips_stub_completion_blocker_for_clean_standby() {
+        let dir = std::env::temp_dir().join(format!("aetheria_runner_standby_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let ws = dir.to_string_lossy().to_string();
+        let scaf = crate::tool::film_scaffold::execute_film_scaffold(
+            "ses_standby_test",
+            &ws,
+            &json!({
+                "title": "Demo",
+                "scenes": [{ "id": "scene1_hook", "duration": 2.0 }]
+            }),
+        );
+        assert_eq!(scaf["ok"], true);
+
+        let target = TurnTarget {
+            session_id: "ses_standby_test",
+            workspace_dir: &ws,
+            assistant_msg_id: "msg_1",
+            started_ms: 1000,
+        };
+        let cfg = json!({});
+        let usage_acc = TurnUsageAccumulator::default();
+        let mut len_c = 0usize;
+        let mut prem_r = 0usize;
+        let mut ver_r = 0usize;
+        let mut parts = vec![json!({
+            "type": "tool",
+            "name": "film_scaffold",
+            "state": { "status": "completed", "structured": { "ok": true } }
+        })];
+        let mut msgs = Vec::new();
+
+        {
+            let _guard =
+                crate::session::agent_turn::kiro_standby::register_subagent_pending(
+                    "ses_standby_test",
+                );
+            let act = handle_no_tool_calls(
+                &target,
+                "local-cli",
+                "gemini-3.8-flash-high",
+                &cfg,
+                FinishReason::Stop,
+                None,
+                "Launched motion-designer subagent in background.".to_string(),
+                false,
+                &json!({"role":"assistant","content":"Launched motion-designer subagent in background."}),
+                &mut len_c,
+                &mut prem_r,
+                &mut ver_r,
+                &mut parts,
+                &mut msgs,
+                &usage_acc,
+            );
+            assert!(
+                matches!(act, NoToolCallAction::Break { .. }),
+                "parent must enter standby cleanly instead of firing stub blockers while worker runs"
+            );
+            assert_eq!(ver_r, 0);
+        }
+
+        let after_finish = handle_no_tool_calls(
+            &target,
+            "local-cli",
+            "gemini-3.8-flash-high",
+            &cfg,
+            FinishReason::Stop,
+            None,
+            "Finished.".to_string(),
+            false,
+            &json!({"role":"assistant","content":"Finished."}),
+            &mut len_c,
+            &mut prem_r,
+            &mut ver_r,
+            &mut parts,
+            &mut msgs,
+            &usage_acc,
+        );
+        assert!(
+            matches!(after_finish, NoToolCallAction::Continue),
+            "when no subagent is pending, stub scene still triggers verification gate"
+        );
+        assert_eq!(ver_r, 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

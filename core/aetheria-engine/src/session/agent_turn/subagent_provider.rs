@@ -9,10 +9,10 @@ use serde_json::Value;
 /// Baseline default max_tokens for lightweight non-coding subagent roles (`explore`, `audio-director`, `qa-verifier`).
 pub(crate) const DEFAULT_SUBAGENT_MAX_TOKENS: u64 = 4096;
 
-/// Measured default for `motion-designer` (`F4.2`): historical P90 scene `write` is 9,913 chars (~2,479 tok)
-/// and max is 12,511 chars (~3,128 tok + JSON escaping + thinking tokens), causing 22.7% historical sessions (5/22)
-/// and 2/3 live runs on 4096 to hit `finish_reason == "length"`. Capped to `model.limit.output` when lower.
-pub(crate) const DEFAULT_MOTION_DESIGNER_MAX_TOKENS: u64 = 12_288;
+/// Default output budget for `motion-designer`: high-craft multi-phase procedural Canvas scenes
+/// run 150-330 lines (~5-12 KB) each; 24,576 tokens prevents agents from compressing scenes into
+/// thin 40-line stubs when writing 2-3 rich scenes per turn. Capped to `model.limit.output` when lower.
+pub(crate) const DEFAULT_MOTION_DESIGNER_MAX_TOKENS: u64 = 24_576;
 
 pub(crate) fn resolve_subagent_max_tokens(
     cfg: &Value,

@@ -57,7 +57,8 @@ pub(crate) fn extract_tool_target_keys(tool_name: &str, args_val: &Value) -> Vec
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "subagent".to_string());
         let detail_raw = args_val
-            .get("session_id")
+            .get("sessionID")
+            .or_else(|| args_val.get("session_id"))
             .or_else(|| args_val.get("sessionId"))
             .or_else(|| args_val.get("description"))
             .and_then(Value::as_str)

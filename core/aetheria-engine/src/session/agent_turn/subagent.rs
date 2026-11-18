@@ -103,10 +103,16 @@ pub fn execute_subagent<'a>(
             .or_else(|| arguments.get("child_session_id"))
             .or_else(|| arguments.get("session_id"))
             .and_then(|v| v.as_str());
-        let run_in_background = arguments
-            .get("background")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(true);
+        // Always run `motion-designer` synchronously so scene batches never race over shared
+        // `.aetheria/preview/` artifacts or let the coordinator preview mid-flight.
+        let run_in_background = if subagent_type.trim().eq_ignore_ascii_case("motion-designer") {
+            false
+        } else {
+            arguments
+                .get("background")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true)
+        };
 
         if prompt.trim().is_empty() {
             return json!({ "ok": false, "state": "error", "error": "Subagent `prompt` is required and cannot be empty." });
@@ -167,7 +173,41 @@ pub fn execute_subagent<'a>(
                 sys_prompt.push_str("\n\n");
                 sys_prompt.push_str(&ms_override);
             }
-            let ref_vision_imgs = collect_reference_vision_images(workspace_dir, 8);
+            let scope_text = format!("{}\n{}", description, prompt);
+            let target_scenes = super::subagent_scene_scope::extract_target_scene_indices(&scope_text);
+            let is_scoped_batch =
+                super::subagent_scene_scope::is_focused_scene_subset(workspace_dir, &target_scenes);
+            if subagent_type.trim().eq_ignore_ascii_case("motion-designer")
+                || subagent_type.trim().eq_ignore_ascii_case("qa-verifier")
+            {
+                if let Ok(report_path) =
+                    crate::tool::path_guard::resolve_isolated_path(workspace_dir, "ref/extracted/ref_report.md")
+                {
+                    if let Ok(raw_report) = std::fs::read_to_string(&report_path) {
+                        let trimmed = raw_report.trim();
+                        if !trimmed.is_empty() {
+                            let scoped_report = if is_scoped_batch {
+                                super::subagent_scene_scope::filter_ref_report_for_scenes(
+                                    trimmed,
+                                    &target_scenes,
+                                )
+                            } else {
+                                trimmed.to_string()
+                            };
+                            let excerpt: String = scoped_report.chars().take(6500).collect();
+                            effective_prompt.push_str(&format!(
+                                "\n\n<active_video_reference_report>\n{}\n\n[Threshold Rule: pass `passThreshold: 0.65` on `capture_film_preview` whenever replacing reference brand/copy names (still aim >=0.78+ after polish); omit/`0.85` only on strict 1:1 literal clones.]\n</active_video_reference_report>",
+                                excerpt
+                            ));
+                        }
+                    }
+                }
+            }
+            let ref_vision_imgs = super::subagent_scene_scope::collect_reference_vision_images_scoped(
+                workspace_dir,
+                &target_scenes,
+                12,
+            );
             if !ref_vision_imgs.is_empty() {
                 let (child_pid, child_mid, child_vision_ok) = resolve_child_vision_capability(
                     parent_session_id,
@@ -181,10 +221,16 @@ pub fn execute_subagent<'a>(
                     .join(", ");
                 if child_vision_ok {
                     initial_image_urls = ref_vision_imgs.into_iter().map(|(_, url)| url).collect();
+                    let scope_instruction = if is_scoped_batch {
+                        "FOCUSED SCENE BATCH MODE: Study EVERY panel of each attached `ref_scene_0K_beats.jpg` storyboard strip + `_q1`/`mid`/`_q3` full-res keyframes from left to right. First mentally map EVERY exact geometric shape, color hex, per-letter morph, blurred backdrop, 3D arrow, marquee, or screen transition in these target scenes — NEVER simplify a multi-shape visual morph into plain static text! Write craft-rich Canvas code (~150-300 lines per complex scene) for ONLY these target scenes, then call `capture_film_preview` with `compareToReference: true`, `passThreshold: 0.65`, and `timestamps` covering ONLY these scenes' q1/mid/q3 timestamps so comparison_strip.jpg evaluates ONLY your target scenes cleanly."
+                    } else {
+                        "study BOTH the per-scene stills AND the 0.5s contact sheet timeline for intra-scene multi-beat choreography, cursor paths, strokes, and transitions; call `read` on extra frames under `ref/extracted/frames/` or `.aetheria/preview/comparison_strip.jpg` if needed."
+                    };
                     effective_prompt.push_str(&format!(
-                        "\n\n[Attached Reference Keyframes ({} vision frames inline): {} — inspect these frames directly for layout, contrast, composition, and typography; call `read` on any extra frames under `ref/extracted/frames/` or `.aetheria/preview/comparison_strip.jpg` if needed.]",
+                        "\n\n[Attached Reference Keyframes ({} vision images inline): {} — {}]",
                         initial_image_urls.len(),
-                        frame_list
+                        frame_list,
+                        scope_instruction
                     ));
                 } else {
                     effective_prompt.push_str(&format!(
@@ -474,7 +520,11 @@ async fn run_subagent_loop(
     let mut executed_tool_parts: Vec<Value> = Vec::new();
     let mut verification_retries: usize = 0;
     let mut steps_run: usize = 0;
-    let max_steps: usize = 24;
+    let max_steps: usize = if subagent_type.trim().eq_ignore_ascii_case("motion-designer") {
+        38
+    } else {
+        24
+    };
     let mut output_limit_continuations: usize = 0;
     let mut length_hits_total: usize = 0;
     let mut doom_detector = DoomLoopDetector::default();
@@ -523,6 +573,12 @@ async fn run_subagent_loop(
         }
 
         steps_run += 1;
+        // Gemini-3 thinking models perform best at temperature 1.0 (lower values degrade reasoning/visual craft).
+        let subagent_temperature = if model_id.to_ascii_lowercase().contains("gemini-3") {
+            1.0
+        } else {
+            0.3
+        };
         let completion = match send_resilient_chat_completion_with_options(
             &client,
             &mut base_url,
@@ -530,7 +586,7 @@ async fn run_subagent_loop(
             &mut model_id,
             &mut chat_messages,
             &tools,
-            0.3,
+            subagent_temperature,
             subagent_max_tokens,
             subagent_reasoning.as_deref(),
         )
@@ -639,29 +695,43 @@ async fn run_subagent_loop(
             }
             continue;
         }
-        if let Some(gate_issue) = evaluate_subagent_verification_gate_in_workspace(
+        let polish_msg = evaluate_post_build_comparison_polish(subagent_type, &executed_tool_parts);
+        let gate_issue = evaluate_subagent_verification_gate_in_workspace(
             subagent_type,
             workspace_dir,
             &executed_tool_parts,
-        ) {
+        );
+        if gate_issue.is_some() || polish_msg.is_some() {
             let refinement = extract_latest_fidelity_refinement_hint(&executed_tool_parts);
-            let max_gate_retries = if refinement.is_some() { 2 } else { 1 };
+            let max_gate_retries = if refinement.is_some() || polish_msg.is_some() { 2 } else { 1 };
             if verification_retries < max_gate_retries && steps_run < max_steps {
                 verification_retries += 1;
+                let primary_reason = gate_issue
+                    .as_deref()
+                    .or(polish_msg.as_deref())
+                    .unwrap_or("Verification required");
                 let extra_refinement = refinement
                     .map(|(_, msg)| format!("\n\n{}", msg))
+                    .or_else(|| {
+                        gate_issue
+                            .as_ref()
+                            .and(polish_msg.as_ref())
+                            .map(|p| format!("\n\n{}", p))
+                    })
                     .unwrap_or_default();
                 chat_messages.push(json!({
                     "role": "user",
                     "content": format!(
-                        "SUBAGENT VERIFICATION GATE (attempt {}/{}): Cannot complete task yet — {}. Fix unresolved tool/runtime failures or run 'capture_film_preview' cleanly before finishing.{}",
-                        verification_retries, max_gate_retries, gate_issue, extra_refinement
+                        "SUBAGENT VERIFICATION GATE (attempt {}/{}): Cannot complete task yet — {}. Fix unresolved issues, compare `.aetheria/preview/comparison_strip.jpg` (Reference | Preview | Diff Heatmap), refine weak scenes, and re-run `capture_film_preview(compareToReference: true)` before finishing.{}",
+                        verification_retries, max_gate_retries, primary_reason, extra_refinement
                     )
                 }));
                 continue;
             }
-            exit_outcome = SubagentExitOutcome::Incomplete(gate_issue);
-            break;
+            if let Some(hard_err) = gate_issue {
+                exit_outcome = SubagentExitOutcome::Incomplete(hard_err);
+                break;
+            }
         }
         exit_outcome = SubagentExitOutcome::Completed;
         break;
@@ -914,6 +984,95 @@ pub(crate) fn extract_latest_fidelity_refinement_hint(
     ))
 }
 
+/// Enforces one mandatory visual self-evaluation & Diff Heatmap calibration pass before `motion-designer`
+/// stops after its very first reference preview capture when there is measurable fidelity/edge headroom.
+pub(crate) fn evaluate_post_build_comparison_polish(
+    subagent_type: &str,
+    executed_tool_parts: &[Value],
+) -> Option<String> {
+    if !subagent_type.trim().eq_ignore_ascii_case("motion-designer") {
+        return None;
+    }
+    let completed_previews: Vec<&Value> = executed_tool_parts
+        .iter()
+        .filter(|p| {
+            p.get("type").and_then(Value::as_str) == Some("tool")
+                && p.get("name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|n| n.eq_ignore_ascii_case("capture_film_preview"))
+                && p.pointer("/state/status").and_then(Value::as_str) == Some("completed")
+        })
+        .collect();
+    let preview_count = completed_previews.len();
+    if preview_count == 0 || preview_count >= 3 {
+        return None;
+    }
+    let latest_structured = completed_previews.last()?.pointer("/state/structured")?;
+    if latest_structured.get("ok").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    let cmp = latest_structured.get("referenceComparison")?;
+    if cmp.get("ok").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    let overall = cmp.get("overallFidelity").and_then(Value::as_f64).unwrap_or(0.0);
+    let edge_mean = cmp.get("edgeMatchMean").and_then(Value::as_f64).unwrap_or(0.0);
+    let score_delta = cmp.get("scoreDelta").and_then(Value::as_f64).unwrap_or(0.0);
+    let worst_arr_opt = cmp.get("targetWorstScenes").and_then(Value::as_array);
+    let worst_scene_low = worst_arr_opt
+        .map(|arr| {
+            arr.iter()
+                .any(|x| x.get("combinedScore").and_then(Value::as_f64).unwrap_or(1.0) < 0.82)
+        })
+        .unwrap_or(false);
+    let worst_scene_broken = worst_arr_opt
+        .map(|arr| {
+            arr.iter()
+                .any(|x| x.get("combinedScore").and_then(Value::as_f64).unwrap_or(1.0) < 0.62)
+        })
+        .unwrap_or(false);
+
+    if preview_count == 1 && overall >= 0.85 && edge_mean >= 0.62 && !worst_scene_low {
+        return None;
+    }
+    if preview_count == 2
+        && !(overall < 0.80 && (worst_scene_broken || score_delta <= 0.005 || edge_mean < 0.38))
+    {
+        return None;
+    }
+    let targets = cmp
+        .get("targetWorstScenes")
+        .and_then(Value::as_array)
+        .filter(|a| !a.is_empty())
+        .map(|arr| {
+            arr.iter()
+                .map(|t| {
+                    let sid = t.get("sceneId").and_then(Value::as_str).unwrap_or("scene");
+                    let sc = t.get("script").and_then(Value::as_str).unwrap_or("script/scene*.js");
+                    let comb = t.get("combinedScore").and_then(Value::as_f64).unwrap_or(0.0);
+                    let diag = t.get("diagnosis").and_then(Value::as_str).unwrap_or("");
+                    if diag.is_empty() {
+                        format!("{sid} ({sc}, score={comb:.3})")
+                    } else {
+                        format!("{sid} ({sc}, score={comb:.3}: {diag})")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("; ")
+        })
+        .unwrap_or_else(|| "weakest scenes in comparison_strip.jpg".to_string());
+
+    if preview_count == 1 {
+        Some(format!(
+            "EVALUATION & DIFF HEATMAP POLISH PASS (preview #1 -> overall={overall:.3}, edge={edge_mean:.3}): Never stop right after initial build. Compare `.aetheria/preview/comparison_strip.jpg` (`Reference | Preview | Diff Heatmap`) against `contact_sheet_*.jpg` + `<active_video_reference_report>`, refine coordinates/tilt/polarity/cleanPlate brightness/fontWeight/sub-beats on ONLY {targets}, and run `capture_film_preview(compareToReference: true)` (keeping `passThreshold: 0.65` for brand adaptations) again to confirm measurable improvement."
+        ))
+    } else {
+        Some(format!(
+            "FINAL REMEDIATION POLISH PASS (preview #2 -> overall={overall:.3}, edge={edge_mean:.3}, delta={score_delta:+.3}): Weak scenes still scored <0.62 or stalled without improvement. Inspect LEFT vs MIDDLE panels in `.aetheria/preview/comparison_strip.jpg` and `<active_video_reference_report>` carefully for inverted light/dark polarity, grid tilt angle, cleanPlate background lightness, or missed early->mid->late `subBeats`, fix ONLY {targets}, and run `capture_film_preview(compareToReference: true)` (keeping `passThreshold: 0.65` for brand adaptations) once more."
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1042,5 +1201,129 @@ mod tests {
         assert!(hint.contains("scene2_payoff"));
         assert!(hint.contains("script/scene2.js"));
         assert!(hint.contains("SCORE REGRESSED"));
+    }
+
+    #[test]
+    fn post_build_polish_requires_second_evaluation_when_first_pass_has_headroom() {
+        let single_pass = vec![json!({
+            "type": "tool",
+            "name": "capture_film_preview",
+            "state": {
+                "status": "completed",
+                "structured": {
+                    "ok": true,
+                    "referenceComparison": {
+                        "ok": true,
+                        "overallFidelity": 0.71,
+                        "edgeMatchMean": 0.41,
+                        "targetWorstScenes": [
+                            {
+                                "sceneId": "scene3_card_zoom",
+                                "script": "script/scene3.js",
+                                "combinedScore": 0.58,
+                                "diagnosis": "edge mismatch"
+                            }
+                        ]
+                    }
+                }
+            }
+        })];
+        let msg = evaluate_post_build_comparison_polish("motion-designer", &single_pass)
+            .expect("first preview with overall=0.71 must trigger polish evaluation");
+        assert!(msg.contains("scene3_card_zoom"));
+        assert!(msg.contains("comparison_strip.jpg"));
+
+        let improved_second = vec![
+            single_pass[0].clone(),
+            json!({
+                "type": "tool",
+                "name": "capture_film_preview",
+                "state": {
+                    "status": "completed",
+                    "structured": {
+                        "ok": true,
+                        "referenceComparison": {
+                            "ok": true,
+                            "overallFidelity": 0.82,
+                            "edgeMatchMean": 0.65,
+                            "scoreDelta": 0.11,
+                            "targetWorstScenes": [
+                                {
+                                    "sceneId": "scene3_card_zoom",
+                                    "script": "script/scene3.js",
+                                    "combinedScore": 0.74,
+                                    "diagnosis": ""
+                                }
+                            ]
+                        }
+                    }
+                }
+            }),
+        ];
+        assert!(
+            evaluate_post_build_comparison_polish("motion-designer", &improved_second).is_none(),
+            "improved second preview pass (>=0.80 with positive delta and no <0.62 scene) should allow completion"
+        );
+
+        let stalled_broken_second = vec![single_pass[0].clone(), single_pass[0].clone()];
+        let remediate = evaluate_post_build_comparison_polish("motion-designer", &stalled_broken_second)
+            .expect("second preview pass that still leaves <0.62 scene with zero delta must trigger final remediation");
+        assert!(remediate.contains("FINAL REMEDIATION POLISH PASS"));
+
+        let low_edge_second = vec![
+            single_pass[0].clone(),
+            json!({
+                "type": "tool",
+                "name": "capture_film_preview",
+                "state": {
+                    "status": "completed",
+                    "structured": {
+                        "ok": true,
+                        "referenceComparison": {
+                            "ok": true,
+                            "overallFidelity": 0.73,
+                            "edgeMatchMean": 0.28,
+                            "scoreDelta": 0.02,
+                            "targetWorstScenes": [
+                                { "sceneId": "scene4_cta", "script": "script/scene4.js", "combinedScore": 0.72, "diagnosis": "edge mismatch" }
+                            ]
+                        }
+                    }
+                }
+            }),
+        ];
+        assert!(
+            evaluate_post_build_comparison_polish("motion-designer", &low_edge_second)
+                .is_some_and(|m| m.contains("FINAL REMEDIATION POLISH PASS")),
+            "second preview pass with overall < 0.80 and low edgeMatchMean (< 0.38) should trigger final polish"
+        );
+
+        let three_passes = vec![
+            single_pass[0].clone(),
+            single_pass[0].clone(),
+            single_pass[0].clone(),
+        ];
+        assert!(
+            evaluate_post_build_comparison_polish("motion-designer", &three_passes).is_none(),
+            "third preview pass should always allow clean completion"
+        );
+
+        let already_sharp = vec![json!({
+            "type": "tool",
+            "name": "capture_film_preview",
+            "state": {
+                "status": "completed",
+                "structured": {
+                    "ok": true,
+                    "referenceComparison": {
+                        "ok": true,
+                        "overallFidelity": 0.89,
+                        "edgeMatchMean": 0.72,
+                        "targetWorstScenes": []
+                    }
+                }
+            }
+        })];
+        assert!(evaluate_post_build_comparison_polish("motion-designer", &already_sharp).is_none());
     }
 }

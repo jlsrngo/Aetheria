@@ -22,6 +22,7 @@ pub mod stream_parser;
 pub mod stream_sse;
 pub mod subagent;
 pub mod subagent_provider;
+pub(crate) mod subagent_scene_scope;
 pub mod subagent_store;
 pub mod subagent_tool_batch;
 #[cfg(test)]

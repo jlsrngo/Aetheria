@@ -58,11 +58,28 @@ fn partner_resolved_buckets(tool_lower: &str, bucket: &(String, String)) -> Vec<
     extras
 }
 
+fn extract_subagent_session_id(lower_name: &str, p: &Value, input: &Value) -> Option<String> {
+    if lower_name != "task" && lower_name != "subagent" {
+        return None;
+    }
+    p.pointer("/state/structured/sessionID")
+        .or_else(|| p.pointer("/state/structured/session_id"))
+        .or_else(|| p.pointer("/state/structured/sessionId"))
+        .or_else(|| input.get("sessionID"))
+        .or_else(|| input.get("session_id"))
+        .or_else(|| input.get("sessionId"))
+        .and_then(Value::as_str)
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+}
+
 pub(crate) fn collect_unresolved_failures_with_buckets(
     parts: &[Value],
 ) -> Vec<((String, String), String)> {
     let mut order: Vec<(String, String)> = Vec::new();
     let mut latest: std::collections::HashMap<(String, String), Option<String>> =
+        std::collections::HashMap::new();
+    let mut failed_subagent_buckets: std::collections::HashMap<String, Vec<(String, String)>> =
         std::collections::HashMap::new();
 
     for p in parts {
@@ -76,7 +93,8 @@ pub(crate) fn collect_unresolved_failures_with_buckets(
         let lower = name.trim().to_ascii_lowercase();
         let input = p.pointer("/state/input").unwrap_or(&Value::Null);
         let buckets = normalize_tool_failure_buckets(name, input);
-        if buckets.is_empty() {
+        let sub_sid = extract_subagent_session_id(&lower, p, input);
+        if buckets.is_empty() && sub_sid.is_none() {
             continue;
         }
         let status = p
@@ -88,6 +106,16 @@ pub(crate) fn collect_unresolved_failures_with_buckets(
         let is_completed_ok = status == "completed" && !structured_failed;
         let is_failed = status == "error" || (status == "completed" && structured_failed);
 
+        if is_completed_ok {
+            if let Some(ref sid) = sub_sid {
+                if let Some(prev_buckets) = failed_subagent_buckets.remove(sid) {
+                    for prev in prev_buckets {
+                        latest.insert(prev, None);
+                    }
+                }
+            }
+        }
+
         for bucket in buckets {
             if !latest.contains_key(&bucket) {
                 order.push(bucket.clone());
@@ -98,6 +126,12 @@ pub(crate) fn collect_unresolved_failures_with_buckets(
                 }
                 latest.insert(bucket, None);
             } else if is_failed {
+                if let Some(ref sid) = sub_sid {
+                    failed_subagent_buckets
+                        .entry(sid.clone())
+                        .or_default()
+                        .push(bucket.clone());
+                }
                 let err_raw = p
                     .pointer("/state/structured/error")
                     .or_else(|| p.pointer("/state/error/message"))
@@ -228,6 +262,8 @@ pub fn build_chat_messages(effective_history: &[Value], sys_prompt: &str) -> Vec
     // do not keep carrying stale `[UNRESOLVED TOOL ERRORS IN TURN]` warnings on turn i.
     let mut latest_resolved_turn_by_bucket: std::collections::HashMap<(String, String), usize> =
         std::collections::HashMap::new();
+    let mut cross_turn_failed_subagent_buckets: std::collections::HashMap<String, Vec<(String, String)>> =
+        std::collections::HashMap::new();
     for (idx, m) in effective_history.iter().enumerate() {
         if m.get("type").and_then(|v| v.as_str()) != Some("assistant") {
             continue;
@@ -253,19 +289,37 @@ pub fn build_chat_messages(effective_history: &[Value], sys_prompt: &str) -> Vec
                 {
                     continue;
                 }
+                let name = p.get("name").and_then(Value::as_str).unwrap_or("");
+                let lower = name.trim().to_ascii_lowercase();
+                let input = p.pointer("/state/input").unwrap_or(&Value::Null);
+                let sub_sid = extract_subagent_session_id(&lower, p, input);
+                let buckets = normalize_tool_failure_buckets(name, input);
                 let status = p
                     .pointer("/state/status")
                     .and_then(Value::as_str)
                     .unwrap_or("");
                 let structured_failed =
                     p.pointer("/state/structured/ok").and_then(Value::as_bool) == Some(false);
-                if status != "completed" || structured_failed {
+                if status == "error" || (status == "completed" && structured_failed) {
+                    if let Some(sid) = sub_sid {
+                        cross_turn_failed_subagent_buckets
+                            .entry(sid)
+                            .or_default()
+                            .extend(buckets);
+                    }
                     continue;
                 }
-                let name = p.get("name").and_then(Value::as_str).unwrap_or("");
-                let lower = name.trim().to_ascii_lowercase();
-                let input = p.pointer("/state/input").unwrap_or(&Value::Null);
-                for bucket in normalize_tool_failure_buckets(name, input) {
+                if status != "completed" {
+                    continue;
+                }
+                if let Some(ref sid) = sub_sid {
+                    if let Some(prev_buckets) = cross_turn_failed_subagent_buckets.remove(sid) {
+                        for prev in prev_buckets {
+                            latest_resolved_turn_by_bucket.insert(prev, idx);
+                        }
+                    }
+                }
+                for bucket in buckets {
                     if !unresolved_in_turn.contains(&bucket) {
                         for partner in partner_resolved_buckets(&lower, &bucket) {
                             latest_resolved_turn_by_bucket.insert(partner, idx);
@@ -631,6 +685,58 @@ mod tests {
         let blockers_after = collect_unresolved_mutating_or_verify_failures(&parts_pass);
         assert_eq!(blockers_after.len(), 1);
         assert!(blockers_after[0].contains("lsp(src/app.tsx)"));
+    }
+
+    #[test]
+    fn resumed_subagent_session_id_clears_earlier_incomplete_failure() {
+        let same_turn_parts = vec![
+            json!({
+                "type": "tool",
+                "id": "call_sub_1",
+                "name": "task",
+                "state": {
+                    "status": "completed",
+                    "input": { "subagent_type": "motion-designer", "description": "Build scenes" },
+                    "structured": {
+                        "ok": false,
+                        "state": "incomplete",
+                        "sessionID": "sub_123",
+                        "error": "Reached max steps (30)"
+                    }
+                }
+            }),
+            json!({
+                "type": "tool",
+                "id": "call_sub_2",
+                "name": "task",
+                "state": {
+                    "status": "completed",
+                    "input": { "sessionID": "sub_123", "description": "Resume finishing render" },
+                    "structured": { "ok": true, "state": "completed", "sessionID": "sub_123" }
+                }
+            }),
+        ];
+        assert!(collect_unresolved_mutating_or_verify_failures(&same_turn_parts).is_empty());
+
+        let cross_turn_hist = vec![
+            json!({
+                "type": "assistant",
+                "finish": "stop",
+                "content": [same_turn_parts[0].clone()]
+            }),
+            json!({
+                "type": "assistant",
+                "finish": "stop",
+                "content": [same_turn_parts[1].clone()]
+            }),
+        ];
+        let msgs = build_chat_messages(&cross_turn_hist, "sys");
+        let joined = msgs
+            .iter()
+            .filter_map(|m| m.get("content").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!joined.contains("[UNRESOLVED TOOL ERRORS IN TURN:"));
     }
 }
 
