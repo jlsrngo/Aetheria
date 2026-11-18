@@ -949,9 +949,45 @@ VOXCPM_TIMEOUT_SEC = 180
 def infer_gender_and_default_voice(voice: Optional[str], voice_design: Optional[str]) -> tuple[bool, str]:
     """Infers gender from explicit voice or voice_design keywords, returning (is_female, matched_voice)."""
     text = f"{voice or ''} {voice_design or ''}".lower()
-    is_female = any(k in text for k in ("gadis", "cewek", "wanita", "perempuan", "female", "girl", "af_", "bf_"))
+    is_female = any(
+        k in text
+        for k in (
+            "gadis",
+            "cewek",
+            "wanita",
+            "perempuan",
+            "female",
+            "girl",
+            "aria",
+            "jenny",
+            "sonia",
+            "af_",
+            "bf_",
+        )
+    )
     matched_voice = "id-ID-GadisNeural" if is_female else "id-ID-ArdiNeural"
     return is_female, matched_voice
+
+
+def _is_kokoro_voice_id(voice: Optional[str]) -> bool:
+    v = (voice or "").strip().lower()
+    return (
+        len(v) >= 4
+        and v[2] == "_"
+        and v[0] in ("a", "b", "e", "f", "h", "i", "j", "p", "z")
+        and v[1] in ("f", "m")
+    )
+
+
+def _is_edge_neural_voice_id(voice: Optional[str]) -> bool:
+    return "neural" in (voice or "").strip().lower()
+
+
+def _is_scene_1_stem(stem: str) -> bool:
+    s = stem.strip().lower()
+    return s in ("vo_scene1", "scene1", "voiceover") or s.startswith(
+        ("scene1_", "scene_1", "vo_scene1_", "scene01")
+    )
 
 
 def default_voice_design(voice: Optional[str], lang: str, voice_design: Optional[str] = None) -> str:
@@ -1435,12 +1471,26 @@ def generate_speech(
             voice_design = selected_style_info.get("controlInstruction") or preset_info.get("description")
         lang = preset_info.get("lang", lang)
 
+    # Infer compatible language/engine when caller specifies an explicit Kokoro or English Edge voice
+    # while leaving `lang` at the caller's default ("id").
+    if not preset_info and voice:
+        if _is_edge_neural_voice_id(voice):
+            if engine == "auto":
+                engine = "edge"
+            if "id-id" not in voice.lower() and lang.lower() == "id":
+                lang = "en"
+        elif _is_kokoro_voice_id(voice):
+            if engine in ("auto", "edge"):
+                engine = "kokoro"
+            if lang.lower() == "id":
+                lang = "en"
+
     # Dual-track text handling: visual_text for subtitles, spoken_candidate for TTS voice synthesis
     visual_text = text
     spoken_candidate = spoken_text if spoken_text and spoken_text.strip() else text
 
     # Normalize Indonesian numbers & abbreviations so '21' is spoken as 'dua puluh satu', never 'twenty one'
-    if lang.lower() == "id" or (voice and "id-ID" in voice) or preset_key == "aetheria":
+    if lang.lower() == "id" or (voice and "id-id" in voice.lower()) or preset_key == "aetheria":
         custom_lex = load_pronunciation_lexicon(lexicon_path, workspace_dir=workspace_dir)
         text = normalize_indonesian_speech_text(spoken_candidate, custom_lexicon=custom_lex, workspace_dir=workspace_dir)
     else:
@@ -1453,8 +1503,9 @@ def generate_speech(
         except OSError:
             pass
 
-    is_scene_1 = out_file.stem in ("vo_scene1", "scene1", "voiceover")
+    is_scene_1 = _is_scene_1_stem(out_file.stem)
     lock_data = None if (is_scene_1 and (voice or voice_design or reset_voice_lock)) else read_voice_lock(lock_file)
+    pending_lock_profile: Optional[Dict[str, Any]] = None
 
     if lock_data:
         print(f"[voicebox] Enforcing Project Voice Lock from {lock_file.name}: {lock_data.get('voice')} ({lock_data.get('gender')})")
@@ -1483,6 +1534,8 @@ def generate_speech(
         is_female = (gender == "female")
         if lock_data.get("engine") and not preset_info:
             engine = lock_data["engine"]
+        if lock_data.get("lang"):
+            lang = lock_data["lang"]
         if lock_data.get("rate") and rate == "+0%":
             rate = lock_data["rate"]
         if lock_data.get("pitch") and pitch == "+0Hz":
@@ -1491,16 +1544,22 @@ def generate_speech(
             clone_ref = lock_data["anchor_audio"]
     else:
         is_female, detected_voice = infer_gender_and_default_voice(voice, voice_design)
-        is_id = (lang.lower() == "id") or (voice and "id-ID" in voice)
+        is_id = (lang.lower() == "id") or (voice and "id-id" in voice.lower())
         if not voice:
             voice = detected_voice if is_id else ("af_heart" if is_female else "am_adam")
 
         # If a clone reference audio is provided, automatically use VoxCPM2 for zero-shot voice cloning.
         # Otherwise fallback to deterministic neural engine + Pedalboard DSP.
         if engine == "auto":
-            engine = "voxcpm" if (clone_ref and os.path.isfile(clone_ref)) else ("edge" if is_id else "kokoro")
+            if clone_ref and os.path.isfile(clone_ref):
+                engine = "voxcpm"
+            elif _is_edge_neural_voice_id(voice) or is_id:
+                engine = "edge"
+            else:
+                engine = "kokoro"
 
-        write_voice_lock(lock_file, {
+        # Defer persisting voice lock until after synthesis succeeds so a failed call never poisons retries.
+        pending_lock_profile = {
             "voice": voice,
             "style": selected_style_key or "default",
             "gender": "female" if is_female else "male",
@@ -1509,13 +1568,14 @@ def generate_speech(
             "rate": rate,
             "pitch": pitch,
             "created_at": time.time()
-        })
+        }
 
-    is_indonesian = (lang.lower() == "id") or (voice and "id-ID" in voice)
+    is_indonesian = (lang.lower() == "id") or (voice and "id-id" in voice.lower())
     start_time = time.time()
     words: List[Dict[str, Any]] = []
     used_engine = ""
     fallback_reason = ""
+    effective_voice = voice
 
     if engine in ("voxcpm",):
         design = voice_design or default_voice_design(voice, lang)
@@ -1549,37 +1609,38 @@ def generate_speech(
             )
             words = estimate_word_timings(text, len(audio_data) / sample_rate)
             used_engine = "voxcpm2"
-            if is_scene_1 and lock_file.is_file() and not preset_info:
-                try:
-                    curr = read_voice_lock(lock_file) or {}
-                    curr["anchor_audio"] = str(out_file)
-                    write_voice_lock(lock_file, curr)
-                except Exception:
-                    pass
         except Exception as e:
             fallback_reason = f"VoxCPM2 unavailable ({type(e).__name__}: {e})"
             print(f"[voicebox] {fallback_reason} -> falling back to deterministic engine")
 
     if not used_engine:
-        if is_indonesian:
-            v = voice or ("id-ID-GadisNeural" if is_female else "id-ID-ArdiNeural")
+        use_kokoro = (engine == "kokoro") or (not is_indonesian and not _is_edge_neural_voice_id(voice) and engine != "edge")
+        if use_kokoro:
+            v = voice if _is_kokoro_voice_id(voice) else ("af_heart" if is_female else "am_adam")
+            effective_voice = v
+            print(f"[voicebox] Generating audio (lang={lang}, voice={v})...")
+            audio_data, sample_rate = generate_kokoro_speech(text, voice=v)
+            words = estimate_word_timings(text, len(audio_data) / sample_rate)
+            used_engine = "kokoro"
+        else:
+            v = voice or ""
             if preset_info and preset_info.get("fallback_voice"):
                 v = preset_info["fallback_voice"]
                 if pitch == "+0Hz":
                     pitch = preset_info.get("fallback_pitch", "+14Hz")
                 if rate == "+0%":
                     rate = preset_info.get("fallback_rate", "+10%")
+            if not _is_edge_neural_voice_id(v):
+                if is_indonesian:
+                    v = "id-ID-GadisNeural" if is_female else "id-ID-ArdiNeural"
+                else:
+                    v = "en-US-AriaNeural" if is_female else "en-US-GuyNeural"
+            effective_voice = v
             print(f"[voicebox] Generating audio (lang={lang}, voice={v}, rate={rate}, pitch={pitch})...")
             audio_data, sample_rate, words = asyncio.run(
                 generate_indonesian_speech(text, voice=v, rate=rate, pitch=pitch)
             )
             used_engine = "edge-neural"
-        else:
-            v = voice or ("af_heart" if is_female else "am_adam")
-            print(f"[voicebox] Generating audio (lang={lang}, voice={v})...")
-            audio_data, sample_rate = generate_kokoro_speech(text, voice=v)
-            words = estimate_word_timings(text, len(audio_data) / sample_rate)
-            used_engine = "kokoro"
 
     # Sanitize voiceover audio (trim pre-speech transient spikes, compact dead-air pauses, cosine fade-in/out)
     audio_data, time_map = sanitize_voice_audio_with_map(audio_data, sample_rate)
@@ -1595,6 +1656,22 @@ def generate_speech(
     # Write WAV file
     sf.write(str(out_file), mastered_audio, sample_rate)
     duration_sec = len(mastered_audio) / sample_rate
+
+    # Persist voice lock only after valid WAV synthesis succeeds
+    if pending_lock_profile is not None:
+        if used_engine != "voxcpm2":
+            pending_lock_profile["voice"] = effective_voice
+        pending_lock_profile["engine"] = "edge" if used_engine == "edge-neural" else ("voxcpm" if used_engine == "voxcpm2" else used_engine)
+        if used_engine == "voxcpm2" and not preset_info:
+            pending_lock_profile["anchor_audio"] = str(out_file)
+        write_voice_lock(lock_file, pending_lock_profile)
+    elif is_scene_1 and used_engine == "voxcpm2" and lock_file.is_file() and not preset_info:
+        try:
+            curr = read_voice_lock(lock_file) or {}
+            curr["anchor_audio"] = str(out_file)
+            write_voice_lock(lock_file, curr)
+        except Exception:
+            pass
 
     # Re-align word timings against the final compacted & mastered waveform if not provided by Edge WordBoundary;
     # for Edge-Neural WordBoundary, remap timestamps via exact sanitization cut/compaction segments.

@@ -20,7 +20,7 @@ use super::resolve_isolated_path;
 
 /// Allows read-only access ONLY to built-in IDE skill instructions inside `.aetheria/skills/`
 /// so skill paths surfaced in `<skills>` load cleanly without breaching workspace isolation.
-fn resolve_builtin_skill_read_path(raw_file: &str) -> Option<PathBuf> {
+fn resolve_builtin_skill_read_path(workspace_dir: &str, raw_file: &str) -> Option<PathBuf> {
     let trimmed = raw_file.trim();
     if trimmed.is_empty() {
         return None;
@@ -33,7 +33,26 @@ fn resolve_builtin_skill_read_path(raw_file: &str) -> Option<PathBuf> {
         return None;
     }
     let skills_root = std::fs::canonicalize(crate::paths::project_root().join(".aetheria").join("skills")).ok()?;
-    let candidate = std::fs::canonicalize(req_path).ok()?;
+    if let Ok(candidate) = std::fs::canonicalize(req_path) {
+        if candidate.is_file() && candidate.starts_with(&skills_root) {
+            return Some(candidate);
+        }
+    }
+    // Also map `.aetheria/skills/...` relative to `project_root()` or prefixed by `workspace_dir`
+    let norm = trimmed.replace('\\', "/");
+    let rel_skill = if let Some((_, tail)) = norm.split_once(".aetheria/skills/") {
+        Some(tail.trim_start_matches('/'))
+    } else if !workspace_dir.trim().is_empty() {
+        let ws_norm = workspace_dir.trim().replace('\\', "/");
+        norm.strip_prefix(&ws_norm)
+            .and_then(|s| s.trim_start_matches('/').strip_prefix(".aetheria/skills/"))
+    } else {
+        None
+    }?;
+    if rel_skill.is_empty() || rel_skill.contains("..") {
+        return None;
+    }
+    let candidate = std::fs::canonicalize(skills_root.join(rel_skill)).ok()?;
     if candidate.is_file() && candidate.starts_with(&skills_root) {
         Some(candidate)
     } else {
@@ -70,7 +89,11 @@ pub fn execute_read(workspace_dir: &str, arguments: &Value) -> Value {
         .unwrap_or("");
 
     let resolved = resolve_isolated_path(workspace_dir, fp)
-        .or_else(|iso_err| resolve_builtin_skill_read_path(fp).ok_or(iso_err));
+        .ok()
+        .filter(|p| p.exists())
+        .map(Ok)
+        .or_else(|| resolve_builtin_skill_read_path(workspace_dir, fp).map(Ok))
+        .unwrap_or_else(|| resolve_isolated_path(workspace_dir, fp));
 
     match resolved {
         Ok(p) => {
@@ -162,7 +185,7 @@ mod tests {
         let external = std::env::temp_dir()
             .join("aetheria_outside_ws_test")
             .join("secret.txt");
-        assert!(resolve_builtin_skill_read_path(external.to_string_lossy().as_ref()).is_none());
+        assert!(resolve_builtin_skill_read_path("", external.to_string_lossy().as_ref()).is_none());
 
         let skill_md = crate::paths::project_root()
             .join(".aetheria")
@@ -171,7 +194,16 @@ mod tests {
             .join("SKILL.md");
         if skill_md.is_file() {
             assert!(
-                resolve_builtin_skill_read_path(skill_md.to_string_lossy().as_ref()).is_some()
+                resolve_builtin_skill_read_path("", skill_md.to_string_lossy().as_ref()).is_some()
+            );
+            let isolated_ws = std::env::temp_dir().join("aetheria_isolated_skill_read");
+            let ws_prefixed_skill = isolated_ws.join(".aetheria").join("skills").join("mg-3d-spatial").join("SKILL.md");
+            assert!(
+                resolve_builtin_skill_read_path(
+                    isolated_ws.to_string_lossy().as_ref(),
+                    ws_prefixed_skill.to_string_lossy().as_ref()
+                )
+                .is_some()
             );
         }
     }

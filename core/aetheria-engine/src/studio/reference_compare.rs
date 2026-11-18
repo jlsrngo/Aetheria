@@ -309,6 +309,99 @@ pub fn discover_reference_keyframes(ws_root: &Path, film_duration: f64) -> Vec<R
     out
 }
 
+/// Discovers reference keyframes and remaps scene timestamps to the actual intervals in
+/// `<film_root>/film.json` when available, so narrated films with adapted durations align
+/// scene-by-scene instead of mis-pairing across scene cuts.
+pub fn discover_reference_keyframes_for_film(
+    ws_root: &Path,
+    film_root: &Path,
+    film_duration: f64,
+) -> Vec<ReferenceKeyframe> {
+    let mut kfs = discover_reference_keyframes(ws_root, film_duration);
+    if kfs.is_empty() {
+        return kfs;
+    }
+
+    let film_json_path = film_root.join("film.json");
+    let Ok(raw) = std::fs::read_to_string(&film_json_path) else {
+        return kfs;
+    };
+    let Ok(parsed) = serde_json::from_str::<Value>(&raw) else {
+        return kfs;
+    };
+    let Some(film_scenes_arr) = parsed.get("scenes").and_then(Value::as_array) else {
+        return kfs;
+    };
+
+    let mut film_scenes: Vec<(String, f64, f64)> = Vec::with_capacity(film_scenes_arr.len());
+    let mut cursor = 0.0f64;
+    for (idx, sc) in film_scenes_arr.iter().enumerate() {
+        let id = sc
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("scene{}", idx + 1));
+        let start = sc.get("start").and_then(Value::as_f64).unwrap_or(cursor);
+        let dur = sc
+            .get("duration")
+            .and_then(Value::as_f64)
+            .filter(|&d| d.is_finite() && d > 0.05)
+            .unwrap_or(2.0);
+        film_scenes.push((id, start, dur));
+        cursor = start + dur;
+    }
+    if film_scenes.is_empty() {
+        return kfs;
+    }
+
+    let mut seen_ref_scene_ids: Vec<String> = Vec::new();
+    for kf in &kfs {
+        if let Some(ref sid) = kf.scene_id {
+            if !seen_ref_scene_ids.iter().any(|x| x == sid) {
+                seen_ref_scene_ids.push(sid.clone());
+            }
+        }
+    }
+    if seen_ref_scene_ids.is_empty() {
+        return kfs;
+    }
+
+    for kf in &mut kfs {
+        let Some(ref sid) = kf.scene_id else {
+            continue;
+        };
+        let matched_film_scene = film_scenes
+            .iter()
+            .find(|(fid, _, _)| fid == sid)
+            .or_else(|| {
+                let ref_idx = seen_ref_scene_ids.iter().position(|x| x == sid)?;
+                // Map evenly if film has fewer or equal scenes
+                let mapped_idx = if film_scenes.len() >= seen_ref_scene_ids.len() {
+                    ref_idx
+                } else {
+                    (ref_idx * film_scenes.len()) / seen_ref_scene_ids.len().max(1)
+                };
+                film_scenes.get(mapped_idx)
+            });
+        if let Some((_, f_start, f_dur)) = matched_film_scene {
+            let f_end = f_start + f_dur;
+            let mapped_ts = match kf.phase.as_deref() {
+                Some("start") => f_start + (f_dur * 0.15).min(0.15),
+                Some("end") => (f_end - (f_dur * 0.15).min(0.15)).max(f_start + f_dur * 0.5),
+                _ => f_start + f_dur * 0.5,
+            };
+            kf.timestamp = (mapped_ts * 100.0).round() / 100.0;
+        }
+    }
+
+    kfs.sort_by(|a, b| {
+        a.timestamp
+            .partial_cmp(&b.timestamp)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    kfs
+}
+
 fn sample_kf_indices(len: usize, max_count: usize) -> Vec<usize> {
     if len == 0 || max_count == 0 {
         return Vec::new();
@@ -333,11 +426,26 @@ fn sample_kf_indices(len: usize, max_count: usize) -> Vec<usize> {
 /// Prioritizes scene midpoints across all scenes before adding `start`/`end` transitions up to `max_frames`.
 pub fn recommended_reference_timestamps(ws_root: &Path, film_duration: f64, max_frames: usize) -> Vec<f64> {
     let kfs = discover_reference_keyframes(ws_root, film_duration);
+    select_timestamps_from_keyframes(&kfs, max_frames)
+}
+
+/// Returns recommended preview timestamps aligned to `film.json` scene windows when present.
+pub fn recommended_reference_timestamps_for_film(
+    ws_root: &Path,
+    film_root: &Path,
+    film_duration: f64,
+    max_frames: usize,
+) -> Vec<f64> {
+    let kfs = discover_reference_keyframes_for_film(ws_root, film_root, film_duration);
+    select_timestamps_from_keyframes(&kfs, max_frames)
+}
+
+fn select_timestamps_from_keyframes(kfs: &[ReferenceKeyframe], max_frames: usize) -> Vec<f64> {
     if kfs.is_empty() || max_frames == 0 {
         return Vec::new();
     }
     if kfs.len() <= max_frames {
-        return kfs.into_iter().map(|k| k.timestamp).collect();
+        return kfs.iter().map(|k| k.timestamp).collect();
     }
 
     let mids: Vec<f64> = kfs
@@ -417,7 +525,7 @@ pub async fn compare_preview_to_reference(
     preview_frames: &[PreviewFrameCapture],
     pass_threshold: f64,
 ) -> Result<(Value, Option<String>), String> {
-    let ref_kfs = discover_reference_keyframes(ws_root, film_duration);
+    let ref_kfs = discover_reference_keyframes_for_film(ws_root, film_root, film_duration);
     if ref_kfs.is_empty() {
         return Err("No extracted reference keyframes found under ref/ to compare against.".to_string());
     }
@@ -598,6 +706,31 @@ mod tests {
 
         let ts = recommended_reference_timestamps(&ws, 6.0, 12);
         assert_eq!(ts.len(), 9);
+
+        let film_dir = ws.join("projects").join("adapted");
+        std::fs::create_dir_all(&film_dir).unwrap();
+        std::fs::write(
+            film_dir.join("film.json"),
+            serde_json::to_string(&json!({
+                "scenes": [
+                    { "id": "s1", "start": 0.0, "duration": 2.8 },
+                    { "id": "s2", "start": 2.8, "duration": 3.0 },
+                    { "id": "s3", "start": 5.8, "duration": 8.0 }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let remapped = discover_reference_keyframes_for_film(&ws, &film_dir, 13.8);
+        let s2_mid = remapped
+            .iter()
+            .find(|k| k.scene_id.as_deref() == Some("s2") && k.phase.as_deref() == Some("mid"))
+            .expect("remapped s2 mid");
+        assert!(
+            (s2_mid.timestamp - 4.3).abs() < 0.05,
+            "expected s2 mid mapped to adapted film window (2.8 + 1.5 = 4.3s), got {}",
+            s2_mid.timestamp
+        );
 
         let _ = std::fs::remove_dir_all(&ws);
     }

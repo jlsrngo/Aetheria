@@ -48,6 +48,7 @@ pub fn film_audio_tool_definition() -> Value {
                                 "engine": { "type": "string", "enum": ["auto", "voxcpm", "edge", "kokoro"] },
                                 "accent": { "type": "string", "description": "Optional hex accent color when initializing new scenes." },
                                 "title": { "type": "string" },
+                                "minScene": { "type": "number", "description": "Optional minimum duration floor (seconds) for this scene." },
                                 "sfxCues": {
                                     "type": "array",
                                     "description": "SFX cues for this scene (`{ type: 'whoosh'|'pop'|'impact'|'chime'|'riser'|'typewriter', time?: sec, frame?: n, volume?: 0..1 }` or shorthand cue name). When omitted, deterministic transition & beat SFX cues are generated automatically into `audio/sfx_<id>.wav`.",
@@ -107,6 +108,26 @@ fn sanitize_id(raw: &str) -> String {
 
 fn round3(v: f64) -> f64 {
     (v * 1000.0).round() / 1000.0
+}
+
+fn infer_default_lang(voice: Option<&str>, engine: Option<&str>) -> &'static str {
+    if engine.is_some_and(|e| e.eq_ignore_ascii_case("kokoro")) {
+        return "en";
+    }
+    if let Some(v) = voice {
+        let lower = v.trim().to_ascii_lowercase();
+        if lower == "aetheria_en"
+            || lower.starts_with("en-")
+            || lower.starts_with("en_")
+            || lower.starts_with("af_")
+            || lower.starts_with("am_")
+            || lower.starts_with("bf_")
+            || lower.starts_with("bm_")
+        {
+            return "en";
+        }
+    }
+    "id"
 }
 
 /// Parses exact duration in seconds from a RIFF WAV file header (`fmt ` + `data` chunks).
@@ -613,7 +634,7 @@ pub async fn execute_film_audio(
 
     let default_voice = arguments.get("voice").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty());
     let default_style = arguments.get("style").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty());
-    let default_lang = arguments.get("lang").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).unwrap_or("id");
+    let explicit_default_lang = arguments.get("lang").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty());
     let default_engine = arguments.get("engine").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty());
     let custom_lex_arg = arguments.get("lexicon").and_then(|v| v.as_str());
     let reset_lock = arguments.get("resetVoiceLock").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -653,8 +674,19 @@ pub async fn execute_film_audio(
             .filter(|s| !s.is_empty());
         let voice = item.get("voice").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).or(default_voice);
         let style = item.get("style").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).or(default_style);
-        let lang = item.get("lang").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).unwrap_or(default_lang);
         let engine = item.get("engine").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).or(default_engine);
+        let lang = item
+            .get("lang")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .or(explicit_default_lang)
+            .unwrap_or_else(|| infer_default_lang(voice, engine));
+        let scene_min_sec = item
+            .get("minScene")
+            .and_then(|v| v.as_f64())
+            .filter(|m| m.is_finite() && *m >= 0.0)
+            .unwrap_or(min_scene_sec);
         let title_opt = item.get("title").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty());
         let accent = item.get("accent").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).unwrap_or("#f59e0b");
 
@@ -723,7 +755,7 @@ pub async fn execute_film_audio(
         };
         let words_dur = read_words_duration_secs(&words_path);
         let final_wav_dur = words_dur.map(|wd| wd.max(wav_dur)).unwrap_or(wav_dur);
-        let computed_duration = round3(min_scene_sec.max(final_wav_dur + buffer_sec));
+        let computed_duration = round3(scene_min_sec.max(final_wav_dur + buffer_sec));
 
         let global_disable_sfx = arguments
             .get("disableSfx")
@@ -1030,5 +1062,15 @@ mod tests {
         assert!((dur - 4.5).abs() < 0.05);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn infers_english_default_lang_for_kokoro_and_en_neural_voices() {
+        assert_eq!(infer_default_lang(Some("af_heart"), None), "en");
+        assert_eq!(infer_default_lang(Some("am_adam"), None), "en");
+        assert_eq!(infer_default_lang(Some("en-US-AriaNeural"), None), "en");
+        assert_eq!(infer_default_lang(None, Some("kokoro")), "en");
+        assert_eq!(infer_default_lang(Some("aetheria"), None), "id");
+        assert_eq!(infer_default_lang(None, None), "id");
     }
 }

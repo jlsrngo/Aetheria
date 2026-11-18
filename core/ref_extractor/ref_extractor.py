@@ -595,7 +595,7 @@ def analyze_frame_layout(frame_bgr: np.ndarray, ocr_engine: Optional[Any] = None
 
     if ocr_engine is not None:
         try:
-            max_ocr_w = 540
+            max_ocr_w = 1280
             if w > max_ocr_w:
                 ocr_scale = max_ocr_w / float(w)
                 ocr_img = cv2.resize(
@@ -727,14 +727,16 @@ def scan_motion_timeline(
     """
     MotionClone-inspired full-timeline temporal scanner.
     Reads frames sequentially in one linear pass (grab/retrieve on strided indices,
-    avoiding O(N*GOP) random keyframe seeks) to detect scene cuts and kinetic peaks.
+    avoiding O(N*GOP) random keyframe seeks) to detect both hard color cuts and
+    dark-on-dark / fade-through structural motion shot transitions.
     """
     safe_total = max(1, total_frames)
     target_step = max(1, int(round(max(fps, 1.0) / 10.0)))
     stride = max(target_step, (safe_total + 179) // 180)
-    prev_small: Optional[np.ndarray] = None
+    samples: List[Tuple[int, float, np.ndarray, np.ndarray, np.ndarray]] = []
     deltas: List[Dict[str, Any]] = []
-    jump_indices: List[int] = []
+    hard_jumps: List[int] = []
+    structural_jumps: List[Tuple[int, float]] = []
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
     f_idx = 0
@@ -752,10 +754,15 @@ def scan_motion_timeline(
         h, w, _ = frame.shape
         target_w = 160
         target_h = max(16, int(round(h * (target_w / max(1, w)))))
-        small = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA).astype(np.float32)
+        small_u8 = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
+        small = small_u8.astype(np.float32)
+        gray = cv2.cvtColor(small_u8, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(cv2.GaussianBlur(gray, (3, 3), 0), 30, 100) > 0
 
         ts = round(f_idx / max(fps, 1.0), 3)
-        if prev_small is not None:
+        samples.append((f_idx, ts, small, gray, edges))
+        if len(samples) >= 2:
+            prev_small = samples[-2][2]
             diff = np.abs(small - prev_small) / 255.0
             score = float(diff.mean())
             changed_ratio = float((diff.mean(axis=2) > 0.12).mean())
@@ -765,42 +772,88 @@ def scan_motion_timeline(
                 "score": round(score, 4),
                 "changedRatio": round(changed_ratio, 4),
             })
-            # Strong scene cut: matches MotionClone's >0.22 mean & >60% changed pixels
-            if score > 0.22 and changed_ratio > 0.60:
-                jump_indices.append(f_idx)
-        prev_small = small
+            # Hard visual cut (supports high-contrast dark bento/overlay jumps as well as full-frame flips)
+            if (score > 0.17 and changed_ratio > 0.42) or (score > 0.13 and changed_ratio > 0.55):
+                hard_jumps.append(f_idx)
         f_idx += 1
 
-    # Fallback softer cut threshold if no hard cuts were detected
-    if not jump_indices and deltas:
+    # Detect dark-on-dark structural layout shifts and cross-fade / fade-to-black transitions
+    if len(samples) >= 7:
+        win = min(3, max(1, len(samples) // 8))
+        morph_k = np.ones((5, 5), np.uint8)
+        for i in range(win, len(samples) - win):
+            cur_f, cur_t, _, _, _ = samples[i]
+            _, _, a_small, a_gray, a_edges = samples[i - win]
+            _, _, b_small, b_gray, b_edges = samples[i + win]
+
+            ea_sum = int(np.sum(a_edges))
+            eb_sum = int(np.sum(b_edges))
+            if max(ea_sum, eb_sum) < 35:
+                continue
+
+            ea_d = cv2.dilate(a_edges.astype(np.uint8), morph_k) > 0
+            eb_d = cv2.dilate(b_edges.astype(np.uint8), morph_k) > 0
+            denom = float(ea_sum + eb_sum)
+            edge_overlap = float(np.sum(a_edges & eb_d) + np.sum(b_edges & ea_d)) / denom
+
+            ga = a_gray.astype(np.float32)
+            gb = b_gray.astype(np.float32)
+            fg_a = np.abs(ga - np.median(ga)) > 14.0
+            fg_b = np.abs(gb - np.median(gb)) > 14.0
+            fg_union = int(np.sum(fg_a | fg_b))
+            fg_iou = (float(np.sum(fg_a & fg_b)) / fg_union) if fg_union >= 15 else 1.0
+
+            win_delta = float(np.abs(a_small - b_small).mean() / 255.0)
+            local_step = float(deltas[i - 1]["score"]) if (i - 1) < len(deltas) else 0.0
+            # Trigger on sharp structural swap OR clean fade-out/blank pause into a brand-new composition
+            is_fade_pause = (ea_sum >= 80 and eb_sum == 0) or (ea_sum == 0 and eb_sum >= 80)
+            if edge_overlap < 0.22 and fg_iou < 0.18 and (
+                local_step > 0.032 or win_delta > 0.035 or is_fade_pause
+            ):
+                strength = (1.0 - edge_overlap) * 0.5 + (1.0 - fg_iou) * 0.3 + max(local_step, win_delta)
+                structural_jumps.append((cur_f, round(strength, 4)))
+
+    # Fallback softer cut threshold if neither hard nor structural cuts fired
+    if not hard_jumps and not structural_jumps and deltas:
         for d in deltas:
             if d["score"] > 0.13 and d["changedRatio"] > 0.40:
-                jump_indices.append(int(d["frame"]))
+                hard_jumps.append(int(d["frame"]))
 
-    # Deduplicate jumps closer than 0.65s
-    min_gap_frames = max(2, int(round(0.65 * max(fps, 1.0))))
+    # Combine hard cuts first (0.65s spacing), then add well-separated structural cuts (1.15s spacing)
+    min_hard_gap = max(2, int(round(0.65 * max(fps, 1.0))))
+    min_struct_gap = max(3, int(round(1.15 * max(fps, 1.0))))
     filtered_jumps: List[int] = []
-    for j in jump_indices:
-        if not filtered_jumps or (j - filtered_jumps[-1]) >= min_gap_frames:
+    for j in hard_jumps:
+        if not filtered_jumps or (j - filtered_jumps[-1]) >= min_hard_gap:
             filtered_jumps.append(j)
 
-    jump_timestamps = [round(j / max(fps, 1.0), 3) for j in filtered_jumps if 0.35 < (j / max(fps, 1.0)) < max(0.5, duration - 0.35)]
+    jump_scores: Dict[int, float] = {d["frame"]: float(d["score"]) + 0.5 for d in deltas if d["frame"] in filtered_jumps}
+    for jf, strength in sorted(structural_jumps, key=lambda x: x[1], reverse=True):
+        if any(abs(jf - prev_j) < min_struct_gap for prev_j in filtered_jumps):
+            continue
+        filtered_jumps.append(jf)
+        jump_scores[jf] = strength
+    filtered_jumps.sort()
+
+    min_struct_edge = max(0.75, 0.35)
+    hard_set = set(hard_jumps)
+    jump_timestamps = [
+        round(j / max(fps, 1.0), 3)
+        for j in filtered_jumps
+        if (0.35 if j in hard_set else min_struct_edge) < (j / max(fps, 1.0)) < max(0.5, duration - 0.35)
+    ]
     cut_timestamps = [0.0] + jump_timestamps
 
     # If video has <= 1 detected cut and duration >= 4s, divide into balanced beats snapped near local motion peaks
     if len(cut_timestamps) < 2 and duration >= 4.0:
         beat_count = 4 if duration >= 10.0 else 3
         cut_timestamps = [round((duration * i) / beat_count, 3) for i in range(beat_count)]
-    elif len(cut_timestamps) > 10:
-        # Keep the 9 strongest visual jumps by delta score
-        jump_scores = {d["frame"]: d["score"] for d in deltas}
-        top_jumps = sorted(filtered_jumps, key=lambda j: jump_scores.get(j, 0.0), reverse=True)[:9]
+    elif len(cut_timestamps) > 8:
+        # Keep the 7 strongest cuts by delta/structural score while respecting chronological order
+        valid_jumps = [j for j in filtered_jumps if 0.35 < (j / max(fps, 1.0)) < max(0.5, duration - 0.35)]
+        top_jumps = sorted(valid_jumps, key=lambda j: jump_scores.get(j, 0.0), reverse=True)[:7]
         top_jumps.sort()
-        cut_timestamps = [0.0] + [
-            round(j / max(fps, 1.0), 3)
-            for j in top_jumps
-            if 0.35 < (j / max(fps, 1.0)) < max(0.5, duration - 0.35)
-        ]
+        cut_timestamps = [0.0] + [round(j / max(fps, 1.0), 3) for j in top_jumps]
 
     # Deduplicate & sort cut timestamps
     clean_cuts = [0.0]

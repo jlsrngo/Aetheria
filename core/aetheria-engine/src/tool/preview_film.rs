@@ -24,7 +24,7 @@ pub fn capture_film_preview_tool_definition() -> Value {
                     },
                     "passThreshold": {
                         "type": "number",
-                        "description": "Optional fidelity score pass threshold (0.0..1.0, default 0.85)."
+                        "description": "Optional fidelity score pass threshold (0.0..1.0). Use default 0.85 for exact 1:1 clones, or 0.65 when adapting a reference style/motion to a new brand or custom copy."
                     }
                 }
             }

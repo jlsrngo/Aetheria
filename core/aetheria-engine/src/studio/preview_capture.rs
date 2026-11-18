@@ -241,8 +241,9 @@ pub async fn capture_film_preview_with_options(
         resolve_reference_comparison_policy(has_reference, compare_to_reference);
 
     let effective_requested = if requested_timestamps.is_empty() && should_compare {
-        let aligned = super::reference_compare::recommended_reference_timestamps(
+        let aligned = super::reference_compare::recommended_reference_timestamps_for_film(
             &ref_root,
+            &film_root,
             meta.duration,
             MAX_PREVIEW_FRAMES,
         );

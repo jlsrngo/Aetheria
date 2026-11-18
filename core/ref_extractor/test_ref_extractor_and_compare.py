@@ -107,6 +107,35 @@ class RefExtractorAndCompareTests(unittest.TestCase):
             self.assertTrue(ar_res["aspectRatioMismatch"])
             self.assertFalse(ar_res["passed"])
 
+    def test_ref_extractor_detects_dark_on_dark_structural_cuts(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="mc_py_darkcuts_") as tmp:
+            td = Path(tmp)
+            mp4 = td / "dark_cuts.mp4"
+            writer = cv2.VideoWriter(str(mp4), cv2.VideoWriter_fourcc(*"mp4v"), 10.0, (320, 180))
+            self.assertTrue(writer.isOpened())
+            # Shot 1 (0.0-1.6s): dark #0C0B0E with top-left circle
+            for _ in range(16):
+                frame = np.full((180, 320, 3), 12, dtype=np.uint8)
+                cv2.circle(frame, (60, 55), 32, (220, 220, 230), -1)
+                writer.write(frame)
+            # Shot 2 (1.6-3.2s): same dark #0C0B0E with bottom-right wide bar (dark-on-dark swap)
+            for _ in range(16):
+                frame = np.full((180, 320, 3), 12, dtype=np.uint8)
+                cv2.rectangle(frame, (175, 105), (295, 160), (210, 120, 240), -1)
+                writer.write(frame)
+            # Shot 3 (3.2-4.8s): same dark #0C0B0E with center rotated cross
+            for _ in range(16):
+                frame = np.full((180, 320, 3), 12, dtype=np.uint8)
+                cv2.line(frame, (125, 25), (195, 95), (240, 240, 245), 8)
+                cv2.line(frame, (195, 25), (125, 95), (240, 240, 245), 8)
+                writer.write(frame)
+            writer.release()
+
+            res = ref_extractor.extract_reference_blueprint(str(mp4), str(td / "out"))
+            self.assertTrue(res.get("success"), res)
+            cuts = res["blueprint"]["scenes"]
+            self.assertGreaterEqual(len(cuts), 3, f"expected >=3 dark-on-dark scenes, got {len(cuts)}")
+
 
 if __name__ == "__main__":
     unittest.main()
