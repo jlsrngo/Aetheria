@@ -56,19 +56,21 @@
 
   function rng(seed = 1) {
     let state = hashUint32(seed) || 1;
-    return {
-      next() {
-        state = hashUint32(state);
-        return state / 4294967296;
-      },
-      range(min, max) {
-        return min + (max - min) * this.next();
-      },
-      pick(arr) {
-        if (!arr || !arr.length) return undefined;
-        return arr[Math.floor(this.next() * arr.length)];
-      },
+    // Callable PRNG that also exposes `.next()`, `.range(min, max)`, and `.pick(arr)`
+    // so both `const r = AM.rng(7); r()` and `r.next()` work without throwing TypeError.
+    const next = function () {
+      state = hashUint32(state);
+      return state / 4294967296;
     };
+    next.next = next;
+    next.range = function (min, max) {
+      return min + (max - min) * next();
+    };
+    next.pick = function (arr) {
+      if (!arr || !arr.length) return undefined;
+      return arr[Math.floor(next() * arr.length)];
+    };
+    return next;
   }
 
   function noise1D(x, seed = 0) {
@@ -1391,6 +1393,200 @@
     ctx.restore();
   }
 
+  function drawCursor(ctx, x, y, opts = {}) {
+    if (!ctx) return;
+    const sc = opts.scale ?? 1;
+    const ang = opts.angle ?? 0;
+    const fill = opts.fill || "#FFFFFF";
+    const stroke = opts.stroke || "#7D56EF";
+    const glow = opts.glowColor || "rgba(125,86,239,0.55)";
+    const lw = opts.lineWidth ?? 2;
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(ang);
+    ctx.scale(sc, sc);
+    if (glow && glow !== "none") {
+      ctx.shadowColor = glow;
+      ctx.shadowBlur = opts.glowBlur ?? 10;
+    }
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(14, 24);
+    ctx.quadraticCurveTo(6, 20, -1, 27);
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    if (lw > 0) {
+      ctx.lineWidth = lw;
+      ctx.strokeStyle = stroke;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function _rot3D(p, rx, ry, rz) {
+    const cy = Math.cos(ry), sy = Math.sin(ry);
+    const x1 = p[0] * cy + p[2] * sy;
+    const z1 = -p[0] * sy + p[2] * cy;
+    const cx = Math.cos(rx), sx = Math.sin(rx);
+    const y2 = p[1] * cx - z1 * sx;
+    const z2 = p[1] * sx + z1 * cx;
+    const cz = Math.cos(rz), sz = Math.sin(rz);
+    return [x1 * cz - y2 * sz, x1 * sz + y2 * cz, z2];
+  }
+
+  function _proj3D(p, cx, cy, sc, focal) {
+    const depth = focal / Math.max(120, focal + p[2] * sc);
+    return [cx + p[0] * sc * depth, cy + p[1] * sc * depth];
+  }
+
+  function drawExtrudedArrow3D(ctx, cx, cy, scale = 90, opts = {}) {
+    if (!ctx) return;
+    // Normalize multiplier-style scale (e.g. 1.0..8.0) into pixel radius (~90px default)
+    // and pixel-style depth (e.g. 20..40) into unit-space extrusion (~0.24) so callers never draw a 1px speck.
+    const sc = scale > 0 && scale <= 8 ? scale * 90 : (scale || 90);
+    const rx = opts.rx ?? 0.2;
+    const ry = opts.ry ?? -0.26;
+    const rz = opts.rz ?? 0.06;
+    const depthZ = opts.depth !== undefined
+      ? (opts.depth > 2 ? opts.depth / Math.max(40, sc) : opts.depth)
+      : 0.24;
+    const focal = opts.focal ?? 680;
+    const pts = [[1.15, 0.06], [-0.92, -0.82]];
+    const steps = 10;
+    for (let i = 1; i <= steps; i++) {
+      const u = i / steps;
+      const qx = (1 - u) * (1 - u) * -0.92 + 2 * (1 - u) * u * -0.36 + u * u * -0.84;
+      const qy = (1 - u) * (1 - u) * -0.82 + 2 * (1 - u) * u * 0.02 + u * u * 0.84;
+      pts.push([qx, qy]);
+    }
+    const f2 = [];
+    const b2 = [];
+    for (let i = 0; i < pts.length; i++) {
+      f2.push(_proj3D(_rot3D([pts[i][0], pts[i][1], -depthZ * 0.5], rx, ry, rz), cx, cy, sc, focal));
+      b2.push(_proj3D(_rot3D([pts[i][0], pts[i][1], depthZ * 0.5], rx, ry, rz), cx, cy, sc, focal));
+    }
+
+    ctx.save();
+    if (opts.alpha !== undefined) ctx.globalAlpha *= clamp(opts.alpha, 0, 1);
+    const sideColor = opts.sideColor || "#7C4DFF";
+    const strokeColor = opts.strokeColor || "#8C63FF";
+    for (let j = 0; j < f2.length; j++) {
+      const k = (j + 1) % f2.length;
+      ctx.beginPath();
+      ctx.moveTo(f2[j][0], f2[j][1]);
+      ctx.lineTo(f2[k][0], f2[k][1]);
+      ctx.lineTo(b2[k][0], b2[k][1]);
+      ctx.lineTo(b2[j][0], b2[j][1]);
+      ctx.closePath();
+      ctx.fillStyle = sideColor;
+      ctx.fill();
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+    }
+
+    ctx.beginPath();
+    for (let m = 0; m < f2.length; m++) {
+      if (m === 0) ctx.moveTo(f2[m][0], f2[m][1]);
+      else ctx.lineTo(f2[m][0], f2[m][1]);
+    }
+    ctx.closePath();
+    const grad = ctx.createLinearGradient(f2[1][0], f2[1][1], f2[0][0], f2[0][1]);
+    grad.addColorStop(0, opts.topMid || "#E4DCFF");
+    grad.addColorStop(1, opts.topLight || "#FFFFFF");
+    ctx.shadowColor = opts.glowColor || "rgba(125,86,239,0.5)";
+    ctx.shadowBlur = opts.glowBlur ?? 16;
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawLaptopFrame(ctx, opts = {}, drawScreenFn) {
+    if (!ctx) return;
+    const x = opts.x ?? 244;
+    const y = opts.y ?? 104;
+    const w = opts.w ?? 536;
+    const h = opts.h ?? 342;
+    const bezel = opts.bezel ?? 10;
+    const r = opts.radius ?? 14;
+
+    ctx.save();
+    ctx.fillStyle = opts.bezelColor || "#1D1D22";
+    roundRect(ctx, x, y, w, h, r);
+    ctx.fill();
+    ctx.strokeStyle = opts.borderColor || "#3E3E46";
+    ctx.lineWidth = opts.borderWidth ?? 2;
+    ctx.stroke();
+
+    const sx = x + bezel;
+    const sy = y + bezel;
+    const sw = Math.max(16, w - bezel * 2);
+    const sh = Math.max(16, h - bezel * 2);
+
+    ctx.save();
+    roundRect(ctx, sx, sy, sw, sh, Math.max(4, r - 6));
+    ctx.clip();
+    ctx.fillStyle = opts.screenBg || "#060608";
+    ctx.fillRect(sx, sy, sw, sh);
+    if (typeof drawScreenFn === "function") {
+      if (drawScreenFn.length >= 3) {
+        // Supports legacy/shorthand callbacks expecting (ctx, w, h) translated to screen origin (0, 0).
+        ctx.save();
+        ctx.translate(sx, sy);
+        drawScreenFn(ctx, sw, sh, { x: 0, y: 0, w: sw, h: sh, cx: sw * 0.5, cy: sh * 0.5 });
+        ctx.restore();
+      } else {
+        drawScreenFn(ctx, { x: sx, y: sy, w: sw, h: sh, cx: sx + sw * 0.5, cy: sy + sh * 0.5 });
+      }
+    }
+    ctx.restore();
+
+    const baseW = opts.baseWidth ?? Math.round(w * 1.24);
+    const baseH = opts.baseHeight ?? 14;
+    const baseX = x + w * 0.5 - baseW * 0.5;
+    const baseY = y + h + 2;
+    const deckGrad = ctx.createLinearGradient(0, baseY, 0, baseY + baseH);
+    deckGrad.addColorStop(0, "#383840");
+    deckGrad.addColorStop(0.55, "#26262C");
+    deckGrad.addColorStop(1, "#18181D");
+    ctx.fillStyle = deckGrad;
+    roundRect(ctx, baseX, baseY, baseW, baseH, 5);
+    ctx.fill();
+
+    const notchW = Math.min(baseW * 0.25, 88);
+    ctx.fillStyle = "#19191E";
+    roundRect(ctx, x + w * 0.5 - notchW * 0.5, baseY, notchW, 5, 2.5);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawWordWheel(ctx, opts = {}) {
+    if (!ctx) return;
+    const words = Array.isArray(opts.words) ? opts.words : [];
+    if (!words.length) return;
+    const idx = Math.max(0, Math.min(words.length - 1, Math.round(opts.centerIndex ?? 0)));
+    const cx = opts.cx ?? 512;
+    const cy = opts.cy ?? 288;
+    const stepY = opts.stepY ?? 82;
+    const slideY = opts.slideOffset ?? 0;
+
+    ctx.save();
+    ctx.textAlign = opts.align || "center";
+    ctx.textBaseline = "middle";
+    ctx.font = opts.dimFont || "400 84px Inter, sans-serif";
+    ctx.fillStyle = opts.dimColor || "rgba(222,221,226,0.34)";
+    if (idx > 0) ctx.fillText(String(words[idx - 1]), cx, cy - stepY + slideY);
+    if (idx + 1 < words.length) ctx.fillText(String(words[idx + 1]), cx, cy + stepY + slideY);
+
+    ctx.font = opts.activeFont || "400 104px Inter, sans-serif";
+    ctx.fillStyle = opts.activeColor || "#FFFFFF";
+    ctx.fillText(String(words[idx]), cx, cy + slideY);
+    ctx.restore();
+  }
+
   const API = {
     TAU,
     clamp,
@@ -1443,6 +1639,10 @@
     textReveal,
     clipWipe,
     drawSVGPath,
+    drawCursor,
+    drawExtrudedArrow3D,
+    drawLaptopFrame,
+    drawWordWheel,
   };
 
   global.AetheriaMotion = API;

@@ -85,7 +85,10 @@ describe("Harness F1 spec guards (skill-lint & AM API parity)", () => {
 
   it("ensures every AM.<symbol> in AM_API.md, prompts, and mg-* skills exists in aetheria-motion.js", () => {
     const exported = parseRuntimeAmApiExports();
-    expect(exported.size).toBeGreaterThanOrEqual(42);
+    expect(exported.size).toBeGreaterThanOrEqual(46);
+    for (const sym of ["drawCursor", "drawExtrudedArrow3D", "drawLaptopFrame", "drawWordWheel"]) {
+      expect(exported.has(sym)).toBe(true);
+    }
 
     const targets = [
       path.join(REPO_ROOT, ".aetheria", "reference", "AM_API.md"),
@@ -124,5 +127,94 @@ describe("Harness F1 spec guards (skill-lint & AM API parity)", () => {
     }
 
     expect(unknownRefs).toEqual([]);
+  });
+
+  it("drawLaptopFrame supports both (ctx, rect) and 3-arg (ctx, w, h) callbacks cleanly", () => {
+    const code = fs.readFileSync(
+      path.join(REPO_ROOT, "apps", "public", "script", "aetheria-motion.js"),
+      "utf8",
+    );
+    const fakeWin: { AM?: Record<string, (...args: unknown[]) => void> } = {};
+    new Function("window", code)(fakeWin);
+    const AM = fakeWin.AM;
+    expect(AM).toBeDefined();
+
+    const calls: string[] = [];
+    const mockCtx = {
+      save: () => {},
+      restore: () => {},
+      translate: (tx: number, ty: number) => calls.push(`translate:${tx},${ty}`),
+      beginPath: () => {},
+      moveTo: () => {},
+      lineTo: () => {},
+      arcTo: () => {},
+      closePath: () => {},
+      clip: () => {},
+      fill: () => {},
+      stroke: () => {},
+      fillRect: (rx: number, ry: number, rw: number, rh: number) => calls.push(`fillRect:${rx},${ry},${rw},${rh}`),
+      createLinearGradient: () => ({ addColorStop: () => {} }),
+      fillStyle: "",
+      strokeStyle: "",
+      lineWidth: 1,
+    };
+
+    AM?.drawLaptopFrame(mockCtx, { x: 100, y: 50, w: 320, h: 200, bezel: 10 }, (_c: unknown, rect: { x: number; y: number; w: number; h: number }) => {
+      calls.push(`twoArg:${rect.x},${rect.y},${rect.w},${rect.h}`);
+    });
+    expect(calls).toContain("twoArg:110,60,300,180");
+
+    calls.length = 0;
+    AM?.drawLaptopFrame(mockCtx, { x: 100, y: 50, w: 320, h: 200, bezel: 10 }, (_c: unknown, sw: number, sh: number) => {
+      calls.push(`threeArg:${sw},${sh}`);
+    });
+    expect(calls).toContain("translate:110,60");
+    expect(calls).toContain("threeArg:300,180");
+  });
+
+  it("drawExtrudedArrow3D auto-normalizes multiplier scale (<=8) and pixel depth (>2)", () => {
+    const code = fs.readFileSync(
+      path.join(REPO_ROOT, "apps", "public", "script", "aetheria-motion.js"),
+      "utf8",
+    );
+    const fakeWin: { AM?: Record<string, (...args: unknown[]) => void> } = {};
+    new Function("window", code)(fakeWin);
+    const AM = fakeWin.AM;
+    expect(AM).toBeDefined();
+
+    const xs: number[] = [];
+    const mockCtx = {
+      save: () => {},
+      restore: () => {},
+      beginPath: () => {},
+      moveTo: (x: number) => xs.push(x),
+      lineTo: (x: number) => xs.push(x),
+      closePath: () => {},
+      fill: () => {},
+      stroke: () => {},
+      createLinearGradient: () => ({ addColorStop: () => {} }),
+      fillStyle: "",
+      strokeStyle: "",
+      lineWidth: 1,
+      shadowColor: "",
+      shadowBlur: 0,
+      globalAlpha: 1,
+    };
+
+    AM?.drawExtrudedArrow3D(mockCtx, 512, 288, 1.2, { depth: 30, rx: 0.2, ry: -0.2 });
+    const span = Math.max(...xs) - Math.min(...xs);
+    // Multiplier 1.2 should auto-scale to ~108px radius (~180-230px total width), NOT a ~2px speck.
+    expect(span).toBeGreaterThan(120);
+    expect(span).toBeLessThan(350);
+
+    // AM.rng supports both callable `r()` and object methods `r.next()` / `r.range()` / `r.pick()`
+    const rngFn = (AM as unknown as {
+      rng: (s: number) => { (): number; next: () => number; range: (a: number, b: number) => number; pick: <T>(arr: T[]) => T };
+    }).rng;
+    const rA = rngFn(777);
+    const rB = rngFn(777);
+    expect(rA()).toBe(rB.next());
+    expect(rA.range(10, 20)).toBeGreaterThanOrEqual(10);
+    expect(rA.pick(["a", "b"])).toMatch(/^[ab]$/);
   });
 });

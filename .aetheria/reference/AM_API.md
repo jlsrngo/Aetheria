@@ -62,3 +62,7 @@ Do NOT call `Math.random()`, `Date.now()`, `performance.now()`, `requestAnimatio
 - `AM.textReveal(text, reveal = 1)` — slice text deterministically by character ratio (`0..1`)
 - `AM.clipWipe(ctx, x, y, w, h, reveal, drawFn)` — horizontal clip-rect wipe around `drawFn()`
 - `AM.drawSVGPath(ctx, pathStr, x, y, w, h, opts?)` — stroke/fill SVG path via `Path2D` (`{ viewBoxW, viewBoxH, fill, stroke, progress, lineWidth, lineCap, lineJoin, approxLength }`)
+- `AM.drawCursor(ctx, x, y, opts?)` — crisp vector pointer arrow with optional glow (`{ scale, angle, fill, stroke, glowColor, lineWidth }`)
+- `AM.drawExtrudedArrow3D(ctx, cx, cy, scale?, opts?)` — 3D perspective extruded arrow prism (`scale` defaults to `90` px radius; multiplier `<= 8` auto-scales by `90px`; opts: `{ rx, ry, rz, depth=0.24, topLight, topMid, sideColor, strokeColor, alpha }`)
+- `AM.drawLaptopFrame(ctx, opts?, drawScreenFn)` — sleek minimalist laptop frame + auto-clipped screen viewport; calls `drawScreenFn(ctx, { x, y, w, h, cx, cy })` (or `drawScreenFn(ctx, w, h)` with origin at `(0,0)`)
+- `AM.drawWordWheel(ctx, opts)` — overlapping stacked typography focus wheel (`{ words, centerIndex, cx, cy, stepY, slideOffset, activeFont, dimFont, activeColor, dimColor }`)
