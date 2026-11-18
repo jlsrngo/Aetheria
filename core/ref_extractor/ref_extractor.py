@@ -49,8 +49,16 @@ def _resolve_ffmpeg_bin() -> str:
     return "ffmpeg"
 
 
-def extract_audio_bpm_and_beats(video_path: Path, temp_dir: Path) -> Tuple[float, List[float]]:
-    """Demuxes reference audio to 22.05kHz mono WAV and extracts BPM + transient beat timestamps."""
+def extract_audio_bpm_beats_and_profile(
+    video_path: Path, temp_dir: Path
+) -> Tuple[float, List[float], Dict[str, Any]]:
+    """Demuxes reference audio to 22.05kHz mono WAV and extracts BPM, beats, and audio mode."""
+    default_profile: Dict[str, Any] = {
+        "mode": "bgm-sfx-only",
+        "speechLikelihood": 0.0,
+        "voiceBandRatio": 0.0,
+        "beatRegularity": 0.0,
+    }
     wav_path = temp_dir / "ref_audio.wav"
     ff_bin = _resolve_ffmpeg_bin()
     cmd = [
@@ -71,31 +79,42 @@ def extract_audio_bpm_and_beats(video_path: Path, temp_dir: Path) -> Tuple[float
     try:
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20, check=False)
     except Exception:
-        return 120.0, []
+        return 120.0, [], {**default_profile, "mode": "silent"}
 
     if not wav_path.is_file():
-        return 120.0, []
+        return 120.0, [], {**default_profile, "mode": "silent"}
 
     try:
         with wave.open(str(wav_path), "rb") as w:
             sr = int(w.getframerate() or 22050)
             n_frames = w.getnframes()
             if n_frames <= 0:
-                return 120.0, []
+                return 120.0, [], {**default_profile, "mode": "silent"}
             raw_bytes = w.readframes(n_frames)
         samples = np.frombuffer(raw_bytes, dtype=np.int16).astype(np.float32) / 32768.0
         if samples.size < sr // 2:
-            return 120.0, []
+            return 120.0, [], {**default_profile, "mode": "silent"}
 
         hop = max(256, int(round(sr * 0.05)))  # 50ms windows
+        freqs = np.fft.rfftfreq(hop, d=1.0 / float(sr))
+        voice_mask = (freqs >= 300.0) & (freqs <= 3400.0)
+        sub_mask = (freqs >= 35.0) & (freqs < 250.0)
         energies: List[float] = []
         flux: List[float] = []
+        voice_powers: List[float] = []
+        sub_powers: List[float] = []
+        total_powers: List[float] = []
         prev_mag: Optional[np.ndarray] = None
+        hanning = np.hanning(hop)
         for i in range(0, len(samples) - hop, hop):
             chunk = samples[i:i + hop]
             rms = float(np.sqrt(np.mean(chunk * chunk)))
             energies.append(rms)
-            mag = np.abs(np.fft.rfft(chunk * np.hanning(len(chunk))))
+            mag = np.abs(np.fft.rfft(chunk * hanning))
+            pwr = mag * mag
+            total_powers.append(float(np.sum(pwr)) + 1e-12)
+            voice_powers.append(float(np.sum(pwr[voice_mask])))
+            sub_powers.append(float(np.sum(pwr[sub_mask])))
             if prev_mag is not None and prev_mag.shape == mag.shape:
                 diff = mag - prev_mag
                 half_rect = 0.5 * (diff + np.abs(diff))
@@ -105,9 +124,10 @@ def extract_audio_bpm_and_beats(video_path: Path, temp_dir: Path) -> Tuple[float
             prev_mag = mag
 
         if not energies or float(np.max(energies)) < 1e-4:
-            return 120.0, []
+            return 120.0, [], {**default_profile, "mode": "silent"}
 
-        e_arr = np.asarray(energies, dtype=np.float32)
+        e_raw = np.asarray(energies, dtype=np.float32)
+        e_arr = e_raw.copy()
         f_arr = np.asarray(flux, dtype=np.float32)
         if float(np.max(f_arr)) > 0:
             f_arr = f_arr / float(np.max(f_arr))
@@ -128,6 +148,7 @@ def extract_audio_bpm_and_beats(video_path: Path, temp_dir: Path) -> Tuple[float
                 if not beat_times or (t_sec - beat_times[-1]) >= 0.22:
                     beat_times.append(t_sec)
 
+        beat_regularity = 0.0
         if len(beat_times) >= 3:
             intervals = [
                 beat_times[k + 1] - beat_times[k]
@@ -136,6 +157,8 @@ def extract_audio_bpm_and_beats(video_path: Path, temp_dir: Path) -> Tuple[float
             ]
             if intervals:
                 median_ioi = float(np.median(intervals))
+                mad_ioi = float(np.median(np.abs(np.asarray(intervals) - median_ioi)))
+                beat_regularity = round(float(np.clip(1.0 - (mad_ioi / max(0.05, median_ioi)) * 2.0, 0.0, 1.0)), 3)
                 raw_bpm = 60.0 / max(0.25, median_ioi)
                 while raw_bpm < 75.0:
                     raw_bpm *= 2.0
@@ -146,9 +169,35 @@ def extract_audio_bpm_and_beats(video_path: Path, temp_dir: Path) -> Tuple[float
                 bpm = 120.0
         else:
             bpm = 120.0
-        return bpm, beat_times
+
+        tot_sum = float(np.sum(total_powers)) + 1e-12
+        voice_ratio = round(float(np.sum(voice_powers)) / tot_sum, 3)
+        sub_ratio = round(float(np.sum(sub_powers)) / tot_sum, 3)
+        # Speech typically has high pause-to-burst dynamic variance + dominant mid-band over sub-bass.
+        mean_e = float(np.mean(e_raw)) + 1e-9
+        cv_e = float(np.std(e_raw)) / mean_e
+        quiet_frac = float(np.mean(e_raw < (mean_e * 0.25)))
+        speech_score = 0.45 * min(1.0, max(0.0, (voice_ratio - 0.35) / 0.45)) + 0.30 * min(1.0, quiet_frac * 2.5) + 0.25 * min(1.0, max(0.0, (cv_e - 0.35) / 0.6))
+        if sub_ratio >= 0.14 or beat_regularity >= 0.52:
+            speech_score *= 0.65
+        speech_likelihood = round(float(np.clip(speech_score, 0.0, 1.0)), 3)
+        audio_mode = "speech-narrated" if speech_likelihood >= 0.55 else "bgm-sfx-only"
+        profile = {
+            "mode": audio_mode,
+            "speechLikelihood": speech_likelihood,
+            "voiceBandRatio": voice_ratio,
+            "subBassRatio": sub_ratio,
+            "beatRegularity": beat_regularity,
+        }
+        return bpm, beat_times, profile
     except Exception:
-        return 120.0, []
+        return 120.0, [], {**default_profile, "mode": "silent"}
+
+
+def extract_audio_bpm_and_beats(video_path: Path, temp_dir: Path) -> Tuple[float, List[float]]:
+    """Backwards-compatible wrapper returning `(bpm, beat_timestamps)`."""
+    bpm, beats, _ = extract_audio_bpm_beats_and_profile(video_path, temp_dir)
+    return bpm, beats
 
 
 def snap_cuts_to_beats(cut_timestamps: List[float], beat_times: List[float], duration: float, max_snap_sec: float = 0.12) -> List[float]:
@@ -201,6 +250,157 @@ def extract_clean_plate_background(frames: List[np.ndarray], fallback_hex: str =
         "fillHex": _bgr_to_hex(top_bgr if has_gradient else bg_bgr),
         "bottomHex": _bgr_to_hex(bot_bgr if has_gradient else bg_bgr),
         "hasGradient": has_gradient,
+    }
+
+
+def _hex_to_bgr(hex_str: str) -> Tuple[float, float, float]:
+    s = str(hex_str or "").strip().lstrip("#")
+    if len(s) != 6:
+        return (18.0, 18.0, 22.0)
+    try:
+        r = int(s[0:2], 16)
+        g = int(s[2:4], 16)
+        b = int(s[4:6], 16)
+        return (float(b), float(g), float(r))
+    except ValueError:
+        return (18.0, 18.0, 22.0)
+
+
+def reconcile_palette_with_clean_plate(
+    palette: Dict[str, Any], clean_plate: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Aligns scene palette bgHex/isDark to cleanPlate when border shadows skewed K-means dark."""
+    pal = dict(palette or {})
+    cp_hex = str((clean_plate or {}).get("fillHex") or pal.get("bgHex") or "#141418")
+    bg_hex = str(pal.get("bgHex") or cp_hex)
+    cp_luma = _luma_from_bgr(np.array(_hex_to_bgr(cp_hex)))
+    bg_luma = _luma_from_bgr(np.array(_hex_to_bgr(bg_hex)))
+
+    if (cp_luma >= 145.0 and bg_luma < 125.0) or (cp_luma >= 135.0 and abs(cp_luma - bg_luma) >= 55.0):
+        pal["bgHex"] = cp_hex
+        is_dark = cp_luma < 120.0
+        pal["isDark"] = bool(is_dark)
+        txt_hex = str(pal.get("textHex") or "")
+        txt_luma = _luma_from_bgr(np.array(_hex_to_bgr(txt_hex)))
+        if abs(txt_luma - cp_luma) < 60.0:
+            pal["textHex"] = "#F8FAFC" if is_dark else "#1E2021"
+            pal["accentHex"] = pal.get("accentHex") or pal["textHex"]
+    return pal
+
+
+def detect_grid_tilt_deg(frame_bgr: Optional[np.ndarray]) -> Optional[float]:
+    """Detects consistent oblique layout/grid tilt angle in degrees via sub-degree HoughLines."""
+    if frame_bgr is None or frame_bgr.size == 0:
+        return None
+    gray = cv2.GaussianBlur(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY), (3, 3), 0)
+    edges = cv2.Canny(gray, 40, 120)
+    lines = cv2.HoughLines(edges, 1, np.pi / 720.0, 130)
+    if lines is None or len(lines) < 6:
+        return None
+    angles = [((math.degrees(float(theta)) + 45.0) % 90.0) - 45.0 for _, theta in lines.reshape(-1, 2)]
+    oblique = [a for a in angles if 1.8 <= abs(a) <= 25.0]
+    if len(oblique) < 6 or (len(oblique) / max(1, len(angles))) < 0.55:
+        return None
+    if float(np.std(oblique)) > 2.5:
+        return None
+    return round(float(np.median(oblique)), 1)
+
+
+def detect_bimodal_contrast_tiles(frame_bgr: Optional[np.ndarray]) -> Optional[Dict[str, Any]]:
+    """Detects high-contrast bimodal dark+light grid/tile scenes and measures exact dark vs light tile hexes."""
+    if frame_bgr is None or frame_bgr.size == 0:
+        return None
+    gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+    dark_mask = gray < 55
+    light_mask = gray > 185
+    dark_pct = float(np.mean(dark_mask))
+    light_pct = float(np.mean(light_mask))
+    if dark_pct < 0.20 or light_pct < 0.20:
+        return None
+    dark_bgr = np.median(frame_bgr[dark_mask], axis=0)
+    light_bgr = np.median(frame_bgr[light_mask], axis=0)
+    h, w = gray.shape[:2]
+    top_left_mean = float(np.mean(gray[: max(4, h // 6), : max(4, w // 6)]))
+    return {
+        "darkTileHex": _bgr_to_hex(dark_bgr),
+        "lightTileHex": _bgr_to_hex(light_bgr),
+        "topLeft": "light" if top_left_mean > 128.0 else "dark",
+    }
+
+
+def _edge_line_peaks(frac: np.ndarray, min_gap: int, thr: float) -> List[int]:
+    idx = [
+        i for i in range(1, len(frac) - 1)
+        if frac[i] >= thr and frac[i] >= frac[i - 1] and frac[i] >= frac[i + 1]
+    ]
+    idx.sort(key=lambda i: -frac[i])
+    picked: List[int] = []
+    for i in idx:
+        if all(abs(i - j) >= min_gap for j in picked):
+            picked.append(i)
+    return sorted(picked)
+
+
+def measure_contrast_tile_grid(
+    frame_bgr: Optional[np.ndarray], tilt_deg: Optional[float]
+) -> Optional[Dict[str, Any]]:
+    """Measures the real tile pitch/origin and per-cell dark/light map of a bento/tile wall.
+
+    A bare "alternating tiles" hint made agents paint a strict checkerboard; real tile walls
+    use irregular dark/light placement, so we emit the exact `L`/`D` map row by row.
+    Coordinates are in the de-rotated (axis-aligned) frame: draw after `ctx.rotate(tilt)`.
+    """
+    if frame_bgr is None or frame_bgr.size == 0:
+        return None
+    h, w = frame_bgr.shape[:2]
+    angle = float(tilt_deg or 0.0)
+    rot_m = cv2.getRotationMatrix2D((w / 2.0, h / 2.0), angle, 1.0)
+    rot = cv2.warpAffine(frame_bgr, rot_m, (w, h), borderMode=cv2.BORDER_REPLICATE)
+    gray = cv2.GaussianBlur(cv2.cvtColor(rot, cv2.COLOR_BGR2GRAY), (3, 3), 0)
+    gx = np.abs(cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3))
+    gy = np.abs(cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3))
+    col_frac = (gx > 60).mean(axis=0)
+    row_frac = (gy > 60).mean(axis=1)
+    col_frac = np.maximum.reduce([col_frac, np.roll(col_frac, 1), np.roll(col_frac, -1)])
+    row_frac = np.maximum.reduce([row_frac, np.roll(row_frac, 1), np.roll(row_frac, -1)])
+    xs = _edge_line_peaks(col_frac, max(8, w // 14), 0.25)
+    ys = _edge_line_peaks(row_frac, max(8, h // 8), 0.25)
+    if len(xs) < 2 or len(ys) < 2:
+        return None
+    pitch_x = float(np.median(np.diff(xs)))
+    pitch_y = float(np.median(np.diff(ys)))
+    if pitch_x < 24 or pitch_y < 24:
+        return None
+    # Keep map column/row 0 == the cell at origin: only step back one pitch when that partial
+    # cell is wide enough to be sampled, otherwise its skipped slot would shift every index.
+    rem_x, rem_y = xs[0] % pitch_x, ys[0] % pitch_y
+    origin_x = rem_x - pitch_x if rem_x > pitch_x * 0.3 else rem_x
+    origin_y = rem_y - pitch_y if rem_y > pitch_y * 0.3 else rem_y
+    rows: List[str] = []
+    y = origin_y
+    while y < h:
+        row = ""
+        x = origin_x
+        while x < w:
+            cx0, cx1 = int(max(0, x + pitch_x * 0.15)), int(min(w, x + pitch_x * 0.85))
+            cy0, cy1 = int(max(0, y + pitch_y * 0.15)), int(min(h, y + pitch_y * 0.85))
+            if cx1 - cx0 > 4 and cy1 - cy0 > 4:
+                med = float(np.median(gray[cy0:cy1, cx0:cx1]))
+                row += "L" if med > 150 else ("D" if med < 80 else "M")
+            x += pitch_x
+        if row:
+            rows.append(row)
+        y += pitch_y
+    if not rows:
+        return None
+    return {
+        "pitchX": round(pitch_x, 1),
+        "pitchY": round(pitch_y, 1),
+        "originX": round(float(origin_x), 1),
+        "originY": round(float(origin_y), 1),
+        "cols": max(len(r) for r in rows),
+        "rows": len(rows),
+        "map": rows,
     }
 
 
@@ -455,6 +655,194 @@ def compile_scene_am_skeleton(ast_scene: Dict[str, Any], width: int, height: int
     return "\n".join(lines)
 
 
+def estimate_text_font_weight(frame_bgr: np.ndarray, px_box: List[int]) -> str:
+    """Estimates typographic stroke weight ('400'|'500'|'600'|'800') from text crop stroke width."""
+    try:
+        x0, y0, bw, bh = [int(v) for v in px_box[:4]]
+        h_img, w_img = frame_bgr.shape[:2]
+        x0 = max(0, min(w_img - 1, x0))
+        y0 = max(0, min(h_img - 1, y0))
+        x1 = min(w_img, x0 + max(8, bw))
+        y1 = min(h_img, y0 + max(8, bh))
+        if (x1 - x0) < 10 or (y1 - y0) < 8:
+            return "600"
+        crop = cv2.cvtColor(frame_bgr[y0:y1, x0:x1], cv2.COLOR_BGR2GRAY)
+        scale_up = 2 if bh < 42 else 1
+        if scale_up > 1:
+            crop = cv2.resize(crop, (crop.shape[1] * scale_up, crop.shape[0] * scale_up), interpolation=cv2.INTER_CUBIC)
+        border = np.concatenate([crop[0, :], crop[-1, :], crop[:, 0], crop[:, -1]])
+        bg_med = float(np.median(border))
+        hi_val = float(np.percentile(crop, 98))
+        lo_val = float(np.percentile(crop, 2))
+        bg_is_dark = (hi_val - bg_med) >= (bg_med - lo_val)
+        thresh_flag = cv2.THRESH_BINARY + cv2.THRESH_OTSU if bg_is_dark else cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+        _, mask = cv2.threshold(crop, 0, 255, thresh_flag)
+        fg_ys, _ = np.where(mask > 0)
+        if fg_ys.size < 12:
+            return "500"
+        active_h = max(8.0, float(int(fg_ys.max()) - int(fg_ys.min()) + 1) / float(scale_up))
+        fg_vals = cv2.distanceTransform(mask, cv2.DIST_L2, 3)[mask > 0]
+        stroke_px = 2.0 * float(np.percentile(fg_vals, 92)) / float(scale_up)
+        ratio = stroke_px / active_h
+        if ratio <= 0.120:
+            return "400"
+        if ratio <= 0.155:
+            return "500"
+        if ratio <= 0.185:
+            return "600"
+        return "800"
+    except Exception:
+        return "600"
+
+
+def _quick_ocr_summary(frame_bgr: Optional[np.ndarray], ocr_engine: Any) -> List[str]:
+    """Lightweight OCR snippet extraction for intra-scene sub-beat change detection."""
+    if frame_bgr is None or ocr_engine is None:
+        return []
+    try:
+        h, w = frame_bgr.shape[:2]
+        target_w = min(640, w)
+        if w > target_w:
+            img = cv2.resize(frame_bgr, (target_w, max(16, int(round(h * (target_w / float(w)))))), interpolation=cv2.INTER_AREA)
+        else:
+            img = frame_bgr
+        res, _ = ocr_engine(img)
+        if not res:
+            return []
+        words: List[str] = []
+        for _, text, score in res:
+            clean = text.strip()
+            if score < 0.50 or not clean:
+                continue
+            # Drop 1-2 char OCR noise fragments (e.g. ".S" from a stylized glyph + dot)
+            # so subBeats never trick agents into rendering literal punctuation noise.
+            alnum = "".join(ch for ch in clean if ch.isalnum())
+            if len(alnum) < 2 and clean != alnum:
+                continue
+            if len(clean) <= 2 and clean.startswith("."):
+                continue
+            words.append(clean)
+        return words[:5]
+    except Exception:
+        return []
+
+
+def extract_scene_sub_beats(
+    fr_start: Optional[np.ndarray],
+    fr_mid: Optional[np.ndarray],
+    fr_end: Optional[np.ndarray],
+    ts_start: float,
+    ts_mid: float,
+    ts_end: float,
+    dur: float,
+    mid_words: List[str],
+    ocr_engine: Any,
+) -> List[str]:
+    """Detects significant intra-scene phase shifts (e.g., ticker -> card stack, amber UI -> purple wave)."""
+    if dur < 1.6 or fr_start is None or fr_end is None:
+        return []
+    phases: List[str] = []
+    start_words = _quick_ocr_summary(fr_start, ocr_engine)
+    end_words = _quick_ocr_summary(fr_end, ocr_engine)
+
+    def _luma(f: np.ndarray) -> float:
+        return float(np.mean(cv2.cvtColor(cv2.resize(f, (64, 36)), cv2.COLOR_BGR2GRAY)))
+
+    ls, lm, le = _luma(fr_start), (_luma(fr_mid) if fr_mid is not None else 0.0), _luma(fr_end)
+    sa = cv2.resize(fr_start, (96, 54)).astype(np.float32)
+    se = cv2.resize(fr_end, (96, 54)).astype(np.float32)
+    diff_se = float(np.mean(np.abs(se - sa)) / 255.0)
+    words_changed = (
+        set(w.lower() for w in start_words) != set(w.lower() for w in end_words)
+        and (bool(start_words) or bool(end_words))
+    )
+    if diff_se >= 0.06 or words_changed or abs(ls - le) >= 18.0:
+        s_txt = ", ".join(start_words[:3]) if start_words else f"luma={ls:.0f}"
+        m_txt = ", ".join(mid_words[:3]) if mid_words else f"luma={lm:.0f}"
+        e_txt = ", ".join(end_words[:3]) if end_words else f"luma={le:.0f}"
+        phases.append(f"early@{ts_start:.2f}s:[{s_txt}] -> mid@{ts_mid:.2f}s:[{m_txt}] -> late@{ts_end:.2f}s:[{e_txt}]")
+    return phases
+
+
+def build_dense_contact_sheets(
+    frame_lookup: Any,
+    sample_timestamps: List[float],
+    aspect_w: int,
+    aspect_h: int,
+    out_dir: Path,
+) -> List[str]:
+    """Builds 1..2 compact timestamped contact sheets (5 cols x up to 7 rows) for full temporal vision."""
+    if not sample_timestamps:
+        return []
+    tile_w = 320
+    tile_h = max(120, min(568, int(round(tile_w * (aspect_h / max(1, aspect_w))))))
+    tiles: List[np.ndarray] = []
+    for ts in sample_timestamps:
+        fr = frame_lookup(ts)
+        if fr is None:
+            continue
+        sm = cv2.resize(fr, (tile_w, tile_h), interpolation=cv2.INTER_AREA)
+        cv2.rectangle(sm, (4, 4), (92, 24), (10, 10, 14), -1)
+        cv2.putText(sm, f"{ts:.2f}s", (8, 19), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (248, 248, 252), 1, cv2.LINE_AA)
+        tiles.append(sm)
+    if not tiles:
+        return []
+
+    cols = 5
+    max_per_sheet = 35
+    sheet_rels: List[str] = []
+    for sheet_idx, offset in enumerate(range(0, min(len(tiles), max_per_sheet * 2), max_per_sheet), 1):
+        chunk = tiles[offset:offset + max_per_sheet]
+        rows = (len(chunk) + cols - 1) // cols
+        canvas = np.zeros((rows * tile_h, cols * tile_w, 3), dtype=np.uint8)
+        for i, tile in enumerate(chunk):
+            r, c = divmod(i, cols)
+            canvas[r * tile_h:(r + 1) * tile_h, c * tile_w:(c + 1) * tile_w] = tile
+        name = f"contact_sheet_{sheet_idx}.jpg"
+        cv2.imwrite(str(out_dir / name), canvas, [cv2.IMWRITE_JPEG_QUALITY, 86])
+        sheet_rels.append(name)
+    return sheet_rels
+
+
+def build_scene_beats_strip(
+    frame_lookup: Any,
+    beat_timestamps: List[float],
+    aspect_w: int,
+    aspect_h: int,
+    out_path: Path,
+) -> Optional[str]:
+    """Renders a high-resolution per-scene 3x2 (or 2x2) storyboard strip showing intra-scene morphs."""
+    valid_pairs: List[Tuple[float, np.ndarray]] = []
+    for ts in beat_timestamps:
+        fr = frame_lookup(ts)
+        if fr is not None and fr.size > 0:
+            valid_pairs.append((ts, fr))
+    if len(valid_pairs) < 2:
+        return None
+    cols = 3 if len(valid_pairs) >= 5 else 2
+    rows = int(math.ceil(len(valid_pairs) / float(cols)))
+    panel_w = 512 if aspect_w >= aspect_h else 320
+    panel_h = max(120, int(round(panel_w * (aspect_h / float(max(1, aspect_w))))))
+    sheet = np.full((rows * panel_h, cols * panel_w, 3), 12, dtype=np.uint8)
+    for idx, (ts, fr) in enumerate(valid_pairs[: rows * cols]):
+        r, c = divmod(idx, cols)
+        resized = cv2.resize(fr, (panel_w, panel_h), interpolation=cv2.INTER_AREA)
+        cv2.rectangle(resized, (0, 0), (112, 30), (10, 10, 12), -1)
+        cv2.putText(
+            resized,
+            f"{ts:.2f}s",
+            (8, 22),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.62,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+        sheet[r * panel_h : (r + 1) * panel_h, c * panel_w : (c + 1) * panel_w] = resized
+    cv2.imwrite(str(out_path), sheet, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    return out_path.name
+
+
 def _get_ocr_engine() -> Optional[Any]:
     global _RAPID_OCR, _RAPID_OCR_LOADED
     if _RAPID_OCR_LOADED:
@@ -630,15 +1018,19 @@ def analyze_frame_layout(frame_bgr: np.ndarray, ocr_engine: Optional[Any] = None
                         bottom_items.append(clean_text)
                         zone = "bottom"
 
+                    bw = int(max(1, x1 - x0))
+                    bh = int(max(1, y1 - y0))
+                    est_weight = estimate_text_font_weight(frame_bgr, [int(x0), int(y0), bw, bh])
                     regions.append({
                         "kind": "text",
                         "zone": zone,
                         "text": clean_text,
+                        "fontWeight": est_weight,
                         "x": round(x0 / w, 3),
                         "y": round(y0 / h, 3),
                         "w": round((x1 - x0) / w, 3),
                         "h": round((y1 - y0) / h, 3),
-                        "px": [int(x0), int(y0), int(x1 - x0), int(y1 - y0)],
+                        "px": [int(x0), int(y0), bw, bh],
                     })
         except Exception:
             pass
@@ -655,6 +1047,19 @@ def analyze_frame_layout(frame_bgr: np.ndarray, ocr_engine: Optional[Any] = None
         closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
         contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
+        text_px_boxes = [r["px"] for r in regions if r.get("kind") == "text" and r.get("px")]
+
+        def _overlaps_text_heavily(bx: int, by: int, bw: int, bh: int) -> bool:
+            b_area = max(1, bw * bh)
+            for tx, ty, tw, th in text_px_boxes:
+                ix0, iy0 = max(bx, tx), max(by, ty)
+                ix1, iy1 = min(bx + bw, tx + tw), min(by + bh, ty + th)
+                if ix1 > ix0 and iy1 > iy0:
+                    inter = (ix1 - ix0) * (iy1 - iy0)
+                    if inter / float(b_area) >= 0.45:
+                        return True
+            return False
+
         shape_boxes: List[Tuple[int, int, int, int, str]] = []
         for cnt in contours:
             x, y, cw, ch = cv2.boundingRect(cnt)
@@ -663,12 +1068,19 @@ def analyze_frame_layout(frame_bgr: np.ndarray, ocr_engine: Optional[Any] = None
                 continue
             if cw >= 0.88 * w and ch >= 0.85 * h:
                 continue
+            fill_ratio = cv2.contourArea(cnt) / max(1.0, float(area))
             if cw >= 0.28 * w and ch >= 0.11 * h:
-                card_count += 1
-                shape_boxes.append((x, y, cw, ch, "card"))
+                if fill_ratio >= 0.62:
+                    card_count += 1
+                    shape_boxes.append((x, y, cw, ch, "card"))
+                else:
+                    shape_boxes.append((x, y, cw, ch, "shape"))
             elif cw >= 0.16 * w and 0.035 * h <= ch <= 0.14 * h:
-                pill_count += 1
-                shape_boxes.append((x, y, cw, ch, "pill"))
+                if fill_ratio >= 0.68 and not _overlaps_text_heavily(x, y, cw, ch):
+                    pill_count += 1
+                    shape_boxes.append((x, y, cw, ch, "pill"))
+                elif not _overlaps_text_heavily(x, y, cw, ch):
+                    shape_boxes.append((x, y, cw, ch, "shape"))
             elif area <= 0.03 * w * h:
                 scatter_count += 1
 
@@ -902,26 +1314,34 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
     duration = total_frames / fps if total_frames > 0 else 10.0
     aspect_ratio = "9:16" if height > width else ("1:1" if abs(width - height) <= 16 else "16:9")
 
-    # 1. MotionClone-style full temporal scan + audio beat/BPM decompilation
+    # 1. MotionClone-style full temporal scan + audio beat/BPM decompilation + voice/BGM classification
     with tempfile.TemporaryDirectory(prefix="aetheria_ref_audio_") as tmp_audio_dir:
-        bpm, beat_timestamps = extract_audio_bpm_and_beats(v_path, Path(tmp_audio_dir))
+        bpm, beat_timestamps, audio_profile = extract_audio_bpm_beats_and_profile(v_path, Path(tmp_audio_dir))
     temporal = scan_motion_timeline(cap, total_frames, fps, duration)
     cut_timestamps = snap_cuts_to_beats(temporal["cutTimestamps"], beat_timestamps, duration)
     temporal["cutTimestamps"] = cut_timestamps
     temporal["bpm"] = bpm
     temporal["beatTimestamps"] = beat_timestamps
+    temporal["audioProfile"] = audio_profile
 
-    # 2. Plan all target timestamps (thumbs + per-scene start/mid/end + sub-frame trajectories) and fetch in ONE forward pass
+    # 2. Plan all target timestamps (thumbs + per-scene start/mid/end + sub-frame + dense contact sheet grid)
     thumb_ratios = [0.10, 0.35, 0.60, 0.85]
     thumb_timestamps: List[float] = [
         round(min(max(0.0, duration - 0.05), duration * ratio), 3)
         for ratio in thumb_ratios
     ]
 
+    sheet_step = max(0.45, duration / 68.0) if duration > 0 else 0.5
+    sheet_timestamps: List[float] = []
+    cur_sheet_t = 0.0
+    while cur_sheet_t < max(0.2, duration - 0.05) and len(sheet_timestamps) < 70:
+        sheet_timestamps.append(round(cur_sheet_t, 3))
+        cur_sheet_t += sheet_step
+
     scene_specs: List[Tuple[int, float, float, float, str, float, float, float, List[float]]] = []
     roles = ["hook", "problem_or_context", "proof_or_demo", "cta"]
     needed_indices = set()
-    for ts in thumb_timestamps:
+    for ts in thumb_timestamps + sheet_timestamps:
         needed_indices.add(min(max(0, total_frames - 1), max(0, int(round(ts * fps)))))
 
     sub_sample_ratios = [0.05, 0.16, 0.28, 0.42, 0.56, 0.70, 0.84, 0.95]
@@ -1014,19 +1434,47 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
         if fr_mid is not None:
             cv2.imwrite(str(scene_kf_path), fr_mid, [cv2.IMWRITE_JPEG_QUALITY, 94])
 
-        # Also save start/end sub-keyframes for multi-pose motion cloning
+        # Also save start/q1/mid/q3/end sub-keyframes and a high-res per-scene beat storyboard strip
         sub_keyframes = [{"t": ts_mid, "path": f"frames/{scene_kf_name}"}]
         if fr_start is not None and dur >= 0.9:
             start_name = f"ref_scene_{i + 1:02d}_start.jpg"
             cv2.imwrite(str(frames_dir / start_name), fr_start, [cv2.IMWRITE_JPEG_QUALITY, 88])
-            sub_keyframes.insert(0, {"t": ts_start, "path": f"frames/{start_name}"})
+            sub_keyframes.append({"t": ts_start, "path": f"frames/{start_name}"})
+        if dur >= 2.2 and len(sub_ts_list) >= 6:
+            ts_q1 = sub_ts_list[2]  # ~28% into scene (captures opening morphs / marquees)
+            ts_q3 = sub_ts_list[5]  # ~70% into scene (captures late transitions / secondary screens)
+            fr_q1 = _frame_at(ts_q1)
+            fr_q3 = _frame_at(ts_q3)
+            if fr_q1 is not None:
+                q1_name = f"ref_scene_{i + 1:02d}_q1.jpg"
+                cv2.imwrite(str(frames_dir / q1_name), fr_q1, [cv2.IMWRITE_JPEG_QUALITY, 90])
+                sub_keyframes.append({"t": ts_q1, "path": f"frames/{q1_name}"})
+            if fr_q3 is not None:
+                q3_name = f"ref_scene_{i + 1:02d}_q3.jpg"
+                cv2.imwrite(str(frames_dir / q3_name), fr_q3, [cv2.IMWRITE_JPEG_QUALITY, 90])
+                sub_keyframes.append({"t": ts_q3, "path": f"frames/{q3_name}"})
         if fr_end is not None and dur >= 1.2:
             end_name = f"ref_scene_{i + 1:02d}_end.jpg"
             cv2.imwrite(str(frames_dir / end_name), fr_end, [cv2.IMWRITE_JPEG_QUALITY, 88])
             sub_keyframes.append({"t": ts_end, "path": f"frames/{end_name}"})
+        sub_keyframes.sort(key=lambda item: float(item.get("t", 0.0)))
+
+        beat_strip_ts = sub_ts_list[1:7] if dur >= 1.8 and len(sub_ts_list) >= 7 else [sub_ts_list[0], sub_ts_list[2], sub_ts_list[5], sub_ts_list[-1]]
+        beats_strip_name = build_scene_beats_strip(
+            _frame_at,
+            beat_strip_ts,
+            width,
+            height,
+            frames_dir / f"ref_scene_{i + 1:02d}_beats.jpg",
+        )
+        beats_strip_rel = f"frames/{beats_strip_name}" if beats_strip_name else None
 
         pal = layout_info["palette"]
         clean_plate = extract_clean_plate_background(scene_sub_frames, pal["bgHex"])
+        pal = reconcile_palette_with_clean_plate(pal, clean_plate)
+        layout_info["palette"] = pal
+        layout_info["bg_hex"] = pal["bgHex"]
+        layout_info["is_dark_scene"] = pal["isDark"]
         start_f_idx = max(0, int(round(start * fps)))
         end_f_idx = min(max(1, total_frames), int(round(end * fps)))
 
@@ -1058,6 +1506,7 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
             }
             if kind == "text":
                 est_font_px = max(18, int(round(float(box_norm["h"]) * height * 0.72)))
+                est_font_weight = str(reg.get("fontWeight") or ("600" if reg.get("zone") == "hero" else "500"))
                 ast_layers.append({
                     "id": layer_id,
                     "kind": "text",
@@ -1068,7 +1517,7 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
                         "fontFamily": "Inter, sans-serif",
                         "fillHex": pal["textHex"],
                         "fontSize": est_font_px,
-                        "fontWeight": "800" if reg.get("zone") == "hero" else "600",
+                        "fontWeight": est_font_weight,
                         "align": "center" if abs((box_norm["x"] + box_norm["w"] * 0.5) - 0.5) <= 0.15 else "left",
                     },
                     "motion": {"entrance": motion_curve},
@@ -1086,6 +1535,19 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
                     "motion": {"entrance": motion_curve},
                 })
 
+        mid_words = layout_info.get("hero", []) + layout_info.get("top", [])
+        sub_beats = extract_scene_sub_beats(
+            fr_start, fr_mid, fr_end, ts_start, ts_mid, ts_end, dur, mid_words, ocr_engine
+        )
+        grid_tilt_deg = detect_grid_tilt_deg(fr_mid)
+        contrast_tiles = detect_bimodal_contrast_tiles(fr_mid)
+        if grid_tilt_deg is not None:
+            layout_info["gridTiltDeg"] = grid_tilt_deg
+        if contrast_tiles is not None:
+            tile_grid = measure_contrast_tile_grid(fr_mid, grid_tilt_deg)
+            if tile_grid is not None:
+                contrast_tiles["grid"] = tile_grid
+            layout_info["contrastTiles"] = contrast_tiles
         layout_info["cleanPlate"] = clean_plate
         scene_id = f"scene{i + 1}_{role}"
         scene_palettes.append(pal)
@@ -1101,7 +1563,10 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
             "motionEnergy": motion_energy,
             "keyframeTimestamp": ts_mid,
             "keyframe": f"frames/{scene_kf_name}",
+            "beatsStrip": beats_strip_rel,
             "keyframes": sub_keyframes,
+            "subBeats": sub_beats,
+            "gridTiltDeg": grid_tilt_deg,
             "cleanPlate": clean_plate,
             "layout": layout_info,
         })
@@ -1112,6 +1577,10 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
             "start": round(start, 3),
             "end": round(end, 3),
             "duration": dur,
+            "beatsStrip": beats_strip_rel,
+            "subBeats": sub_beats,
+            "gridTiltDeg": grid_tilt_deg,
+            "contrastTiles": contrast_tiles,
             "cleanPlate": clean_plate,
             "layers": ast_layers,
         }
@@ -1125,6 +1594,7 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
         ast_scene_obj["amCodeSkeleton"] = skeleton_code
         ast_scenes.append(ast_scene_obj)
 
+    contact_sheets = build_dense_contact_sheets(_frame_at, sheet_timestamps, width, height, out_dir)
     cap.release()
 
     # Global dominant palette from the first / most representative scene
@@ -1160,6 +1630,8 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
         "height": height,
         "aspectRatio": aspect_ratio,
         "bpm": bpm,
+        "audioProfile": audio_profile,
+        "contactSheets": contact_sheets,
         "beatTimestamps": beat_timestamps[:64],
         "scenes": ast_scenes,
     }
@@ -1175,9 +1647,12 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
         "totalDuration": round(duration, 3),
         "fps": int(round(fps)),
         "bpm": bpm,
+        "audioProfile": audio_profile,
+        "contactSheets": contact_sheets,
         "aspectRatio": aspect_ratio,
         "width": width,
         "height": height,
+        "resolution": f"{width}x{height}",
         "resolution": f"{width}x{height}",
         "theme": "light-measured" if is_light_theme else "dark-measured",
         "palette": {
@@ -1220,9 +1695,13 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
         else ""
     )
 
+    audio_mode_line = f"{audio_profile.get('mode', 'bgm-sfx-only')} (speechLikelihood={audio_profile.get('speechLikelihood', 0.0):.2f})"
+    sheets_line = ", ".join(f"ref/extracted/{cs}" for cs in contact_sheets) if contact_sheets else "none"
     md = f"""# Reference Video Analysis Report (MotionClone Blueprint)
 **Source:** `{v_path.name}`
 **Duration:** {duration:.2f}s | **FPS:** {int(round(fps))} | **BPM:** {bpm:.1f} | **Resolution:** {width}x{height} ({aspect_ratio})
+**Audio Profile:** `{audio_mode_line}`
+**Dense Contact Sheets:** `{sheets_line}`
 **Detected Tone:** {theme_label} (Mean Luma: {avg_luma:.1f})
 **Detected Scene Cuts:** {len(cut_timestamps)} scenes (`{", ".join(f"{t:.2f}s" for t in cut_timestamps)}`)
 **Extractor Backend:** `{style_spec['extractorBackend']}` (`ocrAvailable={ocr_available}`)
@@ -1253,6 +1732,8 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
         pal = ly["palette"]
         cp = s.get("cleanPlate") or {"fillHex": pal["bgHex"], "hasGradient": False}
         md += f"\n### Scene {s['index']}: `{s['id']}` ({s['start']:.2f}s - {s['end']:.2f}s, {s['duration']:.2f}s)\n"
+        if s.get("beatsStrip"):
+            md += f"- **High-Res Beat Strip:** `ref/extracted/{s['beatsStrip']}`\n"
         md += f"- **Clean Plate Background:** fill=`{cp.get('fillHex')}`, hasGradient=`{cp.get('hasGradient')}`\n"
         md += f"- **Measured Palette:** bg=`{pal['bgHex']}`, surface=`{pal['surfaceHex']}`, text=`{pal['textHex']}`, accent=`{pal['accentHex']}`\n"
         md += f"- **Visual Archetype:** `{ly.get('visual_archetype')}`\n"
@@ -1268,17 +1749,46 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
             for r in ly["regions"][:6]:
                 mot = r.get("motion") or {}
                 curve_label = f"{mot.get('direction', 'pop')}:{mot.get('curve', 'AM.spring')}"
-                reg_summaries.append(
-                    f"{r['kind']}@({r['x']},{r['y']},{r['w']}x{r['h']})[{curve_label}]"
-                )
-            md += f"- **Normalized Bounding Boxes & Decompiled Motion (x,y,w,h)[dir:curve]:** `{', '.join(reg_summaries)}`\n"
+                px_x = int(round(float(r.get("x", 0.0)) * width))
+                px_y = int(round(float(r.get("y", 0.0)) * height))
+                px_w = int(round(float(r.get("w", 0.2)) * width))
+                px_h = int(round(float(r.get("h", 0.1)) * height))
+                if r.get("kind") == "text":
+                    est_font_px = max(18, int(round(float(r.get("h", 0.1)) * height * 0.72)))
+                    fw = str(r.get("fontWeight") or ("600" if r.get("zone") == "hero" else "500"))
+                    lbl = (r.get("text") or "").replace('"', "'").strip()[:22]
+                    reg_summaries.append(
+                        f'text"{lbl}"@({px_x},{px_y},{px_w}x{px_h}px,font={fw} {est_font_px}px)[{curve_label}]'
+                    )
+                else:
+                    reg_summaries.append(
+                        f"{r['kind']}@({px_x},{px_y},{px_w}x{px_h}px)[{curve_label}]"
+                    )
+            md += f"- **Measured Pixel Regions & Typography (x,y,wxh px)[dir:curve]:** `{', '.join(reg_summaries)}`\n"
+        if s.get("gridTiltDeg") is not None:
+            tilt_val = float(s["gridTiltDeg"])
+            tilt_rad = round(math.radians(tilt_val), 4)
+            md += f"- **Detected Grid/Layout Tilt:** `{tilt_val:+.1f} deg` (rotate scene grid by `ctx.rotate({tilt_rad})` around canvas center — check top-left cell polarity vs `ref_scene_XX.jpg`)\n"
+        ct = ly.get("contrastTiles")
+        if ct and ct.get("grid"):
+            grid = ct["grid"]
+            md += (
+                f"- **High-Contrast Tile Wall (measured, NOT a checkerboard):** `lightTile={ct['lightTileHex']}`, `darkTile={ct['darkTileHex']}`, "
+                f"`pitch={grid['pitchX']}x{grid['pitchY']}px`, `origin=({grid['originX']},{grid['originY']})`, `{grid['cols']} cols x {grid['rows']} rows`, "
+                f"rows top->bottom (`L`=lightTile, `D`=darkTile, `M`=mid grey): `{' / '.join(grid['map'])}` — after the tilt rotate, draw cell (r,c) at "
+                f"`originX + c*pitchX, originY + r*pitchY` sized `pitch - 8px` over a near-black gap background, colored EXACTLY per this map\n"
+            )
+        elif ct:
+            md += f"- **High-Contrast Tiles:** `lightTile={ct['lightTileHex']}`, `darkTile={ct['darkTileHex']}`, `topLeft={ct['topLeft']}` — crisp `lightTile` and near-black `darkTile` placed where `ref_scene_XX.jpg` shows them (NEVER substitute medium grey for dark tiles)\n"
+        if s.get("subBeats"):
+            md += f"- **Intra-Scene Multi-Beat Shifts:** `{' | '.join(s['subBeats'])}`\n"
 
     md += f"""
 ## Aetheria Modular HTML5/JS Reconstruction Directives
-1. **READ DECOMPILED MOTION AST (`ref/extracted/style_ast.json`)**: Inspect `style_ast.json` for each scene's `cleanPlate` and `layers[]` (`box`, `style`, and `motion.entrance`). Map `curve == "AM.spring"` directly to `AM.spring(localTime - startSec, ...)` and `direction == "slide_up"` to Y-offset `yBox + 40 * (1 - p)` instead of guessing random easing formulas.
-2. **EXACT TIMING & SCENES (`index.html` + `script/scene1..{len(scenes)}.js`)**: Mirror the measured `SCENES` timings and `{width}x{height}` (`{int(round(fps))}fps`) `window.__filmMeta` contract. Register each scene with `window.AM.registerScene("sceneK_...", ...)` and drive every frame deterministically via `window.renderAt(t)`.
-3. **PER-SCENE PALETTE FIDELITY**: Switch backgrounds/accents per scene to match each scene's measured `cleanPlate.fillHex`, `bgHex`, and `accentHex` above — never substitute generic default colors.
-4. **CLOSED-LOOP VISUAL VERIFICATION**: After writing `index.html` and `script/scene*.js`, call `capture_film_preview` with `compareToReference: true` to measure per-frame RGB SSIM + color/edge similarity and inspect `.aetheria/preview/comparison_strip.jpg`. Refine any low-scoring scenes iteratively until visual metrics and the 5-axis rubric pass!
+1. **VISION BEATS RAW OCR (`contact_sheet_*.jpg` + `frames/ref_scene_*.jpg`)**: Treat the attached keyframes and `0.5s` contact sheets as the visual ground truth. OCR text and contour boxes above are noisy hints for timing/size/coordinates ONLY — NEVER copy garbled OCR fragments (e.g. `.S`, `Showrea`, `Ertem`, `Estem`, `Enum`), NEVER draw separate floating text overlays on top of icons that belong inside tile cells, and NEVER draw a `pill` box unless a real pill button is clearly visible in the image.
+2. **EXACT TIMING & RICH MULTI-PHASE CHOREOGRAPHY (`index.html` + `script/scene1..{len(scenes)}.js`)**: Mirror the measured `SCENES` timings and `{width}x{height}` (`{int(round(fps))}fps`) `window.__filmMeta` contract. Build every visible intra-scene phase from the contact sheet (`early -> mid -> late` morphs, vector icons inside tiles, blurred background depth `ctx.filter = "blur(6px)"`, 3D shapes, secondary screen transitions) deterministically via `window.renderAt(t)`.
+3. **PER-SCENE PALETTE & TYPOGRAPHY FIDELITY**: Switch backgrounds/accents per scene to match each scene's measured `cleanPlate.fillHex`, `contrastTiles`, `bgHex`, `accentHex`, and measured pixel font size/weight above — never substitute generic default colors.
+4. **CLOSED-LOOP VISUAL SELF-CRITIQUE**: After writing `index.html` and `script/scene*.js`, call `capture_film_preview` with `compareToReference: true` and visually audit `.aetheria/preview/comparison_strip.jpg` (`Reference | Preview | Diff Heatmap`) for overlapping text, duplicate elements, missing early/late beats, or wrong silhouettes — even if dark-background SSIM looks > 0.85!
 """
 
     with open(report_md, "w", encoding="utf-8") as f:

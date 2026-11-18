@@ -99,6 +99,18 @@ def compute_edge_similarity(img_a: np.ndarray, img_b: np.ndarray) -> float:
     return float(np.clip(2.0 * prec * rec / (prec + rec), 0.0, 1.0))
 
 
+def compute_luma_correlation(img_a: np.ndarray, img_b: np.ndarray) -> float:
+    """Measures spatial polarity alignment via normalized grayscale Pearson correlation (-1..1)."""
+    ga = cv2.resize(cv2.cvtColor(img_a, cv2.COLOR_BGR2GRAY), (24, 14), interpolation=cv2.INTER_AREA).astype(np.float32).flatten()
+    gb = cv2.resize(cv2.cvtColor(img_b, cv2.COLOR_BGR2GRAY), (24, 14), interpolation=cv2.INTER_AREA).astype(np.float32).flatten()
+    ga -= float(np.mean(ga))
+    gb -= float(np.mean(gb))
+    denom = float(np.linalg.norm(ga) * np.linalg.norm(gb))
+    if denom < 1e-4:
+        return 1.0 if float(np.max(np.abs(ga - gb))) < 8.0 else 0.0
+    return float(np.clip(np.dot(ga, gb) / denom, -1.0, 1.0))
+
+
 def _fit_for_strip(img: np.ndarray, target_w: int, target_h: int) -> np.ndarray:
     return cv2.resize(img, (target_w, target_h), interpolation=cv2.INTER_AREA)
 
@@ -117,6 +129,59 @@ def _fit_letterbox(img: np.ndarray, target_w: int, target_h: int) -> np.ndarray:
     oy = (target_h - nh) // 2
     canvas[oy:oy + nh, ox:ox + nw] = resized
     return canvas
+
+
+def compute_foreground_metrics(ref_bgr: np.ndarray, prev_bgr: np.ndarray) -> Dict[str, Any]:
+    """Detects blank/crashed previews on dark/uniform backdrops and evaluates active foreground ROI."""
+    h, w = ref_bgr.shape[:2]
+    b = max(4, min(10, h // 24, w // 24))
+    border = np.concatenate(
+        [
+            ref_bgr[:b, :, :].reshape(-1, 3),
+            ref_bgr[-b:, :, :].reshape(-1, 3),
+            ref_bgr[:, :b, :].reshape(-1, 3),
+            ref_bgr[:, -b:, :].reshape(-1, 3),
+        ],
+        axis=0,
+    )
+    bg_bgr = np.median(border, axis=0).astype(np.int16)
+    ref_fg = np.max(np.abs(ref_bgr.astype(np.int16) - bg_bgr), axis=2) > 22
+    prev_fg = np.max(np.abs(prev_bgr.astype(np.int16) - bg_bgr), axis=2) > 22
+
+    ref_ratio = float(np.mean(ref_fg))
+    prev_ratio = float(np.mean(prev_fg))
+    coverage = prev_ratio / max(ref_ratio, 1e-6) if ref_ratio > 0 else 1.0
+    blank_detected = bool(ref_ratio >= 0.012 and prev_ratio < ref_ratio * 0.12)
+
+    fg_ssim = None
+    fg_color = None
+    if not blank_detected and 0.012 <= ref_ratio <= 0.42:
+        union = ref_fg | prev_fg
+        ys, xs = np.where(union)
+        if ys.size >= 32 and xs.size >= 32:
+            pad = 16
+            y0 = max(0, int(ys.min()) - pad)
+            y1 = min(h, int(ys.max()) + pad + 1)
+            x0 = max(0, int(xs.min()) - pad)
+            x1 = min(w, int(xs.max()) + pad + 1)
+            if (y1 - y0) >= 24 and (x1 - x0) >= 24:
+                fg_ssim = compute_rgb_ssim(ref_bgr[y0:y1, x0:x1], prev_bgr[y0:y1, x0:x1])
+        if np.count_nonzero(ref_fg) >= 32 and np.count_nonzero(prev_fg) >= 32:
+            r_hsv = cv2.cvtColor(ref_bgr, cv2.COLOR_BGR2HSV)
+            p_hsv = cv2.cvtColor(prev_bgr, cv2.COLOR_BGR2HSV)
+            h1 = cv2.calcHist([r_hsv], [0, 1], ref_fg.astype(np.uint8) * 255, [24, 16], [0, 180, 0, 256])
+            h2 = cv2.calcHist([p_hsv], [0, 1], prev_fg.astype(np.uint8) * 255, [24, 16], [0, 180, 0, 256])
+            cv2.normalize(h1, h1, 0, 1, cv2.NORM_MINMAX)
+            cv2.normalize(h2, h2, 0, 1, cv2.NORM_MINMAX)
+            corr = float(cv2.compareHist(h1, h2, cv2.HISTCMP_CORREL))
+            fg_color = float(np.clip((corr + 1.0) * 0.5, 0.0, 1.0))
+
+    return {
+        "blankFrameDetected": blank_detected,
+        "fgCoverageRatio": round(min(coverage, 9.99), 3),
+        "fgSsim": fg_ssim,
+        "fgColor": fg_color,
+    }
 
 
 def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -168,11 +233,19 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
         ssim = compute_rgb_ssim(ref_cmp, prev_cmp)
         color_sim = compute_color_similarity(ref_cmp, prev_cmp)
         edge_sim = compute_edge_similarity(ref_cmp, prev_cmp)
+        luma_corr = compute_luma_correlation(ref_cmp, prev_cmp)
+        fg_info = compute_foreground_metrics(ref_cmp, prev_cmp)
+        if fg_info["fgSsim"] is not None:
+            ssim = float(np.clip(0.65 * ssim + 0.35 * fg_info["fgSsim"], 0.0, 1.0))
+        if fg_info["fgColor"] is not None:
+            color_sim = float(np.clip(0.55 * color_sim + 0.45 * fg_info["fgColor"], 0.0, 1.0))
         luma_ref = float(np.mean(cv2.cvtColor(ref_cmp, cv2.COLOR_BGR2GRAY))) / 255.0
         luma_prev = float(np.mean(cv2.cvtColor(prev_cmp, cv2.COLOR_BGR2GRAY))) / 255.0
         luma_delta = round(luma_prev - luma_ref, 3)
 
         combined = float(np.clip(0.50 * ssim + 0.30 * color_sim + 0.20 * edge_sim, 0.0, 1.0))
+        if fg_info["blankFrameDetected"]:
+            combined = min(combined, 0.12)
         if ar_mismatch:
             verdict = "aspect_mismatch"
         else:
@@ -190,6 +263,9 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
             "colorSimilarity": round(color_sim, 4),
             "edgeSimilarity": round(edge_sim, 4),
             "luminanceDelta": luma_delta,
+            "lumaCorrelation": round(luma_corr, 3),
+            "blankFrameDetected": bool(fg_info["blankFrameDetected"]),
+            "fgCoverageRatio": fg_info["fgCoverageRatio"],
             "combinedScore": round(combined, 4),
             "aspectRatioMismatch": bool(ar_mismatch),
             "refDimensions": [int(rw), int(rh)],

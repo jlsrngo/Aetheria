@@ -140,7 +140,14 @@ pub(crate) fn select_extracted_vision_keyframes(
                                     continue;
                                 }
                                 let lower_path = path_str.to_ascii_lowercase();
-                                if lower_path.contains("_start.") || lower_path.contains("_end.") {
+                                if lower_path.contains("_beats.") {
+                                    continue;
+                                }
+                                if lower_path.contains("_start.")
+                                    || lower_path.contains("_end.")
+                                    || lower_path.contains("_q1.")
+                                    || lower_path.contains("_q3.")
+                                {
                                     transitions.push(p);
                                 } else {
                                     midpoints.push(p);
@@ -201,8 +208,15 @@ pub(crate) fn select_extracted_vision_keyframes(
                 .and_then(|n| n.to_str())
                 .unwrap_or("")
                 .to_ascii_lowercase();
+            if name.contains("_beats.") {
+                continue;
+            }
             if !has_style_scenes && name.starts_with("ref_scene_") {
-                if name.contains("_start.") || name.contains("_end.") {
+                if name.contains("_start.")
+                    || name.contains("_end.")
+                    || name.contains("_q1.")
+                    || name.contains("_q3.")
+                {
                     transitions.push(p);
                 } else {
                     midpoints.push(p);
@@ -216,10 +230,37 @@ pub(crate) fn select_extracted_vision_keyframes(
     let mut selected: Vec<PathBuf> = Vec::with_capacity(max_frames);
     let mut selected_set = std::collections::HashSet::new();
 
-    for idx in sample_evenly_indices(midpoints.len(), max_frames) {
+    // Collect compact contact sheets generated in ref/extracted/ (full temporal storyboard).
+    let mut sheets: Vec<PathBuf> = Vec::new();
+    if let Some(extracted_root) = frames_dir.parent() {
+        for idx in 1..=2 {
+            let cs = extracted_root.join(format!("contact_sheet_{}.jpg", idx));
+            if cs.is_file() {
+                sheets.push(cs);
+            }
+        }
+    }
+
+    // Reserve capacity for up to 2 temporal contact sheets alongside per-scene midpoints.
+    let mid_budget = if !sheets.is_empty() && max_frames > sheets.len() + 2 {
+        max_frames.saturating_sub(sheets.len())
+    } else {
+        max_frames
+    };
+
+    for idx in sample_evenly_indices(midpoints.len(), mid_budget) {
         let p = &midpoints[idx];
         if selected_set.insert(p.clone()) {
             selected.push(p.clone());
+        }
+    }
+
+    for cs in &sheets {
+        if selected.len() >= max_frames {
+            break;
+        }
+        if selected_set.insert(cs.clone()) {
+            selected.push(cs.clone());
         }
     }
 
@@ -759,6 +800,38 @@ mod tests {
         assert_eq!(temporal["extractorBackend"], "ffmpeg_fallback");
         assert!(report.contains("FFmpeg Fallback"));
         assert!(report.contains("ocrAvailable=false"));
+
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn select_extracted_vision_keyframes_includes_contact_sheets_alongside_midpoints() {
+        let ws = std::env::temp_dir().join(format!("aetheria_kf_cs_{}", crate::paths::now_ms()));
+        let extracted = ws.join("ref").join("extracted");
+        let frames_dir = extracted.join("frames");
+        std::fs::create_dir_all(&frames_dir).unwrap();
+
+        let mut scenes = Vec::new();
+        for idx in 1..=6 {
+            let mid = format!("ref_scene_{idx:02}.jpg");
+            std::fs::write(frames_dir.join(&mid), format!("mid_{idx}").as_bytes()).unwrap();
+            scenes.push(json!({
+                "index": idx,
+                "id": format!("scene_{idx}"),
+                "keyframe": format!("frames/{mid}")
+            }));
+        }
+        std::fs::write(extracted.join("contact_sheet_1.jpg"), b"sheet1").unwrap();
+        let style_path = extracted.join("style.json");
+        std::fs::write(&style_path, serde_json::to_string(&json!({ "scenes": scenes })).unwrap()).unwrap();
+
+        let selected = select_extracted_vision_keyframes(&frames_dir, Some(&style_path), 12);
+        let names: Vec<String> = selected
+            .iter()
+            .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(str::to_string))
+            .collect();
+        assert_eq!(names[0], "ref_scene_01.jpg");
+        assert!(names.contains(&"contact_sheet_1.jpg".to_string()));
 
         let _ = std::fs::remove_dir_all(&ws);
     }
