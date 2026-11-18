@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "manageIndexHtml": true,
+  "title": "Labs Studio Showreel Remake",
+  "width": 1024,
+  "height": 576,
+  "fps": 30,
+  "background": "#0C0B0E",
+  "useThree": false,
+  "scenes": [
+    {
+      "id": "scene1_hook",
+      "title": "Showreel Kinetic Intro",
+      "script": "script/scene1.js",
+      "start": 0.0,
+      "duration": 3.167,
+      "audio": "audio/bgm_scene1_hook.wav",
+      "sfx": "audio/sfx_scene1_hook.wav",
+      "accent": "#7D56EF"
+    },
+    {
+      "id": "scene2_bento_grid",
+      "title": "Bento Icon Matrix",
+      "script": "script/scene2.js",
+      "start": 3.167,
+      "duration": 2.433,
+      "audio": "audio/bgm_scene2_bento_grid.wav",
+      "sfx": "audio/sfx_scene2_bento_grid.wav",
+      "accent": "#D4D6CE"
+    },
+    {
+      "id": "scene3_card_zoom",
+      "title": "Making Logo Card Focus",
+      "script": "script/scene3.js",
+      "start": 5.6,
+      "duration": 1.067,
+      "audio": "audio/bgm_scene3_card_zoom.wav",
+      "sfx": "audio/sfx_scene3_card_zoom.wav",
+      "accent": "#6C4DF6"
+    },
+    {
+      "id": "scene4_cursor_fly",
+      "title": "3D Cursor Fly-In",
+      "script": "script/scene4.js",
+      "start": 6.667,
+      "duration": 1.166,
+      "audio": "audio/bgm_scene4_cursor_fly.wav",
+      "sfx": "audio/sfx_scene4_cursor_fly.wav",
+      "accent": "#7D56EF"
+    },
+    {
+      "id": "scene5_info_to_motion",
+      "title": "Information to Motion",
+      "script": "script/scene5.js",
+      "start": 7.833,
+      "duration": 3.167,
+      "audio": "audio/bgm_scene5_info_to_motion.wav",
+      "sfx": "audio/sfx_scene5_info_to_motion.wav",
+      "accent": "#DEDDDF"
+    },
+    {
+      "id": "scene6_laptop_ui",
+      "title": "Laptop UI & Design Wave",
+      "script": "script/scene6.js",
+      "start": 11.0,
+      "duration": 5.0,
+      "audio": "audio/bgm_scene6_laptop_ui.wav",
+      "sfx": "audio/sfx_scene6_laptop_ui.wav",
+      "accent": "#D8B85C"
+    },
+    {
+      "id": "scene7_word_stack",
+      "title": "Thinking Finding Building",
+      "script": "script/scene7.js",
+      "start": 16.0,
+      "duration": 4.0,
+      "audio": "audio/bgm_scene7_word_stack.wav",
+      "sfx": "audio/sfx_scene7_word_stack.wav",
+      "accent": "#FFFFFF"
+    },
+    {
+      "id": "scene8_outro",
+      "title": "Labs Studio Outro",
+      "script": "script/scene8.js",
+      "start": 20.0,
+      "duration": 5.867,
+      "audio": "audio/bgm_scene8_outro.wav",
+      "sfx": "audio/sfx_scene8_outro.wav",
+      "accent": "#A05240"
+    }
+  ]
+}

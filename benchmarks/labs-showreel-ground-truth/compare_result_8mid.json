@@ -1,0 +1,340 @@
+{
+    "ok":  true,
+    "comparedCount":  8,
+    "ssimMean":  0.8579,
+    "ssimMin":  0.6588,
+    "colorMatchMean":  0.941,
+    "edgeMatchMean":  0.5535,
+    "overallFidelity":  0.822,
+    "passThreshold":  0.85,
+    "ssimFloor":  0.765,
+    "aspectRatioMismatch":  false,
+    "passed":  false,
+    "sceneScores":  {
+                        "scene1_hook":  {
+                                            "count":  1,
+                                            "ssimMean":  0.9151,
+                                            "ssimMin":  0.9151,
+                                            "overallMean":  0.8716,
+                                            "overallMin":  0.8716
+                                        },
+                        "scene2_problem_or_context":  {
+                                                          "count":  1,
+                                                          "ssimMean":  0.6588,
+                                                          "ssimMin":  0.6588,
+                                                          "overallMean":  0.7267,
+                                                          "overallMin":  0.7267
+                                                      },
+                        "scene3_proof_or_demo":  {
+                                                     "count":  1,
+                                                     "ssimMean":  0.7049,
+                                                     "ssimMin":  0.7049,
+                                                     "overallMean":  0.6698,
+                                                     "overallMin":  0.6698
+                                                 },
+                        "scene4_cta":  {
+                                           "count":  1,
+                                           "ssimMean":  0.9223,
+                                           "ssimMin":  0.9223,
+                                           "overallMean":  0.7523,
+                                           "overallMin":  0.7523
+                                       },
+                        "scene5_beat_5":  {
+                                              "count":  1,
+                                              "ssimMean":  0.9811,
+                                              "ssimMin":  0.9811,
+                                              "overallMean":  0.9331,
+                                              "overallMin":  0.9331
+                                          },
+                        "scene6_beat_6":  {
+                                              "count":  1,
+                                              "ssimMean":  0.8333,
+                                              "ssimMin":  0.8333,
+                                              "overallMean":  0.8095,
+                                              "overallMin":  0.8095
+                                          },
+                        "scene7_beat_7":  {
+                                              "count":  1,
+                                              "ssimMean":  0.8977,
+                                              "ssimMin":  0.8977,
+                                              "overallMean":  0.9138,
+                                              "overallMin":  0.9138
+                                          },
+                        "scene8_beat_8":  {
+                                              "count":  1,
+                                              "ssimMean":  0.9504,
+                                              "ssimMin":  0.9504,
+                                              "overallMean":  0.8989,
+                                              "overallMin":  0.8989
+                                          }
+                    },
+    "comparisonStripPath":  "comparison_strip_8mid.jpg",
+    "perFrame":  [
+                     {
+                         "timestamp":  1.583,
+                         "refPath":  "frames/ref_scene_01.jpg",
+                         "refRelPath":  "frames/ref_scene_01.jpg",
+                         "previewPath":  "preview/prev_scene_01.jpg",
+                         "previewRelPath":  "preview/prev_scene_01.jpg",
+                         "ssim":  0.9151,
+                         "colorSimilarity":  0.9565,
+                         "edgeSimilarity":  0.6356,
+                         "luminanceDelta":  -0.008,
+                         "combinedScore":  0.8716,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "cocok",
+                         "sceneId":  "scene1_hook",
+                         "phase":  "mid"
+                     },
+                     {
+                         "timestamp":  4.382,
+                         "refPath":  "frames/ref_scene_02.jpg",
+                         "refRelPath":  "frames/ref_scene_02.jpg",
+                         "previewPath":  "preview/prev_scene_02.jpg",
+                         "previewRelPath":  "preview/prev_scene_02.jpg",
+                         "ssim":  0.6588,
+                         "colorSimilarity":  0.9044,
+                         "edgeSimilarity":  0.63,
+                         "luminanceDelta":  -0.009,
+                         "combinedScore":  0.7267,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "sebagian",
+                         "sceneId":  "scene2_problem_or_context",
+                         "phase":  "mid"
+                     },
+                     {
+                         "timestamp":  6.132,
+                         "refPath":  "frames/ref_scene_03.jpg",
+                         "refRelPath":  "frames/ref_scene_03.jpg",
+                         "previewPath":  "preview/prev_scene_03.jpg",
+                         "previewRelPath":  "preview/prev_scene_03.jpg",
+                         "ssim":  0.7049,
+                         "colorSimilarity":  0.8733,
+                         "edgeSimilarity":  0.2769,
+                         "luminanceDelta":  0.005,
+                         "combinedScore":  0.6698,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "sebagian",
+                         "sceneId":  "scene3_proof_or_demo",
+                         "phase":  "mid"
+                     },
+                     {
+                         "timestamp":  7.25,
+                         "refPath":  "frames/ref_scene_04.jpg",
+                         "refRelPath":  "frames/ref_scene_04.jpg",
+                         "previewPath":  "preview/prev_scene_04.jpg",
+                         "previewRelPath":  "preview/prev_scene_04.jpg",
+                         "ssim":  0.9223,
+                         "colorSimilarity":  0.9058,
+                         "edgeSimilarity":  0.0971,
+                         "luminanceDelta":  -0.012,
+                         "combinedScore":  0.7523,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "sebagian",
+                         "sceneId":  "scene4_cta",
+                         "phase":  "mid"
+                     },
+                     {
+                         "timestamp":  9.416,
+                         "refPath":  "frames/ref_scene_05.jpg",
+                         "refRelPath":  "frames/ref_scene_05.jpg",
+                         "previewPath":  "preview/prev_scene_05.jpg",
+                         "previewRelPath":  "preview/prev_scene_05.jpg",
+                         "ssim":  0.9811,
+                         "colorSimilarity":  0.9651,
+                         "edgeSimilarity":  0.7654,
+                         "luminanceDelta":  -0.003,
+                         "combinedScore":  0.9331,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "cocok",
+                         "sceneId":  "scene5_beat_5",
+                         "phase":  "mid"
+                     },
+                     {
+                         "timestamp":  13.5,
+                         "refPath":  "frames/ref_scene_06.jpg",
+                         "refRelPath":  "frames/ref_scene_06.jpg",
+                         "previewPath":  "preview/prev_scene_06.jpg",
+                         "previewRelPath":  "preview/prev_scene_06.jpg",
+                         "ssim":  0.8333,
+                         "colorSimilarity":  0.9805,
+                         "edgeSimilarity":  0.4935,
+                         "luminanceDelta":  0.002,
+                         "combinedScore":  0.8095,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "sebagian",
+                         "sceneId":  "scene6_beat_6",
+                         "phase":  "mid"
+                     },
+                     {
+                         "timestamp":  18,
+                         "refPath":  "frames/ref_scene_07.jpg",
+                         "refRelPath":  "frames/ref_scene_07.jpg",
+                         "previewPath":  "preview/prev_scene_07.jpg",
+                         "previewRelPath":  "preview/prev_scene_07.jpg",
+                         "ssim":  0.8977,
+                         "colorSimilarity":  0.9619,
+                         "edgeSimilarity":  0.8817,
+                         "luminanceDelta":  -0.013,
+                         "combinedScore":  0.9138,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "cocok",
+                         "sceneId":  "scene7_beat_7",
+                         "phase":  "mid"
+                     },
+                     {
+                         "timestamp":  22.934,
+                         "refPath":  "frames/ref_scene_08.jpg",
+                         "refRelPath":  "frames/ref_scene_08.jpg",
+                         "previewPath":  "preview/prev_scene_08.jpg",
+                         "previewRelPath":  "preview/prev_scene_08.jpg",
+                         "ssim":  0.9504,
+                         "colorSimilarity":  0.9802,
+                         "edgeSimilarity":  0.6481,
+                         "luminanceDelta":  -0.005,
+                         "combinedScore":  0.8989,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "cocok",
+                         "sceneId":  "scene8_beat_8",
+                         "phase":  "mid"
+                     }
+                 ],
+    "worstFrames":  [
+                        {
+                            "timestamp":  6.132,
+                            "refPath":  "frames/ref_scene_03.jpg",
+                            "refRelPath":  "frames/ref_scene_03.jpg",
+                            "previewPath":  "preview/prev_scene_03.jpg",
+                            "previewRelPath":  "preview/prev_scene_03.jpg",
+                            "ssim":  0.7049,
+                            "colorSimilarity":  0.8733,
+                            "edgeSimilarity":  0.2769,
+                            "luminanceDelta":  0.005,
+                            "combinedScore":  0.6698,
+                            "aspectRatioMismatch":  false,
+                            "refDimensions":  [
+                                                  1024,
+                                                  576
+                                              ],
+                            "previewDimensions":  [
+                                                      1024,
+                                                      576
+                                                  ],
+                            "verdict":  "sebagian",
+                            "sceneId":  "scene3_proof_or_demo",
+                            "phase":  "mid"
+                        },
+                        {
+                            "timestamp":  4.382,
+                            "refPath":  "frames/ref_scene_02.jpg",
+                            "refRelPath":  "frames/ref_scene_02.jpg",
+                            "previewPath":  "preview/prev_scene_02.jpg",
+                            "previewRelPath":  "preview/prev_scene_02.jpg",
+                            "ssim":  0.6588,
+                            "colorSimilarity":  0.9044,
+                            "edgeSimilarity":  0.63,
+                            "luminanceDelta":  -0.009,
+                            "combinedScore":  0.7267,
+                            "aspectRatioMismatch":  false,
+                            "refDimensions":  [
+                                                  1024,
+                                                  576
+                                              ],
+                            "previewDimensions":  [
+                                                      1024,
+                                                      576
+                                                  ],
+                            "verdict":  "sebagian",
+                            "sceneId":  "scene2_problem_or_context",
+                            "phase":  "mid"
+                        },
+                        {
+                            "timestamp":  7.25,
+                            "refPath":  "frames/ref_scene_04.jpg",
+                            "refRelPath":  "frames/ref_scene_04.jpg",
+                            "previewPath":  "preview/prev_scene_04.jpg",
+                            "previewRelPath":  "preview/prev_scene_04.jpg",
+                            "ssim":  0.9223,
+                            "colorSimilarity":  0.9058,
+                            "edgeSimilarity":  0.0971,
+                            "luminanceDelta":  -0.012,
+                            "combinedScore":  0.7523,
+                            "aspectRatioMismatch":  false,
+                            "refDimensions":  [
+                                                  1024,
+                                                  576
+                                              ],
+                            "previewDimensions":  [
+                                                      1024,
+                                                      576
+                                                  ],
+                            "verdict":  "sebagian",
+                            "sceneId":  "scene4_cta",
+                            "phase":  "mid"
+                        }
+                    ]
+}

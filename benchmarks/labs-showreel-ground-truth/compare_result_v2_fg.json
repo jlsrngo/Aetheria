@@ -1,0 +1,747 @@
+{
+    "ok":  true,
+    "comparedCount":  19,
+    "ssimMean":  0.8066,
+    "ssimMin":  0.5775,
+    "colorMatchMean":  0.9103,
+    "edgeMatchMean":  0.5294,
+    "overallFidelity":  0.7822,
+    "passThreshold":  0.85,
+    "ssimFloor":  0.765,
+    "aspectRatioMismatch":  false,
+    "passed":  false,
+    "sceneScores":  {
+                        "scene1_hook":  {
+                                            "count":  1,
+                                            "ssimMean":  0.8496,
+                                            "ssimMin":  0.8496,
+                                            "overallMean":  0.8438,
+                                            "overallMin":  0.8438
+                                        },
+                        "scene2_problem_or_context":  {
+                                                          "count":  1,
+                                                          "ssimMean":  0.6588,
+                                                          "ssimMin":  0.6588,
+                                                          "overallMean":  0.7267,
+                                                          "overallMin":  0.7267
+                                                      },
+                        "scene3_proof_or_demo":  {
+                                                     "count":  1,
+                                                     "ssimMean":  0.7049,
+                                                     "ssimMin":  0.7049,
+                                                     "overallMean":  0.6698,
+                                                     "overallMin":  0.6698
+                                                 },
+                        "scene4_cta":  {
+                                           "count":  1,
+                                           "ssimMean":  0.9022,
+                                           "ssimMin":  0.9022,
+                                           "overallMean":  0.713,
+                                           "overallMin":  0.713
+                                       },
+                        "scene5_beat_5":  {
+                                              "count":  1,
+                                              "ssimMean":  0.9811,
+                                              "ssimMin":  0.9811,
+                                              "overallMean":  0.9331,
+                                              "overallMin":  0.9331
+                                          },
+                        "scene6_beat_6":  {
+                                              "count":  1,
+                                              "ssimMean":  0.7888,
+                                              "ssimMin":  0.7888,
+                                              "overallMean":  0.7845,
+                                              "overallMin":  0.7845
+                                          },
+                        "scene7_beat_7":  {
+                                              "count":  1,
+                                              "ssimMean":  0.7955,
+                                              "ssimMin":  0.7955,
+                                              "overallMean":  0.8445,
+                                              "overallMin":  0.8445
+                                          },
+                        "scene8_beat_8":  {
+                                              "count":  1,
+                                              "ssimMean":  0.8762,
+                                              "ssimMin":  0.8762,
+                                              "overallMean":  0.862,
+                                              "overallMin":  0.862
+                                          },
+                        "s1_morph":  {
+                                         "count":  1,
+                                         "ssimMean":  0.8354,
+                                         "ssimMin":  0.8354,
+                                         "overallMean":  0.8344,
+                                         "overallMin":  0.8344
+                                     },
+                        "s2_bento":  {
+                                         "count":  1,
+                                         "ssimMean":  0.7361,
+                                         "ssimMin":  0.7361,
+                                         "overallMean":  0.8033,
+                                         "overallMin":  0.8033
+                                     },
+                        "s3_making_logo":  {
+                                               "count":  1,
+                                               "ssimMean":  0.5775,
+                                               "ssimMin":  0.5775,
+                                               "overallMean":  0.5558,
+                                               "overallMin":  0.5558
+                                           },
+                        "s4_3d_cursor":  {
+                                             "count":  1,
+                                             "ssimMean":  0.7751,
+                                             "ssimMin":  0.7751,
+                                             "overallMean":  0.6383,
+                                             "overallMin":  0.6383
+                                         },
+                        "s5_marquee":  {
+                                           "count":  1,
+                                           "ssimMean":  0.8634,
+                                           "ssimMin":  0.8634,
+                                           "overallMean":  0.8354,
+                                           "overallMin":  0.8354
+                                       },
+                        "s5_info_motion":  {
+                                               "count":  1,
+                                               "ssimMean":  0.9065,
+                                               "ssimMin":  0.9065,
+                                               "overallMean":  0.8515,
+                                               "overallMin":  0.8515
+                                           },
+                        "s6_laptop_pills":  {
+                                                "count":  1,
+                                                "ssimMean":  0.7888,
+                                                "ssimMin":  0.7888,
+                                                "overallMean":  0.7934,
+                                                "overallMin":  0.7934
+                                            },
+                        "s6_purple_design":  {
+                                                 "count":  1,
+                                                 "ssimMean":  0.734,
+                                                 "ssimMin":  0.734,
+                                                 "overallMean":  0.6535,
+                                                 "overallMin":  0.6535
+                                             },
+                        "s7_word_stack":  {
+                                              "count":  1,
+                                              "ssimMean":  0.7955,
+                                              "ssimMin":  0.7955,
+                                              "overallMean":  0.8449,
+                                              "overallMin":  0.8449
+                                          },
+                        "s8_bear_drop":  {
+                                             "count":  1,
+                                             "ssimMean":  0.8875,
+                                             "ssimMin":  0.8875,
+                                             "overallMean":  0.8333,
+                                             "overallMin":  0.8333
+                                         },
+                        "s8_labs_outro":  {
+                                              "count":  1,
+                                              "ssimMean":  0.8677,
+                                              "ssimMin":  0.8677,
+                                              "overallMean":  0.8415,
+                                              "overallMin":  0.8415
+                                          }
+                    },
+    "comparisonStripPath":  "comparison_strip.jpg",
+    "perFrame":  [
+                     {
+                         "timestamp":  1.583,
+                         "refPath":  "frames/ref_scene_01.jpg",
+                         "refRelPath":  "frames/ref_scene_01.jpg",
+                         "previewPath":  "preview/prev_scene_01.jpg",
+                         "previewRelPath":  "preview/prev_scene_01.jpg",
+                         "ssim":  0.8496,
+                         "colorSimilarity":  0.973,
+                         "edgeSimilarity":  0.6356,
+                         "luminanceDelta":  -0.008,
+                         "lumaCorrelation":  0.906,
+                         "blankFrameDetected":  false,
+                         "fgCoverageRatio":  0.633,
+                         "combinedScore":  0.8438,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "sebagian",
+                         "sceneId":  "scene1_hook",
+                         "phase":  "mid"
+                     },
+                     {
+                         "timestamp":  4.382,
+                         "refPath":  "frames/ref_scene_02.jpg",
+                         "refRelPath":  "frames/ref_scene_02.jpg",
+                         "previewPath":  "preview/prev_scene_02.jpg",
+                         "previewRelPath":  "preview/prev_scene_02.jpg",
+                         "ssim":  0.6588,
+                         "colorSimilarity":  0.9044,
+                         "edgeSimilarity":  0.63,
+                         "luminanceDelta":  -0.009,
+                         "lumaCorrelation":  0.974,
+                         "blankFrameDetected":  false,
+                         "fgCoverageRatio":  1.008,
+                         "combinedScore":  0.7267,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "sebagian",
+                         "sceneId":  "scene2_problem_or_context",
+                         "phase":  "mid"
+                     },
+                     {
+                         "timestamp":  6.132,
+                         "refPath":  "frames/ref_scene_03.jpg",
+                         "refRelPath":  "frames/ref_scene_03.jpg",
+                         "previewPath":  "preview/prev_scene_03.jpg",
+                         "previewRelPath":  "preview/prev_scene_03.jpg",
+                         "ssim":  0.7049,
+                         "colorSimilarity":  0.8733,
+                         "edgeSimilarity":  0.2769,
+                         "luminanceDelta":  0.005,
+                         "lumaCorrelation":  0.686,
+                         "blankFrameDetected":  false,
+                         "fgCoverageRatio":  1.047,
+                         "combinedScore":  0.6698,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "sebagian",
+                         "sceneId":  "scene3_proof_or_demo",
+                         "phase":  "mid"
+                     },
+                     {
+                         "timestamp":  7.25,
+                         "refPath":  "frames/ref_scene_04.jpg",
+                         "refRelPath":  "frames/ref_scene_04.jpg",
+                         "previewPath":  "preview/prev_scene_04.jpg",
+                         "previewRelPath":  "preview/prev_scene_04.jpg",
+                         "ssim":  0.9022,
+                         "colorSimilarity":  0.8084,
+                         "edgeSimilarity":  0.0971,
+                         "luminanceDelta":  -0.012,
+                         "lumaCorrelation":  0.287,
+                         "blankFrameDetected":  false,
+                         "fgCoverageRatio":  0.625,
+                         "combinedScore":  0.713,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "sebagian",
+                         "sceneId":  "scene4_cta",
+                         "phase":  "mid"
+                     },
+                     {
+                         "timestamp":  9.416,
+                         "refPath":  "frames/ref_scene_05.jpg",
+                         "refRelPath":  "frames/ref_scene_05.jpg",
+                         "previewPath":  "preview/prev_scene_05.jpg",
+                         "previewRelPath":  "preview/prev_scene_05.jpg",
+                         "ssim":  0.9811,
+                         "colorSimilarity":  0.9651,
+                         "edgeSimilarity":  0.7654,
+                         "luminanceDelta":  -0.003,
+                         "lumaCorrelation":  0.632,
+                         "blankFrameDetected":  false,
+                         "fgCoverageRatio":  0.464,
+                         "combinedScore":  0.9331,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "cocok",
+                         "sceneId":  "scene5_beat_5",
+                         "phase":  "mid"
+                     },
+                     {
+                         "timestamp":  13.5,
+                         "refPath":  "frames/ref_scene_06.jpg",
+                         "refRelPath":  "frames/ref_scene_06.jpg",
+                         "previewPath":  "preview/prev_scene_06.jpg",
+                         "previewRelPath":  "preview/prev_scene_06.jpg",
+                         "ssim":  0.7888,
+                         "colorSimilarity":  0.9712,
+                         "edgeSimilarity":  0.4935,
+                         "luminanceDelta":  0.002,
+                         "lumaCorrelation":  0.751,
+                         "blankFrameDetected":  false,
+                         "fgCoverageRatio":  0.888,
+                         "combinedScore":  0.7845,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "sebagian",
+                         "sceneId":  "scene6_beat_6",
+                         "phase":  "mid"
+                     },
+                     {
+                         "timestamp":  18.0,
+                         "refPath":  "frames/ref_scene_07.jpg",
+                         "refRelPath":  "frames/ref_scene_07.jpg",
+                         "previewPath":  "preview/prev_scene_07.jpg",
+                         "previewRelPath":  "preview/prev_scene_07.jpg",
+                         "ssim":  0.7955,
+                         "colorSimilarity":  0.9015,
+                         "edgeSimilarity":  0.8817,
+                         "luminanceDelta":  -0.013,
+                         "lumaCorrelation":  0.987,
+                         "blankFrameDetected":  false,
+                         "fgCoverageRatio":  0.745,
+                         "combinedScore":  0.8445,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "sebagian",
+                         "sceneId":  "scene7_beat_7",
+                         "phase":  "mid"
+                     },
+                     {
+                         "timestamp":  22.934,
+                         "refPath":  "frames/ref_scene_08.jpg",
+                         "refRelPath":  "frames/ref_scene_08.jpg",
+                         "previewPath":  "preview/prev_scene_08.jpg",
+                         "previewRelPath":  "preview/prev_scene_08.jpg",
+                         "ssim":  0.8762,
+                         "colorSimilarity":  0.9808,
+                         "edgeSimilarity":  0.6481,
+                         "luminanceDelta":  -0.005,
+                         "lumaCorrelation":  0.94,
+                         "blankFrameDetected":  false,
+                         "fgCoverageRatio":  0.828,
+                         "combinedScore":  0.862,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "cocok",
+                         "sceneId":  "scene8_beat_8",
+                         "phase":  "mid"
+                     },
+                     {
+                         "timestamp":  1.5,
+                         "refPath":  "dense_ref/k_01.50s.jpg",
+                         "refRelPath":  "dense_ref/k_01.50s.jpg",
+                         "previewPath":  "preview/prev_s1_morph.jpg",
+                         "previewRelPath":  "preview/prev_s1_morph.jpg",
+                         "ssim":  0.8354,
+                         "colorSimilarity":  0.9718,
+                         "edgeSimilarity":  0.6258,
+                         "luminanceDelta":  -0.009,
+                         "lumaCorrelation":  0.91,
+                         "blankFrameDetected":  false,
+                         "fgCoverageRatio":  0.741,
+                         "combinedScore":  0.8344,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "sebagian",
+                         "sceneId":  "s1_morph",
+                         "phase":  "hero"
+                     },
+                     {
+                         "timestamp":  4.2,
+                         "refPath":  "dense_ref/k_04.20s.jpg",
+                         "refRelPath":  "dense_ref/k_04.20s.jpg",
+                         "previewPath":  "preview/prev_s2_bento.jpg",
+                         "previewRelPath":  "preview/prev_s2_bento.jpg",
+                         "ssim":  0.7361,
+                         "colorSimilarity":  0.9177,
+                         "edgeSimilarity":  0.7995,
+                         "luminanceDelta":  -0.006,
+                         "lumaCorrelation":  0.988,
+                         "blankFrameDetected":  false,
+                         "fgCoverageRatio":  1.005,
+                         "combinedScore":  0.8033,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "sebagian",
+                         "sceneId":  "s2_bento",
+                         "phase":  "hero"
+                     },
+                     {
+                         "timestamp":  5.8,
+                         "refPath":  "dense_ref/k_05.80s.jpg",
+                         "refRelPath":  "dense_ref/k_05.80s.jpg",
+                         "previewPath":  "preview/prev_s3_making_logo.jpg",
+                         "previewRelPath":  "preview/prev_s3_making_logo.jpg",
+                         "ssim":  0.5775,
+                         "colorSimilarity":  0.7721,
+                         "edgeSimilarity":  0.1774,
+                         "luminanceDelta":  -0.045,
+                         "lumaCorrelation":  0.607,
+                         "blankFrameDetected":  false,
+                         "fgCoverageRatio":  1.447,
+                         "combinedScore":  0.5558,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "beda",
+                         "sceneId":  "s3_making_logo",
+                         "phase":  "hero"
+                     },
+                     {
+                         "timestamp":  6.8,
+                         "refPath":  "dense_ref/k_06.80s.jpg",
+                         "refRelPath":  "dense_ref/k_06.80s.jpg",
+                         "previewPath":  "preview/prev_s4_3d_cursor.jpg",
+                         "previewRelPath":  "preview/prev_s4_3d_cursor.jpg",
+                         "ssim":  0.7751,
+                         "colorSimilarity":  0.7712,
+                         "edgeSimilarity":  0.0969,
+                         "luminanceDelta":  -0.03,
+                         "lumaCorrelation":  0.562,
+                         "blankFrameDetected":  false,
+                         "fgCoverageRatio":  1.861,
+                         "combinedScore":  0.6383,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "beda",
+                         "sceneId":  "s4_3d_cursor",
+                         "phase":  "hero"
+                     },
+                     {
+                         "timestamp":  8.2,
+                         "refPath":  "dense_ref/k_08.20s.jpg",
+                         "refRelPath":  "dense_ref/k_08.20s.jpg",
+                         "previewPath":  "preview/prev_s5_marquee.jpg",
+                         "previewRelPath":  "preview/prev_s5_marquee.jpg",
+                         "ssim":  0.8634,
+                         "colorSimilarity":  0.9847,
+                         "edgeSimilarity":  0.5417,
+                         "luminanceDelta":  -0.009,
+                         "lumaCorrelation":  0.717,
+                         "blankFrameDetected":  false,
+                         "fgCoverageRatio":  0.676,
+                         "combinedScore":  0.8354,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "sebagian",
+                         "sceneId":  "s5_marquee",
+                         "phase":  "hero"
+                     },
+                     {
+                         "timestamp":  10.6,
+                         "refPath":  "dense_ref/k_10.60s.jpg",
+                         "refRelPath":  "dense_ref/k_10.60s.jpg",
+                         "previewPath":  "preview/prev_s5_info_motion.jpg",
+                         "previewRelPath":  "preview/prev_s5_info_motion.jpg",
+                         "ssim":  0.9065,
+                         "colorSimilarity":  0.9341,
+                         "edgeSimilarity":  0.5903,
+                         "luminanceDelta":  -0.005,
+                         "lumaCorrelation":  0.922,
+                         "blankFrameDetected":  false,
+                         "fgCoverageRatio":  0.88,
+                         "combinedScore":  0.8515,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "cocok",
+                         "sceneId":  "s5_info_motion",
+                         "phase":  "hero"
+                     },
+                     {
+                         "timestamp":  13.5,
+                         "refPath":  "dense_ref/k_13.50s.jpg",
+                         "refRelPath":  "dense_ref/k_13.50s.jpg",
+                         "previewPath":  "preview/prev_s6_laptop_pills.jpg",
+                         "previewRelPath":  "preview/prev_s6_laptop_pills.jpg",
+                         "ssim":  0.7888,
+                         "colorSimilarity":  0.9661,
+                         "edgeSimilarity":  0.5462,
+                         "luminanceDelta":  0.002,
+                         "lumaCorrelation":  0.75,
+                         "blankFrameDetected":  false,
+                         "fgCoverageRatio":  0.887,
+                         "combinedScore":  0.7934,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "sebagian",
+                         "sceneId":  "s6_laptop_pills",
+                         "phase":  "hero"
+                     },
+                     {
+                         "timestamp":  15.5,
+                         "refPath":  "dense_ref/k_15.50s.jpg",
+                         "refRelPath":  "dense_ref/k_15.50s.jpg",
+                         "previewPath":  "preview/prev_s6_purple_design.jpg",
+                         "previewRelPath":  "preview/prev_s6_purple_design.jpg",
+                         "ssim":  0.734,
+                         "colorSimilarity":  0.7349,
+                         "edgeSimilarity":  0.3302,
+                         "luminanceDelta":  0.006,
+                         "lumaCorrelation":  0.976,
+                         "blankFrameDetected":  false,
+                         "fgCoverageRatio":  1.005,
+                         "combinedScore":  0.6535,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "sebagian",
+                         "sceneId":  "s6_purple_design",
+                         "phase":  "hero"
+                     },
+                     {
+                         "timestamp":  18.0,
+                         "refPath":  "dense_ref/k_18.00s.jpg",
+                         "refRelPath":  "dense_ref/k_18.00s.jpg",
+                         "previewPath":  "preview/prev_s7_word_stack.jpg",
+                         "previewRelPath":  "preview/prev_s7_word_stack.jpg",
+                         "ssim":  0.7955,
+                         "colorSimilarity":  0.9027,
+                         "edgeSimilarity":  0.8817,
+                         "luminanceDelta":  -0.013,
+                         "lumaCorrelation":  0.987,
+                         "blankFrameDetected":  false,
+                         "fgCoverageRatio":  0.745,
+                         "combinedScore":  0.8449,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "sebagian",
+                         "sceneId":  "s7_word_stack",
+                         "phase":  "hero"
+                     },
+                     {
+                         "timestamp":  22.5,
+                         "refPath":  "dense_ref/k_22.50s.jpg",
+                         "refRelPath":  "dense_ref/k_22.50s.jpg",
+                         "previewPath":  "preview/prev_s8_bear_drop.jpg",
+                         "previewRelPath":  "preview/prev_s8_bear_drop.jpg",
+                         "ssim":  0.8875,
+                         "colorSimilarity":  0.9824,
+                         "edgeSimilarity":  0.4739,
+                         "luminanceDelta":  -0.005,
+                         "lumaCorrelation":  0.943,
+                         "blankFrameDetected":  false,
+                         "fgCoverageRatio":  0.784,
+                         "combinedScore":  0.8333,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "sebagian",
+                         "sceneId":  "s8_bear_drop",
+                         "phase":  "hero"
+                     },
+                     {
+                         "timestamp":  25.0,
+                         "refPath":  "dense_ref/k_25.00s.jpg",
+                         "refRelPath":  "dense_ref/k_25.00s.jpg",
+                         "previewPath":  "preview/prev_s8_labs_outro.jpg",
+                         "previewRelPath":  "preview/prev_s8_labs_outro.jpg",
+                         "ssim":  0.8677,
+                         "colorSimilarity":  0.9806,
+                         "edgeSimilarity":  0.5672,
+                         "luminanceDelta":  -0.004,
+                         "lumaCorrelation":  0.928,
+                         "blankFrameDetected":  false,
+                         "fgCoverageRatio":  0.87,
+                         "combinedScore":  0.8415,
+                         "aspectRatioMismatch":  false,
+                         "refDimensions":  [
+                                               1024,
+                                               576
+                                           ],
+                         "previewDimensions":  [
+                                                   1024,
+                                                   576
+                                               ],
+                         "verdict":  "sebagian",
+                         "sceneId":  "s8_labs_outro",
+                         "phase":  "hero"
+                     }
+                 ],
+    "worstFrames":  [
+                        {
+                            "timestamp":  5.8,
+                            "refPath":  "dense_ref/k_05.80s.jpg",
+                            "refRelPath":  "dense_ref/k_05.80s.jpg",
+                            "previewPath":  "preview/prev_s3_making_logo.jpg",
+                            "previewRelPath":  "preview/prev_s3_making_logo.jpg",
+                            "ssim":  0.5775,
+                            "colorSimilarity":  0.7721,
+                            "edgeSimilarity":  0.1774,
+                            "luminanceDelta":  -0.045,
+                            "lumaCorrelation":  0.607,
+                            "blankFrameDetected":  false,
+                            "fgCoverageRatio":  1.447,
+                            "combinedScore":  0.5558,
+                            "aspectRatioMismatch":  false,
+                            "refDimensions":  [
+                                                  1024,
+                                                  576
+                                              ],
+                            "previewDimensions":  [
+                                                      1024,
+                                                      576
+                                                  ],
+                            "verdict":  "beda",
+                            "sceneId":  "s3_making_logo",
+                            "phase":  "hero"
+                        },
+                        {
+                            "timestamp":  6.8,
+                            "refPath":  "dense_ref/k_06.80s.jpg",
+                            "refRelPath":  "dense_ref/k_06.80s.jpg",
+                            "previewPath":  "preview/prev_s4_3d_cursor.jpg",
+                            "previewRelPath":  "preview/prev_s4_3d_cursor.jpg",
+                            "ssim":  0.7751,
+                            "colorSimilarity":  0.7712,
+                            "edgeSimilarity":  0.0969,
+                            "luminanceDelta":  -0.03,
+                            "lumaCorrelation":  0.562,
+                            "blankFrameDetected":  false,
+                            "fgCoverageRatio":  1.861,
+                            "combinedScore":  0.6383,
+                            "aspectRatioMismatch":  false,
+                            "refDimensions":  [
+                                                  1024,
+                                                  576
+                                              ],
+                            "previewDimensions":  [
+                                                      1024,
+                                                      576
+                                                  ],
+                            "verdict":  "beda",
+                            "sceneId":  "s4_3d_cursor",
+                            "phase":  "hero"
+                        },
+                        {
+                            "timestamp":  15.5,
+                            "refPath":  "dense_ref/k_15.50s.jpg",
+                            "refRelPath":  "dense_ref/k_15.50s.jpg",
+                            "previewPath":  "preview/prev_s6_purple_design.jpg",
+                            "previewRelPath":  "preview/prev_s6_purple_design.jpg",
+                            "ssim":  0.734,
+                            "colorSimilarity":  0.7349,
+                            "edgeSimilarity":  0.3302,
+                            "luminanceDelta":  0.006,
+                            "lumaCorrelation":  0.976,
+                            "blankFrameDetected":  false,
+                            "fgCoverageRatio":  1.005,
+                            "combinedScore":  0.6535,
+                            "aspectRatioMismatch":  false,
+                            "refDimensions":  [
+                                                  1024,
+                                                  576
+                                              ],
+                            "previewDimensions":  [
+                                                      1024,
+                                                      576
+                                                  ],
+                            "verdict":  "sebagian",
+                            "sceneId":  "s6_purple_design",
+                            "phase":  "hero"
+                        }
+                    ]
+}
