@@ -59,35 +59,69 @@ pub(crate) async fn execute_subagent_tool_calls(
             Err(repair_err) => (json!({}), Some(repair_err)),
         };
 
-        if syntax_error.is_none()
-            && subagent_type.trim().eq_ignore_ascii_case("motion-designer")
-            && fn_name == "capture_film_preview"
-        {
-            let has_explicit_ts = parsed_args
-                .get("timestamps")
-                .and_then(Value::as_array)
-                .is_some_and(|a| !a.is_empty());
-            if !has_explicit_ts && parsed_args.get("targetSceneIndices").is_none() {
-                if let Some(first_user_text) = chat_messages
-                    .iter()
-                    .find(|m| m.get("role").and_then(Value::as_str) == Some("user"))
-                    .and_then(|m| m.get("content").and_then(Value::as_str))
-                {
+        let mut scoped_scene_guard_error: Option<String> = None;
+        if syntax_error.is_none() && subagent_type.trim().eq_ignore_ascii_case("motion-designer") {
+            let scoped_targets = chat_messages
+                .iter()
+                .find(|m| m.get("role").and_then(Value::as_str) == Some("user"))
+                .and_then(|m| {
+                    let c = m.get("content")?;
+                    if let Some(s) = c.as_str() {
+                        Some(s.to_string())
+                    } else if let Some(arr) = c.as_array() {
+                        arr.iter()
+                            .filter_map(|p| p.get("text").and_then(Value::as_str))
+                            .next()
+                            .map(str::to_string)
+                    } else {
+                        None
+                    }
+                })
+                .map(|first_user_text| {
                     let prompt_head: String = first_user_text
                         .split("<active_video_reference_report>")
                         .next()
-                        .unwrap_or(first_user_text)
+                        .unwrap_or(&first_user_text)
                         .chars()
-                        .take(1200)
+                        .take(1400)
                         .collect();
-                    let target_scenes =
+                    let raw =
                         super::subagent_scene_scope::extract_target_scene_indices(&prompt_head);
-                    if super::subagent_scene_scope::is_focused_scene_subset(
+                    super::subagent_scene_scope::clamp_target_scene_indices_for_reference(
                         workspace_dir,
-                        &target_scenes,
-                    ) {
-                        if let Some(obj) = parsed_args.as_object_mut() {
-                            obj.insert("targetSceneIndices".to_string(), json!(target_scenes));
+                        &raw,
+                    )
+                })
+                .unwrap_or_default();
+
+            let is_focused = super::subagent_scene_scope::is_focused_scene_subset(
+                workspace_dir,
+                &scoped_targets,
+            );
+            if fn_name == "capture_film_preview" && is_focused {
+                let has_explicit_ts = parsed_args
+                    .get("timestamps")
+                    .and_then(Value::as_array)
+                    .is_some_and(|a| !a.is_empty());
+                if !has_explicit_ts && parsed_args.get("targetSceneIndices").is_none() {
+                    if let Some(obj) = parsed_args.as_object_mut() {
+                        obj.insert("targetSceneIndices".to_string(), json!(scoped_targets));
+                    }
+                }
+            } else if is_focused && matches!(fn_name.as_str(), "write" | "edit" | "multiedit") {
+                if let Some(fp) = parsed_args
+                    .get("filePath")
+                    .or_else(|| parsed_args.get("path"))
+                    .and_then(Value::as_str)
+                {
+                    if let Some(scene_num) =
+                        super::subagent_scene_scope::extract_scene_script_number(fp)
+                    {
+                        if !scoped_targets.contains(&scene_num) {
+                            scoped_scene_guard_error = Some(format!(
+                                "SCENE SCOPE GUARD: This motion-designer task is scoped strictly to Scene(s) {:?}. Modifying '{}' (Scene {}) outside your assigned scene scope is blocked to prevent cross-scene regression.",
+                                scoped_targets, fp, scene_num
+                            ));
                         }
                     }
                 }
@@ -95,7 +129,9 @@ pub(crate) async fn execute_subagent_tool_calls(
         }
 
         let sub_profile = crate::tool::profiles::ToolProfile::from_subagent_type(subagent_type);
-        let policy_error = if fn_name == "question" {
+        let policy_error = if let Some(scope_err) = scoped_scene_guard_error {
+            Some(scope_err)
+        } else if fn_name == "question" {
             Some("Tool 'question' is unavailable inside subagents.".to_string())
         } else {
             crate::tool::profiles::check_tool_allowed_runtime(sub_profile, &fn_name).err()

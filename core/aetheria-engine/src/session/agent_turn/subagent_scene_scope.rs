@@ -120,12 +120,41 @@ fn encode_image_pair(ws: &Path, path: &Path) -> Option<(String, String)> {
     ))
 }
 
-/// Returns true when `target_scenes` is a focused subset (1..=3 scenes, fewer than total extracted scenes).
-pub(crate) fn is_focused_scene_subset(workspace_dir: &str, target_scenes: &[usize]) -> bool {
-    if target_scenes.is_empty() || target_scenes.len() > 3 {
-        return false;
+/// Clamps `target_scenes` to at most 2 scenes when the extracted reference video has `>= 4` scenes
+/// AND `target_scenes.len() < total`, preventing mass-refine tasks (such as `"Refine scene 3, 4, 5, 6, 7"`)
+/// from diluting vision attention and overwriting passing scenes.
+pub(crate) fn clamp_target_scene_indices_for_reference(
+    workspace_dir: &str,
+    target_scenes: &[usize],
+) -> Vec<usize> {
+    if target_scenes.len() <= 2 {
+        return target_scenes.to_vec();
     }
     let total = read_total_extracted_scenes(Path::new(workspace_dir));
+    if total >= 4 && target_scenes.len() > 2 {
+        return target_scenes[..2].to_vec();
+    }
+    target_scenes.to_vec()
+}
+
+/// Extracts `K` from a scene script path like `script/scene3.js` or `./script/scene12.js`.
+pub(crate) fn extract_scene_script_number(file_path: &str) -> Option<usize> {
+    let norm = file_path.trim().replace('\\', "/");
+    let fname = norm.rsplit('/').next().unwrap_or(&norm).to_ascii_lowercase();
+    let rest = fname.strip_prefix("scene")?.strip_suffix(".js")?;
+    if rest.is_empty() || !rest.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    rest.parse::<usize>().ok()
+}
+
+/// Returns true when `target_scenes` is a focused subset (1..=3 scenes, or 1..=2 scenes on `>= 4`-scene films).
+pub(crate) fn is_focused_scene_subset(workspace_dir: &str, target_scenes: &[usize]) -> bool {
+    let total = read_total_extracted_scenes(Path::new(workspace_dir));
+    let max_batch = if total >= 4 { 2 } else { 3 };
+    if target_scenes.is_empty() || target_scenes.len() > max_batch {
+        return false;
+    }
     total == 0 || target_scenes.len() < total
 }
 
@@ -215,5 +244,27 @@ mod tests {
         assert!(!filtered.contains("### Scene 3:"));
         assert!(!filtered.contains("Making logo"));
         assert!(filtered.contains("## Aetheria Modular HTML5/JS Reconstruction Directives"));
+    }
+
+    #[test]
+    fn clamps_mass_refine_scene_delegation_and_extracts_scene_script_number() {
+        let ws = std::env::temp_dir().join(format!("aetheria_clamp_sc_{}", crate::paths::now_ms()));
+        let ext_dir = ws.join("ref").join("extracted");
+        std::fs::create_dir_all(&ext_dir).unwrap();
+        std::fs::write(
+            ext_dir.join("style.json"),
+            r#"{"scenes":[{"id":"s1"},{"id":"s2"},{"id":"s3"},{"id":"s4"},{"id":"s5"},{"id":"s6"},{"id":"s7"},{"id":"s8"}]}"#,
+        )
+        .unwrap();
+        let ws_str = ws.to_string_lossy().to_string();
+        let raw = extract_target_scene_indices("Refine scene 3, scene 4, scene 5, scene 6, scene 7");
+        assert_eq!(raw, vec![3, 4, 5, 6, 7]);
+        let clamped = clamp_target_scene_indices_for_reference(&ws_str, &raw);
+        assert_eq!(clamped, vec![3, 4]);
+        assert!(is_focused_scene_subset(&ws_str, &clamped));
+        assert_eq!(extract_scene_script_number("script/scene3.js"), Some(3));
+        assert_eq!(extract_scene_script_number("./script/scene12.js"), Some(12));
+        assert_eq!(extract_scene_script_number("script/aetheria-motion.js"), None);
+        let _ = std::fs::remove_dir_all(&ws);
     }
 }

@@ -8,7 +8,7 @@ similarity, Sobel/Canny edge structure overlap, and renders a side-by-side
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 try:
     import cv2
@@ -197,6 +197,7 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     per_frame: List[Dict[str, Any]] = []
     strip_rows: List[np.ndarray] = []
+    scene_tiles_map: Dict[str, List[Tuple[float, np.ndarray, np.ndarray, np.ndarray, float, float, float]]] = {}
     any_ar_mismatch = False
 
     for item in pairs:
@@ -319,6 +320,10 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
         r_tile = _fit_for_strip(ref_cmp, tile_w, tile_h)
         p_tile = _fit_for_strip(prev_cmp, tile_w, tile_h)
         d_tile = _fit_for_strip(diff_heat, tile_w, tile_h)
+        if scene_id:
+            scene_tiles_map.setdefault(str(scene_id), []).append(
+                (ts, r_tile.copy(), p_tile.copy(), d_tile.copy(), ssim, edge_sim, combined)
+            )
 
         row_img = np.hstack([r_tile, p_tile, d_tile])
         banner = np.full((28, row_img.shape[1], 3), (24, 24, 28), dtype=np.uint8)
@@ -345,6 +350,48 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
     if strip_rows:
         canvas = np.vstack(strip_rows)
         strip_saved = bool(cv2.imwrite(str(strip_out), canvas, [cv2.IMWRITE_JPEG_QUALITY, 86]))
+
+    scene_beat_strips: Dict[str, str] = {}
+    for sid, tile_items in scene_tiles_map.items():
+        if not tile_items:
+            continue
+        tile_items.sort(key=lambda x: x[0])
+        ref_row_tiles: List[np.ndarray] = []
+        prev_row_tiles: List[np.ndarray] = []
+        diff_row_tiles: List[np.ndarray] = []
+        for ts_v, rt, pt, dt, ss_v, ed_v, cb_v in tile_items[:6]:
+            r_lbl = rt.copy()
+            p_lbl = pt.copy()
+            d_lbl = dt.copy()
+            cv2.rectangle(r_lbl, (0, 0), (140, 24), (14, 14, 18), -1)
+            cv2.putText(r_lbl, f"REF {ts_v:.2f}s", (6, 17), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
+            cv2.rectangle(p_lbl, (0, 0), (155, 24), (14, 14, 18), -1)
+            cv2.putText(p_lbl, f"PREV {ts_v:.2f}s", (6, 17), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 255, 180), 1, cv2.LINE_AA)
+            cv2.rectangle(d_lbl, (0, 0), (r_lbl.shape[1], 24), (14, 14, 18), -1)
+            cv2.putText(
+                d_lbl,
+                f"DIFF S={ss_v:.2f} E={ed_v:.2f} C={cb_v:.2f}",
+                (6, 17),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.40,
+                (255, 220, 140),
+                1,
+                cv2.LINE_AA,
+            )
+            ref_row_tiles.append(r_lbl)
+            prev_row_tiles.append(p_lbl)
+            diff_row_tiles.append(d_lbl)
+        row_ref = np.hstack(ref_row_tiles)
+        row_prev = np.hstack(prev_row_tiles)
+        row_diff = np.hstack(diff_row_tiles)
+        grid_6b = np.vstack([row_ref, row_prev, row_diff])
+        digits = "".join(ch for ch in sid if ch.isdigit())
+        s_num = int(digits) if digits else 1
+        beat_out = strip_out.parent / f"scene_{s_num:02d}_compare_6beats.jpg"
+        if cv2.imwrite(str(beat_out), grid_6b, [cv2.IMWRITE_JPEG_QUALITY, 88]):
+            scene_beat_strips[sid] = str(beat_out)
+
+    primary_beat_strip = next(iter(scene_beat_strips.values()), None) if len(scene_beat_strips) <= 2 else None
 
     ssim_mean = round(float(np.mean([f["ssim"] for f in per_frame])), 4)
     ssim_min = round(float(np.min([f["ssim"] for f in per_frame])), 4)
@@ -385,6 +432,8 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
         "passed": passed,
         "sceneScores": scene_scores,
         "comparisonStripPath": str(strip_out) if strip_saved else None,
+        "sceneBeatStripPaths": scene_beat_strips,
+        "primarySceneBeatStripPath": primary_beat_strip,
         "perFrame": per_frame,
         "worstFrames": worst,
     }

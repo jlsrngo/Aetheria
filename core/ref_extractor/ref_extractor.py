@@ -378,6 +378,8 @@ def measure_contrast_tile_grid(
     origin_y = rem_y - pitch_y if rem_y > pitch_y * 0.3 else rem_y
     rows: List[str] = []
     y = origin_y
+    populated_cells = 0
+    total_cells = 0
     while y < h:
         row = ""
         x = origin_x
@@ -385,14 +387,24 @@ def measure_contrast_tile_grid(
             cx0, cx1 = int(max(0, x + pitch_x * 0.15)), int(min(w, x + pitch_x * 0.85))
             cy0, cy1 = int(max(0, y + pitch_y * 0.15)), int(min(h, y + pitch_y * 0.85))
             if cx1 - cx0 > 4 and cy1 - cy0 > 4:
-                med = float(np.median(gray[cy0:cy1, cx0:cx1]))
-                row += "L" if med > 150 else ("D" if med < 80 else "M")
+                patch = gray[cy0:cy1, cx0:cx1]
+                med = float(np.median(patch))
+                cell_ch = "L" if med > 150 else ("D" if med < 80 else "M")
+                row += cell_ch
+                # Measure interior icon contrast inside [0.22..0.78] of cell
+                ix0, ix1 = int(max(0, x + pitch_x * 0.22)), int(min(w, x + pitch_x * 0.78))
+                iy0, iy1 = int(max(0, y + pitch_y * 0.22)), int(min(h, y + pitch_y * 0.78))
+                if ix1 - ix0 > 6 and iy1 - iy0 > 6:
+                    total_cells += 1
+                    if float(np.std(gray[iy0:iy1, ix0:ix1])) >= 8.0:
+                        populated_cells += 1
             x += pitch_x
         if row:
             rows.append(row)
         y += pitch_y
     if not rows:
         return None
+    icon_ratio = round(float(populated_cells) / float(max(1, total_cells)), 2)
     return {
         "pitchX": round(pitch_x, 1),
         "pitchY": round(pitch_y, 1),
@@ -401,6 +413,13 @@ def measure_contrast_tile_grid(
         "cols": max(len(r) for r in rows),
         "rows": len(rows),
         "map": rows,
+        "populatedIconRatio": icon_ratio,
+        "iconPopulatedEveryCell": bool(icon_ratio >= 0.45),
+        "iconRule": (
+            "CRITICAL BENTO ICON RULE: EVERY visible tile cell — BOTH lightTile (L) AND darkTile (D) — "
+            "must contain a distinct centered vector icon (draw dark #1D1E21 vector icons inside lightTile "
+            "cells and bright #F0EEEC vector icons inside darkTile cells; NEVER leave darkTile cells blank)"
+        ),
     }
 
 
@@ -722,6 +741,11 @@ def _quick_ocr_summary(frame_bgr: Optional[np.ndarray], ocr_engine: Any) -> List
             if len(clean) <= 2 and clean.startswith("."):
                 continue
             words.append(clean)
+        try:
+            from ref_motion_clues import sanitize_ocr_tokens_for_clues
+            words = sanitize_ocr_tokens_for_clues(words)
+        except Exception:
+            pass
         return words[:5]
     except Exception:
         return []
@@ -1006,6 +1030,11 @@ def analyze_frame_layout(frame_bgr: np.ndarray, ocr_engine: Optional[Any] = None
                     y0, y1 = max(0.0, min(ys)), min(float(h), max(ys))
                     y_mid = ((y0 + y1) * 0.5) / float(h)
                     clean_text = text.strip()
+                    low_clean = clean_text.lower()
+                    if low_clean in ("showrea", "shosea", "showre"):
+                        clean_text = "Showreel"
+                    elif low_clean in ("ertem", "estem", "1 ahe", "ahe", ".s", "s."):
+                        continue
                     text_heights.append((y1 - y0) / float(h))
 
                     zone = "hero"
@@ -1453,7 +1482,7 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
                 q3_name = f"ref_scene_{i + 1:02d}_q3.jpg"
                 cv2.imwrite(str(frames_dir / q3_name), fr_q3, [cv2.IMWRITE_JPEG_QUALITY, 90])
                 sub_keyframes.append({"t": ts_q3, "path": f"frames/{q3_name}"})
-        if fr_end is not None and dur >= 1.2:
+        if fr_end is not None and dur >= 0.8:
             end_name = f"ref_scene_{i + 1:02d}_end.jpg"
             cv2.imwrite(str(frames_dir / end_name), fr_end, [cv2.IMWRITE_JPEG_QUALITY, 88])
             sub_keyframes.append({"t": ts_end, "path": f"frames/{end_name}"})
@@ -1580,6 +1609,7 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
             "keyframeTimestamp": ts_mid,
             "keyframe": f"frames/{scene_kf_name}",
             "beatsStrip": beats_strip_rel,
+            "beatStripTimestamps": [round(float(t), 3) for t in beat_strip_ts],
             "keyframes": sub_keyframes,
             "subBeats": sub_beats,
             "gridTiltDeg": grid_tilt_deg,
@@ -1595,6 +1625,7 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
             "end": round(end, 3),
             "duration": dur,
             "beatsStrip": beats_strip_rel,
+            "beatStripTimestamps": [round(float(t), 3) for t in beat_strip_ts],
             "subBeats": sub_beats,
             "gridTiltDeg": grid_tilt_deg,
             "contrastTiles": contrast_tiles,
@@ -1790,17 +1821,22 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
         ct = ly.get("contrastTiles")
         if ct and ct.get("grid"):
             grid = ct["grid"]
+            icon_rule = f" | **{grid.get('iconRule', '')}**" if grid.get("iconRule") else ""
             md += (
                 f"- **High-Contrast Tile Wall (measured, NOT a checkerboard):** `lightTile={ct['lightTileHex']}`, `darkTile={ct['darkTileHex']}`, "
                 f"`pitch={grid['pitchX']}x{grid['pitchY']}px`, `origin=({grid['originX']},{grid['originY']})`, `{grid['cols']} cols x {grid['rows']} rows`, "
                 f"rows top->bottom (`L`=lightTile, `D`=darkTile, `M`=mid grey): `{' / '.join(grid['map'])}` — after the tilt rotate, draw cell (r,c) at "
-                f"`originX + c*pitchX, originY + r*pitchY` sized `pitch - 8px` over a near-black gap background, colored EXACTLY per this map\n"
+                f"`originX + c*pitchX, originY + r*pitchY` sized `pitch - 8px` over a near-black gap background, colored EXACTLY per this map{icon_rule}\n"
             )
         elif ct:
-            md += f"- **High-Contrast Tiles:** `lightTile={ct['lightTileHex']}`, `darkTile={ct['darkTileHex']}`, `topLeft={ct['topLeft']}` — crisp `lightTile` and near-black `darkTile` placed where `ref_scene_XX.jpg` shows them (NEVER substitute medium grey for dark tiles)\n"
+            md += f"- **High-Contrast Tiles:** `lightTile={ct['lightTileHex']}`, `darkTile={ct['darkTileHex']}`, `topLeft={ct['topLeft']}` — crisp `lightTile` and near-black `darkTile` placed where `ref_scene_XX.jpg` shows them (NEVER substitute medium grey for dark tiles, and draw contrast-inverted vector icons inside BOTH light and dark tiles)\n"
         if s.get("subBeats"):
             md += f"- **Intra-Scene Multi-Beat Shifts:** `{' | '.join(s['subBeats'])}`\n"
         mc = s.get("motionClues") or {}
+        if mc.get("inlineGlyphMorph"):
+            md += f"- **Inline Glyph Morph (CRITICAL):** `{mc['inlineGlyphMorph']}`\n"
+        if mc.get("heroCardBox"):
+            md += f"- **Centered Hero Card Over Blurred Backdrop (CRITICAL):** `heroCardBox={mc['heroCardBox']}`, `backdrop={mc.get('blurredBackdrop', '')}`\n"
         if mc.get("saturatedAccents"):
             acc_strs = [
                 f"{a['hex']}@({a['box'][0]},{a['box'][1]},{a['box'][2]}x{a['box'][3]}px)@{a['timestamp']:.2f}s"

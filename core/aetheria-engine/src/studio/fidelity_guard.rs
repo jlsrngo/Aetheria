@@ -181,6 +181,8 @@ pub struct FidelityHistorySummary {
 
 static FIDELITY_SCORE_HISTORY: OnceLock<Mutex<HashMap<String, Vec<f64>>>> = OnceLock::new();
 static SCENE_POLISH_ATTEMPTS: OnceLock<Mutex<HashMap<String, usize>>> = OnceLock::new();
+static BEST_SCENE_SNAPSHOTS: OnceLock<Mutex<HashMap<String, (f64, String, String)>>> =
+    OnceLock::new();
 
 fn fidelity_history_store() -> &'static Mutex<HashMap<String, Vec<f64>>> {
     FIDELITY_SCORE_HISTORY.get_or_init(|| Mutex::new(HashMap::new()))
@@ -188,6 +190,103 @@ fn fidelity_history_store() -> &'static Mutex<HashMap<String, Vec<f64>>> {
 
 fn scene_polish_attempts_store() -> &'static Mutex<HashMap<String, usize>> {
     SCENE_POLISH_ATTEMPTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn best_scene_snapshots_store() -> &'static Mutex<HashMap<String, (f64, String, String)>> {
+    BEST_SCENE_SNAPSHOTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn parse_scene_number_from_id(scene_id: &str) -> Option<usize> {
+    let lower = scene_id.trim().to_ascii_lowercase();
+    let rest = lower.strip_prefix("scene")?;
+    let digits: String = rest
+        .trim_start_matches(['_', '-'])
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    if digits.is_empty() {
+        return None;
+    }
+    digits.parse::<usize>().ok()
+}
+
+/// Snapshots the best-scoring version of each `script/sceneK.js` per `(film_root, sceneId)` when
+/// `runtime_errors_empty` is true, and automatically rolls back `script/sceneK.js` on disk whenever
+/// a subsequent edit introduces runtime errors or drops that scene's `overallMean` by `> 0.008`.
+pub fn reconcile_per_scene_snapshots_and_rollback(
+    film_root: &Path,
+    runtime_errors_empty: bool,
+    comparison: &Value,
+) -> Vec<Value> {
+    let root_key = film_root
+        .to_string_lossy()
+        .replace('\\', "/")
+        .to_ascii_lowercase();
+    let mut guard = best_scene_snapshots_store()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let mut rolled_back = Vec::new();
+
+    if !runtime_errors_empty {
+        let prefix = format!("{root_key}#");
+        for (k, (best_score, script_rel, best_code)) in guard.iter() {
+            if !k.starts_with(&prefix) {
+                continue;
+            }
+            let sid = k.trim_start_matches(&prefix);
+            let disk_path = film_root.join(script_rel);
+            if let Ok(cur_code) = std::fs::read_to_string(&disk_path) {
+                if cur_code != *best_code && std::fs::write(&disk_path, best_code).is_ok() {
+                    rolled_back.push(json!({
+                        "sceneId": sid,
+                        "script": script_rel,
+                        "reason": "runtime_error",
+                        "restoredBestScore": best_score,
+                    }));
+                }
+            }
+        }
+        return rolled_back;
+    }
+
+    let Some(scene_scores) = comparison.get("sceneScores").and_then(Value::as_object) else {
+        return rolled_back;
+    };
+
+    for (sid, stats) in scene_scores {
+        let Some(overall_mean) = stats.get("overallMean").and_then(Value::as_f64) else {
+            continue;
+        };
+        let Some(scene_num) = parse_scene_number_from_id(sid) else {
+            continue;
+        };
+        let script_rel = format!("script/scene{scene_num}.js");
+        let disk_path = film_root.join(&script_rel);
+        let Ok(cur_code) = std::fs::read_to_string(&disk_path) else {
+            continue;
+        };
+        let snap_key = format!("{root_key}#scene{scene_num}");
+        match guard.get(&snap_key).cloned() {
+            None => {
+                guard.insert(snap_key, (overall_mean, script_rel, cur_code));
+            }
+            Some((best_score, _, best_code)) => {
+                if overall_mean >= best_score - 0.008 {
+                    if overall_mean >= best_score {
+                        guard.insert(snap_key, (overall_mean, script_rel, cur_code));
+                    }
+                } else if cur_code != best_code && std::fs::write(&disk_path, &best_code).is_ok() {
+                    rolled_back.push(json!({
+                        "sceneId": sid,
+                        "script": script_rel,
+                        "rolledBackFrom": overall_mean,
+                        "restoredBestScore": best_score,
+                    }));
+                }
+            }
+        }
+    }
+    rolled_back
 }
 
 pub(crate) fn record_fidelity_score_in_map(
@@ -269,6 +368,7 @@ pub fn build_target_worst_scenes(
             "clippedTextDetected",
             "textDriftDetected",
             "stackedRowMismatch",
+            "emptyTileCellsDetected",
         ]
         .iter()
         .any(|k| f.get(*k).and_then(Value::as_bool) == Some(true))
@@ -552,6 +652,32 @@ mod tests {
             .as_str()
             .unwrap_or("")
             .contains("early-beat mismatch"));
+
+        // Verify per-scene snapshot & auto-rollback when a refine pass degrades a scene's score
+        let script_dir = ws.join("script");
+        std::fs::create_dir_all(&script_dir).unwrap();
+        let s1_path = script_dir.join("scene1.js");
+        let good_code = "window.AM.registerScene('s1_hook', function(ctx){ /* good v1 */ });";
+        std::fs::write(&s1_path, good_code).unwrap();
+        let cmp_pass1 = json!({
+            "sceneScores": {
+                "scene1_hook": { "overallMean": 0.742 }
+            }
+        });
+        let rb1 = reconcile_per_scene_snapshots_and_rollback(&ws, true, &cmp_pass1);
+        assert!(rb1.is_empty());
+
+        let broken_code = "window.AM.registerScene('s1_hook', function(ctx){ /* regressed v2 */ });";
+        std::fs::write(&s1_path, broken_code).unwrap();
+        let cmp_pass2 = json!({
+            "sceneScores": {
+                "scene1_hook": { "overallMean": 0.610 }
+            }
+        });
+        let rb2 = reconcile_per_scene_snapshots_and_rollback(&ws, true, &cmp_pass2);
+        assert_eq!(rb2.len(), 1);
+        assert_eq!(rb2[0]["script"], "script/scene1.js");
+        assert_eq!(std::fs::read_to_string(&s1_path).unwrap(), good_code);
 
         let _ = std::fs::remove_dir_all(&ws);
     }

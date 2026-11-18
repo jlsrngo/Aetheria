@@ -86,7 +86,9 @@ pub(crate) fn collect_unresolved_failures_with_buckets(
         if p.get("type").and_then(Value::as_str) != Some("tool") {
             continue;
         }
-        if p.pointer("/state/structured/syntaxError").and_then(Value::as_bool) == Some(true) {
+        if p.pointer("/state/structured/syntaxError").and_then(Value::as_bool) == Some(true)
+            || p.pointer("/state/structured/blocked").and_then(Value::as_bool) == Some(true)
+        {
             continue;
         }
         let name = p.get("name").and_then(Value::as_str).unwrap_or("");

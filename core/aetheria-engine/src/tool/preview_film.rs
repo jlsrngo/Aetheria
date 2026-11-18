@@ -102,6 +102,22 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
                 // Attach ONLY the unified side-by-side comparison strip (Ref | Preview | Diff Heatmap)
                 // instead of duplicating 12 raw preview frames that flood vision context on multi-pass polish.
                 vision_images.push(Value::String(strip_url));
+                if let Some(beat_strip_path) = res
+                    .reference_comparison
+                    .as_ref()
+                    .and_then(|c| c.get("primarySceneBeatStripPath"))
+                    .and_then(Value::as_str)
+                {
+                    if let Ok(bytes) = std::fs::read(beat_strip_path) {
+                        if !bytes.is_empty() {
+                            use base64::prelude::*;
+                            vision_images.push(Value::String(format!(
+                                "data:image/jpeg;base64,{}",
+                                BASE64_STANDARD.encode(&bytes)
+                            )));
+                        }
+                    }
+                }
             } else {
                 for f in &res.frames {
                     vision_images.push(Value::String(f.data_url.clone()));
@@ -159,8 +175,20 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
                     } else {
                         String::new()
                     };
+                    let rollback_note = cmp
+                        .get("autoRolledBackScenes")
+                        .and_then(Value::as_array)
+                        .filter(|a| !a.is_empty())
+                        .map(|arr| {
+                            let names: Vec<String> = arr
+                                .iter()
+                                .filter_map(|x| x.get("script").and_then(Value::as_str).map(str::to_string))
+                                .collect();
+                            format!(" AUTO-ROLLBACK RESTORED best snapshot for {:?} after score regression.", names)
+                        })
+                        .unwrap_or_default();
                     format!(
-                        " Reference comparison: RGB SSIM mean={}, color={}, edge={}, overall={}, passed={}. Inspect side-by-side strip + frames.{}{}",
+                        " Reference comparison: RGB SSIM mean={}, color={}, edge={}, overall={}, passed={}. Inspect side-by-side strip + frames.{}{}{}",
                         cmp.get("ssimMean").and_then(Value::as_f64).unwrap_or(0.0),
                         cmp.get("colorMatchMean").and_then(Value::as_f64).unwrap_or(0.0),
                         cmp.get("edgeMatchMean").and_then(Value::as_f64).unwrap_or(0.0),
@@ -168,6 +196,7 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
                         cmp.get("passed").and_then(Value::as_bool).unwrap_or(false),
                         worst_note,
                         reg_note,
+                        rollback_note,
                     )
                 }
                 _ => String::new(),

@@ -174,7 +174,22 @@ pub fn execute_subagent<'a>(
                 sys_prompt.push_str(&ms_override);
             }
             let scope_text = format!("{}\n{}", description, prompt);
-            let target_scenes = super::subagent_scene_scope::extract_target_scene_indices(&scope_text);
+            let raw_target_scenes =
+                super::subagent_scene_scope::extract_target_scene_indices(&scope_text);
+            let target_scenes = if subagent_type.trim().eq_ignore_ascii_case("motion-designer") {
+                super::subagent_scene_scope::clamp_target_scene_indices_for_reference(
+                    workspace_dir,
+                    &raw_target_scenes,
+                )
+            } else {
+                raw_target_scenes.clone()
+            };
+            if raw_target_scenes.len() > target_scenes.len() {
+                effective_prompt = format!(
+                    "[SCENE SCOPE GUARD (v13): Multi-scene mass edits (>2 scenes) are prohibited to prevent cross-scene regressions. Your scope for this task is STRICTLY clamped to Scene(s) {:?} ONLY. Do NOT write or edit any other script/scene*.js file.]\n\n{}",
+                    target_scenes, effective_prompt
+                );
+            }
             let is_scoped_batch =
                 super::subagent_scene_scope::is_focused_scene_subset(workspace_dir, &target_scenes);
             if subagent_type.trim().eq_ignore_ascii_case("motion-designer")
@@ -838,6 +853,9 @@ pub(crate) fn evaluate_subagent_verification_gate_in_workspace(
         if p.pointer("/state/structured/syntaxError")
             .and_then(Value::as_bool)
             == Some(true)
+            || p.pointer("/state/structured/blocked")
+                .and_then(Value::as_bool)
+                == Some(true)
         {
             continue;
         }

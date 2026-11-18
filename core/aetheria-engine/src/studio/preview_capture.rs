@@ -369,6 +369,12 @@ pub async fn capture_film_preview_with_options(
                     let hist = super::fidelity_guard::record_fidelity_score(&project_key, overall);
                     let target_worst =
                         super::fidelity_guard::build_target_worst_scenes(&film_root, &cmp_json);
+                    let rolled_back_scenes =
+                        super::fidelity_guard::reconcile_per_scene_snapshots_and_rollback(
+                            &film_root,
+                            runtime_errors.is_empty(),
+                            &cmp_json,
+                        );
                     if let Some(obj) = cmp_json.as_object_mut() {
                         obj.insert("attempt".to_string(), json!(hist.attempt));
                         obj.insert("previousOverall".to_string(), json!(hist.previous_overall));
@@ -378,6 +384,12 @@ pub async fn capture_film_preview_with_options(
                             json!(hist.regressed_from_previous),
                         );
                         obj.insert("targetWorstScenes".to_string(), json!(target_worst));
+                        if !rolled_back_scenes.is_empty() {
+                            obj.insert(
+                                "autoRolledBackScenes".to_string(),
+                                json!(rolled_back_scenes),
+                            );
+                        }
                     }
                 }
                 (Some(cmp_json), strip_url)

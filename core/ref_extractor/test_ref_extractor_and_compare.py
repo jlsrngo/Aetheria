@@ -325,6 +325,73 @@ class RefExtractorAndCompareTests(unittest.TestCase):
         self.assertIsNotNone(clues.get("objectTrajectory"))
         self.assertEqual(len(clues.get("denseTimeline", [])), 6)
 
+    def test_v13_hero_card_over_bright_backdrop_inline_glyph_morph_bento_icons_and_marquee(self):
+        import ref_motion_clues as rmc
+        import ref_structural_compare as rsc
+
+        # 1. Scene 3 hero card over bright/blurred backdrop (v13 #2)
+        scene3 = np.full((576, 1024, 3), 232, dtype=np.uint8)
+        cv2.rectangle(scene3, (40, 60), (310, 510), (210, 212, 216), -1)
+        cv2.rectangle(scene3, (710, 60), (980, 510), (210, 212, 216), -1)
+        scene3 = cv2.GaussianBlur(scene3, (15, 15), 5.0)
+        # Sharp centered vertical hero card [356, 34, 312, 506]
+        cv2.rectangle(scene3, (356, 34), (668, 540), (248, 248, 250), -1)
+        cv2.rectangle(scene3, (356, 34), (668, 540), (40, 42, 46), 3)
+        hero_info = rmc.detect_centered_hero_card_over_bright_backdrop(scene3)
+        self.assertIsNotNone(hero_info)
+        hx, hy, hw, hh = hero_info["heroCardBox"]
+        self.assertAlmostEqual(hx, 356, delta=24)
+        self.assertAlmostEqual(hw, 312, delta=36)
+        self.assertGreaterEqual(hh, 440)
+
+        # 2. Scene 1 inline glyph morph clue (v13 #3)
+        s1_fr = np.full((576, 1024, 3), 12, dtype=np.uint8)
+        accents = [
+            {"hex": "#884BF9", "box": [620, 260, 44, 52], "timestamp": 1.5},
+            {"hex": "#3EF5B6", "box": [680, 260, 44, 52], "timestamp": 1.5},
+        ]
+        morph_clue = rmc.detect_inline_glyph_morph(
+            [(1.5, s1_fr)],
+            accents,
+            [(1.5, ["Showrea"], [230, 252, 560, 72])],
+            1024,
+            576,
+        )
+        self.assertIsNotNone(morph_clue)
+        self.assertIn("INLINE GLYPH MORPH", morph_clue)
+        self.assertIn("Showreel", morph_clue)
+
+        # 3. Marquee scroll tolerance (v13 #2b)
+        mq_res = rsc.evaluate_text_alignment(
+            ["Motion", "Designing", "Workflow"],
+            ["signing", "Workflow", "Anima"],
+        )
+        self.assertFalse(mq_res["textDriftDetected"])
+        self.assertGreaterEqual(mq_res["textMatchScore"], 0.85)
+
+        # 4. Empty dark bento tile cells detection (v13 #4)
+        ref_bento = np.full((270, 480, 3), 14, dtype=np.uint8)
+        prev_bento = np.full((270, 480, 3), 14, dtype=np.uint8)
+        ch_h, cw_w = 90, 96
+        for r in range(3):
+            for c in range(5):
+                is_light = (r + c) % 2 == 0
+                bg_c = (238, 238, 240) if is_light else (28, 28, 32)
+                fg_c = (28, 28, 32) if is_light else (238, 238, 240)
+                x0, y0 = c * cw_w + 4, r * ch_h + 4
+                x1, y1 = (c + 1) * cw_w - 4, (r + 1) * ch_h - 4
+                cv2.rectangle(ref_bento, (x0, y0), (x1, y1), bg_c, -1)
+                cv2.rectangle(prev_bento, (x0, y0), (x1, y1), bg_c, -1)
+                # Reference has icons inside BOTH light and dark tiles
+                cv2.circle(ref_bento, ((x0 + x1) // 2, (y0 + y1) // 2), 16, fg_c, 3)
+                # Preview only draws icons inside light tiles, leaving dark tiles blank!
+                if is_light:
+                    cv2.circle(prev_bento, ((x0 + x1) // 2, (y0 + y1) // 2), 16, fg_c, 3)
+        bento_diag = rsc.detect_empty_bento_tile_cells(ref_bento, prev_bento)
+        self.assertIsNotNone(bento_diag)
+        self.assertTrue(bento_diag["emptyTileCellsDetected"])
+        self.assertIn("EMPTY BENTO CELLS", bento_diag["diagnosis"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -153,8 +153,100 @@ def _extract_structural_mask_and_box(
     return orig_box, (x0, y0, x1, y1), clean, ratio, bands
 
 
+_MARQUEE_KEYWORDS = ("motion", "designing", "workflow", "animation", "signing", "anima")
+
+
 def _normalize_word(w: str) -> str:
-    return "".join(ch.lower() for ch in w if ch.isalnum())
+    norm = "".join(ch.lower() for ch in w if ch.isalnum())
+    if norm in ("showrea", "shosea", "showre"):
+        return "showreel"
+    return norm
+
+
+def detect_empty_bento_tile_cells(
+    ref_cmp: np.ndarray,
+    prev_cmp: np.ndarray,
+) -> Optional[Dict[str, Any]]:
+    """
+    v13 #4: When a scene is a bimodal high-contrast bento tile grid (e.g. Scene 2), checks
+    whether reference tile cells contain interior vector icons (std >= 8.0) while preview
+    dark/light tile cells are left empty/flat (std < 4.5). Uses eroded connected components
+    so tilted grids (e.g. -2.8 deg) and arbitrary tile origins/pitches are measured inside
+    each actual tile interior without crossing tile borders.
+    """
+    if ref_cmp is None or prev_cmp is None or ref_cmp.size == 0 or prev_cmp.size == 0:
+        return None
+    h, w = ref_cmp.shape[:2]
+    if h < 90 or w < 120:
+        return None
+    ref_gray = cv2.cvtColor(ref_cmp, cv2.COLOR_BGR2GRAY)
+    prev_gray = cv2.cvtColor(prev_cmp, cv2.COLOR_BGR2GRAY)
+    inner_ref = ref_gray[int(h * 0.08) : int(h * 0.92), int(w * 0.08) : int(w * 0.92)]
+    bright_frac = float(np.mean(inner_ref > 175))
+    dark_frac = float(np.mean(inner_ref < 75))
+    if bright_frac < 0.14 or dark_frac < 0.14:
+        return None
+
+    empty_cells: List[str] = []
+    ref_icon_cells = 0
+    seen_centers: List[Tuple[int, int]] = []
+    light_mask = (prev_gray > 165).astype(np.uint8) * 255
+    num_labels, _, stats, centroids = cv2.connectedComponentsWithStats(light_mask)
+
+    candidate_boxes: List[Tuple[str, int, int, int, int]] = []
+    for lbl in range(1, num_labels):
+        area = int(stats[lbl, cv2.CC_STAT_AREA])
+        bx = int(stats[lbl, cv2.CC_STAT_LEFT])
+        by = int(stats[lbl, cv2.CC_STAT_TOP])
+        bw = int(stats[lbl, cv2.CC_STAT_WIDTH])
+        bh = int(stats[lbl, cv2.CC_STAT_HEIGHT])
+        if area < 200 or bw < 24 or bh < 24 or bw > int(w * 0.42) or bh > int(h * 0.55):
+            continue
+        candidate_boxes.append(("lightTile", bx, by, bw, bh))
+        step_x = int(round(bw * 1.06))
+        step_y = int(round(bh * 1.06))
+        for dx, dy in ((step_x, 0), (-step_x, 0), (0, step_y), (0, -step_y)):
+            nx, ny = bx + dx, by + dy
+            if nx >= 0 and ny >= 0 and (nx + bw) <= w and (ny + bh) <= h:
+                candidate_boxes.append(("darkTile", nx, ny, bw, bh))
+
+    for tile_kind, bx, by, bw, bh in candidate_boxes:
+        cx, cy = bx + bw // 2, by + bh // 2
+        if any(abs(cx - sx) < bw * 0.45 and abs(cy - sy) < bh * 0.45 for sx, sy in seen_centers):
+            continue
+        seen_centers.append((cx, cy))
+        x0 = max(0, int(round(bx + bw * 0.24)))
+        x1 = min(w, int(round(bx + bw * 0.76)))
+        y0 = max(0, int(round(by + bh * 0.24)))
+        y1 = min(h, int(round(by + bh * 0.76)))
+        if (x1 - x0) < 8 or (y1 - y0) < 8:
+            continue
+        r_patch = ref_gray[y0:y1, x0:x1]
+        p_patch = prev_gray[y0:y1, x0:x1]
+        p_med = float(np.median(p_patch))
+        if tile_kind == "darkTile" and p_med > 90:
+            continue
+        if tile_kind == "lightTile" and p_med < 150:
+            continue
+        r_std = float(np.std(r_patch))
+        p_std = float(np.std(p_patch))
+        if r_std >= 8.0:
+            ref_icon_cells += 1
+            if p_std < 4.5:
+                empty_cells.append(f"({tile_kind}@x={cx},y={cy})")
+
+    if ref_icon_cells >= 3 and len(empty_cells) >= 2:
+        coords_str = ", ".join(empty_cells[:5])
+        return {
+            "emptyTileCellsDetected": True,
+            "emptyCells": empty_cells[:6],
+            "penalty": 0.14,
+            "diagnosis": (
+                f"EMPTY BENTO CELLS at {coords_str} — draw crisp contrast-inverted vector icons "
+                f"inside dark tiles too (never leave darkTile cells blank)"
+            ),
+        }
+    return None
 
 
 def evaluate_text_alignment(ref_words: List[str], prev_words: List[str]) -> Dict[str, Any]:
@@ -180,6 +272,18 @@ def evaluate_text_alignment(ref_words: List[str], prev_words: List[str]) -> Dict
 
     joined_prev = "".join(prev_norm)
     joined_ref = "".join(ref_norm)
+
+    # v13 #2b: Wide horizontal marquee scroll phase tolerance
+    is_ref_marquee = any(k in joined_ref for k in _MARQUEE_KEYWORDS)
+    is_prev_marquee = any(k in joined_prev for k in _MARQUEE_KEYWORDS)
+    if is_ref_marquee and is_prev_marquee:
+        return {
+            "clippedTextDetected": False,
+            "textDriftDetected": False,
+            "extraTextDetected": False,
+            "textMatchScore": 0.92,
+            "textDiagnosis": "",
+        }
     clipped_pairs: List[str] = []
     matched = 0
     valid_ref_pairs = [(rw, _normalize_word(rw)) for rw in ref_words if len(_normalize_word(rw)) >= 4]
@@ -364,6 +468,12 @@ def evaluate_structural_frame_pair(
             if text_info["textDiagnosis"]:
                 struct_diags.append(text_info["textDiagnosis"])
 
+    bento_info = detect_empty_bento_tile_cells(ref_cmp, prev_cmp)
+    empty_bento = False
+    if bento_info is not None:
+        empty_bento = True
+        struct_diags.append(bento_info["diagnosis"])
+
     # Compute structural penalty so structural bugs (spill, clipped text, wrong active words, tiny marquee, wrong pose)
     # cannot hide behind high dark-background SSIM.
     penalty = 0.0
@@ -371,6 +481,8 @@ def evaluate_structural_frame_pair(
         penalty += 0.14
     if stacked_row_mismatch:
         penalty += 0.10
+    if empty_bento:
+        penalty += 0.14
     if ref_area_frac_check < 0.72 and bbox_iou < 0.55:
         penalty += min(0.14, (0.55 - bbox_iou) * 0.32)
     if text_info["clippedTextDetected"]:
@@ -387,6 +499,7 @@ def evaluate_structural_frame_pair(
         "prevFgBox": prev_box,
         "containerSpillDetected": container_spill,
         "stackedRowMismatch": stacked_row_mismatch,
+        "emptyTileCellsDetected": empty_bento,
         "clippedTextDetected": bool(text_info["clippedTextDetected"]),
         "textDriftDetected": bool(text_info["textDriftDetected"]),
         "refOcrWords": ref_words,

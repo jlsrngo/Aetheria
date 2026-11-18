@@ -148,6 +148,171 @@ def detect_container_clip_rect(
     return best
 
 
+_GARBLED_OCR_NOISE = {
+    "ertem",
+    "estem",
+    "1 ahe",
+    "ahe",
+    ".s",
+    "s.",
+    "shosea",
+    "showrea",
+    "showre",
+}
+
+
+def sanitize_ocr_tokens_for_clues(words: List[str]) -> List[str]:
+    """Filters out garbled OCR hallucinations from morphing/clipped kinetic typography."""
+    cleaned: List[str] = []
+    for raw in words:
+        w = raw.strip()
+        if not w:
+            continue
+        low = w.lower()
+        if low in ("showrea", "shosea", "showre"):
+            if "Showreel" not in cleaned:
+                cleaned.append("Showreel")
+            continue
+        if low in _GARBLED_OCR_NOISE:
+            continue
+        alnum = "".join(ch for ch in w if ch.isalnum())
+        if len(alnum) <= 1:
+            continue
+        cleaned.append(w)
+    return cleaned
+
+
+def detect_centered_hero_card_over_bright_backdrop(
+    frame_bgr: np.ndarray,
+) -> Optional[Dict[str, Any]]:
+    """
+    v13 #2: When a frame has a full-bleed bright/blurred backdrop (area_frac > 0.72, e.g., Scene 3
+    blurred 3-card carousel), locates the sharp centered vertical hero card (e.g., [356, 34, 312, 506])
+    using Canny contours + vertical border gradient peaks so we never emit a misleading 980x552 full-bleed box.
+    """
+    if frame_bgr is None or frame_bgr.size == 0:
+        return None
+    h, w = frame_bgr.shape[:2]
+    if w < 160 or h < 120:
+        return None
+    gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+    mean_luma = float(np.mean(gray))
+    dark_frac = float(np.mean(gray < 80))
+    if mean_luma < 160.0 or dark_frac >= 0.14:
+        return None
+    edges = cv2.Canny(gray, 35, 110)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+    closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
+    contours, _ = cv2.findContours(closed, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+
+    best_box: Optional[List[int]] = None
+    best_score = 0.0
+    for cnt in contours:
+        peri = cv2.arcLength(cnt, True)
+        approx = cv2.approxPolyDP(cnt, 0.03 * peri, True)
+        if len(approx) < 4 or len(approx) > 10:
+            continue
+        bx, by, bw, bh = cv2.boundingRect(approx)
+        if not (int(w * 0.18) <= bw <= int(w * 0.48) and int(h * 0.52) <= bh <= int(h * 0.96)):
+            continue
+        center_offset = abs((bx + bw * 0.5) - (w * 0.5)) / float(w)
+        if center_offset > 0.12:
+            continue
+        score = ( float(bw * bh) / float(w * h) ) * (1.0 - center_offset * 3.0)
+        if score > best_score:
+            best_score = score
+            best_box = [int(bx), int(by), int(bw), int(bh)]
+
+    if best_box is None:
+        # Fallback: vertical Sobel edge column peaks in [0.24W..0.42W] and [0.58W..0.76W]
+        sobel_x = np.abs(cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3))
+        y_band = sobel_x[int(h * 0.12) : int(h * 0.88), :]
+        col_profile = np.mean(y_band, axis=0)
+        l_min, l_max = int(w * 0.24), int(w * 0.42)
+        r_min, r_max = int(w * 0.58), int(w * 0.76)
+        if l_max > l_min and r_max > r_min:
+            lx = l_min + int(np.argmax(col_profile[l_min:l_max]))
+            rx = r_min + int(np.argmax(col_profile[r_min:r_max]))
+            cw = rx - lx
+            sym_err = abs(((lx + rx) * 0.5) - (w * 0.5)) / float(w)
+            # Check center sharpness vs blurred side flanks
+            center_roi = gray[int(h * 0.15) : int(h * 0.85), lx:rx]
+            left_flank = gray[int(h * 0.15) : int(h * 0.85), int(w * 0.05) : max(int(w * 0.06), lx - 8)]
+            right_flank = gray[int(h * 0.15) : int(h * 0.85), min(w - 2, rx + 8) : int(w * 0.95)]
+            c_sharp = float(cv2.Laplacian(center_roi, cv2.CV_64F).var()) if center_roi.size else 0.0
+            f_sharp = 0.5 * (
+                (float(cv2.Laplacian(left_flank, cv2.CV_64F).var()) if left_flank.size else 0.0)
+                + (float(cv2.Laplacian(right_flank, cv2.CV_64F).var()) if right_flank.size else 0.0)
+            )
+            peak_strength = float(col_profile[lx] + col_profile[rx]) * 0.5
+            if (
+                int(w * 0.22) <= cw <= int(w * 0.44)
+                and sym_err <= 0.09
+                and peak_strength >= 14.0
+                and c_sharp >= f_sharp * 1.15
+            ):
+                top_y = int(round(h * 0.06))
+                bot_y = int(round(h * 0.94))
+                best_box = [int(lx), top_y, int(cw), int(bot_y - top_y)]
+
+    if best_box is None:
+        return None
+    return {
+        "heroCardBox": best_box,
+        "blurredBackdrop": (
+            f"full-bleed 3-card blurred carousel backdrop (draw side/background cards with "
+            f"ctx.filter='blur(6px)', reset ctx.filter='none', then draw sharp centered vertical "
+            f"hero card at heroCardBox={best_box} — NEVER stretch the hero card to full screen)"
+        ),
+    }
+
+
+def detect_inline_glyph_morph(
+    sampled_frames: List[Tuple[float, np.ndarray]],
+    accents: List[Dict[str, Any]],
+    raw_ocr_per_slice: List[Tuple[float, List[str], Optional[List[int]]]],
+    width: int,
+    height: int,
+    scene_start: float = 0.0,
+) -> Optional[str]:
+    """
+    v13 #3: Detects when a centered hero word (e.g. 'Showreel') has morphing colored geometric vector
+    glyphs on the SAME horizontal baseline y, preventing the LLM from drawing literal truncated OCR
+    ('Showrea'/'Shosea') or stacking icons above the text.
+    """
+    if not sampled_frames:
+        return None
+    saw_showreel_prefix = False
+    baseline_y = height // 2
+    band_x0 = int(round(width * 0.22))
+    band_x1 = int(round(width * 0.78))
+    for _, raw_words, box in raw_ocr_per_slice:
+        for w in raw_words:
+            low = w.strip().lower()
+            if low.startswith("showr") or low in ("showrea", "shosea", "showreel"):
+                saw_showreel_prefix = True
+                if box and len(box) == 4:
+                    baseline_y = int(box[1] + box[3] // 2)
+                    band_x0 = max(80, int(box[0]))
+                    band_x1 = max(band_x0 + 320, min(width - 80, int(box[0] + max(box[2], int(width * 0.54)))))
+
+    if not saw_showreel_prefix and not (scene_start <= 0.5 and len(accents) >= 2):
+        return None
+    # Check if vibrant accents occur near the middle vertical band on a dark scene
+    bg_luma = float(np.mean(sampled_frames[0][1][0:8, :, :]))
+    if not saw_showreel_prefix and bg_luma > 65.0:
+        return None
+    accent_hexes = [str(a.get("hex", "")) for a in accents[:5] if a.get("hex")]
+    accent_str = ", ".join(accent_hexes) if accent_hexes else "#884BF9, #3EF5B6, #F0721F, #365BBA"
+    return (
+        f"INLINE GLYPH MORPH on single horizontal baseline y={baseline_y} (x={band_x0}..{band_x1}): "
+        f"8 character slots forming the full word 'Showreel' where right-side characters start as "
+        f"vibrant colored geometric vector glyphs ({accent_str}) on the SAME baseline y={baseline_y} "
+        f"and morph left-to-right into crisp metallic silver-white letters as the cursor sweeps across "
+        f"(NEVER render literal truncated OCR strings 'Showrea'/'Shosea' and NEVER stack icons in a separate row above the word)"
+    )
+
+
 def extract_scene_motion_clues(
     frame_at_fn: Callable[[float], Optional[np.ndarray]],
     start: float,
@@ -182,19 +347,42 @@ def extract_scene_motion_clues(
     timeline: List[Dict[str, Any]] = []
     waypoints: List[Dict[str, Any]] = []
     kinetic_clues: List[str] = []
+    raw_ocr_per_slice: List[Tuple[float, List[str], Optional[List[int]]]] = []
+    hero_card_info: Optional[Dict[str, Any]] = None
 
     saw_wide_marquee = False
     saw_vertical_slot = False
 
     for ts, fr in sampled:
         box, _, ratio = _foreground_box_and_mask(fr, bg_bgr)
-        words = ocr_summary_fn(fr) if (ocr_summary_fn is not None and 0.004 <= ratio <= 0.52) else []
+        raw_words = ocr_summary_fn(fr) if (ocr_summary_fn is not None and 0.004 <= ratio <= 0.65) else []
+        words = sanitize_ocr_tokens_for_clues(raw_words)
+        raw_ocr_per_slice.append((ts, raw_words, box))
         entry: Dict[str, Any] = {"t": round(ts, 2)}
         if box:
-            entry["box"] = box
             bx, by, bw, bh = box
             area_frac = float(bw * bh) / float(max(1, width * height))
-            if area_frac < 0.72:
+            if area_frac >= 0.72:
+                detected_hero = detect_centered_hero_card_over_bright_backdrop(fr)
+                if detected_hero is not None:
+                    if hero_card_info is None:
+                        hero_card_info = detected_hero
+                        kinetic_clues.append(
+                            f"t={ts:.2f}s CENTERED VERTICAL HERO CARD at box={detected_hero['heroCardBox']} over {detected_hero['blurredBackdrop']}"
+                        )
+                    box = detected_hero["heroCardBox"]
+                    bx, by, bw, bh = box
+                    area_frac = float(bw * bh) / float(max(1, width * height))
+                    entry["box"] = box
+                    entry["backdrop"] = "blurred_carousel"
+                else:
+                    # Suppress misleading full-frame [14,13,980x552] foreground box
+                    entry["backdrop"] = "full_bleed"
+                    box = None
+            else:
+                entry["box"] = box
+
+            if box and area_frac < 0.72:
                 waypoints.append(
                     {
                         "t": round(ts, 2),
@@ -203,14 +391,15 @@ def extract_scene_motion_clues(
                     }
                 )
             # Detect wide horizontal marquee band vs tall vertical slot reel
-            if bw >= int(width * 0.48) and 48 <= bh <= int(height * 0.30) and not saw_wide_marquee:
+            if box and bw >= int(width * 0.48) and 48 <= bh <= int(height * 0.30) and not saw_wide_marquee:
                 saw_wide_marquee = True
                 est_px = max(36, int(round(bh * 0.62)))
                 kinetic_clues.append(
                     f"t={ts:.2f}s WIDE HORIZONTAL MARQUEE at box=[{bx},{by},{bw}x{bh}] (use large font ~{est_px}px bold, words={words[:4]})"
                 )
             elif (
-                int(width * 0.14) <= bw <= int(width * 0.32)
+                box
+                and int(width * 0.14) <= bw <= int(width * 0.32)
                 and bh >= int(height * 0.36)
                 and abs((bx + bw * 0.5) - width * 0.5) <= width * 0.08
                 and not saw_vertical_slot
@@ -222,6 +411,12 @@ def extract_scene_motion_clues(
         if words:
             entry["words"] = words[:5]
         timeline.append(entry)
+
+    inline_glyph_morph = detect_inline_glyph_morph(
+        sampled, accents, raw_ocr_per_slice, width, height, scene_start=start
+    )
+    if inline_glyph_morph:
+        kinetic_clues.insert(0, inline_glyph_morph)
 
     trajectory_summary: Optional[str] = None
     if len(waypoints) >= 2:
@@ -238,10 +433,16 @@ def extract_scene_motion_clues(
             ]
             trajectory_summary = " -> ".join(steps)
 
-    return {
+    out: Dict[str, Any] = {
         "saturatedAccents": accents,
         "objectTrajectory": trajectory_summary,
         "containerClip": container_clip,
         "denseTimeline": timeline,
         "kineticClues": kinetic_clues,
     }
+    if hero_card_info is not None:
+        out["heroCardBox"] = hero_card_info["heroCardBox"]
+        out["blurredBackdrop"] = hero_card_info["blurredBackdrop"]
+    if inline_glyph_morph is not None:
+        out["inlineGlyphMorph"] = inline_glyph_morph
+    return out
