@@ -333,7 +333,14 @@ pub async fn capture_film_preview_with_options(
 
     validate_non_identical_frames(&frames)?;
 
-    let project_key = normalize_preview_project_key(&film_root);
+    let base_project_key = normalize_preview_project_key(&film_root);
+    let ts_scope_sig = format!(
+        "{}:{:.2}..{:.2}",
+        timestamps.len(),
+        timestamps.first().copied().unwrap_or(0.0),
+        timestamps.last().copied().unwrap_or(0.0)
+    );
+    let project_key = format!("{}#{}", base_project_key, ts_scope_sig);
     let changed_since_last_capture = {
         let mut guard = previous_preview_digests_store()
             .lock()

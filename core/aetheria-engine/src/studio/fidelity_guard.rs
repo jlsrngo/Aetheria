@@ -180,9 +180,14 @@ pub struct FidelityHistorySummary {
 }
 
 static FIDELITY_SCORE_HISTORY: OnceLock<Mutex<HashMap<String, Vec<f64>>>> = OnceLock::new();
+static SCENE_POLISH_ATTEMPTS: OnceLock<Mutex<HashMap<String, usize>>> = OnceLock::new();
 
 fn fidelity_history_store() -> &'static Mutex<HashMap<String, Vec<f64>>> {
     FIDELITY_SCORE_HISTORY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn scene_polish_attempts_store() -> &'static Mutex<HashMap<String, usize>> {
+    SCENE_POLISH_ATTEMPTS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 pub(crate) fn record_fidelity_score_in_map(
@@ -251,15 +256,25 @@ pub fn build_target_worst_scenes(
         })
         .collect();
 
-    // Rank weakness combining combinedScore and edge deficit so dark-backdrop scenes
-    // with wrong foreground shapes/fonts (high SSIM on black pixels, low edgeSimilarity) still surface.
+    // Rank weakness combining combinedScore, edge deficit, and structural/text flags so dark-backdrop scenes
+    // with spilled containers, clipped text, wrong active words, or wrong bbox scale/position always surface.
     let weakness_rank = |f: &Value| -> f64 {
         let comb = f.get("combinedScore").and_then(Value::as_f64).unwrap_or(0.5);
         let edge_penalty = match f.get("edgeSimilarity").and_then(Value::as_f64) {
             Some(e) if e < 0.35 => (0.35 - e) * 0.65,
             _ => 0.0,
         };
-        comb - edge_penalty
+        let struct_flag_pen = [
+            "containerSpillDetected",
+            "clippedTextDetected",
+            "textDriftDetected",
+            "stackedRowMismatch",
+        ]
+        .iter()
+        .any(|k| f.get(*k).and_then(Value::as_bool) == Some(true))
+        .then_some(0.14)
+        .unwrap_or(0.0);
+        comb - edge_penalty - struct_flag_pen
     };
 
     // Keep the weakest single frame per unique scene so one scene with 2-3 phases
@@ -293,9 +308,37 @@ pub fn build_target_worst_scenes(
         }
     }
 
+    let is_full_film_eval = best_per_scene.len() >= 4;
+    let root_key = film_root
+        .to_string_lossy()
+        .replace('\\', "/")
+        .to_ascii_lowercase();
     let mut ranked: Vec<(f64, &Value, Option<String>, Option<String>)> =
         best_per_scene.into_values().collect();
-    ranked.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    if is_full_film_eval {
+        let attempts_guard = scene_polish_attempts_store()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        ranked.sort_by(|a, b| {
+            let a_sid = a.2.as_deref().unwrap_or("");
+            let b_sid = b.2.as_deref().unwrap_or("");
+            let a_tries = attempts_guard
+                .get(&format!("{}#{}", root_key, a_sid))
+                .copied()
+                .unwrap_or(0);
+            let b_tries = attempts_guard
+                .get(&format!("{}#{}", root_key, b_sid))
+                .copied()
+                .unwrap_or(0);
+            let a_exhausted = a_tries >= 2;
+            let b_exhausted = b_tries >= 2;
+            a_exhausted
+                .cmp(&b_exhausted)
+                .then_with(|| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
+        });
+    } else {
+        ranked.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    }
 
     let using_per_frame = comparison
         .get("perFrame")
@@ -306,9 +349,15 @@ pub fn build_target_worst_scenes(
     for (_, wf, scene_id, script_path) in ranked {
         let comb_v = wf.get("combinedScore").and_then(Value::as_f64);
         let edge_v = wf.get("edgeSimilarity").and_then(Value::as_f64);
+        let struct_diag = wf
+            .get("structuralDiagnosis")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
         if using_per_frame
             && comb_v.unwrap_or(0.0) >= 0.80
             && edge_v.unwrap_or(1.0) >= 0.35
+            && struct_diag.is_none()
         {
             continue;
         }
@@ -328,6 +377,9 @@ pub fn build_target_worst_scenes(
             diag_hints.push(
                 "BLANK/CRASHED FRAME (preview rendered empty backdrop — check scene JS for ReferenceError/TypeError or missing draw calls at this timestamp)".to_string(),
             );
+        }
+        if let Some(sd) = struct_diag {
+            diag_hints.push(sd.to_string());
         }
         if luma_corr.is_some_and(|c| c < 0.15) {
             diag_hints.push(format!(
@@ -385,6 +437,17 @@ pub fn build_target_worst_scenes(
         }));
         if out.len() >= 5 {
             break;
+        }
+    }
+    if is_full_film_eval {
+        let mut attempts_guard = scene_polish_attempts_store()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        for item in out.iter().take(2) {
+            if let Some(sid) = item.get("sceneId").and_then(Value::as_str) {
+                let k = format!("{}#{}", root_key, sid);
+                *attempts_guard.entry(k).or_insert(0) += 1;
+            }
         }
     }
     out

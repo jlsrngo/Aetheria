@@ -451,6 +451,45 @@ pub fn recommended_reference_timestamps_for_film(
     select_timestamps_from_keyframes(&kfs, max_frames)
 }
 
+/// Returns recommended preview timestamps restricted to a focused subset of 1-based scene indices
+/// (preferring `q1`, `mid`, and `q3` phases so subagents evaluate only their assigned scenes).
+pub fn recommended_reference_timestamps_for_film_scenes(
+    ws_root: &Path,
+    film_root: &Path,
+    film_duration: f64,
+    target_scenes: &[usize],
+    max_frames: usize,
+) -> Vec<f64> {
+    if target_scenes.is_empty() {
+        return recommended_reference_timestamps_for_film(ws_root, film_root, film_duration, max_frames);
+    }
+    let kfs = discover_reference_keyframes_for_film(ws_root, film_root, film_duration);
+    let matches_target = |kf: &ReferenceKeyframe| -> bool {
+        let rel = kf.rel_path.to_ascii_lowercase();
+        let sid = kf.scene_id.as_deref().unwrap_or("").to_ascii_lowercase();
+        target_scenes.iter().any(|&idx| {
+            rel.contains(&format!("ref_scene_{idx:02}"))
+                || sid.starts_with(&format!("scene{idx}_"))
+                || sid == format!("scene{idx}")
+                || sid.starts_with(&format!("scene_{idx}_"))
+                || sid == format!("scene_{idx}")
+        })
+    };
+    let scoped_core: Vec<ReferenceKeyframe> = kfs
+        .iter()
+        .filter(|k| {
+            matches_target(k)
+                && matches!(k.phase.as_deref(), Some("mid") | Some("q1") | Some("q3") | None)
+        })
+        .cloned()
+        .collect();
+    if !scoped_core.is_empty() {
+        return select_timestamps_from_keyframes(&scoped_core, max_frames);
+    }
+    let scoped_all: Vec<ReferenceKeyframe> = kfs.into_iter().filter(matches_target).collect();
+    select_timestamps_from_keyframes(&scoped_all, max_frames)
+}
+
 fn select_timestamps_from_keyframes(kfs: &[ReferenceKeyframe], max_frames: usize) -> Vec<f64> {
     if kfs.is_empty() || max_frames == 0 {
         return Vec::new();

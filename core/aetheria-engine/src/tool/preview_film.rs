@@ -33,11 +33,42 @@ pub fn capture_film_preview_tool_definition() -> Value {
 }
 
 pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value) -> Value {
-    let timestamps: Vec<f64> = arguments
+    let mut timestamps: Vec<f64> = arguments
         .get("timestamps")
         .and_then(|v| v.as_array())
         .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect())
         .unwrap_or_default();
+    if timestamps.is_empty() {
+        let target_scenes: Vec<usize> = arguments
+            .get("targetSceneIndices")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_u64().map(|n| n as usize))
+                    .filter(|&n| (1..=24).contains(&n))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !target_scenes.is_empty() {
+            if let Some(html_path) = crate::studio::motion::resolve_active_html_film_path(Some(workspace_dir)) {
+                if let Some(film_root) = html_path.parent() {
+                    let ws_root = if workspace_dir.trim().is_empty() {
+                        film_root.to_path_buf()
+                    } else {
+                        std::path::PathBuf::from(workspace_dir)
+                    };
+                    let meta = crate::studio::film_inspector::inspect_workspace_film(&html_path);
+                    timestamps = crate::studio::reference_compare::recommended_reference_timestamps_for_film_scenes(
+                        &ws_root,
+                        film_root,
+                        meta.duration,
+                        &target_scenes,
+                        12,
+                    );
+                }
+            }
+        }
+    }
     let compare_to_reference = arguments
         .get("compareToReference")
         .and_then(|v| v.as_bool());
