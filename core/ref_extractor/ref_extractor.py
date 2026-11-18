@@ -1549,6 +1549,22 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
                 contrast_tiles["grid"] = tile_grid
             layout_info["contrastTiles"] = contrast_tiles
         layout_info["cleanPlate"] = clean_plate
+        motion_clues: Dict[str, Any] = {}
+        try:
+            from ref_motion_clues import extract_scene_motion_clues
+
+            motion_clues = extract_scene_motion_clues(
+                _frame_at,
+                start,
+                end,
+                width,
+                height,
+                ocr_summary_fn=lambda f: _quick_ocr_summary(f, ocr_engine),
+                sub_ts_list=sub_ts_list,
+            )
+        except Exception:
+            motion_clues = {}
+        layout_info["motionClues"] = motion_clues
         scene_id = f"scene{i + 1}_{role}"
         scene_palettes.append(pal)
         scenes.append({
@@ -1568,6 +1584,7 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
             "subBeats": sub_beats,
             "gridTiltDeg": grid_tilt_deg,
             "cleanPlate": clean_plate,
+            "motionClues": motion_clues,
             "layout": layout_info,
         })
         ast_scene_obj = {
@@ -1582,6 +1599,7 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
             "gridTiltDeg": grid_tilt_deg,
             "contrastTiles": contrast_tiles,
             "cleanPlate": clean_plate,
+            "motionClues": motion_clues,
             "layers": ast_layers,
         }
         skeleton_code = compile_scene_am_skeleton(ast_scene_obj, width, height)
@@ -1782,6 +1800,32 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
             md += f"- **High-Contrast Tiles:** `lightTile={ct['lightTileHex']}`, `darkTile={ct['darkTileHex']}`, `topLeft={ct['topLeft']}` — crisp `lightTile` and near-black `darkTile` placed where `ref_scene_XX.jpg` shows them (NEVER substitute medium grey for dark tiles)\n"
         if s.get("subBeats"):
             md += f"- **Intra-Scene Multi-Beat Shifts:** `{' | '.join(s['subBeats'])}`\n"
+        mc = s.get("motionClues") or {}
+        if mc.get("saturatedAccents"):
+            acc_strs = [
+                f"{a['hex']}@({a['box'][0]},{a['box'][1]},{a['box'][2]}x{a['box'][3]}px)@{a['timestamp']:.2f}s"
+                for a in mc["saturatedAccents"]
+            ]
+            md += f"- **Saturated Accent Callouts (small high-chroma elements missed by global palette):** `{', '.join(acc_strs)}`\n"
+        if mc.get("containerClip"):
+            cc = mc["containerClip"]
+            ob = cc["outerBox"]
+            ib = cc["innerClipRect"]
+            md += (
+                f"- **Container & Inner Screen ClipRect (MUST `ctx.clip()` so content never spills outside):** "
+                f"`outerBezel=[{ob[0]},{ob[1]},{ob[2]}x{ob[3]}px]`, `innerClipRect=[{ib[0]},{ib[1]},{ib[2]}x{ib[3]}px]`\n"
+            )
+        if mc.get("objectTrajectory"):
+            md += f"- **Measured Foreground Trajectory (t -> box[x,y,wxh]):** `{mc['objectTrajectory']}`\n"
+        if mc.get("kineticClues"):
+            md += f"- **Kinetic Layout Clues:** `{' ; '.join(mc['kineticClues'])}`\n"
+        if mc.get("denseTimeline"):
+            tl_parts = []
+            for te in mc["denseTimeline"]:
+                b_str = f"[{te['box'][0]},{te['box'][1]},{te['box'][2]}x{te['box'][3]}]" if te.get("box") else "[]"
+                w_str = f" words={te['words']}" if te.get("words") else ""
+                tl_parts.append(f"{te['t']:.2f}s:{b_str}{w_str}")
+            md += f"- **Dense 6-Slice Timeline (exact position/size/words per timestamp):** `{' -> '.join(tl_parts)}`\n"
 
     md += f"""
 ## Aetheria Modular HTML5/JS Reconstruction Directives

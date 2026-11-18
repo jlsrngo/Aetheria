@@ -266,6 +266,65 @@ class RefExtractorAndCompareTests(unittest.TestCase):
             self.assertFalse(exact_res["perFrame"][0]["blankFrameDetected"])
             self.assertGreaterEqual(exact_res["perFrame"][0]["combinedScore"], 0.95)
 
+    def test_ref_structural_compare_detects_container_spill_clipped_text_and_word_drift(self):
+        import ref_structural_compare as rsc
+
+        # 1. Text alignment checks: clipped left edge, word sub-beat drift, and extra stacked row
+        clip_res = rsc.evaluate_text_alignment(
+            ["Movement", "Transitions", "Design"],
+            ["ement", "sitions", "Design"],
+        )
+        self.assertTrue(clip_res["clippedTextDetected"])
+        self.assertIn("CLIPPED TEXT", clip_res["textDiagnosis"])
+
+        drift_res = rsc.evaluate_text_alignment(
+            ["Thinking", "Finding", "Building"],
+            ["Finding", "Building", "Creating"],
+        )
+        self.assertTrue(drift_res["textDriftDetected"])
+        self.assertIn("TEXT SUB-BEAT/WORD MISMATCH", drift_res["textDiagnosis"])
+
+        extra_res = rsc.evaluate_text_alignment(["Showrea"], ["SLOI", "Showreel"])
+        self.assertTrue(extra_res["extraTextDetected"])
+        self.assertIn("EXTRA/STACKED TEXT", extra_res["textDiagnosis"])
+
+        # 2. Container spill check: ref has centered laptop container, preview spills outside
+        ref_img = np.full((270, 480, 3), 12, dtype=np.uint8)
+        cv2.rectangle(ref_img, (120, 60), (360, 210), (165, 55, 130), -1)
+        prev_spill = np.full((270, 480, 3), 12, dtype=np.uint8)
+        cv2.rectangle(prev_spill, (40, 25), (410, 245), (165, 55, 130), -1)
+
+        bg = np.array([12, 12, 12], dtype=np.int16)
+        st = rsc.evaluate_structural_frame_pair(
+            ref_img, prev_spill, bg, 1024, 576, ref_path=None, edge_sim=0.70
+        )
+        self.assertTrue(st["containerSpillDetected"])
+        self.assertGreater(st["structuralPenalty"], 0.10)
+        self.assertIn("CONTAINER SPILL", st["structuralDiagnosis"])
+
+    def test_ref_motion_clues_extracts_saturated_accents_container_clip_and_trajectory(self):
+        import ref_motion_clues as rmc
+
+        frames = {}
+        for idx, t in enumerate([0.1, 0.3, 0.5, 0.7, 0.9, 1.1]):
+            fr = np.full((576, 1024, 3), 12, dtype=np.uint8)
+            x0 = 180 + idx * 45
+            cv2.rectangle(fr, (x0, 220), (x0 + 240, 360), (245, 75, 140), -1)
+            frames[round(t, 3)] = fr
+
+        clues = rmc.extract_scene_motion_clues(
+            lambda ts: frames.get(round(ts, 3)),
+            0.0,
+            1.2,
+            1024,
+            576,
+            ocr_summary_fn=None,
+            sub_ts_list=[0.1, 0.3, 0.5, 0.7, 0.9, 1.1],
+        )
+        self.assertTrue(len(clues.get("saturatedAccents", [])) >= 1)
+        self.assertIsNotNone(clues.get("objectTrajectory"))
+        self.assertEqual(len(clues.get("denseTimeline", [])), 6)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -181,6 +181,7 @@ def compute_foreground_metrics(ref_bgr: np.ndarray, prev_bgr: np.ndarray) -> Dic
         "fgCoverageRatio": round(min(coverage, 9.99), 3),
         "fgSsim": fg_ssim,
         "fgColor": fg_color,
+        "bgBgr": bg_bgr,
     }
 
 
@@ -243,7 +244,27 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
         luma_prev = float(np.mean(cv2.cvtColor(prev_cmp, cv2.COLOR_BGR2GRAY))) / 255.0
         luma_delta = round(luma_prev - luma_ref, 3)
 
-        combined = float(np.clip(0.50 * ssim + 0.30 * color_sim + 0.20 * edge_sim, 0.0, 1.0))
+        struct_info: Dict[str, Any] = {}
+        if not fg_info["blankFrameDetected"]:
+            try:
+                from ref_structural_compare import evaluate_structural_frame_pair
+
+                struct_info = evaluate_structural_frame_pair(
+                    ref_cmp,
+                    prev_cmp,
+                    fg_info["bgBgr"],
+                    int(rw),
+                    int(rh),
+                    ref_path=ref_path,
+                    edge_sim=edge_sim,
+                )
+            except Exception:
+                struct_info = {}
+
+        struct_pen = float(struct_info.get("structuralPenalty", 0.0))
+        combined = float(
+            np.clip(0.50 * ssim + 0.30 * color_sim + 0.20 * edge_sim - struct_pen, 0.0, 1.0)
+        )
         if fg_info["blankFrameDetected"]:
             combined = min(combined, 0.12)
         if ar_mismatch:
@@ -266,6 +287,15 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
             "lumaCorrelation": round(luma_corr, 3),
             "blankFrameDetected": bool(fg_info["blankFrameDetected"]),
             "fgCoverageRatio": fg_info["fgCoverageRatio"],
+            "fgBboxIou": struct_info.get("fgBboxIou"),
+            "fgScaleRatio": struct_info.get("fgScaleRatio"),
+            "refFgBox": struct_info.get("refFgBox"),
+            "prevFgBox": struct_info.get("prevFgBox"),
+            "containerSpillDetected": bool(struct_info.get("containerSpillDetected", False)),
+            "stackedRowMismatch": bool(struct_info.get("stackedRowMismatch", False)),
+            "clippedTextDetected": bool(struct_info.get("clippedTextDetected", False)),
+            "textDriftDetected": bool(struct_info.get("textDriftDetected", False)),
+            "structuralDiagnosis": struct_info.get("structuralDiagnosis") or "",
             "combinedScore": round(combined, 4),
             "aspectRatioMismatch": bool(ar_mismatch),
             "refDimensions": [int(rw), int(rh)],
