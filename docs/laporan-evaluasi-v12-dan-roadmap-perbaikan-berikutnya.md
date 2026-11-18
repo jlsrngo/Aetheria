@@ -54,6 +54,8 @@ Seluruh angka di bawah diukur menggunakan evaluator struktural 19-frame terbaru 
 
 ## 3. Akar Masalah yang Tersisa & Roadmap Perbaikan Berikutnya (`v13`)
 
+> **Rujukan Arsitektur & Cara Pengerjaan Cepat (`v13`):** Lihat dokumen pendamping [`docs/arsitektur-direct-per-scene-loop-dan-siklus-uji-cepat.md`](./arsitektur-direct-per-scene-loop-dan-siklus-uji-cepat.md) untuk spesifikasi lengkap penggantian orkestrasi multi-step + teks OCR berisik menjadi **`Direct Per-Scene Vision-First Loop` (2-pass deterministik per scene + persistent CDP tab + auto-rollback, runtime ~2,5–3 menit)** beserta **SOP siklus uji cepat ~30 detik per scene**.
+
 Berdasarkan forensik log dan visual `v12-flash`, ada **4 akar masalah spesifik** yang perlu diselesaikan pada iterasi berikutnya (`v13`) untuk mencapai target minimal setara remake manual di seluruh 8 scene:
 
 ### 3.1. Perbaikan #1 — Guard Rollback Otomatis Per-Scene & Larangan Polish Massal `> 2` Scene (`subagent.rs` & `preview_capture.rs`)

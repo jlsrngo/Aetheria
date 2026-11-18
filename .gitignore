@@ -89,6 +89,7 @@ docs/*
 !docs/backlog-integrasi-sosial-dan-akun.md
 !docs/analisis-gap-kualitas-agen-vs-remake-manual.md
 !docs/laporan-evaluasi-v12-dan-roadmap-perbaikan-berikutnya.md
+!docs/arsitektur-direct-per-scene-loop-dan-siklus-uji-cepat.md
 demo/
 demo-workspace/
 
