@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Bauhaus Swiss Story",
+  "title": "Bauhaus Konstruktion Story",
   "type": "object",
   "required": ["version", "meta", "shots"],
   "properties": {
@@ -14,7 +14,7 @@
         "height": { "type": "integer", "enum": [1920, 1080] },
         "fps": { "type": "integer", "const": 30 },
         "durationSec": { "type": "number", "minimum": 3, "maximum": 90 },
-        "theme": { "enum": ["cream-1919", "swiss-red", "dessau-dark", "zurich-mono", "weimar-ochre"] }
+        "theme": { "enum": ["cream-1919", "weimar-ochre", "dessau-dark", "swiss-red", "zurich-mono"] }
       }
     },
     "shots": {
@@ -28,26 +28,14 @@
           "id": { "type": "string" },
           "startSec": { "type": "number", "minimum": 0 },
           "endSec": { "type": "number", "minimum": 0.5 },
-          "layout": { "enum": ["bauhaus-poster", "swiss-grid-split", "modular-stack", "constructivist-stat", "diagonal-matrix", "manifesto-cta"] },
-          "theme": { "enum": ["cream-1919", "swiss-red", "dessau-dark", "zurich-mono", "weimar-ochre"] },
+          "layout": { "enum": ["kandinsky-assembly", "escapement-pivot", "tile-cascade", "flip-matrix", "constructivist-stat", "bauhaus-poster"] },
+          "theme": { "enum": ["cream-1919", "weimar-ochre", "dessau-dark", "swiss-red", "zurich-mono"] },
           "badge": { "type": "string" },
-          "headline": { "type": "string", "maxLength": 44 },
-          "subtext": { "type": "string", "maxLength": 92 },
+          "headline": { "type": "string", "maxLength": 36 },
+          "subtext": { "type": "string", "maxLength": 84 },
           "metric": { "type": "string" },
-          "glyph": { "enum": ["quarter-arc", "split-circle", "bauhaus-tri", "grid-cross", "concentric-ring", "diagonal-bars"] },
-          "transition": { "enum": ["block-wipe", "diagonal-slice", "invert-cut"] },
-          "items": {
-            "type": "array",
-            "maxItems": 4,
-            "items": {
-              "type": "object",
-              "required": ["label"],
-              "properties": {
-                "label": { "type": "string" },
-                "glyph": { "enum": ["quarter-arc", "split-circle", "bauhaus-tri", "grid-cross", "concentric-ring", "diagonal-bars"] }
-              }
-            }
-          }
+          "verticalWord": { "type": "string" },
+          "transition": { "enum": ["block-wipe", "tile-flip", "invert-cut"] }
         }
       }
     },
