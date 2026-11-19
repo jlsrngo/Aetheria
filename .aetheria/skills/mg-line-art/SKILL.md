@@ -1,33 +1,24 @@
 ---
 name: mg-line-art
-description: "Declarative Technical Monoline & Blueprint Line Art motion graphics skill with self-drawing vector schematics, glowing pen tips, coordinate grids, and drafting callouts."
-tags:
-  - motion-graphics
-  - declarative-kit
-  - line-art
-  - blueprint
-command: /mg-line-art
+description: Atelier Linea continuous one-line champagne-gold SVG path engine on deep navy drafting paper with parallax dot grid, floating gold motes, hot glowing pen tip, exponential breaking wave curl, and beveled anisotropic gold medallion.
 ---
 
-# Technical Line Art & Blueprint — Declarative Fast-Path Skill
+# `mg-line-art` — Atelier Linea Continuous One-Line Engine (v2)
 
-## Visual Identity
-Minimalist architectural drafting & technical schematics: uniform 2.5–3px monoline strokes self-drawing with a glowing pen tip, dashed reference circles, corner L-brackets, and blueprint coordinate grids.
+## 1. Visual DNA & Reference Craft (`02-line-art`)
+- **Surface & Grid (`drawBackground` + `drawMotes`)**: Deep navy drafting paper (`#0B1320`) with radial vignette, 48px parallax dot grid (`rgba(160,180,210,0.09)`), and 40 floating warm gold motes.
+- **Continuous One-Line Champagne-Gold Stroke (`buildPath` + `lineColor`)**: A single uninterrupted SVG path sampled at 1.2px intervals with organic hand-drawn wobble on natural segments and ruled precision on architectural/logo segments, grading from `AGED` (`#967D50`) → `GOLD` (`#E9D7A5`) → `HOT` (`#FFF6DC`) behind a glowing pen tip (`glowAt`).
 
-## Zero-JS Workflow
-Do **not** write custom canvas JS. Author only `story.json` matching `examples/kit.json` and `examples/story.schema.json`.
-1. Read `examples/kit.json` and `examples/story.example.json` for valid enums and structure.
-2. Write `story.json` with 2–12 shots (`durationSec` 3–90, `fps: 30`, `1080x1920` or `1920x1080`).
-3. Validate via `story_lint`, preview via `capture_film_preview`, and inspect `contact_sheet.jpg`.
-4. Mode `'M'` (`?microstock=1`) automatically hides all text and dimension callouts for clean blueprint plates.
+## 2. Layouts (`examples/kit.json`)
+1. `seed-sprout`: Ground line → seed → stems & leaves → curling tendril.
+2. `pavilion-skyline`: Roof beam → arched pavilion → tower → city skyline.
+3. `breaking-wave`: Horizon → concave wave back → counter-clockwise exponential spiral curl → rising lift.
+4. `atelier-medallion`: Medallion ring + carved doorway arch → gold coin swell-in with directional bevel & expanding 1px echo ring.
 
-## Kit Enums (`examples/kit.json`)
-- **themes**: `midnight-gold`, `blueprint-cyan`, `archival-ink`, `obsidian-silver`, `atelier-emerald`
-- **layouts**: `monoline-hero`, `blueprint-split`, `schematic-stack`, `dimension-stat`, `drafting-grid`, `atelier-cta`
-- **schematics**: `blueprint-arch`, `botanical-sprout`, `circuit-trace`, `compass-rose`, `gear-schematic`, `monogram-emblem`
-- **transitions**: `pen-trace`, `blueprint-fold`, `cursor-sweep`
+## 3. Declarative Contract (`story.json`)
+Only author `story.json` (validated against `examples/story.schema.json`). Do not edit `examples/script/lineart-kit.js` or `examples/script/story-runtime.js`.
 
-## Limits & Safe-Zone Contract
-- `headline` <= 48 chars; `subtext` <= 96 chars; `items` <= 4.
-- Portrait `1080x1920` keeps all drafting frames inside `x: 56..952`, `y: 80..1420`.
-- Pure deterministic function of `t`: path trace length and pen-tip position derive strictly from `localTime`.
+## 4. Verification & Mode `'M'`
+- Deterministic render & contact sheet:
+  `node scripts/render-skill-example.mjs --dir ".aetheria/skills/mg-line-art/examples" --html "story.html" --times "1,5,10,16,22,27" --out-dir "<outDir>"`
+- Microstock clean-plate mode (`?microstock=1` or key `'M'`): Suppresses all typography and hairline rules while preserving the continuous one-line drawing and gold medallion.

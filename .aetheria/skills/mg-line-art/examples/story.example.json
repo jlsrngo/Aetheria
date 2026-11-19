@@ -1,92 +1,55 @@
 {
-  "version": 1,
   "meta": {
-    "title": "ATELIER LINEA — Blueprint Precision",
+    "title": "02-Line-Art — Atelier Linea One Line",
     "width": 1080,
     "height": 1920,
     "fps": 30,
-    "durationSec": 30,
-    "theme": "midnight-gold"
+    "durationSec": 30
   },
+  "aspect": "9:16",
+  "fps": 30,
+  "seed": 202,
+  "microstockMode": false,
   "shots": [
     {
-      "id": "s1-hero",
-      "startSec": 0,
-      "endSec": 5,
-      "layout": "monoline-hero",
-      "theme": "midnight-gold",
-      "badge": "ATELIER LINEA",
-      "headline": "SATU GARIS PRESISI",
-      "subtext": "Sketsa arsitektur monoline yang tergambar otomatis",
-      "schematic": "blueprint-arch",
-      "transition": "pen-trace"
+      "id": "shot_1_seed",
+      "layout": "seed-sprout",
+      "start": 0.0,
+      "duration": 7.5,
+      "startSec": 0.0,
+      "endSec": 7.5,
+      "headline": "01 · ORIGIN",
+      "tagline": "ONE CONTINUOUS STROKE"
     },
     {
-      "id": "s2-split",
-      "startSec": 5,
-      "endSec": 10,
-      "layout": "blueprint-split",
-      "theme": "blueprint-cyan",
-      "headline": "ALAM & REKAYASA",
-      "items": [
-        { "label": "POLA BOTANI", "schematic": "botanical-sprout" },
-        { "label": "JALUR SIRKUIT", "schematic": "circuit-trace" }
-      ],
-      "transition": "blueprint-fold"
+      "id": "shot_2_skyline",
+      "layout": "pavilion-skyline",
+      "start": 7.5,
+      "duration": 7.5,
+      "startSec": 7.5,
+      "endSec": 15.0,
+      "headline": "02 · ARCHITECTURE",
+      "tagline": "TENDRIL TO BEAM"
     },
     {
-      "id": "s3-grid",
-      "startSec": 10,
-      "endSec": 15,
-      "layout": "drafting-grid",
-      "theme": "archival-ink",
-      "headline": "EMPAT SKEMATIK INTI",
-      "transition": "cursor-sweep"
+      "id": "shot_3_wave",
+      "layout": "breaking-wave",
+      "start": 15.0,
+      "duration": 7.5,
+      "startSec": 15.0,
+      "endSec": 22.5,
+      "headline": "03 · HORIZON",
+      "tagline": "EXPONENTIAL WAVE CURL"
     },
     {
-      "id": "s4-stat",
-      "startSec": 15,
-      "endSec": 20,
-      "layout": "dimension-stat",
-      "theme": "obsidian-silver",
-      "metric": "2.5PX",
-      "headline": "KETEBALAN GARIS KONSISTEN",
-      "schematic": "gear-schematic",
-      "transition": "pen-trace"
-    },
-    {
-      "id": "s5-stack",
-      "startSec": 20,
-      "endSec": 25,
-      "layout": "schematic-stack",
-      "theme": "atelier-emerald",
-      "headline": "ALUR DRAFTING",
-      "items": [
-        { "label": "01. Garis Konstruksi", "schematic": "compass-rose" },
-        { "label": "02. Tracing Kontur", "schematic": "blueprint-arch" },
-        { "label": "03. Monogram Akhir", "schematic": "monogram-emblem" }
-      ],
-      "transition": "blueprint-fold"
-    },
-    {
-      "id": "s6-cta",
-      "startSec": 25,
-      "endSec": 30,
-      "layout": "atelier-cta",
-      "theme": "midnight-gold",
-      "badge": "STUDIO DRAFT",
-      "headline": "ELEGANSI TANPA NOISE",
-      "subtext": "Gunakan cetak biru monoline untuk cerita presisi",
-      "schematic": "monogram-emblem",
-      "transition": "cursor-sweep"
+      "id": "shot_4_medallion",
+      "layout": "atelier-medallion",
+      "start": 22.5,
+      "duration": 7.5,
+      "startSec": 22.5,
+      "endSec": 30.0,
+      "headline": "ATELIER LINEA",
+      "tagline": "ONE LINE"
     }
-  ],
-  "captions": [
-    { "startSec": 0.5, "endSec": 4.5, "text": "SATU GARIS PRESISI" },
-    { "startSec": 5.5, "endSec": 9.5, "text": "ALAM DAN REKAYASA" },
-    { "startSec": 10.5, "endSec": 14.5, "text": "EMPAT SKEMATIK" },
-    { "startSec": 15.5, "endSec": 19.5, "text": "GARIS 2.5 PIKSEL" },
-    { "startSec": 20.5, "endSec": 24.5, "text": "ALUR DRAFTING" },
-    { "startSec": 25.5, "endSec": 29.5, "text": "ELEGANSI PRESISI" }
   ]
 }

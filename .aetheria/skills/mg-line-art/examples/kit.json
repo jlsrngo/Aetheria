@@ -1,22 +1,20 @@
 {
-  "schemaVersion": 1,
-  "skillId": "mg-line-art",
-  "renderer": "2d-line-art",
-  "useThree": false,
-  "scripts": ["script/lineart-kit.js", "script/story-runtime.js"],
-  "enums": {
-    "themes": ["midnight-gold", "blueprint-cyan", "archival-ink", "obsidian-silver", "atelier-emerald"],
-    "layouts": ["monoline-hero", "blueprint-split", "schematic-stack", "dimension-stat", "drafting-grid", "atelier-cta"],
-    "schematics": ["blueprint-arch", "botanical-sprout", "circuit-trace", "compass-rose", "gear-schematic", "monogram-emblem"],
-    "transitions": ["pen-trace", "blueprint-fold", "cursor-sweep"]
-  },
-  "limits": {
-    "minShots": 2,
-    "maxShots": 12,
-    "minDurationSec": 3.0,
-    "maxDurationSec": 90.0,
-    "maxHeadlineChars": 48,
-    "maxSubtextChars": 96,
-    "maxItems": 4
+  "slug": "mg-line-art",
+  "name": "Atelier Linea Continuous One-Line & Gold Medallion Engine (02-line-art Craft)",
+  "paradigm": "canvas2d-one-line-kit",
+  "layouts": ["seed-sprout", "pavilion-skyline", "breaking-wave", "atelier-medallion"],
+  "components": [
+    "navy-drafting-dot-grid",
+    "floating-gold-motes",
+    "continuous-one-line-svg-path",
+    "hot-glowing-pen-tip",
+    "architectural-skyline-stroke",
+    "exponential-wave-curl",
+    "anisotropic-gold-coin-medallion",
+    "hairline-glint-wordmark"
+  ],
+  "defaultSafeZone": {
+    "9:16": { "x": 56, "y": 80, "w": 896, "h": 1340 },
+    "16:9": { "x": 96, "y": 54, "w": 1574, "h": 908 }
   }
 }
