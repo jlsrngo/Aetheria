@@ -1,7 +1,7 @@
 {
   "version": 1,
   "meta": {
-    "title": "Lumina AI — Think In Light",
+    "title": "Aurora — Think In Light",
     "width": 1080,
     "height": 1920,
     "fps": 30,
@@ -10,85 +10,92 @@
   },
   "shots": [
     {
-      "id": "s1-hook",
+      "id": "s1-cluster",
       "startSec": 0,
       "endSec": 5,
-      "layout": "glass-hero",
+      "layout": "glass-cluster",
       "theme": "indigo-aurora",
-      "badge": "AI WORKSPACE 2026",
-      "headline": "THINK IN LIGHT",
-      "subtext": "Antarmuka kaca cair yang tenang dan responsif",
-      "widget": "orb-pulse",
+      "badge": "Aurora",
+      "headline": "Plan a slow morning",
+      "subtext": "Sarapan tenang jam sepuluh, lalu berjalan di tepi danau saat cahaya hangat",
+      "actionPill": "Add to calendar",
+      "toggleLabel": "Focus",
+      "sliderLabel": "Glow",
+      "sliderPct": 72,
       "transition": "light-sweep"
     },
     {
-      "id": "s2-compare",
+      "id": "s2-voice",
       "startSec": 5,
       "endSec": 10,
-      "layout": "glass-split",
+      "layout": "voice-listening",
       "theme": "emerald-northern",
-      "headline": "SUARA & KONTEKS",
-      "items": [
-        { "label": "GELOMBANG SUARA ALAMI", "widget": "waveform" },
-        { "label": "KONTROL INSTAN", "widget": "toggle-grid" }
-      ],
+      "badge": "Aurora Voice",
+      "headline": "Mendengar tanpa batas",
+      "subtext": "Gelombang suara alami langsung terubah menjadi jadwal rapi",
+      "actionPill": "Confirm schedule",
+      "toggleLabel": "Ambient",
+      "sliderLabel": "Clarity",
+      "sliderPct": 86,
       "transition": "luminance-fade"
     },
     {
       "id": "s3-lens",
       "startSec": 10,
       "endSec": 15,
-      "layout": "glass-lens",
+      "layout": "lens-refract",
       "theme": "twilight-violet",
-      "headline": "LENSA REFRAKTIF",
-      "subtext": "Fokus otomatis pada detail percakapan terpenting",
-      "widget": "chat-bubble",
-      "transition": "prism-expand"
+      "badge": "Liquid Glass",
+      "headline": "Lensa kaca refraktif",
+      "subtext": "Dispersi kromatik halus memfokuskan konteks terpenting",
+      "actionPill": "Inspect detail",
+      "toggleLabel": "Refract",
+      "sliderLabel": "Prism",
+      "sliderPct": 64,
+      "transition": "glass-part"
     },
     {
       "id": "s4-metric",
       "startSec": 15,
       "endSec": 20,
-      "layout": "glass-metric",
+      "layout": "metric-ring",
       "theme": "obsidian-cyan",
       "metric": "42ms",
-      "headline": "LATENSI RESPON RATA-RATA",
-      "widget": "metric-ring",
+      "headline": "Respon jernih seketika",
       "transition": "light-sweep"
     },
     {
-      "id": "s5-stack",
+      "id": "s5-controls",
       "startSec": 20,
       "endSec": 25,
-      "layout": "glass-stack",
+      "layout": "focus-controls",
       "theme": "rose-nebula",
-      "headline": "TIGA LAPISAN CAHAYA",
-      "items": [
-        { "label": "01. Mesh Aurora Adaptif", "widget": "orb-pulse" },
-        { "label": "02. Kaca Buram Spekular", "widget": "spark-prism" },
-        { "label": "03. Mikro-UI Tenang", "widget": "toggle-grid" }
-      ],
+      "badge": "Spatial UI",
+      "headline": "Kendali tenang & halus",
+      "subtext": "Lapisan kaca buram berparallax dengan kilau tepi Fresnel",
+      "actionPill": "Enable Focus",
+      "toggleLabel": "Deep Focus",
+      "sliderLabel": "Warmth",
+      "sliderPct": 78,
       "transition": "luminance-fade"
     },
     {
-      "id": "s6-cta",
+      "id": "s6-title",
       "startSec": 25,
       "endSec": 30,
-      "layout": "glass-cta",
+      "layout": "aurora-title",
       "theme": "indigo-aurora",
-      "badge": "COBA SEKARANG",
-      "headline": "MASA DEPAN ANTIGELAP",
-      "subtext": "Cepat, jernih, dan bebas distraksi",
-      "widget": "spark-prism",
-      "transition": "prism-expand"
+      "headline": "Aurora",
+      "subtext": "Think in light.",
+      "transition": "glass-part"
     }
   ],
   "captions": [
-    { "startSec": 0.5, "endSec": 4.5, "text": "THINK IN LIGHT" },
-    { "startSec": 5.5, "endSec": 9.5, "text": "SUARA ALAMI" },
-    { "startSec": 10.5, "endSec": 14.5, "text": "LENSA KACA" },
-    { "startSec": 15.5, "endSec": 19.5, "text": "42 MILIDETIK" },
-    { "startSec": 20.5, "endSec": 24.5, "text": "TIGA LAPISAN" },
-    { "startSec": 25.5, "endSec": 29.5, "text": "BEBAS DISTRAKSI" }
+    { "startSec": 0.5, "endSec": 4.5, "text": "Plan a slow morning" },
+    { "startSec": 5.5, "endSec": 9.5, "text": "Mendengar tanpa batas" },
+    { "startSec": 10.5, "endSec": 14.5, "text": "Lensa kaca refraktif" },
+    { "startSec": 15.5, "endSec": 19.5, "text": "42 milidetik" },
+    { "startSec": 20.5, "endSec": 24.5, "text": "Kendali tenang & halus" },
+    { "startSec": 25.5, "endSec": 29.5, "text": "Think in light" }
   ]
 }

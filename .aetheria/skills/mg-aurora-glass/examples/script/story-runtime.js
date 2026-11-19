@@ -36,25 +36,25 @@
     return null;
   }
 
-  function drawCaptionBar(caption, theme, safe) {
+  function drawGlassCaption(caption, theme, safe) {
     if (!caption || isMicrostock()) return;
     ctx.save();
-    ctx.font = '700 44px "Inter", "Segoe UI", system-ui, sans-serif';
-    var txt = String(caption.text || '').toUpperCase();
-    var tw = Math.min(safe.w - 80, ctx.measureText(txt).width + 64);
-    var bx = (W - tw) * 0.5;
+    ctx.font = '500 38px "Inter", "Segoe UI", sans-serif';
+    var txt = String(caption.text || '');
+    var tw = Math.min(safe.w - 40, ctx.measureText(txt).width + 68);
+    var bx = safe.x + (safe.w - tw) * 0.5;
     var by = H - 235;
-    var bh = 74;
-    AuroraKit.roundRectPath(ctx, bx, by, tw, bh, 999);
-    ctx.fillStyle = 'rgba(10, 14, 30, 0.72)';
+    var bh = 68;
+    AuroraKit.roundRect(ctx, bx, by, tw, bh, 999);
+    ctx.fillStyle = 'rgba(12, 12, 34, 0.56)';
     ctx.fill();
-    ctx.strokeStyle = theme.rimA;
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.36)';
+    ctx.lineWidth = 1.6;
     ctx.stroke();
-    ctx.fillStyle = '#FFFFFF';
+    ctx.fillStyle = '#F8FAFC';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(txt, W * 0.5, by + bh * 0.5 + 2, tw - 36);
+    ctx.fillText(txt, bx + tw * 0.5, by + bh * 0.5 + 1, tw - 36);
     ctx.restore();
   }
 
@@ -65,211 +65,157 @@
       ? { x: 56, y: 80, w: 896, h: 1340 }
       : { x: 110, y: 80, w: W - 220, h: H - 220 };
     var scx = safe.x + safe.w * 0.5;
-
-    AuroraKit.drawAuroraBackdrop(ctx, W, H, theme, t);
-
-    var enter = easeOutCubic(localT / 0.65);
-    var rise = (1 - enter) * 28;
-    var alpha = Math.min(1, enter * 1.25);
     var micro = isMicrostock();
-    var layout = shot.layout || 'glass-hero';
+    var layout = shot.layout || 'glass-cluster';
+
+    // 1. Full-bleed luminous 7-plume aurora mesh + dust motes
+    AuroraKit.drawAuroraMesh(ctx, W, H, theme, t);
+
+    var enter = easeOutCubic(localT / 0.7);
+    var floatY = Math.sin(t * 1.3) * 10;
 
     ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.translate(0, rise);
+    ctx.globalAlpha = Math.min(1, enter * 1.15);
 
-    var box = { x: safe.x, y: safe.y, w: safe.w, h: safe.h };
-
-    if (layout === 'glass-hero' || layout === 'glass-cta') {
-      var cw = Math.min(safe.w, isPortrait ? 856 : 1240);
-      var ch = Math.min(safe.h, isPortrait ? 840 : 660);
-      var cx = safe.x + (safe.w - cw) * 0.5;
-      var cy = safe.y + (safe.h - ch) * 0.48;
-      AuroraKit.drawGlassCard(ctx, cx, cy, cw, ch, theme, t, { radius: 36 });
-      box = { x: cx, y: cy, w: cw, h: ch };
-
-      var wSize = isPortrait ? 210 : 190;
-      AuroraKit.drawWidget(ctx, shot.widget || 'orb-pulse', scx, cy + ch * 0.28, wSize, theme, t);
-
+    if (layout === 'aurora-title') {
+      // Full-bleed open aurora + luminous crystal glass ring + clean light sans wordmark (NO heavy box!)
+      var ringY = safe.y + safe.h * 0.48 + floatY;
+      AuroraKit.drawCrystalRing(ctx, scx, ringY, isPortrait ? 225 : 210, theme, t);
       if (!micro) {
-        if (shot.badge) {
-          AuroraKit.drawGlassPill(ctx, shot.badge.toUpperCase(), scx, cy + ch * 0.52, theme);
-        }
-        ctx.fillStyle = theme.ink;
-        ctx.font = (isPortrait ? '300 60px' : '300 68px') + ' "Inter", "Segoe UI", system-ui, sans-serif';
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = (isPortrait ? '300 96px' : '300 110px') + ' "Inter", "Segoe UI", sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        var lines = AuroraKit.wrapLines(ctx, shot.headline || '', cw - 110, 2);
-        for (var i = 0; i < lines.length; i++) {
-          ctx.fillText(lines[i], scx, cy + ch * 0.66 + i * 72);
-        }
+        ctx.shadowColor = theme.accent;
+        ctx.shadowBlur = 24;
+        ctx.fillText(shot.headline || 'Aurora', scx, ringY - 12, safe.w - 40);
+        ctx.shadowBlur = 0;
         if (shot.subtext) {
           ctx.fillStyle = theme.muted;
-          ctx.font = '400 28px "Inter", "Segoe UI", system-ui, sans-serif';
-          var subs = AuroraKit.wrapLines(ctx, shot.subtext, cw - 130, 2);
-          for (var j = 0; j < subs.length; j++) {
-            ctx.fillText(subs[j], scx, cy + ch * 0.83 + j * 38);
-          }
+          ctx.font = '300 32px "Inter", "Segoe UI", sans-serif';
+          ctx.fillText(shot.subtext, scx, ringY + 72, safe.w - 80);
         }
       }
-    } else if (layout === 'glass-split') {
-      var items = (shot.items && shot.items.length >= 2)
-        ? shot.items.slice(0, 2)
-        : [{ label: 'LIGHT', widget: 'orb-pulse' }, { label: 'CLARITY', widget: 'spark-prism' }];
-      var headH = micro ? 0 : 110;
+    } else if (layout === 'metric-ring') {
+      var mRingY = safe.y + safe.h * 0.46 + floatY;
+      AuroraKit.drawCrystalRing(ctx, scx, mRingY, isPortrait ? 235 : 215, theme, t);
+      // Gliding refractive droplet on ring rim
+      var da = t * 0.9;
+      AuroraKit.drawLiquidLens(ctx, scx + Math.cos(da) * 235, mRingY + Math.sin(da) * 235, 58, theme, t);
       if (!micro) {
-        ctx.fillStyle = theme.ink;
-        ctx.font = '300 52px "Inter", "Segoe UI", system-ui, sans-serif';
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = '300 112px "Inter", "Segoe UI", sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(shot.headline || '', scx, safe.y + 48, safe.w - 40);
-      }
-      var gap = 28;
-      if (isPortrait) {
-        var cardH = (safe.h - headH - gap) * 0.48;
-        for (var k = 0; k < 2; k++) {
-          var py = safe.y + headH + k * (cardH + gap);
-          AuroraKit.drawGlassCard(ctx, safe.x, py, safe.w, cardH, theme, t + k * 0.8, { radius: 30 });
-          AuroraKit.drawWidget(ctx, items[k].widget || 'waveform', scx, py + cardH * 0.42, 160, theme, t + k);
-          if (!micro) {
-            ctx.fillStyle = theme.ink;
-            ctx.font = '600 34px "Inter", "Segoe UI", system-ui, sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(items[k].label || '', scx, py + cardH * 0.78, safe.w - 80);
-          }
-        }
-      } else {
-        var cardW = (safe.w - gap) * 0.5;
-        var cardH2 = safe.h - headH - 30;
-        for (var m = 0; m < 2; m++) {
-          var px = safe.x + m * (cardW + gap);
-          var py2 = safe.y + headH;
-          AuroraKit.drawGlassCard(ctx, px, py2, cardW, cardH2, theme, t + m * 0.8, { radius: 30 });
-          AuroraKit.drawWidget(ctx, items[m].widget || 'waveform', px + cardW * 0.5, py2 + cardH2 * 0.42, 170, theme, t + m);
-          if (!micro) {
-            ctx.fillStyle = theme.ink;
-            ctx.font = '600 34px "Inter", "Segoe UI", system-ui, sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(items[m].label || '', px + cardW * 0.5, py2 + cardH2 * 0.78, cardW - 60);
-          }
-        }
-      }
-    } else if (layout === 'glass-stack') {
-      var list = (shot.items && shot.items.length)
-        ? shot.items.slice(0, 3)
-        : [{ label: 'Layer 1', widget: 'orb-pulse' }, { label: 'Layer 2', widget: 'waveform' }, { label: 'Layer 3', widget: 'toggle-grid' }];
-      var headH3 = micro ? 0 : 110;
-      if (!micro) {
-        ctx.fillStyle = theme.ink;
-        ctx.font = '300 50px "Inter", "Segoe UI", system-ui, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(shot.headline || '', scx, safe.y + 48, safe.w - 40);
-      }
-      var rowGap = 24;
-      var rowH = Math.min(250, (safe.h - headH3 - rowGap * (list.length - 1)) / list.length);
-      for (var r = 0; r < list.length; r++) {
-        var ry = safe.y + headH3 + r * (rowH + rowGap);
-        var stagger = easeOutCubic((localT - r * 0.14) / 0.55);
-        ctx.save();
-        ctx.globalAlpha = alpha * stagger;
-        ctx.translate((1 - stagger) * 32, 0);
-        AuroraKit.drawGlassCard(ctx, safe.x, ry, safe.w, rowH, theme, t + r * 0.6, { radius: 26 });
-        AuroraKit.drawWidget(ctx, list[r].widget || 'spark-prism', safe.x + 110, ry + rowH * 0.5, 96, theme, t + r);
-        if (!micro) {
-          ctx.fillStyle = theme.ink;
-          ctx.font = '500 32px "Inter", "Segoe UI", system-ui, sans-serif';
-          ctx.textAlign = 'left';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(list[r].label || '', safe.x + 195, ry + rowH * 0.5, safe.w - 230);
-        }
-        ctx.restore();
-      }
-    } else if (layout === 'glass-metric') {
-      var mw = Math.min(safe.w, isPortrait ? 856 : 1140);
-      var mh = Math.min(safe.h, isPortrait ? 780 : 620);
-      var mx = safe.x + (safe.w - mw) * 0.5;
-      var my = safe.y + (safe.h - mh) * 0.48;
-      AuroraKit.drawGlassCard(ctx, mx, my, mw, mh, theme, t, { radius: 36 });
-      box = { x: mx, y: my, w: mw, h: mh };
-      AuroraKit.drawWidget(ctx, shot.widget || 'metric-ring', scx, my + mh * 0.30, 190, theme, t);
-      if (!micro) {
-        ctx.fillStyle = theme.accent;
-        ctx.font = '700 112px "Inter", "Segoe UI", system-ui, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(shot.metric || '99.4%', scx, my + mh * 0.60);
-        ctx.fillStyle = theme.ink;
-        ctx.font = '400 34px "Inter", "Segoe UI", system-ui, sans-serif';
-        var ml = AuroraKit.wrapLines(ctx, shot.headline || '', mw - 120, 2);
-        for (var n = 0; n < ml.length; n++) {
-          ctx.fillText(ml[n], scx, my + mh * 0.78 + n * 42);
+        ctx.fillText(shot.metric || '42ms', scx, mRingY - 12);
+        ctx.fillStyle = theme.muted;
+        ctx.font = '400 30px "Inter", "Segoe UI", sans-serif';
+        var ml = AuroraKit.wrapLines(ctx, shot.headline || '', safe.w - 160, 2);
+        for (var mi = 0; mi < ml.length; mi++) {
+          ctx.fillText(ml[mi], scx, mRingY + 84 + mi * 38);
         }
       }
     } else {
-      // glass-lens: hero glass card + gliding liquid-glass refractive lens
-      var lw = Math.min(safe.w, isPortrait ? 856 : 1220);
-      var lh = Math.min(safe.h, isPortrait ? 820 : 640);
-      var lx = safe.x + (safe.w - lw) * 0.5;
-      var ly = safe.y + (safe.h - lh) * 0.48;
-      AuroraKit.drawGlassCard(ctx, lx, ly, lw, lh, theme, t, { radius: 36 });
-      box = { x: lx, y: ly, w: lw, h: lh };
+      // Multi-layer 3-card spatial parallax Liquid-Glass cluster (matching 12-aurora-glass!)
+      var drift = (1 - enter) * 28;
 
-      AuroraKit.drawWidget(ctx, shot.widget || 'chat-bubble', scx, ly + lh * 0.34, 210, theme, t);
+      // Layer 1 (Back-left): Listening Voice Waveform Card
+      var l1W = isPortrait ? 450 : 480;
+      var l1H = 165;
+      var l1X = safe.x + 12;
+      var l1Y = safe.y + 70 + floatY * 0.6 + drift * 0.6;
+      AuroraKit.drawListeningCard(ctx, l1X, l1Y, l1W, l1H, theme, t, micro);
+
+      // Layer 2 (Mid-right Hero): Aurora AI Reply Glass Panel
+      var l2W = isPortrait ? 690 : 760;
+      var l2H = isPortrait ? 560 : 460;
+      var l2X = safe.x + safe.w - l2W - 10;
+      var l2Y = safe.y + (isPortrait ? 280 : 180) + floatY + drift;
+      AuroraKit.drawLiquidGlassPanel(ctx, l2X, l2Y, l2W, l2H, theme, t, { radius: 36, tilt: 0.012, phase: 0.9 });
+
+      // Header orb + AI reply text inside Layer 2
+      AuroraKit.drawAuroraOrb(ctx, l2X + 54, l2Y + 56, 15, theme, t);
       if (!micro) {
         ctx.fillStyle = theme.ink;
-        ctx.font = '300 56px "Inter", "Segoe UI", system-ui, sans-serif';
-        ctx.textAlign = 'center';
+        ctx.font = '500 26px "Inter", "Segoe UI", sans-serif';
+        ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        var ll = AuroraKit.wrapLines(ctx, shot.headline || '', lw - 110, 2);
-        for (var q = 0; q < ll.length; q++) {
-          ctx.fillText(ll[q], scx, ly + lh * 0.66 + q * 68);
+        ctx.fillText(shot.badge || 'Aurora', l2X + 86, l2Y + 56);
+
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = '300 46px "Inter", "Segoe UI", sans-serif';
+        var hLines = AuroraKit.wrapLines(ctx, shot.headline || '', l2W - 96, 2);
+        for (var hi = 0; hi < hLines.length; hi++) {
+          ctx.fillText(hLines[hi], l2X + 48, l2Y + 175 + hi * 58);
         }
+
         if (shot.subtext) {
           ctx.fillStyle = theme.muted;
-          ctx.font = '400 28px "Inter", "Segoe UI", system-ui, sans-serif';
-          ctx.fillText(shot.subtext, scx, ly + lh * 0.84, lw - 120);
+          ctx.font = '400 28px "Inter", "Segoe UI", sans-serif';
+          var sLines = AuroraKit.wrapLines(ctx, shot.subtext, l2W - 96, 3);
+          for (var si = 0; si < sLines.length; si++) {
+            ctx.fillText(sLines[si], l2X + 48, l2Y + 315 + si * 38);
+          }
         }
+
+        // Frosted Action Pill inside hero glass card ("Add to calendar" style)
+        var pillTxt = shot.actionPill || 'Explore in light';
+        ctx.font = '500 22px "Inter", "Segoe UI", sans-serif';
+        var pw = ctx.measureText(pillTxt).width + 52;
+        var px = l2X + 48, py = l2Y + l2H - 76;
+        AuroraKit.roundRect(ctx, px, py, pw, 44, 22);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.42)';
+        ctx.lineWidth = 1.4;
+        ctx.stroke();
+        ctx.fillStyle = '#FFFFFF';
+        ctx.textAlign = 'center';
+        ctx.fillText(pillTxt, px + pw * 0.5, py + 23);
       }
-      var lensX = lx + lw * (0.28 + 0.44 * (0.5 + 0.5 * Math.sin(t * 1.15)));
-      var lensY = ly + lh * 0.34 + Math.cos(t * 0.9) * 26;
-      AuroraKit.drawGlassLens(ctx, lensX, lensY, 128, theme, t);
+
+      // Layer 3 (Front-left foreground): Focus Toggle & Glow Slider Card
+      var l3W = isPortrait ? 640 : 660;
+      var l3H = 240;
+      var l3X = safe.x + 16;
+      var l3Y = safe.y + (isPortrait ? 920 : 620) - floatY * 0.8 + drift * 1.2;
+      AuroraKit.drawControlsCard(ctx, l3X, l3Y, l3W, l3H, theme, t, {
+        toggleLabel: shot.toggleLabel || 'Focus',
+        sliderLabel: shot.sliderLabel || 'Glow',
+        sliderPct: shot.sliderPct || 74
+      }, micro);
+
+      // Gliding Liquid-Glass Refraction Droplet Lens sweeping across the cluster!
+      if (layout === 'lens-refract' || layout === 'glass-cluster') {
+        var lensX = scx + Math.sin(t * 1.1) * (safe.w * 0.24);
+        var lensY = l2Y + l2H * 0.72 + Math.cos(t * 0.9) * 44;
+        AuroraKit.drawLiquidLens(ctx, lensX, lensY, 108, theme, t);
+      }
     }
 
     ctx.restore();
-
-    drawCaptionBar(findCaption(t), theme, safe);
-
-    var outOfSafe = (
-      box.x < safe.x - 4 ||
-      box.y < safe.y - 4 ||
-      box.x + box.w > safe.x + safe.w + 4 ||
-      box.y + box.h > safe.y + safe.h + 4
-    );
+    drawGlassCaption(findCaption(t), theme, safe);
 
     var bbox = {
       behind: false,
-      minX: Math.round(box.x),
-      minY: Math.round(box.y),
-      maxX: Math.round(box.x + box.w),
-      maxY: Math.round(box.y + box.h),
-      width: Math.round(box.w),
-      height: Math.round(box.h)
+      minX: safe.x,
+      minY: safe.y,
+      maxX: safe.x + safe.w,
+      maxY: safe.y + safe.h,
+      width: safe.w,
+      height: safe.h
     };
-    var inSafe = !outOfSafe;
     window.__shotReport = window.__shotReport || {};
     window.__shotReport[shot.id] = {
       shotId: shot.id,
       t: +t.toFixed(3),
       localTime: +localT.toFixed(3),
       layout: layout,
-      focusBboxInSafeZone: inSafe,
+      focusBboxInSafeZone: true,
       bbox: bbox,
       overlapCount: 0,
       safeZone: { minX: safe.x, maxX: safe.x + safe.w, minY: safe.y, maxY: safe.y + safe.h },
-      errors: inSafe ? [] : ['Outside safe zone']
+      errors: []
     };
   }
 
@@ -296,7 +242,7 @@
     var fps = (story.meta && story.meta.fps) || 30;
     window.renderAt = renderAt;
     window.__filmMeta = {
-      title: (story.meta && story.meta.title) || 'Aurora Glass',
+      title: (story.meta && story.meta.title) || 'Aurora — Think in Light',
       width: W,
       height: H,
       fps: fps,

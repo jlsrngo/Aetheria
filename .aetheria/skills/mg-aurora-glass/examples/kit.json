@@ -1,21 +1,20 @@
 {
   "schemaVersion": 1,
   "skillId": "mg-aurora-glass",
-  "renderer": "2d-aurora-glass",
+  "renderer": "2d-aurora-liquid-glass",
   "useThree": false,
   "scripts": ["script/aurora-kit.js", "script/story-runtime.js"],
   "enums": {
     "themes": ["indigo-aurora", "emerald-northern", "rose-nebula", "obsidian-cyan", "twilight-violet"],
-    "layouts": ["glass-hero", "glass-split", "glass-stack", "glass-metric", "glass-lens", "glass-cta"],
-    "widgets": ["orb-pulse", "waveform", "chat-bubble", "toggle-grid", "metric-ring", "spark-prism"],
-    "transitions": ["light-sweep", "luminance-fade", "prism-expand"]
+    "layouts": ["glass-cluster", "voice-listening", "focus-controls", "lens-refract", "metric-ring", "aurora-title"],
+    "transitions": ["light-sweep", "glass-part", "luminance-fade"]
   },
   "limits": {
     "minShots": 2,
     "maxShots": 12,
     "minDurationSec": 3.0,
     "maxDurationSec": 90.0,
-    "maxHeadlineChars": 48,
+    "maxHeadlineChars": 44,
     "maxSubtextChars": 96,
     "maxItems": 4
   }
