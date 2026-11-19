@@ -137,10 +137,10 @@
     var exitPanY = 0;
     var exitBlur = 0;
     if (shot.whipExit && localTime > dur - 0.24) {
-      var eu = clamp((localTime - (dur - 0.24)) / 0.24, 0, 1);
+      var eu = clamp((localTime - (dur - 0.28)) / 0.28, 0, 1);
       var ep = eu * eu * eu;
-      exitPanY = -ep * 260;
-      exitBlur = ep * 9.0;
+      exitPanY = -ep * 300;
+      exitBlur = ep * 14.0;
     }
 
     var manualBlur = 0;
@@ -150,7 +150,11 @@
       manualBlur = b0 + (b1 - b0) * easeOutExpo(clamp(localTime / 0.35, 0, 1));
     }
 
-    var autoBlur = clamp(vel * 0.55 * vBlurScale, 0, 10.0);
+    // Generous cinematic shutter motion blur: stronger velocity-driven blur + soft entrance rack-blur
+    var enterMotionBlur = (Math.abs(z1 - z0) > 0.02 || Math.abs(px1 - px0) > 4 || Math.abs(py1 - py0) > 4)
+      ? (1 - easeOutCubic(clamp(localTime / 0.26, 0, 1))) * 4.5
+      : 0;
+    var autoBlur = clamp(vel * 0.95 * vBlurScale, 0, 14.0);
 
     return {
       zoom: lerp(z0, z1),
@@ -159,7 +163,7 @@
       panX: lerp(px0, px1),
       panY: lerp(py0, py1) + exitPanY,
       rollRad: (lerp(r0, r1) * Math.PI) / 180,
-      blur: Math.max(manualBlur, autoBlur, exitBlur),
+      blur: Math.max(manualBlur, autoBlur, exitBlur, enterMotionBlur),
     };
   }
 
@@ -980,7 +984,7 @@
       // Painter's algorithm: draw back-to-front (ascending cosT)
       items3d.sort(function (a, b) { return a.cosT - b.cosT; });
 
-      var spinBlur = clamp(spinVel * 1.8, 0, 5.5);
+      var spinBlur = clamp(spinVel * 3.1, 0, 10.5);
 
       for (var oi = 0; oi < items3d.length; oi++) {
         var it = items3d[oi];
@@ -1114,7 +1118,7 @@
       var standPrev = easeInOutExpo(clamp((localTime - 0.033) / Math.max(0.3, standEnd), 0, 1));
       var zoomP = easeInOutExpo(clamp((localTime - standEnd * 0.90) / Math.max(0.35, dur * 0.44), 0, 1));
       var zoomPrev = easeInOutExpo(clamp((localTime - 0.033 - standEnd * 0.90) / Math.max(0.35, dur * 0.44), 0, 1));
-      var motionBlur = clamp((Math.abs(standP - standPrev) * 24) + (Math.abs(zoomP - zoomPrev) * 34), 0, 7.0);
+      var motionBlur = clamp((Math.abs(standP - standPrev) * 38) + (Math.abs(zoomP - zoomPrev) * 52), 0, 11.5);
       var tiltAmount = 1.0 - standP; // 1.0 = laid flat forward extending past viewport bottom -> 0.0 = standing upright
 
       var barGap = (cardW * 0.78) / bars.length;
@@ -1602,22 +1606,26 @@
       // 1. Spark drops from above onto glossy dark Arunaki icon (0 -> 0.26*dur)
       // 2. Impact triggers rapid zoom-in onto logo -> horizontal motion-blurred morph into "▶ Try Arunaki" pill (0.26 -> 0.48*dur)
       // 3. Pill holds cleanly with subtle specular presence (0.48 -> 0.68*dur)
-      // 4. Rapid ZOOM-IN directly into the white ▶ play triangle until the triangle fills the entire screen pure white! (0.68 -> 1.0*dur)
-      var impactT = dur * 0.26;
-      var zoomThroughStart = dur * 0.68;
+      // 4. Rapid motion-blurred ZOOM-IN directly into the white ▶ play triangle from the very start of zoom
+      //    with multi-pass radial zoom-blur ghosts + soft white bloom until the entire screen is blurred pure white!
+      var impactT = dur * 0.24;
+      var zoomThroughStart = dur * 0.58;
 
       var zoomInP = easeOutExpo(clamp((localTime - impactT * 0.85) / Math.max(0.20, dur * 0.22), 0, 1));
       var throughU = clamp((localTime - zoomThroughStart) / Math.max(0.25, dur - zoomThroughStart), 0, 1);
-      var throughP = Math.pow(throughU, 2.6); // accelerating plunge right into the white triangle!
-      var throughPrev = Math.pow(clamp((localTime - 0.033 - zoomThroughStart) / Math.max(0.25, dur - zoomThroughStart), 0, 1), 2.6);
-      var throughBlur = clamp(Math.abs(throughP - throughPrev) * 42, 0, 7.5);
+      var throughP = Math.pow(throughU, 1.95); // immediate accelerating plunge with strong motion blur from frame 1!
+      var throughPrev = Math.pow(clamp((localTime - 0.033 - zoomThroughStart) / Math.max(0.25, dur - zoomThroughStart), 0, 1), 1.95);
+      // Continuous progressive motion blur starting right as zoom begins and staying blurred all the way to full white
+      var throughBlur = throughU > 0.005
+        ? clamp(2.8 + Math.abs(throughP - throughPrev) * 58 + throughU * 18.0, 0, 24.0)
+        : 0;
 
-      // Exponential zoom: 1.0 -> 1.32x (on impact) -> up to 34x diving straight through the white ▶ triangle!
-      var ctaZoom = (1.0 + 0.32 * zoomInP) * Math.pow(28, throughP);
+      // Exponential zoom: 1.0 -> 1.30x (on impact) -> 26x diving straight through the white ▶ triangle!
+      var ctaZoom = (1.0 + 0.30 * zoomInP) * Math.pow(24, throughP);
 
       if (localTime < impactT) {
         // Beat 1: Glossy dark rounded square brand icon + bright white light spark dropping from above
-        var iconScale = easeOutBack(clamp(localTime / 0.24, 0, 1)) * ctaZoom;
+        var iconScale = easeOutBack(clamp(localTime / 0.22, 0, 1)) * ctaZoom;
         var iconSz = isPortrait ? 154 : 128;
         ctx.save();
         ctx.translate(cx, cy);
@@ -1642,16 +1650,17 @@
         ctx.fill();
         ctx.restore();
       } else {
-        // Beat 2-4: Impact zoom-in -> horizontal motion-blurred morph into pill -> plunge zoom-in through the white ▶ triangle!
+        // Beat 2-4: Impact zoom-in -> horizontal motion-blurred morph into pill -> radial motion-blurred plunge through ▶!
         var dt2 = localTime - impactT;
         var pMorph = easeOutExpo(clamp(dt2 / Math.max(0.22, dur * 0.20), 0, 1));
         var pPrev = easeOutExpo(clamp((dt2 - 0.033) / Math.max(0.22, dur * 0.20), 0, 1));
-        var mBlur = clamp(Math.abs(pMorph - pPrev) * 44 + throughBlur, 0, 9.0);
+        var morphBlur = clamp(Math.abs(pMorph - pPrev) * 44, 0, 9.0);
+        var totalBlur = clamp(morphBlur + throughBlur, 0, 24.0);
 
         var pillW = 128 + ((isPortrait ? 580 : 500) - 128) * pMorph;
         var pillH = 128 + (88 - 128) * pMorph;
 
-        // Exact local X center of the white ▶ triangle inside the pill so the camera dives dead-center into it!
+        // Exact local X center of the white ▶ triangle inside the pill so the camera dives dead-center into it
         var labelText = String(shot.ctaLabel || 'Start');
         ctx.font = '600 30px "Inter", "Segoe UI", sans-serif';
         var txtW = micro ? 0 : ctx.measureText(labelText).width;
@@ -1659,65 +1668,92 @@
         var triGap = 16;
         var groupW = micro ? triSz * 2 : triSz * 2 + triGap + txtW;
         var triLocalX = -groupW * 0.5 + triSz * 0.9;
-        var pivotShiftX = -triLocalX * easeOutCubic(clamp(throughU / 0.55, 0, 1));
+        var pivotShiftX = -triLocalX * easeOutCubic(clamp(throughU / 0.42, 0, 1));
 
-        ctx.save();
-        if (mBlur > 0.25 && throughU < 0.85) ctx.filter = 'blur(' + mBlur.toFixed(1) + 'px)';
-        ctx.translate(cx, cy);
-        ctx.scale(ctaZoom, ctaZoom);
-        ctx.translate(pivotShiftX, 0);
-
-        var pg = ctx.createLinearGradient(0, -pillH * 0.5, 0, pillH * 0.5);
-        pg.addColorStop(0.0, 'rgba(22, 20, 32, 0.94)');
-        pg.addColorStop(0.75, 'rgba(54, 48, 78, 0.92)');
-        pg.addColorStop(1.0, 'rgba(138, 126, 178, 0.88)');
-        roundRect(ctx, -pillW * 0.5, -pillH * 0.5, pillW, pillH, 999);
-        ctx.fillStyle = pg;
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(226, 232, 240, 0.36)';
-        ctx.lineWidth = 1.6;
-        ctx.stroke();
-
-        // Impact flash burst right when spark hits
-        if (dt2 < 0.18) {
-          var impFlash = 1.0 - dt2 / 0.18;
+        var drawCtaPass = function (scaleMult, alphaMult, blurAdd) {
           ctx.save();
-          ctx.globalAlpha = impFlash * 0.7;
-          ctx.fillStyle = '#FFFFFF';
+          ctx.globalAlpha = alphaMult;
+          var bPx = totalBlur + blurAdd;
+          if (bPx > 0.25) ctx.filter = 'blur(' + bPx.toFixed(1) + 'px)';
+          ctx.translate(cx, cy);
+          ctx.scale(ctaZoom * scaleMult, ctaZoom * scaleMult);
+          ctx.translate(pivotShiftX, 0);
+
+          var pg = ctx.createLinearGradient(0, -pillH * 0.5, 0, pillH * 0.5);
+          pg.addColorStop(0.0, 'rgba(22, 20, 32, 0.94)');
+          pg.addColorStop(0.75, 'rgba(54, 48, 78, 0.92)');
+          pg.addColorStop(1.0, 'rgba(138, 126, 178, 0.88)');
           roundRect(ctx, -pillW * 0.5, -pillH * 0.5, pillW, pillH, 999);
+          ctx.fillStyle = pg;
           ctx.fill();
-          ctx.restore();
-        }
+          ctx.strokeStyle = 'rgba(226, 232, 240, 0.36)';
+          ctx.lineWidth = 1.6;
+          ctx.stroke();
 
-        if (pMorph > 0.22) {
-          var contentAlpha = easeOutCubic((pMorph - 0.22) / 0.78);
-          ctx.save();
-          ctx.globalAlpha = contentAlpha;
-          // Crisp vector white ▶ play triangle (camera zooms directly through its white interior!)
-          ctx.fillStyle = '#FFFFFF';
-          ctx.beginPath();
-          ctx.moveTo(triLocalX - triSz * 0.65, -triSz * 0.88);
-          ctx.lineTo(triLocalX + triSz * 0.95, 0);
-          ctx.lineTo(triLocalX - triSz * 0.65, triSz * 0.88);
-          ctx.closePath();
-          ctx.fill();
+          if (dt2 < 0.18 && scaleMult === 1.0) {
+            var impFlash = 1.0 - dt2 / 0.18;
+            ctx.save();
+            ctx.globalAlpha = impFlash * 0.7;
+            ctx.fillStyle = '#FFFFFF';
+            roundRect(ctx, -pillW * 0.5, -pillH * 0.5, pillW, pillH, 999);
+            ctx.fill();
+            ctx.restore();
+          }
 
-          if (!micro) {
-            ctx.font = '600 30px "Inter", "Segoe UI", sans-serif';
-            ctx.textAlign = 'left';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(labelText, triLocalX + triSz + triGap, 1);
+          if (pMorph > 0.22) {
+            var contentAlpha = easeOutCubic((pMorph - 0.22) / 0.78);
+            ctx.save();
+            ctx.globalAlpha = alphaMult * contentAlpha;
+            // Soft-glowing vector white ▶ triangle
+            ctx.fillStyle = '#FFFFFF';
+            if (throughU > 0.02) {
+              ctx.shadowColor = '#FFFFFF';
+              ctx.shadowBlur = 18 + throughU * 42;
+            }
+            ctx.beginPath();
+            ctx.moveTo(triLocalX - triSz * 0.65, -triSz * 0.88);
+            ctx.lineTo(triLocalX + triSz * 0.95, 0);
+            ctx.lineTo(triLocalX - triSz * 0.65, triSz * 0.88);
+            ctx.closePath();
+            ctx.fill();
+            ctx.shadowBlur = 0;
+
+            if (!micro) {
+              ctx.font = '600 30px "Inter", "Segoe UI", sans-serif';
+              ctx.textAlign = 'left';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(labelText, triLocalX + triSz + triGap, 1);
+            }
+            ctx.restore();
           }
           ctx.restore();
-        }
-        ctx.restore();
+        };
 
-        // Final pure-white lock at the very tail of the plunge so screen is 100% clean white before final scene
-        if (throughU > 0.72) {
-          var whiteLock = easeInOutCubic((throughU - 0.72) / 0.28);
+        // Multi-pass radial zoom-blur ghost trails during plunge so zoom feels silky & cinematic, never rigid!
+        if (throughU > 0.02) {
+          drawCtaPass(0.84, 0.22, 6.0);
+          drawCtaPass(0.92, 0.36, 3.0);
+        }
+        drawCtaPass(1.0, 1.0, 0);
+
+        // Soft blurred white bloom radiating outward from the ▶ triangle until the entire screen is pure white
+        if (throughU > 0.22) {
+          var bloomU = clamp((throughU - 0.22) / 0.78, 0, 1);
+          var bloomE = easeInOutCubic(bloomU);
           ctx.save();
-          ctx.globalAlpha = whiteLock;
-          ctx.fillStyle = '#FFFFFF';
+          ctx.globalAlpha = bloomE;
+          var wg = ctx.createRadialGradient(
+            cx,
+            cy,
+            Math.max(12, Math.min(W, H) * 0.06 * bloomE),
+            cx,
+            cy,
+            Math.max(W, H) * (0.28 + 0.95 * bloomE)
+          );
+          wg.addColorStop(0.0, '#FFFFFF');
+          wg.addColorStop(0.55, 'rgba(255, 255, 255, ' + (0.72 + 0.28 * bloomE).toFixed(3) + ')');
+          wg.addColorStop(1.0, 'rgba(255, 255, 255, ' + Math.pow(bloomE, 1.4).toFixed(3) + ')');
+          ctx.fillStyle = wg;
           ctx.fillRect(0, 0, W, H);
           ctx.restore();
         }
@@ -1903,6 +1939,15 @@
     }
 
     ctx.restore();
+
+    // Optional soft white-out reveal when entering from a white-flash transition shot
+    if (shot.enterFromWhite && localTime < 0.36) {
+      ctx.save();
+      ctx.globalAlpha = 1.0 - easeOutCubic(clamp(localTime / 0.36, 0, 1));
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
   }
 
   global.CobaltKit = {
