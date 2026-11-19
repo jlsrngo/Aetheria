@@ -1,92 +1,64 @@
 {
-  "version": 1,
   "meta": {
-    "title": "FLUX — Glossy Liquid Motion",
+    "title": "07-Liquid Glossy Studio SDF Motion — drop",
     "width": 1080,
     "height": 1920,
     "fps": 30,
     "durationSec": 30,
-    "theme": "plum-candy"
+    "wordmark": "drop"
   },
+  "aspect": "9:16",
+  "fps": 30,
+  "seed": 707,
+  "microstockMode": false,
   "shots": [
     {
-      "id": "s1-hero",
-      "startSec": 0,
-      "endSec": 5,
-      "layout": "fluid-hero",
-      "theme": "plum-candy",
-      "badge": "LIQUID GENESIS",
-      "headline": "CAIRAN YANG MENGALIR",
-      "subtext": "Metaball mengilap dengan elastisitas organik",
-      "form": "metaball-duo",
-      "transition": "liquid-flood"
+      "id": "shot_1_pour_crown",
+      "layout": "pour-macro",
+      "start": 0.0,
+      "duration": 7.5,
+      "startSec": 0.0,
+      "endSec": 7.5,
+      "wordmark": "drop",
+      "tagline": "01 · MACRO POUR & BALL LENS",
+      "subheadline": "VISCOUS PINCH-OFF & SPLASH CROWN",
+      "huePreset": 0.08
     },
     {
-      "id": "s2-split",
-      "startSec": 5,
-      "endSec": 10,
-      "layout": "fluid-split",
-      "theme": "ocean-splash",
-      "headline": "TETES & PERCIKAN",
-      "items": [
-        { "label": "TETESAN MURNI", "form": "liquid-drop" },
-        { "label": "MAHKOTA SPLASH", "form": "splash-crown" }
-      ],
-      "transition": "splash-wipe"
+      "id": "shot_2_leap_swirl",
+      "layout": "marbled-leap",
+      "start": 7.5,
+      "duration": 7.5,
+      "startSec": 7.5,
+      "endSec": 15.0,
+      "wordmark": "drop",
+      "tagline": "02 · SURFACE-TENSION LEAP",
+      "subheadline": "3D MARBLED SWIRL & SNAPPING THREAD",
+      "huePreset": 0.38
     },
     {
-      "id": "s3-pool",
-      "startSec": 10,
-      "endSec": 15,
-      "layout": "fluid-pool",
-      "theme": "citrus-fizz",
-      "headline": "EMPAT BENTUK CAIR",
-      "transition": "droplet-merge"
+      "id": "shot_3_diagonal_flood",
+      "layout": "flood-immersion",
+      "start": 15.0,
+      "duration": 7.5,
+      "startSec": 15.0,
+      "endSec": 22.5,
+      "wordmark": "drop",
+      "tagline": "03 · DIAGONAL FLOOD SHEETS",
+      "subheadline": "CAUSTIC SHAFTS & BACKLIT SEED BLOBS",
+      "huePreset": 0.62
     },
     {
-      "id": "s4-stat",
-      "startSec": 15,
-      "endSec": 20,
-      "layout": "fluid-stat",
-      "theme": "berry-velvet",
-      "metric": "100%",
-      "headline": "KILAU SPEKULAR ALAMI",
-      "form": "ripple-pool",
-      "transition": "liquid-flood"
-    },
-    {
-      "id": "s5-stack",
-      "startSec": 20,
-      "endSec": 25,
-      "layout": "fluid-stack",
-      "theme": "obsidian-lava",
-      "headline": "DINAMIKA FLUIDA",
-      "items": [
-        { "label": "01. Fusi Metaball", "form": "metaball-duo" },
-        { "label": "02. Pita Gelombang", "form": "wave-ribbon" },
-        { "label": "03. Gugus Gelembung", "form": "bubble-cluster" }
-      ],
-      "transition": "splash-wipe"
-    },
-    {
-      "id": "s6-cta",
-      "startSec": 25,
-      "endSec": 30,
-      "layout": "fluid-cta",
-      "theme": "plum-candy",
-      "badge": "FLUX STUDIO",
-      "headline": "RASA SEGAR DI LAYAR",
-      "subtext": "Ideal untuk minuman, kosmetik, dan brand kreatif",
-      "form": "bubble-cluster",
-      "transition": "droplet-merge"
+      "id": "shot_4_jelly_wordmark",
+      "layout": "jelly-wordmark",
+      "start": 22.5,
+      "duration": 7.5,
+      "startSec": 22.5,
+      "endSec": 30.0,
+      "wordmark": "drop",
+      "tagline": "IT ALL STARTS WITH A DROP",
+      "subheadline": "EVERYTHING BEGINS AS A DROP · LIQUID MOTION",
+      "huePreset": 0.85
     }
-  ],
-  "captions": [
-    { "startSec": 0.5, "endSec": 4.5, "text": "CAIRAN MENGALIR" },
-    { "startSec": 5.5, "endSec": 9.5, "text": "TETES DAN SPLASH" },
-    { "startSec": 10.5, "endSec": 14.5, "text": "BENTUK ORGANIK" },
-    { "startSec": 15.5, "endSec": 19.5, "text": "KILAU SPEKULAR" },
-    { "startSec": 20.5, "endSec": 24.5, "text": "DINAMIKA FLUIDA" },
-    { "startSec": 25.5, "endSec": 29.5, "text": "RASA SEGAR" }
   ]
 }

@@ -1,22 +1,21 @@
 {
-  "schemaVersion": 1,
-  "skillId": "mg-liquid-fluid",
-  "renderer": "2d-liquid-fluid",
-  "useThree": false,
-  "scripts": ["script/liquid-kit.js", "script/story-runtime.js"],
-  "enums": {
-    "themes": ["plum-candy", "ocean-splash", "citrus-fizz", "berry-velvet", "obsidian-lava"],
-    "layouts": ["fluid-hero", "fluid-split", "fluid-stack", "fluid-stat", "fluid-pool", "fluid-cta"],
-    "forms": ["metaball-duo", "liquid-drop", "splash-crown", "ripple-pool", "wave-ribbon", "bubble-cluster"],
-    "transitions": ["liquid-flood", "splash-wipe", "droplet-merge"]
-  },
-  "limits": {
-    "minShots": 2,
-    "maxShots": 12,
-    "minDurationSec": 3.0,
-    "maxDurationSec": 90.0,
-    "maxHeadlineChars": 44,
-    "maxSubtextChars": 92,
-    "maxItems": 4
+  "slug": "mg-liquid-fluid",
+  "name": "3D Glossy Studio Liquid & SDF Jelly Engine (07-liquid Craft)",
+  "paradigm": "webgl2-sdf-liquid-kit",
+  "layouts": ["pour-macro", "splash-fuse", "marbled-leap", "flood-immersion", "jelly-wordmark"],
+  "components": [
+    "plum-cyclorama-studio",
+    "smooth-union-metaball-field",
+    "fresnel-softbox-env-reflection",
+    "ball-lens-refraction-pour",
+    "splash-crown-tendrils",
+    "marbled-3d-swirl-sphere",
+    "diagonal-flood-sheets",
+    "edt-letter-sdf-jelly-wordmark",
+    "polished-floor-mirror-ripple"
+  ],
+  "defaultSafeZone": {
+    "9:16": { "x": 56, "y": 80, "w": 896, "h": 1340 },
+    "16:9": { "x": 96, "y": 54, "w": 1574, "h": 908 }
   }
 }

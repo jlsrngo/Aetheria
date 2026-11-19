@@ -1,33 +1,45 @@
 ---
 name: mg-liquid-fluid
-description: "Declarative Liquid & Fluid Motion graphics skill with glossy 3D-shaded metaballs, organic droplets, splash crowns, flowing liquid ribbons, and specular pill highlights."
-tags:
-  - motion-graphics
-  - declarative-kit
-  - liquid-fluid
-  - metaballs
-command: /mg-liquid-fluid
+description: 3D glossy studio liquid and SDF jelly typography engine (WebGL2 HDR ray-shaded smooth-union metaballs, Felzenszwalb EDT letter SDFs, softbox Fresnel reflections, splash crown tendrils, diagonal flood sheets, and polished floor mirror ripples).
 ---
 
-# Liquid & Fluid Motion — Declarative Fast-Path Skill
+# `mg-liquid-fluid` — 3D Glossy Studio Liquid & SDF Jelly Engine (v2)
 
-## Visual Identity
-Glossy beverage & beauty commercial motion: deep rich backdrops with layered flowing liquid waves, 3D-shaded specular metaball spheres, organic droplets, splash crowns, and vibrant gradient-rimmed pill cards.
+## 1. Visual DNA & Reference Craft (`07-liquid`)
+- **Studio Cyclorama & Lighting (`FS_SCENE` + `FS_BRIGHT` + `FS_POST`)**: Deep plum studio cyclorama (`#120517` to `#340F3C`) with curved horizon falloff, polished floor mirror reflections (`2.0 * uFloorY - p.y`), contact darkening, cast liquid shadows, colored floor/wall caustics, and 4 studio softboxes (`env(r)` key upper-left, top-right catchlight, right strip light, lower-left kicker).
+- **3D Height-Dome & Thickness Shading (`shadeLiquid`)**: Log-sum-exp smooth-union SDF (`Fld`, `fadd`, `fres`, sharpness `uK`) reconstructed into a 3D dome (`R = 95px`, `Hc = 210px`, `tanh(h0/Hc)`) with thickness-driven beer-lambert coloring (`palThin` → `palMid` → `palDeep` across Tangerine `#FFBD4D` → Hot Pink `#FF1A70` → Violet `#8F1FFF`), transmitted rim glow, Fresnel reflection (`R0 = 0.04`), wet specular hotspot (`pow(900)`), diagonal glint sweep, and mipmapped HDR bloom + film grain.
+- **Felzenszwalb 2D EDT Letter SDF (`buildLetterSDF`)**: Generates 4-channel sub-pixel Euclidean Distance Transform textures (`RGBA16F`) from any 4-letter hero wordmark (default `"drop"`), blending sharp edge contours with a smoothed interior dome so medial-axis creases vanish.
 
-## Zero-JS Workflow
-Do **not** write custom canvas JS. Author only `story.json` matching `examples/kit.json` and `examples/story.schema.json`.
-1. Read `examples/kit.json` and `examples/story.example.json` for valid enums and structure.
-2. Write `story.json` with 2–12 shots (`durationSec` 3–90, `fps: 30`, `1080x1920` or `1920x1080`).
-3. Validate via `story_lint`, preview via `capture_film_preview`, and inspect `contact_sheet.jpg`.
-4. Mode `'M'` (`?microstock=1`) automatically hides all text and captions for clean liquid plates.
+## 2. Layouts (`examples/kit.json`)
+1. `pour-macro`: Macro pour bulb with barrel-refracted ball-lens image (`uLens`), thinning viscous neck pinch-off (`pour_snap`), splash crown tendrils with detaching ballistic beads, and P1–P4 drop landings.
+2. `marbled-leap`: Merged liquid mass gathering into a dome and leaping into a 3D marbled swirl sphere (`uSw` curl-warped 3D bands) with a stretching/snapping remnant floor thread.
+3. `flood-immersion`: Three diagonal flood sheets (`sheetV` violet L→R, `sheetO` tangerine R→L, `sheetP` hot pink L→R) with bright meniscus rims, 4 under-surface caustic light shafts, rising micro-bubbles, and dense backlit seed blobs.
+4. `jelly-wordmark`: Fused liquid bar pinching and splitting into the 4 glossy 3D jelly letters of the wordmark (`drop`) with gooey snapping inter-letter bridges, radial light ring + backlit crown sheet, rising carbonation bubbles, hanging descender drip that snaps and lands on the polished floor, and expanding specular ripple rings.
 
-## Kit Enums (`examples/kit.json`)
-- **themes**: `plum-candy`, `ocean-splash`, `citrus-fizz`, `berry-velvet`, `obsidian-lava`
-- **layouts**: `fluid-hero`, `fluid-split`, `fluid-stack`, `fluid-stat`, `fluid-pool`, `fluid-cta`
-- **forms**: `metaball-duo`, `liquid-drop`, `splash-crown`, `ripple-pool`, `wave-ribbon`, `bubble-cluster`
-- **transitions**: `liquid-flood`, `splash-wipe`, `droplet-merge`
+## 3. Declarative Contract (`story.json`)
+Only author `story.json` (validated against `examples/story.schema.json`). Do not edit `examples/script/liquid-kit.js` or `examples/script/story-runtime.js`.
 
-## Limits & Safe-Zone Contract
-- `headline` <= 44 chars; `subtext` <= 92 chars; `items` <= 4.
-- Portrait `1080x1920` keeps all fluid cards inside `x: 56..952`, `y: 80..1420`.
-- Pure deterministic function of `t`: wave phase, metaball separation, and droplet orbit derive strictly from `t`.
+```json
+{
+  "aspect": "9:16",
+  "fps": 30,
+  "seed": 707,
+  "microstockMode": false,
+  "shots": [
+    {
+      "id": "shot_4_jelly_wordmark",
+      "layout": "jelly-wordmark",
+      "start": 22.5,
+      "duration": 7.5,
+      "wordmark": "drop",
+      "tagline": "IT ALL STARTS WITH A DROP",
+      "subheadline": "EVERYTHING BEGINS AS A DROP · LIQUID MOTION"
+    }
+  ]
+}
+```
+
+## 4. Verification & Mode `'M'`
+- Deterministic render & contact sheet:
+  `node scripts/render-skill-example.mjs --dir ".aetheria/skills/mg-liquid-fluid/examples" --html "story.html" --times "1,5,10,16,22,27" --out-dir "<outDir>"`
+- Microstock clean-plate mode (`?microstock=1` or key `'M'`): Suppresses all front typography and replaces the wordmark SDF glyphs with pure 3D glossy liquid spheres and drips.
