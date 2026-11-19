@@ -2,35 +2,158 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "mg-cel-boil story.json schema",
   "type": "object",
-  "required": ["aspect", "fps", "shots"],
+  "required": [
+    "shots",
+    "canvas",
+    "captions"
+  ],
   "properties": {
-    "aspect": { "type": "string", "enum": ["9:16", "16:9"] },
-    "fps": { "type": "integer", "default": 24 },
-    "seed": { "type": "integer", "default": 505 },
-    "microstockMode": { "type": "boolean", "default": false },
+    "aspect": {
+      "type": "string",
+      "enum": [
+        "9:16",
+        "16:9"
+      ]
+    },
+    "fps": {
+      "type": "integer",
+      "default": 24
+    },
+    "seed": {
+      "type": "integer",
+      "default": 505
+    },
+    "microstockMode": {
+      "type": "boolean",
+      "default": false
+    },
     "shots": {
       "type": "array",
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["id", "layout", "start", "duration"],
+        "required": [
+          "id",
+          "layout",
+          "start",
+          "duration"
+        ],
         "properties": {
-          "id": { "type": "string" },
+          "id": {
+            "type": "string"
+          },
           "layout": {
             "type": "string",
-            "enum": ["strike-smear", "spirit-jump", "box-dance", "badge-riffle"]
+            "enum": [
+              "strike-smear",
+              "spirit-jump",
+              "box-dance",
+              "badge-riffle"
+            ]
           },
-          "start": { "type": "number" },
-          "duration": { "type": "number" },
-          "exposure": { "type": "string", "enum": ["on-1s", "on-2s", "on-3s"] },
-          "drawingNumber": { "type": "integer" },
-          "sceneCode": { "type": "string" },
-          "headline": { "type": "string" },
-          "subheadline": { "type": "string" },
-          "tagline": { "type": "string" },
+          "start": {
+            "type": "number",
+            "minimum": 0
+          },
+          "duration": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "exposure": {
+            "type": "string",
+            "enum": [
+              "on-1s",
+              "on-2s",
+              "on-3s"
+            ]
+          },
+          "drawingNumber": {
+            "type": "integer"
+          },
+          "sceneCode": {
+            "type": "string"
+          },
+          "headline": {
+            "type": "string"
+          },
+          "subheadline": {
+            "type": "string"
+          },
+          "tagline": {
+            "type": "string"
+          },
           "spiritFace": {
             "type": "string",
-            "enum": ["open", "happy", "wink", "fierce", "squeeze"]
+            "enum": [
+              "open",
+              "happy",
+              "wink",
+              "fierce",
+              "squeeze"
+            ]
+          }
+        }
+      }
+    },
+    "title": {
+      "type": "string"
+    },
+    "canvas": {
+      "type": "object",
+      "required": [
+        "w",
+        "h",
+        "fps"
+      ],
+      "properties": {
+        "w": {
+          "type": "integer",
+          "minimum": 320,
+          "maximum": 3840
+        },
+        "h": {
+          "type": "integer",
+          "minimum": 320,
+          "maximum": 3840
+        },
+        "fps": {
+          "type": "integer",
+          "minimum": 12,
+          "maximum": 60
+        }
+      }
+    },
+    "captions": {
+      "type": "object",
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "start",
+              "duration",
+              "text"
+            ],
+            "properties": {
+              "start": {
+                "type": "number",
+                "minimum": 0
+              },
+              "duration": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "text": {
+                "type": "string"
+              }
+            }
           }
         }
       }

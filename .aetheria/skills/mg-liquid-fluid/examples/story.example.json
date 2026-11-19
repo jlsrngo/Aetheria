@@ -1,24 +1,19 @@
 {
-  "meta": {
-    "title": "07-Liquid Glossy Studio SDF Motion — drop",
-    "width": 1080,
-    "height": 1920,
-    "fps": 30,
-    "durationSec": 30,
-    "wordmark": "drop"
+  "title": "07-Liquid Glossy Studio SDF Motion — drop",
+  "canvas": {
+    "w": 1080,
+    "h": 1920,
+    "fps": 30
   },
   "aspect": "9:16",
-  "fps": 30,
   "seed": 707,
   "microstockMode": false,
   "shots": [
     {
       "id": "shot_1_pour_crown",
-      "layout": "pour-macro",
-      "start": 0.0,
+      "start": 0,
       "duration": 7.5,
-      "startSec": 0.0,
-      "endSec": 7.5,
+      "layout": "pour-macro",
       "wordmark": "drop",
       "tagline": "01 · MACRO POUR & BALL LENS",
       "subheadline": "VISCOUS PINCH-OFF & SPLASH CROWN",
@@ -26,11 +21,9 @@
     },
     {
       "id": "shot_2_leap_swirl",
-      "layout": "marbled-leap",
       "start": 7.5,
       "duration": 7.5,
-      "startSec": 7.5,
-      "endSec": 15.0,
+      "layout": "marbled-leap",
       "wordmark": "drop",
       "tagline": "02 · SURFACE-TENSION LEAP",
       "subheadline": "3D MARBLED SWIRL & SNAPPING THREAD",
@@ -38,11 +31,9 @@
     },
     {
       "id": "shot_3_diagonal_flood",
-      "layout": "flood-immersion",
-      "start": 15.0,
+      "start": 15,
       "duration": 7.5,
-      "startSec": 15.0,
-      "endSec": 22.5,
+      "layout": "flood-immersion",
       "wordmark": "drop",
       "tagline": "03 · DIAGONAL FLOOD SHEETS",
       "subheadline": "CAUSTIC SHAFTS & BACKLIT SEED BLOBS",
@@ -50,15 +41,16 @@
     },
     {
       "id": "shot_4_jelly_wordmark",
-      "layout": "jelly-wordmark",
       "start": 22.5,
       "duration": 7.5,
-      "startSec": 22.5,
-      "endSec": 30.0,
+      "layout": "jelly-wordmark",
       "wordmark": "drop",
       "tagline": "IT ALL STARTS WITH A DROP",
       "subheadline": "EVERYTHING BEGINS AS A DROP · LIQUID MOTION",
       "huePreset": 0.85
     }
-  ]
+  ],
+  "captions": {
+    "enabled": false
+  }
 }

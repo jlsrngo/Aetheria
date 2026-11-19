@@ -104,8 +104,8 @@
     if (!res.ok) res = await fetch('story.example.json');
     story = await res.json();
 
-    W = (story.meta && story.meta.width) || (story.aspect === '16:9' ? 1920 : 1080);
-    H = (story.meta && story.meta.height) || (story.aspect === '16:9' ? 1080 : 1920);
+    W = (story.canvas && story.canvas.w) || (story.meta && story.meta.width) || (story.aspect === '16:9' ? 1920 : 1080);
+    H = (story.canvas && story.canvas.h) || (story.meta && story.meta.height) || (story.aspect === '16:9' ? 1080 : 1920);
     canvas.width = W;
     canvas.height = H;
     ctx = canvas.getContext('2d');
@@ -119,7 +119,7 @@
     const fps = (story.meta && story.meta.fps) || story.fps || 24;
 
     window.__filmMeta = {
-      title: (story.meta && story.meta.title) || '05-Cel-Boil Hand-Drawn Film',
+      title: story.title || (story.meta && story.meta.title) || '05-Cel-Boil Hand-Drawn Film',
       width: W,
       height: H,
       fps,

@@ -22,22 +22,26 @@
     if (!story || !story.shots || !story.shots.length) return null;
     for (var i = 0; i < story.shots.length; i++) {
       var s = story.shots[i];
-      if (t >= s.startSec && t < s.endSec) return s;
+      var st = s.start !== undefined ? s.start : (s.startSec || 0); var en = s.duration !== undefined ? st + s.duration : (s.endSec || st); if (t >= st && t < en) return s;
     }
     return story.shots[story.shots.length - 1];
   }
 
   function findCaption(t) {
     if (!story || !story.captions) return null;
-    for (var i = 0; i < story.captions.length; i++) {
-      var c = story.captions[i];
-      if (t >= c.startSec && t < c.endSec) return c;
+    if (!Array.isArray(story.captions) && story.captions.enabled === false) return null;
+    var items = Array.isArray(story.captions) ? story.captions : (story.captions.items || []);
+    for (var i = 0; i < items.length; i++) {
+      var c = items[i];
+      var cs = c.start !== undefined ? c.start : (c.startSec || 0);
+      var ce = c.duration !== undefined ? cs + c.duration : (c.endSec || cs);
+      if (t >= cs && t < ce) return c;
     }
     return null;
   }
 
   function renderShot(shot, t, localT) {
-    var theme = SynthwaveKit.getTheme(shot.theme || (story.meta && story.meta.theme));
+    var theme = SynthwaveKit.getTheme(shot.theme || story.theme || (story.meta && story.meta.theme));
     var isPortrait = H > W;
     var safe = isPortrait
       ? { x: 56, y: 80, w: 896, h: 1340 }
@@ -193,7 +197,7 @@
     if (!story || !ctx) return;
     var shot = findShot(t);
     if (!shot) return;
-    renderShot(shot, t, Math.max(0, t - shot.startSec));
+    var shotStart = shot.start !== undefined ? shot.start : (shot.startSec || 0); renderShot(shot, t, Math.max(0, t - shotStart));
   }
 
   async function init() {
@@ -202,24 +206,24 @@
     var res = await fetch('story.json');
     if (!res.ok) res = await fetch('story.example.json');
     story = await res.json();
-    W = (story.meta && story.meta.width) || 1080;
-    H = (story.meta && story.meta.height) || 1920;
+    W = (story.canvas && story.canvas.w) || (story.meta && story.meta.width) || 1080;
+    H = (story.canvas && story.canvas.h) || (story.meta && story.meta.height) || 1920;
     canvas.width = W;
     canvas.height = H;
     ctx = canvas.getContext('2d');
 
-    var dur = (story.meta && story.meta.durationSec) || 30;
-    var fps = (story.meta && story.meta.fps) || 30;
+    var dur = (story.meta && story.meta.durationSec) || (story.shots || []).reduce(function (a, sh) { var st = sh.start !== undefined ? sh.start : (sh.startSec || 0); var en = sh.duration !== undefined ? st + sh.duration : (sh.endSec || st); return Math.max(a, en); }, 0) || 30;
+    var fps = (story.canvas && story.canvas.fps) || (story.meta && story.meta.fps) || 30;
     window.renderAt = renderAt;
     window.__filmMeta = {
-      title: (story.meta && story.meta.title) || 'Outrun 1986 Synthwave',
+      title: story.title || (story.meta && story.meta.title) || 'Outrun 1986 Synthwave',
       width: W,
       height: H,
       fps: fps,
       duration: dur,
       durationInFrames: Math.round(dur * fps),
       scenes: (story.shots || []).map(function (s) {
-        return { id: s.id, title: s.id, start: s.startSec, duration: s.endSec - s.startSec };
+        var st = s.start !== undefined ? s.start : (s.startSec || 0); var du = s.duration !== undefined ? s.duration : ((s.endSec || st) - st); return { id: s.id, title: s.id, start: st, duration: du };
       })
     };
     renderAt(0);

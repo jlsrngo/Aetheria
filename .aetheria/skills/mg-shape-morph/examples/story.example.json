@@ -1,55 +1,80 @@
 {
-  "meta": {
-    "title": "08-Morph Continuous Via-Circle Icon Journey — morphe.",
-    "width": 1080,
-    "height": 1920,
-    "fps": 30,
-    "durationSec": 30
+  "title": "08-Morph Continuous Via-Circle Icon Journey — morphe.",
+  "canvas": {
+    "w": 1080,
+    "h": 1920,
+    "fps": 30
   },
   "aspect": "9:16",
-  "fps": 30,
   "seed": 808,
   "microstockMode": false,
   "shots": [
     {
       "id": "shot_1_morning_cup",
-      "layout": "morning-cup",
-      "start": 0.0,
+      "start": 0,
       "duration": 7.5,
-      "startSec": 0.0,
-      "endSec": 7.5,
+      "layout": "morning-cup",
       "tagline": "01 / 07 · GOOD MORNING → SUNRISE",
-      "captions": ["GOOD MORNING", "SUNRISE", "SUNSET", "SEA BREEZE", "TAKE OFF", "ARRIVAL", "LOVE"]
+      "captions": [
+        "GOOD MORNING",
+        "SUNRISE",
+        "SUNSET",
+        "SEA BREEZE",
+        "TAKE OFF",
+        "ARRIVAL",
+        "LOVE"
+      ]
     },
     {
       "id": "shot_2_sun_to_sea",
-      "layout": "sun-to-sea",
       "start": 7.5,
       "duration": 7.5,
-      "startSec": 7.5,
-      "endSec": 15.0,
+      "layout": "sun-to-sea",
       "tagline": "03 / 07 · SUNSET → SEA BREEZE GULL",
-      "captions": ["GOOD MORNING", "SUNRISE", "SUNSET", "SEA BREEZE", "TAKE OFF", "ARRIVAL", "LOVE"]
+      "captions": [
+        "GOOD MORNING",
+        "SUNRISE",
+        "SUNSET",
+        "SEA BREEZE",
+        "TAKE OFF",
+        "ARRIVAL",
+        "LOVE"
+      ]
     },
     {
       "id": "shot_3_flight_loop",
-      "layout": "flight-loop",
-      "start": 15.0,
+      "start": 15,
       "duration": 7.5,
-      "startSec": 15.0,
-      "endSec": 22.5,
+      "layout": "flight-loop",
       "tagline": "05 / 07 · TAKE OFF LOOP → ARRIVAL PIN",
-      "captions": ["GOOD MORNING", "SUNRISE", "SUNSET", "SEA BREEZE", "TAKE OFF", "ARRIVAL", "LOVE"]
+      "captions": [
+        "GOOD MORNING",
+        "SUNRISE",
+        "SUNSET",
+        "SEA BREEZE",
+        "TAKE OFF",
+        "ARRIVAL",
+        "LOVE"
+      ]
     },
     {
       "id": "shot_4_heart_wordmark",
-      "layout": "heart-wordmark",
       "start": 22.5,
       "duration": 7.5,
-      "startSec": 22.5,
-      "endSec": 30.0,
+      "layout": "heart-wordmark",
       "tagline": "ONE SHAPE · SEVEN MOMENTS",
-      "captions": ["GOOD MORNING", "SUNRISE", "SUNSET", "SEA BREEZE", "TAKE OFF", "ARRIVAL", "LOVE"]
+      "captions": [
+        "GOOD MORNING",
+        "SUNRISE",
+        "SUNSET",
+        "SEA BREEZE",
+        "TAKE OFF",
+        "ARRIVAL",
+        "LOVE"
+      ]
     }
-  ]
+  ],
+  "captions": {
+    "enabled": false
+  }
 }

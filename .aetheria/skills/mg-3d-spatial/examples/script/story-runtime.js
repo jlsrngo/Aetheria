@@ -105,8 +105,8 @@
     if (!res.ok) res = await fetch('story.example.json');
     story = await res.json();
 
-    W = (story.meta && story.meta.width) || (story.aspect === '16:9' ? 1920 : 1080);
-    H = (story.meta && story.meta.height) || (story.aspect === '16:9' ? 1080 : 1920);
+    W = (story.canvas && story.canvas.w) || (story.meta && story.meta.width) || (story.aspect === '16:9' ? 1920 : 1080);
+    H = (story.canvas && story.canvas.h) || (story.meta && story.meta.height) || (story.aspect === '16:9' ? 1080 : 1920);
     webglCanvas.width = W; webglCanvas.height = H;
     hudCanvas.width = W; hudCanvas.height = H;
 
@@ -119,7 +119,7 @@
     const fps = (story.meta && story.meta.fps) || story.fps || 24;
 
     window.__filmMeta = {
-      title: (story.meta && story.meta.title) || '04-3D-Render — SOFT Hexagonal Capsule Bed',
+      title: story.title || (story.meta && story.meta.title) || '04-3D-Render — SOFT Hexagonal Capsule Bed',
       width: W,
       height: H,
       fps,

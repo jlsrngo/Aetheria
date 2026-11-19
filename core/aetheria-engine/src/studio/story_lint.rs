@@ -270,7 +270,8 @@ pub fn lint_story_json_value(
     story_path_label: &str,
 ) -> StoryLintReport {
     let mut issues = Vec::new();
-    let Some(root) = val.as_object() else {
+    let (norm_val, _dialect_notes) = super::story_dialect::normalize_story_dialect(val);
+    let Some(root) = norm_val.as_object() else {
         push_issue(&mut issues, "STORY_INVALID_ROOT", "", "Root of story.json must be a JSON object.");
         return StoryLintReport {
             valid: false,
@@ -800,9 +801,10 @@ pub fn story_shot_midpoints(story_path: &Path) -> Vec<(String, f64)> {
     let Ok(raw) = std::fs::read_to_string(story_path) else {
         return Vec::new();
     };
-    let Ok(val) = serde_json::from_str::<Value>(&raw) else {
+    let Ok(raw_val) = serde_json::from_str::<Value>(&raw) else {
         return Vec::new();
     };
+    let (val, _) = super::story_dialect::normalize_story_dialect(&raw_val);
     let Some(shots) = val.get("shots").and_then(Value::as_array) else {
         return Vec::new();
     };

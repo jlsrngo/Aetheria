@@ -2,20 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Bauhaus Konstruktion Story",
   "type": "object",
-  "required": ["version", "meta", "shots"],
+  "required": [
+    "version",
+    "shots",
+    "canvas",
+    "captions"
+  ],
   "properties": {
-    "version": { "const": 1 },
-    "meta": {
-      "type": "object",
-      "required": ["title", "width", "height", "fps", "durationSec", "theme"],
-      "properties": {
-        "title": { "type": "string" },
-        "width": { "type": "integer", "enum": [1080, 1920] },
-        "height": { "type": "integer", "enum": [1920, 1080] },
-        "fps": { "type": "integer", "const": 30 },
-        "durationSec": { "type": "number", "minimum": 3, "maximum": 90 },
-        "theme": { "enum": ["cream-1919", "weimar-ochre", "dessau-dark", "swiss-red", "zurich-mono"] }
-      }
+    "version": {
+      "const": 1
     },
     "shots": {
       "type": "array",
@@ -23,31 +18,131 @@
       "maxItems": 12,
       "items": {
         "type": "object",
-        "required": ["id", "startSec", "endSec", "layout", "headline"],
+        "required": [
+          "id",
+          "layout",
+          "headline",
+          "start",
+          "duration"
+        ],
         "properties": {
-          "id": { "type": "string" },
-          "startSec": { "type": "number", "minimum": 0 },
-          "endSec": { "type": "number", "minimum": 0.5 },
-          "layout": { "enum": ["kandinsky-assembly", "escapement-pivot", "tile-cascade", "flip-matrix", "constructivist-stat", "bauhaus-poster"] },
-          "theme": { "enum": ["cream-1919", "weimar-ochre", "dessau-dark", "swiss-red", "zurich-mono"] },
-          "badge": { "type": "string" },
-          "headline": { "type": "string", "maxLength": 36 },
-          "subtext": { "type": "string", "maxLength": 84 },
-          "metric": { "type": "string" },
-          "verticalWord": { "type": "string" },
-          "transition": { "enum": ["block-wipe", "tile-flip", "invert-cut"] }
+          "id": {
+            "type": "string"
+          },
+          "layout": {
+            "enum": [
+              "kandinsky-assembly",
+              "escapement-pivot",
+              "tile-cascade",
+              "flip-matrix",
+              "constructivist-stat",
+              "bauhaus-poster"
+            ]
+          },
+          "theme": {
+            "enum": [
+              "cream-1919",
+              "weimar-ochre",
+              "dessau-dark",
+              "swiss-red",
+              "zurich-mono"
+            ]
+          },
+          "badge": {
+            "type": "string"
+          },
+          "headline": {
+            "type": "string",
+            "maxLength": 36
+          },
+          "subtext": {
+            "type": "string",
+            "maxLength": 84
+          },
+          "metric": {
+            "type": "string"
+          },
+          "verticalWord": {
+            "type": "string"
+          },
+          "transition": {
+            "enum": [
+              "block-wipe",
+              "tile-flip",
+              "invert-cut"
+            ]
+          },
+          "start": {
+            "type": "number",
+            "minimum": 0
+          },
+          "duration": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          }
         }
       }
     },
     "captions": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["startSec", "endSec", "text"],
-        "properties": {
-          "startSec": { "type": "number" },
-          "endSec": { "type": "number" },
-          "text": { "type": "string" }
+      "type": "object",
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "start",
+              "duration",
+              "text"
+            ],
+            "properties": {
+              "start": {
+                "type": "number",
+                "minimum": 0
+              },
+              "duration": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "text": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "title": {
+      "type": "string"
+    },
+    "canvas": {
+      "type": "object",
+      "required": [
+        "w",
+        "h",
+        "fps"
+      ],
+      "properties": {
+        "w": {
+          "type": "integer",
+          "minimum": 320,
+          "maximum": 3840
+        },
+        "h": {
+          "type": "integer",
+          "minimum": 320,
+          "maximum": 3840
+        },
+        "fps": {
+          "type": "integer",
+          "minimum": 12,
+          "maximum": 60
         }
       }
     }

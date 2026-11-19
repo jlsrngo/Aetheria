@@ -1,8 +1,35 @@
 {
+  "schemaVersion": 1,
+  "skillId": "mg-3d-spatial",
+  "renderer": "threejs-pbr-spatial-kit",
+  "useThree": true,
+  "scripts": [
+    "script/spatial-kit.js",
+    "script/story-runtime.js"
+  ],
+  "enums": {
+    "layout": [
+      "capsule-bed-drop",
+      "letter-cascade",
+      "sphere-shockwave",
+      "soft-finale"
+    ]
+  },
+  "limits": {
+    "minShots": 1,
+    "maxShots": 12,
+    "minDurationSec": 3,
+    "maxDurationSec": 90
+  },
   "slug": "mg-3d-spatial",
   "name": "Soft 3D PBR Hex-Capsule Bed & Sculpted Wordmark Engine (04-3d-render Craft)",
   "paradigm": "threejs-pbr-spatial-kit",
-  "layouts": ["capsule-bed-drop", "letter-cascade", "sphere-shockwave", "soft-finale"],
+  "layouts": [
+    "capsule-bed-drop",
+    "letter-cascade",
+    "sphere-shockwave",
+    "soft-finale"
+  ],
   "components": [
     "pastel-studio-cyclorama",
     "instanced-hex-capsule-bed",
@@ -13,7 +40,17 @@
     "spatial-hud-overlay"
   ],
   "defaultSafeZone": {
-    "9:16": { "x": 56, "y": 80, "w": 896, "h": 1340 },
-    "16:9": { "x": 96, "y": 54, "w": 1574, "h": 908 }
+    "9:16": {
+      "x": 56,
+      "y": 80,
+      "w": 896,
+      "h": 1340
+    },
+    "16:9": {
+      "x": 96,
+      "y": 54,
+      "w": 1574,
+      "h": 908
+    }
   }
 }

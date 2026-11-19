@@ -1,8 +1,35 @@
 {
+  "schemaVersion": 1,
+  "skillId": "mg-cel-boil",
+  "renderer": "canvas2d-procedural-kit",
+  "useThree": false,
+  "scripts": [
+    "script/celboil-kit.js",
+    "script/story-runtime.js"
+  ],
+  "enums": {
+    "layout": [
+      "strike-smear",
+      "spirit-jump",
+      "box-dance",
+      "badge-riffle"
+    ]
+  },
+  "limits": {
+    "minShots": 1,
+    "maxShots": 12,
+    "minDurationSec": 3,
+    "maxDurationSec": 90
+  },
   "slug": "mg-cel-boil",
   "name": "Cel Boil Hand-Drawn Animator Kit (24fps / 12fps On-Twos / Off-Register Gouache)",
   "paradigm": "canvas2d-procedural-kit",
-  "layouts": ["strike-smear", "spirit-jump", "box-dance", "badge-riffle"],
+  "layouts": [
+    "strike-smear",
+    "spirit-jump",
+    "box-dance",
+    "badge-riffle"
+  ],
   "components": [
     "cel-paper-sheet",
     "acme-peg-bar-holes",
@@ -15,7 +42,17 @@
     "light-table-desk-pullback"
   ],
   "defaultSafeZone": {
-    "9:16": { "x": 56, "y": 80, "w": 896, "h": 1340 },
-    "16:9": { "x": 96, "y": 54, "w": 1574, "h": 908 }
+    "9:16": {
+      "x": 56,
+      "y": 80,
+      "w": 896,
+      "h": 1340
+    },
+    "16:9": {
+      "x": 96,
+      "y": 54,
+      "w": 1574,
+      "h": 908
+    }
   }
 }

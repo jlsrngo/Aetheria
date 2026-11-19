@@ -1,18 +1,17 @@
 {
   "version": 1,
-  "meta": {
-    "title": "NEON DRIVE — Outrun 1986",
-    "width": 1080,
-    "height": 1920,
-    "fps": 30,
-    "durationSec": 30,
-    "theme": "outrun-1986"
+  "title": "NEON DRIVE — Outrun 1986",
+  "theme": "outrun-1986",
+  "canvas": {
+    "w": 1080,
+    "h": 1920,
+    "fps": 30
   },
   "shots": [
     {
       "id": "s1-cruise",
-      "startSec": 0,
-      "endSec": 5,
+      "start": 0,
+      "duration": 5,
       "layout": "highway-cruise",
       "theme": "outrun-1986",
       "carMode": "cruising",
@@ -23,8 +22,8 @@
     },
     {
       "id": "s2-miami",
-      "startSec": 5,
-      "endSec": 10,
+      "start": 5,
+      "duration": 5,
       "layout": "palm-sunset",
       "theme": "miami-vice",
       "carMode": "cruising",
@@ -35,8 +34,8 @@
     },
     {
       "id": "s3-boost",
-      "startSec": 10,
-      "endSec": 15,
+      "start": 10,
+      "duration": 5,
       "layout": "car-chase",
       "theme": "laser-crimson",
       "carMode": "boost",
@@ -47,8 +46,8 @@
     },
     {
       "id": "s4-metric",
-      "startSec": 15,
-      "endSec": 20,
+      "start": 15,
+      "duration": 5,
       "layout": "neon-metric",
       "theme": "midnight-chrome",
       "carMode": "cruising",
@@ -59,8 +58,8 @@
     },
     {
       "id": "s5-vapor",
-      "startSec": 20,
-      "endSec": 25,
+      "start": 20,
+      "duration": 5,
       "layout": "chrome-slam",
       "theme": "vapor-teal",
       "carMode": "boost",
@@ -71,8 +70,8 @@
     },
     {
       "id": "s6-outro",
-      "startSec": 25,
-      "endSec": 30,
+      "start": 25,
+      "duration": 5,
       "layout": "vhs-outro",
       "theme": "outrun-1986",
       "carMode": "cruising",
@@ -82,12 +81,39 @@
       "transition": "vhs-rewind"
     }
   ],
-  "captions": [
-    { "startSec": 0.5, "endSec": 4.5, "text": "NEON DRIVE 1986" },
-    { "startSec": 5.5, "endSec": 9.5, "text": "MIAMI NIGHTS" },
-    { "startSec": 10.5, "endSec": 14.5, "text": "FULL THROTTLE" },
-    { "startSec": 15.5, "endSec": 19.5, "text": "ERA SYNTHWAVE" },
-    { "startSec": 20.5, "endSec": 24.5, "text": "ENDLESS GRID" },
-    { "startSec": 25.5, "endSec": 29.5, "text": "OUTRUN FOREVER" }
-  ]
+  "captions": {
+    "enabled": true,
+    "items": [
+      {
+        "start": 0.5,
+        "duration": 4,
+        "text": "NEON DRIVE 1986"
+      },
+      {
+        "start": 5.5,
+        "duration": 4,
+        "text": "MIAMI NIGHTS"
+      },
+      {
+        "start": 10.5,
+        "duration": 4,
+        "text": "FULL THROTTLE"
+      },
+      {
+        "start": 15.5,
+        "duration": 4,
+        "text": "ERA SYNTHWAVE"
+      },
+      {
+        "start": 20.5,
+        "duration": 4,
+        "text": "ENDLESS GRID"
+      },
+      {
+        "start": 25.5,
+        "duration": 4,
+        "text": "OUTRUN FOREVER"
+      }
+    ]
+  }
 }

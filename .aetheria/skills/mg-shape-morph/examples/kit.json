@@ -1,8 +1,35 @@
 {
+  "schemaVersion": 1,
+  "skillId": "mg-shape-morph",
+  "renderer": "canvas2d-svg-morph-kit",
+  "useThree": false,
+  "scripts": [
+    "script/morph-kit.js",
+    "script/story-runtime.js"
+  ],
+  "enums": {
+    "layout": [
+      "morning-cup",
+      "sun-to-sea",
+      "flight-loop",
+      "heart-wordmark"
+    ]
+  },
+  "limits": {
+    "minShots": 1,
+    "maxShots": 12,
+    "minDurationSec": 3,
+    "maxDurationSec": 90
+  },
   "slug": "mg-shape-morph",
   "name": "Swiss Flat-Color Via-Circle Icon Morph Engine (08-morph Craft)",
   "paradigm": "canvas2d-svg-morph-kit",
-  "layouts": ["morning-cup", "sun-to-sea", "flight-loop", "heart-wordmark"],
+  "layouts": [
+    "morning-cup",
+    "sun-to-sea",
+    "flight-loop",
+    "heart-wordmark"
+  ],
   "components": [
     "240-vertex-resampled-contour-morph",
     "via-circle-topological-bridge",
@@ -15,7 +42,17 @@
     "7-dot-capsule-chapter-hud"
   ],
   "defaultSafeZone": {
-    "9:16": { "x": 56, "y": 80, "w": 896, "h": 1340 },
-    "16:9": { "x": 96, "y": 54, "w": 1574, "h": 908 }
+    "9:16": {
+      "x": 56,
+      "y": 80,
+      "w": 896,
+      "h": 1340
+    },
+    "16:9": {
+      "x": 96,
+      "y": 54,
+      "w": 1574,
+      "h": 908
+    }
   }
 }

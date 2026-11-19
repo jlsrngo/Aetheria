@@ -1,59 +1,52 @@
 {
-  "meta": {
-    "title": "03-Isometric — Isopolis 2.5D Floating City",
-    "width": 1080,
-    "height": 1920,
-    "fps": 30,
-    "durationSec": 30
+  "title": "03-Isometric — Isopolis 2.5D Floating City",
+  "canvas": {
+    "w": 1080,
+    "h": 1920,
+    "fps": 30
   },
   "aspect": "9:16",
-  "fps": 30,
   "seed": 303,
   "microstockMode": false,
   "shots": [
     {
       "id": "shot_1_clay",
-      "layout": "clay-grid",
-      "start": 0.0,
+      "start": 0,
       "duration": 7.5,
-      "startSec": 0.0,
-      "endSec": 7.5,
+      "layout": "clay-grid",
       "headline": "BLUEPRINT",
       "tagline": "ISOMETRIC 2.5D · CLAY EXTRUSION",
       "metric": "GRID 12×12"
     },
     {
       "id": "shot_2_ignition",
-      "layout": "city-ignition",
       "start": 7.5,
       "duration": 7.5,
-      "startSec": 7.5,
-      "endSec": 15.0,
+      "layout": "city-ignition",
       "headline": "IGNITION",
       "tagline": "CYAN SCANLINE · PASTEL BLOOM",
       "metric": "CORE ONLINE"
     },
     {
       "id": "shot_3_traffic",
-      "layout": "traffic-flow",
-      "start": 15.0,
+      "start": 15,
       "duration": 7.5,
-      "startSec": 15.0,
-      "endSec": 22.5,
+      "layout": "traffic-flow",
       "headline": "CITY OS",
       "tagline": "TRANSIT & DATA PULSE",
       "metric": "99.4% SYNC"
     },
     {
       "id": "shot_4_overview",
-      "layout": "isopolis-overview",
       "start": 22.5,
       "duration": 7.5,
-      "startSec": 22.5,
-      "endSec": 30.0,
+      "layout": "isopolis-overview",
       "headline": "ISOPOLIS",
       "tagline": "2.5D FLOATING METROPOLIS",
       "metric": "BUILD 2.5D"
     }
-  ]
+  ],
+  "captions": {
+    "enabled": false
+  }
 }

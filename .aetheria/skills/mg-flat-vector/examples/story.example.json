@@ -1,55 +1,48 @@
 {
-  "meta": {
-    "title": "01-Flat-Vector — Popwise One Dot",
-    "width": 1080,
-    "height": 1920,
-    "fps": 30,
-    "durationSec": 30
+  "title": "01-Flat-Vector — Popwise One Dot",
+  "canvas": {
+    "w": 1080,
+    "h": 1920,
+    "fps": 30
   },
   "aspect": "9:16",
-  "fps": 30,
   "seed": 101,
   "microstockMode": false,
   "shots": [
     {
       "id": "shot_1_dot",
-      "layout": "sky-dot-bounce",
-      "start": 0.0,
+      "start": 0,
       "duration": 7.5,
-      "startSec": 0.0,
-      "endSec": 7.5,
+      "layout": "sky-dot-bounce",
       "headline": "ONE DOT",
       "tagline": "01 · ULTRAMARINE & CORAL"
     },
     {
       "id": "shot_2_city",
-      "layout": "city-pop-rise",
       "start": 7.5,
       "duration": 7.5,
-      "startSec": 7.5,
-      "endSec": 15.0,
+      "layout": "city-pop-rise",
       "headline": "CITY POP",
       "tagline": "02 · SPRING SKYLINE & CLOUDS"
     },
     {
       "id": "shot_3_ping",
-      "layout": "character-ping",
-      "start": 15.0,
+      "start": 15,
       "duration": 7.5,
-      "startSec": 15.0,
-      "endSec": 22.5,
+      "layout": "character-ping",
       "headline": "PING!",
       "tagline": "03 · VECTOR REACTION"
     },
     {
       "id": "shot_4_wordmark",
-      "layout": "popwise-wordmark",
       "start": 22.5,
       "duration": 7.5,
-      "startSec": 22.5,
-      "endSec": 30.0,
+      "layout": "popwise-wordmark",
       "headline": "popwise",
       "tagline": "FLAT VECTOR · EVERY DAY"
     }
-  ]
+  ],
+  "captions": {
+    "enabled": false
+  }
 }

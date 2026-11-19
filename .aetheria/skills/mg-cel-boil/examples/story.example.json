@@ -1,23 +1,19 @@
 {
-  "meta": {
-    "title": "05-Cel-Boil Hand-Drawn Match & Flame Spirit",
-    "width": 1080,
-    "height": 1920,
-    "fps": 24,
-    "durationSec": 30
+  "title": "05-Cel-Boil Hand-Drawn Match & Flame Spirit",
+  "canvas": {
+    "w": 1080,
+    "h": 1920,
+    "fps": 24
   },
   "aspect": "9:16",
-  "fps": 24,
   "seed": 505,
   "microstockMode": false,
   "shots": [
     {
       "id": "shot_1_strike",
-      "layout": "strike-smear",
-      "start": 0.0,
+      "start": 0,
       "duration": 7.5,
-      "startSec": 0.0,
-      "endSec": 7.5,
+      "layout": "strike-smear",
       "exposure": "on-1s",
       "drawingNumber": 12,
       "sceneCode": "SC. 05A",
@@ -28,11 +24,9 @@
     },
     {
       "id": "shot_2_ignition",
-      "layout": "spirit-jump",
       "start": 7.5,
       "duration": 7.5,
-      "startSec": 7.5,
-      "endSec": 15.0,
+      "layout": "spirit-jump",
       "exposure": "on-2s",
       "drawingNumber": 48,
       "sceneCode": "SC. 05B",
@@ -43,11 +37,9 @@
     },
     {
       "id": "shot_3_dance",
-      "layout": "box-dance",
-      "start": 15.0,
+      "start": 15,
       "duration": 7.5,
-      "startSec": 15.0,
-      "endSec": 22.5,
+      "layout": "box-dance",
       "exposure": "on-2s",
       "drawingNumber": 96,
       "sceneCode": "SC. 05C",
@@ -58,11 +50,9 @@
     },
     {
       "id": "shot_4_finale",
-      "layout": "badge-riffle",
       "start": 22.5,
       "duration": 7.5,
-      "startSec": 22.5,
-      "endSec": 30.0,
+      "layout": "badge-riffle",
       "exposure": "on-3s",
       "drawingNumber": 146,
       "sceneCode": "SC. 05D",
@@ -71,5 +61,8 @@
       "tagline": "TOTAL 146 DRAWINGS · ACME PEG BAR",
       "spiritFace": "wink"
     }
-  ]
+  ],
+  "captions": {
+    "enabled": false
+  }
 }

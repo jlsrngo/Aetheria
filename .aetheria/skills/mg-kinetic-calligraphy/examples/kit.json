@@ -1,8 +1,35 @@
 {
+  "schemaVersion": 1,
+  "skillId": "mg-kinetic-calligraphy",
+  "renderer": "canvas2d-calligraphy-kinetic-kit",
+  "useThree": false,
+  "scripts": [
+    "script/calligraphy-kit.js",
+    "script/story-runtime.js"
+  ],
+  "enums": {
+    "layout": [
+      "brush-reveal",
+      "focus-burst",
+      "ink-cascade",
+      "hanko-seal"
+    ]
+  },
+  "limits": {
+    "minShots": 1,
+    "maxShots": 12,
+    "minDurationSec": 3,
+    "maxDurationSec": 90
+  },
   "slug": "mg-kinetic-calligraphy",
   "name": "Kinetic Calligraphy & Spring-Extruded Hanzi/Display Engine (18-hanazi Craft)",
   "paradigm": "canvas2d-calligraphy-kinetic-kit",
-  "layouts": ["brush-reveal", "focus-burst", "ink-cascade", "hanko-seal"],
+  "layouts": [
+    "brush-reveal",
+    "focus-burst",
+    "ink-cascade",
+    "hanko-seal"
+  ],
   "components": [
     "xuan-paper-grain-backdrop",
     "variable-pressure-sumi-brush",
@@ -12,7 +39,17 @@
     "vermilion-hanko-seal-stamp"
   ],
   "defaultSafeZone": {
-    "9:16": { "x": 56, "y": 80, "w": 896, "h": 1340 },
-    "16:9": { "x": 96, "y": 54, "w": 1574, "h": 908 }
+    "9:16": {
+      "x": 56,
+      "y": 80,
+      "w": 896,
+      "h": 1340
+    },
+    "16:9": {
+      "x": 96,
+      "y": 54,
+      "w": 1574,
+      "h": 908
+    }
   }
 }

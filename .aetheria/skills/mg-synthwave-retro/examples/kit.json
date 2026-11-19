@@ -3,18 +3,42 @@
   "skillId": "mg-synthwave-retro",
   "renderer": "2d-synthwave-outrun",
   "useThree": false,
-  "scripts": ["script/synthwave-kit.js", "script/story-runtime.js"],
+  "scripts": [
+    "script/synthwave-kit.js",
+    "script/story-runtime.js"
+  ],
   "enums": {
-    "themes": ["outrun-1986", "miami-vice", "laser-crimson", "midnight-chrome", "vapor-teal"],
-    "layouts": ["highway-cruise", "chrome-slam", "neon-metric", "car-chase", "palm-sunset", "vhs-outro"],
-    "carModes": ["cruising", "boost", "hidden"],
-    "transitions": ["vhs-rewind", "neon-flash", "grid-warp"]
+    "theme": [
+      "outrun-1986",
+      "miami-vice",
+      "laser-crimson",
+      "midnight-chrome",
+      "vapor-teal"
+    ],
+    "layout": [
+      "highway-cruise",
+      "chrome-slam",
+      "neon-metric",
+      "car-chase",
+      "palm-sunset",
+      "vhs-outro"
+    ],
+    "carModes": [
+      "cruising",
+      "boost",
+      "hidden"
+    ],
+    "transition": [
+      "vhs-rewind",
+      "neon-flash",
+      "grid-warp"
+    ]
   },
   "limits": {
     "minShots": 2,
     "maxShots": 12,
-    "minDurationSec": 3.0,
-    "maxDurationSec": 90.0,
+    "minDurationSec": 3,
+    "maxDurationSec": 90,
     "maxHeadlineChars": 32,
     "maxSubtextChars": 72,
     "maxItems": 4

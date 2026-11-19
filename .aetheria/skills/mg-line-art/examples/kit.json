@@ -1,8 +1,35 @@
 {
+  "schemaVersion": 1,
+  "skillId": "mg-line-art",
+  "renderer": "canvas2d-one-line-kit",
+  "useThree": false,
+  "scripts": [
+    "script/lineart-kit.js",
+    "script/story-runtime.js"
+  ],
+  "enums": {
+    "layout": [
+      "seed-sprout",
+      "pavilion-skyline",
+      "breaking-wave",
+      "atelier-medallion"
+    ]
+  },
+  "limits": {
+    "minShots": 1,
+    "maxShots": 12,
+    "minDurationSec": 3,
+    "maxDurationSec": 90
+  },
   "slug": "mg-line-art",
   "name": "Atelier Linea Continuous One-Line & Gold Medallion Engine (02-line-art Craft)",
   "paradigm": "canvas2d-one-line-kit",
-  "layouts": ["seed-sprout", "pavilion-skyline", "breaking-wave", "atelier-medallion"],
+  "layouts": [
+    "seed-sprout",
+    "pavilion-skyline",
+    "breaking-wave",
+    "atelier-medallion"
+  ],
   "components": [
     "navy-drafting-dot-grid",
     "floating-gold-motes",
@@ -14,7 +41,17 @@
     "hairline-glint-wordmark"
   ],
   "defaultSafeZone": {
-    "9:16": { "x": 56, "y": 80, "w": 896, "h": 1340 },
-    "16:9": { "x": 96, "y": 54, "w": 1574, "h": 908 }
+    "9:16": {
+      "x": 56,
+      "y": 80,
+      "w": 896,
+      "h": 1340
+    },
+    "16:9": {
+      "x": 96,
+      "y": 54,
+      "w": 1574,
+      "h": 908
+    }
   }
 }

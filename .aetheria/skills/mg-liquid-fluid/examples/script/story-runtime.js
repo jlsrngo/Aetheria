@@ -103,8 +103,8 @@
     if (!res.ok) res = await fetch('story.example.json');
     story = await res.json();
 
-    W = (story.meta && story.meta.width) || (story.aspect === '16:9' ? 1920 : 1080);
-    H = (story.meta && story.meta.height) || (story.aspect === '16:9' ? 1080 : 1920);
+    W = (story.canvas && story.canvas.w) || (story.meta && story.meta.width) || (story.aspect === '16:9' ? 1920 : 1080);
+    H = (story.canvas && story.canvas.h) || (story.meta && story.meta.height) || (story.aspect === '16:9' ? 1080 : 1920);
     canvas.width = W;
     canvas.height = H;
     ctx = canvas.getContext('2d');
@@ -115,10 +115,10 @@
         const en = s.endSec !== undefined ? s.endSec : st + (s.duration || 7.5);
         return Math.max(acc, en);
       }, 0) || 30;
-    const fps = (story.meta && story.meta.fps) || story.fps || 30;
+    const fps = (story.canvas && story.canvas.fps) || (story.meta && story.meta.fps) || story.fps || 30;
 
     window.__filmMeta = {
-      title: (story.meta && story.meta.title) || '07-Liquid Glossy Studio SDF Motion',
+      title: story.title || (story.meta && story.meta.title) || '07-Liquid Glossy Studio SDF Motion',
       width: W,
       height: H,
       fps,

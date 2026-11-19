@@ -1,55 +1,48 @@
 {
-  "meta": {
-    "title": "04-3D-Render — SOFT Hexagonal Capsule Bed",
-    "width": 1080,
-    "height": 1920,
-    "fps": 24,
-    "durationSec": 30
+  "title": "04-3D-Render — SOFT Hexagonal Capsule Bed",
+  "canvas": {
+    "w": 1080,
+    "h": 1920,
+    "fps": 24
   },
   "aspect": "9:16",
-  "fps": 24,
   "seed": 404,
   "microstockMode": false,
   "shots": [
     {
       "id": "shot_1_drop",
-      "layout": "capsule-bed-drop",
-      "start": 0.0,
+      "start": 0,
       "duration": 7.5,
-      "startSec": 0.0,
-      "endSec": 7.5,
+      "layout": "capsule-bed-drop",
       "headline": "01 · IMPACT",
       "tagline": "HEXAGONAL CAPSULE BED · SOFT PBR"
     },
     {
       "id": "shot_2_cascade",
-      "layout": "letter-cascade",
       "start": 7.5,
       "duration": 7.5,
-      "startSec": 7.5,
-      "endSec": 15.0,
+      "layout": "letter-cascade",
       "headline": "02 · CASCADE",
       "tagline": "3D SCULPTED FORMS · STUDIO SHADOWS"
     },
     {
       "id": "shot_3_shockwave",
-      "layout": "sphere-shockwave",
-      "start": 15.0,
+      "start": 15,
       "duration": 7.5,
-      "startSec": 15.0,
-      "endSec": 22.5,
+      "layout": "sphere-shockwave",
       "headline": "03 · SHOCKWAVE",
       "tagline": "RADIAL CAPSULE CROWN · 24 FPS"
     },
     {
       "id": "shot_4_finale",
-      "layout": "soft-finale",
       "start": 22.5,
       "duration": 7.5,
-      "startSec": 22.5,
-      "endSec": 30.0,
+      "layout": "soft-finale",
       "headline": "SOFT.",
       "tagline": "3D SPATIAL RENDER · TACTILE"
     }
-  ]
+  ],
+  "captions": {
+    "enabled": false
+  }
 }

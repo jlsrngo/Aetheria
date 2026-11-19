@@ -1,8 +1,37 @@
 {
+  "schemaVersion": 1,
+  "skillId": "mg-liquid-fluid",
+  "renderer": "webgl2-sdf-liquid-kit",
+  "useThree": false,
+  "scripts": [
+    "script/liquid-kit.js",
+    "script/story-runtime.js"
+  ],
+  "enums": {
+    "layout": [
+      "pour-macro",
+      "splash-fuse",
+      "marbled-leap",
+      "flood-immersion",
+      "jelly-wordmark"
+    ]
+  },
+  "limits": {
+    "minShots": 1,
+    "maxShots": 12,
+    "minDurationSec": 3,
+    "maxDurationSec": 90
+  },
   "slug": "mg-liquid-fluid",
   "name": "3D Glossy Studio Liquid & SDF Jelly Engine (07-liquid Craft)",
   "paradigm": "webgl2-sdf-liquid-kit",
-  "layouts": ["pour-macro", "splash-fuse", "marbled-leap", "flood-immersion", "jelly-wordmark"],
+  "layouts": [
+    "pour-macro",
+    "splash-fuse",
+    "marbled-leap",
+    "flood-immersion",
+    "jelly-wordmark"
+  ],
   "components": [
     "plum-cyclorama-studio",
     "smooth-union-metaball-field",
@@ -15,7 +44,17 @@
     "polished-floor-mirror-ripple"
   ],
   "defaultSafeZone": {
-    "9:16": { "x": 56, "y": 80, "w": 896, "h": 1340 },
-    "16:9": { "x": 96, "y": 54, "w": 1574, "h": 908 }
+    "9:16": {
+      "x": 56,
+      "y": 80,
+      "w": 896,
+      "h": 1340
+    },
+    "16:9": {
+      "x": 96,
+      "y": 54,
+      "w": 1574,
+      "h": 908
+    }
   }
 }

@@ -43,6 +43,7 @@ pub mod stage_extractor;
 pub mod collage_lint;
 pub mod generic_kit_lint;
 pub mod keynote_lint;
+pub mod story_dialect;
 pub mod story_lint;
 #[cfg(test)]
 mod story_characterization_tests;

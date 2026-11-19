@@ -3,17 +3,37 @@
   "skillId": "mg-bauhaus-swiss",
   "renderer": "2d-bauhaus-konstruktion",
   "useThree": false,
-  "scripts": ["script/bauhaus-kit.js", "script/story-runtime.js"],
+  "scripts": [
+    "script/bauhaus-kit.js",
+    "script/story-runtime.js"
+  ],
   "enums": {
-    "themes": ["cream-1919", "weimar-ochre", "dessau-dark", "swiss-red", "zurich-mono"],
-    "layouts": ["kandinsky-assembly", "escapement-pivot", "tile-cascade", "flip-matrix", "constructivist-stat", "bauhaus-poster"],
-    "transitions": ["block-wipe", "tile-flip", "invert-cut"]
+    "theme": [
+      "cream-1919",
+      "weimar-ochre",
+      "dessau-dark",
+      "swiss-red",
+      "zurich-mono"
+    ],
+    "layout": [
+      "kandinsky-assembly",
+      "escapement-pivot",
+      "tile-cascade",
+      "flip-matrix",
+      "constructivist-stat",
+      "bauhaus-poster"
+    ],
+    "transition": [
+      "block-wipe",
+      "tile-flip",
+      "invert-cut"
+    ]
   },
   "limits": {
     "minShots": 2,
     "maxShots": 12,
-    "minDurationSec": 3.0,
-    "maxDurationSec": 90.0,
+    "minDurationSec": 3,
+    "maxDurationSec": 90,
     "maxHeadlineChars": 36,
     "maxSubtextChars": 84,
     "maxItems": 4

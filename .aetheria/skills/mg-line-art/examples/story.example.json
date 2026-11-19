@@ -1,55 +1,48 @@
 {
-  "meta": {
-    "title": "02-Line-Art — Atelier Linea One Line",
-    "width": 1080,
-    "height": 1920,
-    "fps": 30,
-    "durationSec": 30
+  "title": "02-Line-Art — Atelier Linea One Line",
+  "canvas": {
+    "w": 1080,
+    "h": 1920,
+    "fps": 30
   },
   "aspect": "9:16",
-  "fps": 30,
   "seed": 202,
   "microstockMode": false,
   "shots": [
     {
       "id": "shot_1_seed",
-      "layout": "seed-sprout",
-      "start": 0.0,
+      "start": 0,
       "duration": 7.5,
-      "startSec": 0.0,
-      "endSec": 7.5,
+      "layout": "seed-sprout",
       "headline": "01 · ORIGIN",
       "tagline": "ONE CONTINUOUS STROKE"
     },
     {
       "id": "shot_2_skyline",
-      "layout": "pavilion-skyline",
       "start": 7.5,
       "duration": 7.5,
-      "startSec": 7.5,
-      "endSec": 15.0,
+      "layout": "pavilion-skyline",
       "headline": "02 · ARCHITECTURE",
       "tagline": "TENDRIL TO BEAM"
     },
     {
       "id": "shot_3_wave",
-      "layout": "breaking-wave",
-      "start": 15.0,
+      "start": 15,
       "duration": 7.5,
-      "startSec": 15.0,
-      "endSec": 22.5,
+      "layout": "breaking-wave",
       "headline": "03 · HORIZON",
       "tagline": "EXPONENTIAL WAVE CURL"
     },
     {
       "id": "shot_4_medallion",
-      "layout": "atelier-medallion",
       "start": 22.5,
       "duration": 7.5,
-      "startSec": 22.5,
-      "endSec": 30.0,
+      "layout": "atelier-medallion",
       "headline": "ATELIER LINEA",
       "tagline": "ONE LINE"
     }
-  ]
+  ],
+  "captions": {
+    "enabled": false
+  }
 }

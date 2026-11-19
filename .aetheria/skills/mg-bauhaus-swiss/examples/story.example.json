@@ -1,18 +1,17 @@
 {
   "version": 1,
-  "meta": {
-    "title": "KONSTRUKTION — 20 Beats Bauhaus",
-    "width": 1080,
-    "height": 1920,
-    "fps": 30,
-    "durationSec": 30,
-    "theme": "cream-1919"
+  "title": "KONSTRUKTION — 20 Beats Bauhaus",
+  "theme": "cream-1919",
+  "canvas": {
+    "w": 1080,
+    "h": 1920,
+    "fps": 30
   },
   "shots": [
     {
       "id": "s1-assembly",
-      "startSec": 0,
-      "endSec": 5,
+      "start": 0,
+      "duration": 5,
       "layout": "kandinsky-assembly",
       "theme": "cream-1919",
       "headline": "KONSTRUKTION 01",
@@ -21,8 +20,8 @@
     },
     {
       "id": "s2-escapement",
-      "startSec": 5,
-      "endSec": 10,
+      "start": 5,
+      "duration": 5,
       "layout": "escapement-pivot",
       "theme": "cream-1919",
       "headline": "POROS ESCAPEMENT",
@@ -31,8 +30,8 @@
     },
     {
       "id": "s3-cascade",
-      "startSec": 10,
-      "endSec": 15,
+      "start": 10,
+      "duration": 5,
       "layout": "tile-cascade",
       "theme": "cream-1919",
       "headline": "KASKADE 120 BPM",
@@ -40,8 +39,8 @@
     },
     {
       "id": "s4-flip",
-      "startSec": 15,
-      "endSec": 20,
+      "start": 15,
+      "duration": 5,
       "layout": "flip-matrix",
       "theme": "weimar-ochre",
       "headline": "MATRIKS DUA SISI",
@@ -49,8 +48,8 @@
     },
     {
       "id": "s5-stat",
-      "startSec": 20,
-      "endSec": 25,
+      "start": 20,
+      "duration": 5,
       "layout": "constructivist-stat",
       "theme": "swiss-red",
       "metric": "1919",
@@ -59,8 +58,8 @@
     },
     {
       "id": "s6-poster",
-      "startSec": 25,
-      "endSec": 30,
+      "start": 25,
+      "duration": 5,
       "layout": "bauhaus-poster",
       "theme": "cream-1919",
       "verticalWord": "BAUHAUS",
@@ -69,12 +68,39 @@
       "transition": "invert-cut"
     }
   ],
-  "captions": [
-    { "startSec": 0.5, "endSec": 4.5, "text": "KONSTRUKTION 01" },
-    { "startSec": 5.5, "endSec": 9.5, "text": "POROS MEKANIS" },
-    { "startSec": 10.5, "endSec": 14.5, "text": "KASKADE 120 BPM" },
-    { "startSec": 15.5, "endSec": 19.5, "text": "MATRIKS DUA SISI" },
-    { "startSec": 20.5, "endSec": 24.5, "text": "WEIMAR 1919" },
-    { "startSec": 25.5, "endSec": 29.5, "text": "FORM FARBE FUNKTION" }
-  ]
+  "captions": {
+    "enabled": true,
+    "items": [
+      {
+        "start": 0.5,
+        "duration": 4,
+        "text": "KONSTRUKTION 01"
+      },
+      {
+        "start": 5.5,
+        "duration": 4,
+        "text": "POROS MEKANIS"
+      },
+      {
+        "start": 10.5,
+        "duration": 4,
+        "text": "KASKADE 120 BPM"
+      },
+      {
+        "start": 15.5,
+        "duration": 4,
+        "text": "MATRIKS DUA SISI"
+      },
+      {
+        "start": 20.5,
+        "duration": 4,
+        "text": "WEIMAR 1919"
+      },
+      {
+        "start": 25.5,
+        "duration": 4,
+        "text": "FORM FARBE FUNKTION"
+      }
+    ]
+  }
 }

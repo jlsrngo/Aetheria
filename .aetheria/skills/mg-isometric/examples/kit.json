@@ -1,8 +1,35 @@
 {
+  "schemaVersion": 1,
+  "skillId": "mg-isometric",
+  "renderer": "canvas2d-isometric-25d-kit",
+  "useThree": false,
+  "scripts": [
+    "script/isometric-kit.js",
+    "script/story-runtime.js"
+  ],
+  "enums": {
+    "layout": [
+      "clay-grid",
+      "city-ignition",
+      "traffic-flow",
+      "isopolis-overview"
+    ]
+  },
+  "limits": {
+    "minShots": 1,
+    "maxShots": 12,
+    "minDurationSec": 3,
+    "maxDurationSec": 90
+  },
   "slug": "mg-isometric",
   "name": "Isopolis 2.5D Isometric Floating City Engine (03-isometric Craft)",
   "paradigm": "canvas2d-isometric-25d-kit",
-  "layouts": ["clay-grid", "city-ignition", "traffic-flow", "isopolis-overview"],
+  "layouts": [
+    "clay-grid",
+    "city-ignition",
+    "traffic-flow",
+    "isopolis-overview"
+  ],
   "components": [
     "lilac-sky-dot-grid",
     "4-layer-floating-island",
@@ -14,7 +41,17 @@
     "isopolis-city-os-hud"
   ],
   "defaultSafeZone": {
-    "9:16": { "x": 56, "y": 80, "w": 896, "h": 1340 },
-    "16:9": { "x": 96, "y": 54, "w": 1574, "h": 908 }
+    "9:16": {
+      "x": 56,
+      "y": 80,
+      "w": 896,
+      "h": 1340
+    },
+    "16:9": {
+      "x": 96,
+      "y": 54,
+      "w": 1574,
+      "h": 908
+    }
   }
 }

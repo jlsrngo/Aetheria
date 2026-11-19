@@ -1,8 +1,35 @@
 {
+  "schemaVersion": 1,
+  "skillId": "mg-paperclip-sticker",
+  "renderer": "canvas2d-sticker-slap-kit",
+  "useThree": false,
+  "scripts": [
+    "script/sticker-kit.js",
+    "script/story-runtime.js"
+  ],
+  "enums": {
+    "layout": [
+      "sticker-slap",
+      "supply-chain",
+      "chip-matrix",
+      "bezel-pullback"
+    ]
+  },
+  "limits": {
+    "minShots": 1,
+    "maxShots": 12,
+    "minDurationSec": 3,
+    "maxDurationSec": 90
+  },
   "slug": "mg-paperclip-sticker",
   "name": "Paperclip Die-Cut Sticker & Editorial Infographic Engine (19-paperclip Craft)",
   "paradigm": "canvas2d-sticker-slap-kit",
-  "layouts": ["sticker-slap", "supply-chain", "chip-matrix", "bezel-pullback"],
+  "layouts": [
+    "sticker-slap",
+    "supply-chain",
+    "chip-matrix",
+    "bezel-pullback"
+  ],
   "components": [
     "dot-grid-board-surface",
     "die-cut-white-border-stickers",
@@ -12,7 +39,17 @@
     "device-bezel-desk-pullback"
   ],
   "defaultSafeZone": {
-    "9:16": { "x": 56, "y": 80, "w": 896, "h": 1340 },
-    "16:9": { "x": 96, "y": 54, "w": 1574, "h": 908 }
+    "9:16": {
+      "x": 56,
+      "y": 80,
+      "w": 896,
+      "h": 1340
+    },
+    "16:9": {
+      "x": 96,
+      "y": 54,
+      "w": 1574,
+      "h": 908
+    }
   }
 }

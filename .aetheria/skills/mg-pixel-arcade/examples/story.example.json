@@ -1,18 +1,17 @@
 {
   "version": 1,
-  "meta": {
-    "title": "PIXEL QUEST — 16-Bit Side-Scroller",
-    "width": 1080,
-    "height": 1920,
-    "fps": 30,
-    "durationSec": 30,
-    "theme": "day"
+  "title": "PIXEL QUEST — 16-Bit Side-Scroller",
+  "theme": "day",
+  "canvas": {
+    "w": 1080,
+    "h": 1920,
+    "fps": 30
   },
   "shots": [
     {
       "id": "s1-morning",
-      "startSec": 0,
-      "endSec": 5,
+      "start": 0,
+      "duration": 5,
       "layout": "side-scroll",
       "theme": "day",
       "heroAction": "run",
@@ -25,8 +24,8 @@
     },
     {
       "id": "s2-jump",
-      "startSec": 5,
-      "endSec": 10,
+      "start": 5,
+      "duration": 5,
       "layout": "boss-encounter",
       "theme": "afternoon",
       "heroAction": "bop",
@@ -39,8 +38,8 @@
     },
     {
       "id": "s3-golden",
-      "startSec": 10,
-      "endSec": 15,
+      "start": 10,
+      "duration": 5,
       "layout": "dialogue-cutscene",
       "theme": "golden",
       "heroAction": "run",
@@ -53,8 +52,8 @@
     },
     {
       "id": "s4-chest",
-      "startSec": 15,
-      "endSec": 20,
+      "start": 15,
+      "duration": 5,
       "layout": "treasure-reveal",
       "theme": "sunset",
       "heroAction": "item-get",
@@ -67,8 +66,8 @@
     },
     {
       "id": "s5-dusk",
-      "startSec": 20,
-      "endSec": 25,
+      "start": 20,
+      "duration": 5,
       "layout": "stage-clear",
       "theme": "dusk",
       "heroAction": "cheer",
@@ -81,8 +80,8 @@
     },
     {
       "id": "s6-title",
-      "startSec": 25,
-      "endSec": 30,
+      "start": 25,
+      "duration": 5,
       "layout": "title-logo",
       "theme": "night",
       "heroAction": "cheer",
@@ -93,12 +92,39 @@
       "transition": "crt-flash"
     }
   ],
-  "captions": [
-    { "startSec": 0.5, "endSec": 4.5, "text": "WORLD 1-1 START" },
-    { "startSec": 5.5, "endSec": 9.5, "text": "COMBO +500" },
-    { "startSec": 10.5, "endSec": 14.5, "text": "JEMBATAN EMAS" },
-    { "startSec": 15.5, "endSec": 19.5, "text": "KRISTAL BARU" },
-    { "startSec": 20.5, "endSec": 24.5, "text": "STAGE CLEAR" },
-    { "startSec": 25.5, "endSec": 29.5, "text": "PRESS START" }
-  ]
+  "captions": {
+    "enabled": true,
+    "items": [
+      {
+        "start": 0.5,
+        "duration": 4,
+        "text": "WORLD 1-1 START"
+      },
+      {
+        "start": 5.5,
+        "duration": 4,
+        "text": "COMBO +500"
+      },
+      {
+        "start": 10.5,
+        "duration": 4,
+        "text": "JEMBATAN EMAS"
+      },
+      {
+        "start": 15.5,
+        "duration": 4,
+        "text": "KRISTAL BARU"
+      },
+      {
+        "start": 20.5,
+        "duration": 4,
+        "text": "STAGE CLEAR"
+      },
+      {
+        "start": 25.5,
+        "duration": 4,
+        "text": "PRESS START"
+      }
+    ]
+  }
 }

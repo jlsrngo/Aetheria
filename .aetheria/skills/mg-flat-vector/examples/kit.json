@@ -1,8 +1,35 @@
 {
+  "schemaVersion": 1,
+  "skillId": "mg-flat-vector",
+  "renderer": "canvas2d-flat-vector-kit",
+  "useThree": false,
+  "scripts": [
+    "script/flat-kit.js",
+    "script/story-runtime.js"
+  ],
+  "enums": {
+    "layout": [
+      "sky-dot-bounce",
+      "city-pop-rise",
+      "character-ping",
+      "popwise-wordmark"
+    ]
+  },
+  "limits": {
+    "minShots": 1,
+    "maxShots": 12,
+    "minDurationSec": 3,
+    "maxDurationSec": 90
+  },
   "slug": "mg-flat-vector",
   "name": "Popwise Bold Flat-Vector & Spring-Pop Engine (01-flat-vector Craft)",
   "paradigm": "canvas2d-flat-vector-kit",
-  "layouts": ["sky-dot-bounce", "city-pop-rise", "character-ping", "popwise-wordmark"],
+  "layouts": [
+    "sky-dot-bounce",
+    "city-pop-rise",
+    "character-ping",
+    "popwise-wordmark"
+  ],
   "components": [
     "ultramarine-tone-on-tone-sky",
     "coral-sun-with-12-rays",
@@ -12,7 +39,17 @@
     "popwise-bouncing-dot-wordmark"
   ],
   "defaultSafeZone": {
-    "9:16": { "x": 56, "y": 80, "w": 896, "h": 1340 },
-    "16:9": { "x": 96, "y": 54, "w": 1574, "h": 908 }
+    "9:16": {
+      "x": 56,
+      "y": 80,
+      "w": 896,
+      "h": 1340
+    },
+    "16:9": {
+      "x": 96,
+      "y": 54,
+      "w": 1574,
+      "h": 908
+    }
   }
 }

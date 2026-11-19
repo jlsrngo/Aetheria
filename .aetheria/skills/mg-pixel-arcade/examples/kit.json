@@ -3,18 +3,46 @@
   "skillId": "mg-pixel-arcade",
   "renderer": "2d-pixel-arcade-indexed",
   "useThree": false,
-  "scripts": ["script/pixel-kit.js", "script/story-runtime.js"],
+  "scripts": [
+    "script/pixel-kit.js",
+    "script/story-runtime.js"
+  ],
   "enums": {
-    "themes": ["day", "afternoon", "golden", "sunset", "dusk", "night"],
-    "layouts": ["side-scroll", "boss-encounter", "treasure-reveal", "title-logo", "dialogue-cutscene", "stage-clear"],
-    "heroActions": ["run", "jump", "bop", "cheer", "item-get", "idle"],
-    "transitions": ["pixel-dissolve", "palette-shift", "crt-flash"]
+    "theme": [
+      "day",
+      "afternoon",
+      "golden",
+      "sunset",
+      "dusk",
+      "night"
+    ],
+    "layout": [
+      "side-scroll",
+      "boss-encounter",
+      "treasure-reveal",
+      "title-logo",
+      "dialogue-cutscene",
+      "stage-clear"
+    ],
+    "heroActions": [
+      "run",
+      "jump",
+      "bop",
+      "cheer",
+      "item-get",
+      "idle"
+    ],
+    "transition": [
+      "pixel-dissolve",
+      "palette-shift",
+      "crt-flash"
+    ]
   },
   "limits": {
     "minShots": 2,
     "maxShots": 12,
-    "minDurationSec": 3.0,
-    "maxDurationSec": 90.0,
+    "minDurationSec": 3,
+    "maxDurationSec": 90,
     "maxHeadlineChars": 32,
     "maxSubtextChars": 80,
     "maxItems": 4
