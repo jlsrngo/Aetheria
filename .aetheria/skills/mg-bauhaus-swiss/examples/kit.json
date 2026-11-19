@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "skillId": "mg-bauhaus-swiss",
+  "renderer": "2d-bauhaus-swiss",
+  "useThree": false,
+  "scripts": ["script/bauhaus-kit.js", "script/story-runtime.js"],
+  "enums": {
+    "themes": ["cream-1919", "swiss-red", "dessau-dark", "zurich-mono", "weimar-ochre"],
+    "layouts": ["bauhaus-poster", "swiss-grid-split", "modular-stack", "constructivist-stat", "diagonal-matrix", "manifesto-cta"],
+    "glyphs": ["quarter-arc", "split-circle", "bauhaus-tri", "grid-cross", "concentric-ring", "diagonal-bars"],
+    "transitions": ["block-wipe", "diagonal-slice", "invert-cut"]
+  },
+  "limits": {
+    "minShots": 2,
+    "maxShots": 12,
+    "minDurationSec": 3.0,
+    "maxDurationSec": 90.0,
+    "maxHeadlineChars": 44,
+    "maxSubtextChars": 92,
+    "maxItems": 4
+  }
+}
