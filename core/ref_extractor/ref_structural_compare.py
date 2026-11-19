@@ -153,14 +153,8 @@ def _extract_structural_mask_and_box(
     return orig_box, (x0, y0, x1, y1), clean, ratio, bands
 
 
-_MARQUEE_KEYWORDS = ("motion", "designing", "workflow", "animation", "signing", "anima")
-
-
 def _normalize_word(w: str) -> str:
-    norm = "".join(ch.lower() for ch in w if ch.isalnum())
-    if norm in ("showrea", "shosea", "showre"):
-        return "showreel"
-    return norm
+    return "".join(ch.lower() for ch in w if ch.isalnum())
 
 
 def detect_empty_bento_tile_cells(
@@ -272,18 +266,6 @@ def evaluate_text_alignment(ref_words: List[str], prev_words: List[str]) -> Dict
 
     joined_prev = "".join(prev_norm)
     joined_ref = "".join(ref_norm)
-
-    # v13 #2b: Wide horizontal marquee scroll phase tolerance
-    is_ref_marquee = any(k in joined_ref for k in _MARQUEE_KEYWORDS)
-    is_prev_marquee = any(k in joined_prev for k in _MARQUEE_KEYWORDS)
-    if is_ref_marquee and is_prev_marquee:
-        return {
-            "clippedTextDetected": False,
-            "textDriftDetected": False,
-            "extraTextDetected": False,
-            "textMatchScore": 0.92,
-            "textDiagnosis": "",
-        }
     clipped_pairs: List[str] = []
     matched = 0
     valid_ref_pairs = [(rw, _normalize_word(rw)) for rw in ref_words if len(_normalize_word(rw)) >= 4]
@@ -323,6 +305,19 @@ def evaluate_text_alignment(ref_words: List[str], prev_words: List[str]) -> Dict
         )
         if not is_rel:
             extra_tokens.append(pw_raw)
+
+    # Scrolling marquee phase tolerance (general, word-agnostic):
+    # A scrolling marquee shifts one word partially off the left edge (len(clipped_pairs) == 1)
+    # while at least one center word matches (matched >= 1) and a new word scrolls in on the right
+    # (len(extra_tokens) >= 1) — unlike a static clipped container where 2+ words are cut with 0 new words.
+    if len(valid_ref_pairs) >= 2 and matched >= 1 and len(clipped_pairs) == 1 and len(extra_tokens) >= 1:
+        return {
+            "clippedTextDetected": False,
+            "textDriftDetected": False,
+            "extraTextDetected": False,
+            "textMatchScore": 0.90,
+            "textDiagnosis": "",
+        }
 
     denom = max(1, len(valid_ref_pairs))
     match_ratio = float(matched) / float(denom)

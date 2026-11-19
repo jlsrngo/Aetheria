@@ -149,30 +149,19 @@ def detect_container_clip_rect(
 
 
 _GARBLED_OCR_NOISE = {
-    "ertem",
-    "estem",
-    "1 ahe",
-    "ahe",
     ".s",
     "s.",
-    "shosea",
-    "showrea",
-    "showre",
 }
 
 
 def sanitize_ocr_tokens_for_clues(words: List[str]) -> List[str]:
-    """Filters out garbled OCR hallucinations from morphing/clipped kinetic typography."""
+    """Filters out tiny punctuation/single-character OCR artifacts."""
     cleaned: List[str] = []
     for raw in words:
         w = raw.strip()
         if not w:
             continue
         low = w.lower()
-        if low in ("showrea", "shosea", "showre"):
-            if "Showreel" not in cleaned:
-                cleaned.append("Showreel")
-            continue
         if low in _GARBLED_OCR_NOISE:
             continue
         alnum = "".join(ch for ch in w if ch.isalnum())
@@ -276,40 +265,55 @@ def detect_inline_glyph_morph(
     scene_start: float = 0.0,
 ) -> Optional[str]:
     """
-    v13 #3: Detects when a centered hero word (e.g. 'Showreel') has morphing colored geometric vector
-    glyphs on the SAME horizontal baseline y, preventing the LLM from drawing literal truncated OCR
-    ('Showrea'/'Shosea') or stacking icons above the text.
+    Detects when a dark-backdrop scene has small localized high-chroma vector glyphs arranged
+    inline along a single horizontal text baseline, preventing stacked-row layouts or literal
+    truncated OCR strings. Strictly rejects talking-head / full-frame camera footage.
     """
-    if not sampled_frames:
+    if not sampled_frames or len(accents) < 2:
         return None
-    saw_showreel_prefix = False
-    baseline_y = height // 2
-    band_x0 = int(round(width * 0.22))
-    band_x1 = int(round(width * 0.78))
-    for _, raw_words, box in raw_ocr_per_slice:
-        for w in raw_words:
-            low = w.strip().lower()
-            if low.startswith("showr") or low in ("showrea", "shosea", "showreel"):
-                saw_showreel_prefix = True
-                if box and len(box) == 4:
-                    baseline_y = int(box[1] + box[3] // 2)
-                    band_x0 = max(80, int(box[0]))
-                    band_x1 = max(band_x0 + 320, min(width - 80, int(box[0] + max(box[2], int(width * 0.54)))))
+    fr0 = sampled_frames[0][1]
+    if fr0 is None or fr0.size == 0:
+        return None
+    border_strip = fr0[0:8, :, :]
+    bg_luma = float(np.mean(border_strip))
+    border_std = float(np.std(border_strip))
+    if bg_luma > 48.0 or border_std > 20.0:
+        return None
 
-    if not saw_showreel_prefix and not (scene_start <= 0.5 and len(accents) >= 2):
+    # Only count small localized glyph-sized accents (not full-screen faces/clothing/backgrounds)
+    small_accents = []
+    for a in accents:
+        bx = a.get("box")
+        if not isinstance(bx, list) or len(bx) != 4:
+            continue
+        aw, ah = int(bx[2]), int(bx[3])
+        if aw <= int(width * 0.24) and ah <= int(height * 0.28):
+            small_accents.append(a)
+    if len(small_accents) < 2:
         return None
-    # Check if vibrant accents occur near the middle vertical band on a dark scene
-    bg_luma = float(np.mean(sampled_frames[0][1][0:8, :, :]))
-    if not saw_showreel_prefix and bg_luma > 65.0:
+
+    cys = [int(a["box"][1] + a["box"][3] // 2) for a in small_accents]
+    if (max(cys) - min(cys)) > int(height * 0.16):
         return None
-    accent_hexes = [str(a.get("hex", "")) for a in accents[:5] if a.get("hex")]
-    accent_str = ", ".join(accent_hexes) if accent_hexes else "#884BF9, #3EF5B6, #F0721F, #365BBA"
+
+    baseline_y = int(round(sum(cys) / len(cys)))
+    band_x0 = max(60, min(int(a["box"][0]) for a in small_accents) - int(width * 0.25))
+    band_x1 = min(width - 60, max(int(a["box"][0] + a["box"][2]) for a in small_accents) + 40)
+    for _, _, box in raw_ocr_per_slice:
+        if box and len(box) == 4 and box[3] <= int(height * 0.34):
+            by_mid = int(box[1] + box[3] // 2)
+            if abs(by_mid - baseline_y) <= int(height * 0.14):
+                baseline_y = by_mid
+                band_x0 = max(60, min(band_x0, int(box[0])))
+                band_x1 = min(width - 60, max(band_x1, int(box[0] + box[2])))
+
+    accent_hexes = [str(a.get("hex", "")) for a in small_accents[:5] if a.get("hex")]
+    accent_str = ", ".join(accent_hexes)
     return (
         f"INLINE GLYPH MORPH on single horizontal baseline y={baseline_y} (x={band_x0}..{band_x1}): "
-        f"8 character slots forming the full word 'Showreel' where right-side characters start as "
-        f"vibrant colored geometric vector glyphs ({accent_str}) on the SAME baseline y={baseline_y} "
-        f"and morph left-to-right into crisp metallic silver-white letters as the cursor sweeps across "
-        f"(NEVER render literal truncated OCR strings 'Showrea'/'Shosea' and NEVER stack icons in a separate row above the word)"
+        f"small vibrant geometric vector glyphs ({accent_str}) lie INLINE on the SAME horizontal baseline "
+        f"y={baseline_y} as the hero title and morph left-to-right into crisp letters as the cursor sweeps across "
+        f"(read the full intended word from the visual frames — NEVER render truncated OCR fragments and NEVER stack icons in a separate row above the word)"
     )
 
 

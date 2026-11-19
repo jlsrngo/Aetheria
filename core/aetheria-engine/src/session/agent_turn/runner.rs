@@ -579,6 +579,38 @@ pub async fn run_agent_turn(
 
         emit_step_ended_event(&target, step_finish, None, step_usage.as_ref());
 
+        if matches!(active_profile, crate::tool::profiles::ToolProfile::Director { .. })
+            && super::direct_scene_remake::should_run_direct_scene_remake(workspace_dir)
+        {
+            match super::direct_scene_remake::run_direct_per_scene_remake(
+                session_id,
+                workspace_dir,
+                prompt_text,
+                &client,
+                &mut base_url,
+                &mut api_key,
+                &mut current_model_id,
+                &mut content_parts,
+            )
+            .await
+            {
+                Ok(summary) => {
+                    final_text = super::direct_scene_remake::format_direct_remake_report(&summary);
+                    final_text_streamed = false;
+                    break;
+                }
+                Err(err) => {
+                    crate::paths::log_engine(
+                        "direct_remake",
+                        &format!(
+                            "Direct per-scene remake fallback to standard coordinator loop: {}",
+                            err
+                        ),
+                    );
+                }
+            }
+        }
+
         if batch.all_blocked {
             consecutive_blocked_batches += 1;
             if consecutive_blocked_batches >= 3 {

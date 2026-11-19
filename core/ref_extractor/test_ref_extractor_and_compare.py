@@ -359,7 +359,17 @@ class RefExtractorAndCompareTests(unittest.TestCase):
         )
         self.assertIsNotNone(morph_clue)
         self.assertIn("INLINE GLYPH MORPH", morph_clue)
-        self.assertIn("Showreel", morph_clue)
+        self.assertIn("#884BF9", morph_clue)
+
+        # Negative test: talking-head/full-screen footage with large accents must NOT trigger inline glyph morph
+        cam_fr = np.full((576, 1024, 3), 120, dtype=np.uint8)
+        big_accents = [
+            {"hex": "#9F6C5D", "box": [108, 200, 439, 360], "timestamp": 1.0},
+            {"hex": "#3C3E6A", "box": [10, 300, 520, 260], "timestamp": 2.0},
+        ]
+        self.assertIsNone(
+            rmc.detect_inline_glyph_morph([(1.0, cam_fr)], big_accents, [], 1024, 576)
+        )
 
         # 3. Marquee scroll tolerance (v13 #2b)
         mq_res = rsc.evaluate_text_alignment(
