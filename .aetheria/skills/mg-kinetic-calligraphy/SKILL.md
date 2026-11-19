@@ -1,103 +1,33 @@
 ---
 name: mg-kinetic-calligraphy
-description: "Kinetic Calligraphy Typography motion design archetype from aetheria-motion. Award-shortlist commercial motion graphics standard for Aetheria Motion Engine."
+description: "Declarative Kinetic Calligraphy & Brush Impact motion graphics skill with tapered Enso ink strokes, dry-brush slashes, crimson Hanko seals, ink splatter particles, and dramatic typographic slams."
 tags:
   - motion-graphics
-  - aetheria-motion
-  - aetheria-html
-  - visual-archetype
+  - declarative-kit
+  - calligraphy
+  - kinetic-typography
 command: /mg-kinetic-calligraphy
 ---
 
-# Kinetic Calligraphy / Expressive Dynamic Typography (Motion Graphics Standard)
-*Ported from award-winning aetheria-motion motion system.*
+# Kinetic Calligraphy — Declarative Fast-Path Skill
 
-# Kinetic Calligraphy & Dynamic Typography Motion Design
+## Visual Identity
+Expressive oriental sumi-e calligraphy fused with modern kinetic poster typography: tapered Enso brush circles, diagonal dry-brush slashes, crimson Hanko stamp seals, floating ink splatters, and high-contrast slam headlines.
 
-**Reference Benchmark**: Meow Diary EP.07: Daily Joy · 1080×1920 · 30 fps · 10 s · AI Jury Score 7.64 / 10
+## Zero-JS Workflow
+Do **not** write custom canvas JS. Author only `story.json` matching `examples/kit.json` and `examples/story.schema.json`.
+1. Read `examples/kit.json` and `examples/story.example.json` for valid enums and structure.
+2. Write `story.json` with 2–12 shots (`durationSec` 3–90, `fps: 30`, `1080x1920` or `1920x1080`).
+3. Validate via `story_lint`, preview via `capture_film_preview`, and inspect `contact_sheet.jpg`.
+4. Mode `'M'` (`?microstock=1`) automatically hides all text and captions for clean calligraphy plates.
 
-**Reference Source**: [cues.json](../../../references/aetheria-motion/demos/18-hanazi/cues.json) · [index.html](../../../references/aetheria-motion/demos/18-hanazi/index.html)
+## Kit Enums (`examples/kit.json`)
+- **themes**: `sumi-rice`, `crimson-impact`, `obsidian-gold`, `indigo-brush`, `vermilion-scroll`
+- **layouts**: `brush-hero`, `brush-split`, `brush-stack`, `brush-stat`, `brush-slash`, `brush-cta`
+- **motifs**: `enso-circle`, `brush-wave`, `katana-slash`, `ink-blossom`, `hanko-seal`, `spark-kanji`
+- **transitions**: `brush-wipe`, `impact-flash`, `ink-burst`
 
-## How to Use
-
-1. Open Aetheria Video Studio and invoke this skill using the command or natural language.
-2. The skill injects the creative seed, timing choreography, palette tokens, and motion curves into the LLM context.
-3. **Customization**: Adapt the narrative, brand names, copy, and palette in `Creative seed` while preserving `Signature features` to retain the iconic visual identity of this archetype.
-4. **Verification**: Inspect key frames via `capture_film_preview` and review the generated film in the interactive Studio player against the motion craft checklist below.
-
-## System Prompt Template
-
-```text
-You are the director, motion designer, and visual engineer of this motion-design film (creative seed below shows a sample beat arc; adapt duration and scene count to narration/brief).
-The goal is the most classic, yet most stunning form of this style — award-shortlist / high-end commercial quality. A clean,
-template-looking result is a fail. Benchmarks: Buck, ManvsMachine, Ordinary Folk, Giant Ant, Territory Studio, Apple keynote
-motion, Pentagram motion identities, top Behance/Motionographer features, top designer accounts (Motionographer, Behance, Vimeo Staff Picks).
-
-# Style
-Kinetic Calligraphy / Expressive Dynamic Typography
-
-# Output Formats
-- **Standard Landscape**: 1920×1080, 30 fps.
-- **Short-Form Mobile (TikTok / Reels / Shorts)**: 1080×1920, 30 fps.
-
-# Vertical 9:16 Spatial Layout Contract (1080×1920 Mobile Standard)
-When generating vertical 9:16 content, LLM MUST strictly adhere to this vertical spatial zoning to avoid empty voids, clashing elements, or UI clipping:
-
-| Zone ID | Vertical Span (Y) | Component Type | Constraints & Styling |
-| :--- | :--- | :--- | :--- |
-| **Zone 0** | `Y: 60 – 240px` | Top Header Bar & Stamp/Badge | Monospace topic bar across top (`Y: 70`). Stamps/tags MUST be anchored to top-left (`left: 64`) or top-right (`right: 64`) with 8–14° tilt. **NEVER slap large text in center X:50% that occludes the hero below!** |
-| **Zone 1** | `Y: 260 – 920px` | Backdrop Graphic Bed / Sheet | Angled style-specific backdrop, grid card, or paper scrap (`width: 720–820px`, tilted -8° to +8°). Serves as visual backing so the hero never floats in an empty void. |
-| **Zone 2** | `Y: 340 – 1050px` | Hero Subject / Core Visual Anchor | Primary focal point. `width: 520–620px`, `height: 600–720px`, centered. Wajib style-specific rim/border/glow and subtle micro-motion/jitter. |
-| **Zone 3** | `Y: 880 – 1100px` | Style Accents & Connectors | Style-specific accent props (pointing hands, stickers, sparks, geometric chips) bridging transition between hero and headline. |
-| **Zone 4** | `Y: 1100 – 1380px` | Bold Style Action Headline | High-contrast headline card/plaque with `box-shadow: 8px 8px 0 #1A1A1A`, uppercase bold typography (`fontSize: 64–76px`), and sub-badge (`fontSize: 20–24px`). |
-| **Zone 5** | `Y: 1500 – 1720px` | Kinetic Subtitles (Hormozi) | Clean word chips anchored at `bottom: 200–240px`. Maximum font size 58–64px with lemon-yellow `#FFDE59` active pop. |
-| **Deadzone**| `Y > 1750px` & `X > 960px` | TikTok UI Exclusion Zone | NEVER place critical text or heroes in the bottom 180px or extreme right rail (avatar, like, comment, share, sound disc). |
-
-# Suggested technical route
-HTML DOM/SVG: multi-layer text-stroke expressive kinetic caption components + spring pops + SVG burst/sweat/sparkle decorations over a pet-vlog footage layer (CC0 photos with Ken Burns + handheld shake + punch-ins)
-(You may choose a better route if it clearly raises quality; say why.)
-
-# Creative seed
-"playful pet variety vlog vlog"variety showexpressive kinetic caption in its native habitat — reactive captions over a pet vlog.
-- Base layer that feels like footage: CC0/PD cat or dog photos from /assets/images with slow Ken Burns, subtle handheld shake, snap punch-in zooms on 'moments' (you may also build a stylised scene if photos look weak).
-- expressive kinetic caption moments synced to beats: title "DAILY JOY" (fill gradient + thick white stroke + coloured outer stroke + drop shadow, rounded heavy font), "???" bouncing question marks, "SHOCK!!!" inside a radial comic explosion burst with speed lines + speed lines flash, "(whisper)" small aside, "AMAZING!" with sparkles, sweat drops, a "CAT CERTIFIED" stamp.
-- Motion: pop 0 → 1.15 → 1.0 in ~8 frames, per-character bounce with 2-frame stagger, slight rotation, gentle wiggle while holding; appear 2–3 frames after the audio/visual moment. High-saturation pink/yellow/cyan with white strokes.
-Sound: bouncy variety-show bed (pizzicato/bass/claps) + boing, pop, ding, slide whistle, record scratch on '???'.
-
-You are the director: you may change the concept, copy, story beats and brand names if you find a stronger idea, but the result must remain the CANONICAL, instantly-recognisable form of this style and must hit its signature features below.
-
-# Signature features and key techniques (the result is judged against these)
-High-energy expressive typography blending oriental calligraphy with modern streetwear/manga motion design. Features explosive stroke reveals, dry brush textures, speed lines, and impactful typographic punch.
-
-**Visual Features**: Heavy brush textures, ink bleed splatters, stark black/white/red contrast, radical scale changes (screen-filling characters), directional speed lines, impact frames.
-
-**Key Techniques**:
-- Stroke drawing reveals: Animate SVG strokeDashoffset or clipped masks along the natural writing stroke path.
-- Impact slams: Characters slam onto screen with 1–2 frame inverted color flash and screen shake.
-- Floating ink particles: Secondary ink drops flying off moving glyphs with organic turbulence.
-- Transitions: Brush stroke sweeps that wipe the entire frame to reveal the next composition.
-
-# How to work
-1. Treatment. Write down one clear idea: a hook in the first 0.5 s (never open on empty or black), an escalation, one unmistakable hero moment at ~60–75 % of the runtime, and a composed end frame held with living micro-motion. Map every signature feature above to a scene beat.
-2. Key frames & lookdev. Build the look in modular scene scripts and inspect stills at key times via `capture_film_preview`: composition, hierarchy, negative space, type set cleanly (~5 % safe margins). Iterate until nothing looks generic or cramped.
-3. Motion & SFX cues. Refine spacing, easing, arcs, overlap, anticipation and follow-through; trigger SFX cues on visual impacts and preview in Studio.
-
-# Rules
-- Rendering must be deterministic: every frame is a pure function of time t. Seeded randomness only; physics and particles
-  precomputed or closed-form; no real-time clocks; no state-triggered CSS transitions. A reliable route: pure `AM.registerScene(id, fn)` evaluation over `localTime` inside the managed Studio HTML stage.
-- Assets: only CC0 / public domain / OFL / Apache / free-for-commercial-use. Record each source and licence in CREDITS.md.
-  No real brand trademarks; invent brand names.
-- On-screen text must be correct, punchy, and natural: proper typography, zero overflow, no typos.
-
-# Craft checklist (what a jury looks for)
-- Style authenticity: an expert names the style in one second; every signature technique is present and executed correctly.
-- Motion craft: purposeful easing (no linear unless mechanical by design), overlap and stagger, anticipation and
-  follow-through, arcs, squash and stretch where the style allows, consistent physics, motion blur where apt; transitions
-  carried by elements, not crossfades.
-- Rhythm: hits locked to narration/SFX cues; contrast between busy and calm; no monotony.
-- Design: strong composition, grid, typographic hierarchy, controlled palette; texture and finishing (grain, glow, vignette)
-  only where the style wants it; nothing looks accidental.
-- Technical polish: no jitter (unless intended), no popping, no aliasing, no banding, no fallback fonts, no half-loaded images.
-- Sound: synced cleanly to visual hits and narration timing.
-
-```
+## Limits & Safe-Zone Contract
+- `headline` <= 42 chars; `subtext` <= 88 chars; `items` <= 4.
+- Portrait `1080x1920` keeps all scroll cards inside `x: 56..952`, `y: 80..1420`.
+- Pure deterministic function of `t`: stroke progression, slam scale, and ink particle drift derive strictly from `t`.
