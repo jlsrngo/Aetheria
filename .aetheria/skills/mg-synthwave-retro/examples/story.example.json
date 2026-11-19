@@ -1,7 +1,7 @@
 {
   "version": 1,
   "meta": {
-    "title": "OUTRUN 1986 — Neon Midnight Drive",
+    "title": "NEON DRIVE — Outrun 1986",
     "width": 1080,
     "height": 1920,
     "fps": 30,
@@ -10,83 +10,84 @@
   },
   "shots": [
     {
-      "id": "s1-hero",
+      "id": "s1-cruise",
       "startSec": 0,
       "endSec": 5,
-      "layout": "synth-hero",
+      "layout": "highway-cruise",
       "theme": "outrun-1986",
-      "badge": "PLAY 1986",
-      "headline": "NEON MIDNIGHT",
-      "subtext": "Perjalanan retro melintasi grid neon tanpa batas",
-      "icon": "retro-sun",
+      "carMode": "cruising",
+      "badge": "Midnight",
+      "headline": "NEON DRIVE",
+      "subtext": "Melaju menembus grid neon 1986 menuju cakrawala",
       "transition": "neon-flash"
     },
     {
-      "id": "s2-split",
+      "id": "s2-miami",
       "startSec": 5,
       "endSec": 10,
-      "layout": "synth-split",
+      "layout": "palm-sunset",
       "theme": "miami-vice",
-      "headline": "ERA ANALOG",
-      "items": [
-        { "label": "KASET SYNTH", "icon": "cassette-tape" },
-        { "label": "TURBO COUPE", "icon": "sport-car" }
-      ],
+      "carMode": "cruising",
+      "badge": "Turbo 86",
+      "headline": "MIAMI NIGHTS",
+      "subtext": "Siluet palem berlapis cahaya magenta dan cyan",
       "transition": "grid-warp"
     },
     {
-      "id": "s3-horizon",
+      "id": "s3-boost",
       "startSec": 10,
       "endSec": 15,
-      "layout": "synth-horizon",
-      "theme": "midnight-chrome",
-      "headline": "IKON OUTRUN",
+      "layout": "car-chase",
+      "theme": "laser-crimson",
+      "carMode": "boost",
+      "badge": "Overdrive",
+      "headline": "FULL THROTTLE",
+      "subtext": "Pantulan lampu belakang menyala di aspal basah",
       "transition": "vhs-rewind"
     },
     {
-      "id": "s4-stat",
+      "id": "s4-metric",
       "startSec": 15,
       "endSec": 20,
-      "layout": "synth-stat",
-      "theme": "laser-crimson",
+      "layout": "neon-metric",
+      "theme": "midnight-chrome",
+      "carMode": "cruising",
       "metric": "1986",
-      "headline": "TAHUN KEEMASAN SYNTHWAVE",
-      "icon": "sport-car",
+      "headline": "ERA EMAS SYNTHWAVE",
+      "subtext": "Tipografi krom reflektif dengan kilau bintang",
       "transition": "neon-flash"
     },
     {
-      "id": "s5-stack",
+      "id": "s5-vapor",
       "startSec": 20,
       "endSec": 25,
-      "layout": "synth-stack",
+      "layout": "chrome-slam",
       "theme": "vapor-teal",
-      "headline": "RESEP VISUAL 80-AN",
-      "items": [
-        { "label": "01. Matahari Bergaris", "icon": "retro-sun" },
-        { "label": "02. Grid Perspektif", "icon": "laser-grid" },
-        { "label": "03. Tipografi Krom", "icon": "vhs-play" }
-      ],
+      "carMode": "boost",
+      "badge": "Analog Hi-Fi",
+      "headline": "ENDLESS GRID",
+      "subtext": "Pegunungan wireframe di bawah langit berbintang",
       "transition": "grid-warp"
     },
     {
-      "id": "s6-cta",
+      "id": "s6-outro",
       "startSec": 25,
       "endSec": 30,
-      "layout": "synth-cta",
+      "layout": "vhs-outro",
       "theme": "outrun-1986",
-      "badge": "VHS READY",
-      "headline": "NYALAKAN NOSTALGIA",
-      "subtext": "Gunakan gaya Outrun untuk musik, gaming, dan promo",
-      "icon": "neon-palm",
+      "carMode": "cruising",
+      "badge": "Replay",
+      "headline": "OUTRUN FOREVER",
+      "subtext": "Nostalgia retro-futuristik siap pakai di Studio",
       "transition": "vhs-rewind"
     }
   ],
   "captions": [
-    { "startSec": 0.5, "endSec": 4.5, "text": "NEON MIDNIGHT" },
-    { "startSec": 5.5, "endSec": 9.5, "text": "ERA ANALOG" },
-    { "startSec": 10.5, "endSec": 14.5, "text": "IKON OUTRUN" },
-    { "startSec": 15.5, "endSec": 19.5, "text": "TAHUN 1986" },
-    { "startSec": 20.5, "endSec": 24.5, "text": "VISUAL 80-AN" },
-    { "startSec": 25.5, "endSec": 29.5, "text": "NYALAKAN NOSTALGIA" }
+    { "startSec": 0.5, "endSec": 4.5, "text": "NEON DRIVE 1986" },
+    { "startSec": 5.5, "endSec": 9.5, "text": "MIAMI NIGHTS" },
+    { "startSec": 10.5, "endSec": 14.5, "text": "FULL THROTTLE" },
+    { "startSec": 15.5, "endSec": 19.5, "text": "ERA SYNTHWAVE" },
+    { "startSec": 20.5, "endSec": 24.5, "text": "ENDLESS GRID" },
+    { "startSec": 25.5, "endSec": 29.5, "text": "OUTRUN FOREVER" }
   ]
 }

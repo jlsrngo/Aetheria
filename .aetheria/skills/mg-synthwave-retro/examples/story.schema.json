@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Synthwave Retro 1986 Story",
+  "title": "Synthwave Outrun 1986 Story",
   "type": "object",
   "required": ["version", "meta", "shots"],
   "properties": {
@@ -28,26 +28,14 @@
           "id": { "type": "string" },
           "startSec": { "type": "number", "minimum": 0 },
           "endSec": { "type": "number", "minimum": 0.5 },
-          "layout": { "enum": ["synth-hero", "synth-split", "synth-stack", "synth-stat", "synth-horizon", "synth-cta"] },
+          "layout": { "enum": ["highway-cruise", "chrome-slam", "neon-metric", "car-chase", "palm-sunset", "vhs-outro"] },
           "theme": { "enum": ["outrun-1986", "miami-vice", "laser-crimson", "midnight-chrome", "vapor-teal"] },
+          "carMode": { "enum": ["cruising", "boost", "hidden"] },
           "badge": { "type": "string" },
-          "headline": { "type": "string", "maxLength": 42 },
-          "subtext": { "type": "string", "maxLength": 88 },
+          "headline": { "type": "string", "maxLength": 32 },
+          "subtext": { "type": "string", "maxLength": 72 },
           "metric": { "type": "string" },
-          "icon": { "enum": ["retro-sun", "cassette-tape", "neon-palm", "sport-car", "laser-grid", "vhs-play"] },
-          "transition": { "enum": ["vhs-rewind", "neon-flash", "grid-warp"] },
-          "items": {
-            "type": "array",
-            "maxItems": 4,
-            "items": {
-              "type": "object",
-              "required": ["label"],
-              "properties": {
-                "label": { "type": "string" },
-                "icon": { "enum": ["retro-sun", "cassette-tape", "neon-palm", "sport-car", "laser-grid", "vhs-play"] }
-              }
-            }
-          }
+          "transition": { "enum": ["vhs-rewind", "neon-flash", "grid-warp"] }
         }
       }
     },
