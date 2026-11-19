@@ -447,7 +447,13 @@
     ctx.shadowOffsetY = 10;
     roundRect(ctx, x, y, w, h, 14);
 
-    if (style === 'editorial-light') {
+    if (style === 'brand-hero') {
+      var bhg = ctx.createLinearGradient(x, y, x + w, y + h);
+      bhg.addColorStop(0, '#16307A');
+      bhg.addColorStop(0.6, '#3B6BE0');
+      bhg.addColorStop(1, '#0E1840');
+      ctx.fillStyle = bhg;
+    } else if (style === 'editorial-light') {
       ctx.fillStyle = '#F4F6FB';
     } else if (style === 'cobalt-hero') {
       var cg = ctx.createLinearGradient(x, y, x + w, y + h);
@@ -473,7 +479,13 @@
     ctx.clip();
 
     // Procedural miniature graphic per card style
-    if (style === 'editorial-light') {
+    if (style === 'brand-hero') {
+      ctx.save();
+      ctx.shadowColor = '#60A5FA';
+      ctx.shadowBlur = 22;
+      drawBrandMark(ctx, x + w * 0.5, y + h * 0.42, Math.min(w, h) * 0.36, 1.0, '#FFFFFF');
+      ctx.restore();
+    } else if (style === 'editorial-light') {
       ctx.fillStyle = '#1D4ED8';
       roundRect(ctx, x + w * 0.12, y + h * 0.14, w * 0.36, h * 0.09, 6);
       ctx.fill();
@@ -549,11 +561,20 @@
 
     ctx.restore();
 
-    // Subtle specular glass border
+    // Subtle specular glass border (brighter neon cyan rim on hero card)
     roundRect(ctx, x, y, w, h, 14);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
-    ctx.lineWidth = 1.25;
-    ctx.stroke();
+    if (card && card.__isHeroCenter) {
+      ctx.strokeStyle = 'rgba(96, 165, 250, 0.95)';
+      ctx.lineWidth = 2.4;
+      ctx.shadowColor = '#3B82F6';
+      ctx.shadowBlur = 24;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    } else {
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+      ctx.lineWidth = 1.25;
+      ctx.stroke();
+    }
 
     ctx.restore();
   }
@@ -586,7 +607,7 @@
 
     // Subtle shot-end fade when transitioning out (except brand-lockup-resolve hold)
     var exitFade = 1.0;
-    if (layout !== 'brand-lockup-resolve' && layout !== 'logo-assemble') {
+    if (layout !== 'brand-lockup-resolve' && layout !== 'logo-assemble' && layout !== 'prompt-type-send') {
       exitFade = clamp((dur - localTime) / 0.35, 0, 1);
     }
 
@@ -781,47 +802,129 @@
         }
         ctx.restore();
       }
-    } else if (layout === 'coverflow-carousel') {
+    } else if (layout === 'coverflow-carousel' || layout === 'orbit-carousel') {
+      // 3D Cylindrical Orbit Ring Carousel with glowing floor ring, mirror reflection,
+      // and dynamic speed-ramp: spins FAST then brakes SUDDENLY onto the hero card!
       var cards = Array.isArray(shot.cards) && shot.cards.length
         ? shot.cards
         : [
-            { title: 'Aurora Glass', tag: 'Liquid UI', style: 'cobalt-hero' },
-            { title: 'Editorial', tag: 'Minimalist', style: 'editorial-light' },
-            { title: 'Audio Sync', tag: 'BPM + SFX', style: 'waveform-ui' },
-            { title: 'Timeline', tag: '30fps Local', style: 'dark-studio' },
+            { title: 'Arunaki', tag: 'AI Motion Studio', style: 'brand-hero' },
+            { title: '2.5D Camera', tag: 'Zoom • Tilt', style: 'dark-studio' },
+            { title: 'Audio Sync', tag: 'BPM • SFX', style: 'waveform-ui' },
+            { title: 'Aurora Glass', tag: 'FX Style', style: 'cobalt-hero' },
+            { title: 'Editorial', tag: 'Typography', style: 'editorial-light' },
             { title: 'Story Core', tag: 'Dialect A', style: 'code-matrix' },
-            { title: '3D Spatial', tag: 'WebGL PBR', style: 'cobalt-hero' },
+            { title: '3D Crystal', tag: 'UI Kit', style: 'cobalt-hero' },
             { title: 'Export MP4', tag: 'Zero Cloud', style: 'sunset-stat' },
           ];
 
-      var enterC = easeOutCubic(localTime / 0.45);
-      var sweep = clamp(localTime / dur, 0, 1);
-      var focusFloat = 0.6 + sweep * Math.max(1, cards.length - 2.2);
-      var baseCardW = isPortrait ? 300 : 215;
-      var baseCardH = isPortrait ? 410 : 285;
-      var spacing = isPortrait ? 205 : 152;
+      var nCards = cards.length;
+      var targetIdx = shot.targetIndex !== undefined ? Number(shot.targetIndex) : 0;
+      var enterC = easeOutCubic(clamp(localTime / 0.35, 0, 1));
 
-      // Sort back-to-front by distance from focusFloat so center card overlaps cleanly
-      var order = cards.map(function (c, idx) {
-        return { card: c, idx: idx, dist: Math.abs(idx - focusFloat) };
-      });
-      order.sort(function (a, b) { return b.dist - a.dist; });
+      // Variable pace: fast multi-card spin (1.35 turns) during first 58% of shot,
+      // then sudden exponential brake locking onto targetIdx for the last 42%!
+      var spinDur = Math.max(0.6, dur * 0.62);
+      var spinU = clamp(localTime / spinDur, 0, 1);
+      var spinUprev = clamp((localTime - 0.033) / spinDur, 0, 1);
+      // Steep exponential brake curve (1 - (1-u)^4.5)
+      var spinEase = 1 - Math.pow(1 - spinU, 4.6);
+      var spinEasePrev = 1 - Math.pow(1 - spinUprev, 4.6);
+      var spinVel = Math.abs(spinEase - spinEasePrev) / 0.033;
 
-      for (var oi = 0; oi < order.length; oi++) {
-        var entry = order[oi];
-        var d = entry.idx - focusFloat;
-        var absD = Math.abs(d);
-        if (absD > 3.6) continue;
+      var totalSweepRad = (shot.spinTurns !== undefined ? Number(shot.spinTurns) : 1.25) * Math.PI * 2;
+      var targetAngle = -(targetIdx / nCards) * Math.PI * 2;
+      var currentRot = targetAngle - (1 - spinEase) * totalSweepRad;
 
-        var scale = clamp(1.06 - absD * 0.14, 0.58, 1.06) * (0.85 + 0.15 * enterC);
-        var cw = baseCardW * scale;
-        var ch = baseCardH * scale;
-        var offsetX = d * spacing * (1 - absD * 0.045);
-        var cardAlpha = clamp(1.0 - absD * 0.18, 0.25, 1.0) * enterC;
+      var ringRx = isPortrait ? safe.w * 0.44 : Math.min(520, W * 0.40);
+      var ringRy = isPortrait ? 68 : 74;
+      var ringCenterY = cy + (isPortrait ? 150 : 128);
+      var baseW = isPortrait ? 245 : 210;
+      var baseH = isPortrait ? 335 : 275;
+
+      // 1. Glowing floor reflection pool + neon elliptical ring (matching Image 1!)
+      ctx.save();
+      ctx.globalAlpha = exitFade * enterC;
+      var floorG = ctx.createRadialGradient(cx, ringCenterY + 12, 10, cx, ringCenterY + 12, ringRx * 1.18);
+      floorG.addColorStop(0.0, 'rgba(37, 99, 235, 0.42)');
+      floorG.addColorStop(0.55, 'rgba(29, 78, 216, 0.16)');
+      floorG.addColorStop(1.0, 'rgba(2, 6, 24, 0.0)');
+      ctx.fillStyle = floorG;
+      ctx.beginPath();
+      ctx.ellipse(cx, ringCenterY + 12, ringRx * 1.18, ringRy * 1.55, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Outer & inner luminous neon floor rings
+      ctx.strokeStyle = 'rgba(96, 165, 250, 0.85)';
+      ctx.lineWidth = 2.4;
+      ctx.shadowColor = '#3B82F6';
+      ctx.shadowBlur = 24;
+      ctx.beginPath();
+      ctx.ellipse(cx, ringCenterY + 10, ringRx * 1.04, ringRy * 1.08, 0, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.strokeStyle = 'rgba(147, 197, 253, 0.35)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.ellipse(cx, ringCenterY + 10, ringRx * 0.88, ringRy * 0.86, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+
+      // 2. Compute 3D cylindrical coordinates for each card (z = cos(theta), x = sin(theta))
+      var items3d = [];
+      for (var ci = 0; ci < nCards; ci++) {
+        var theta = (ci / nCards) * Math.PI * 2 + currentRot;
+        var sinT = Math.sin(theta);
+        var cosT = Math.cos(theta); // +1 = front center, -1 = back center
+        items3d.push({
+          card: cards[ci],
+          idx: ci,
+          theta: theta,
+          sinT: sinT,
+          cosT: cosT,
+        });
+      }
+      // Painter's algorithm: draw back-to-front (ascending cosT)
+      items3d.sort(function (a, b) { return a.cosT - b.cosT; });
+
+      var spinBlur = clamp(spinVel * 1.8, 0, 5.5);
+
+      for (var oi = 0; oi < items3d.length; oi++) {
+        var it = items3d[oi];
+        var depth01 = (it.cosT + 1) * 0.5; // 0 at back, 1 at front
+        var persp = 0.52 + 0.54 * Math.pow(depth01, 1.15);
+        // Horizontal foreshortening on side cards so they angle along the cylinder!
+        var foreshortenX = 0.62 + 0.38 * Math.abs(it.cosT);
+        var cw = baseW * persp;
+        var ch = baseH * persp;
+        var cardX = cx + it.sinT * ringRx;
+        var cardY = cy - 16 + it.cosT * (ringRy * 0.52) - (1 - depth01) * 38;
+        var cardAlpha = clamp(0.22 + 0.78 * Math.pow(depth01, 1.3), 0.18, 1.0) * enterC;
+        var isFrontHero = it.cosT > 0.92 && spinU > 0.72;
+
+        // Subtle pulse on hero card when locked
+        var lockBounce = isFrontHero ? 1.0 + 0.045 * Math.sin(clamp((spinU - 0.72) / 0.28, 0, 1) * Math.PI) : 1.0;
 
         ctx.save();
         ctx.globalAlpha = exitFade * cardAlpha;
-        drawShowcaseCard(ctx, cx + offsetX - cw * 0.5, cy - ch * 0.5, cw, ch, entry.card, globalT, micro, theme);
+        if (spinBlur > 0.35 && !isFrontHero) {
+          ctx.filter = 'blur(' + (spinBlur * (1.1 - depth01 * 0.5)).toFixed(1) + 'px)';
+        }
+
+        // Draw faint floor mirror reflection for front-half cards
+        if (it.cosT > 0.05) {
+          ctx.save();
+          ctx.globalAlpha = exitFade * cardAlpha * 0.18 * it.cosT;
+          ctx.translate(cardX, cardY + ch * 0.5 + 14);
+          ctx.scale(foreshortenX * lockBounce, -0.28);
+          drawShowcaseCard(ctx, -cw * 0.5, -ch * 0.5, cw, ch, it.card, globalT, true, theme);
+          ctx.restore();
+        }
+
+        ctx.translate(cardX, cardY);
+        ctx.scale(foreshortenX * lockBounce, lockBounce);
+        var cardCopy = Object.assign({}, it.card, { __isHeroCenter: isFrontHero });
+        drawShowcaseCard(ctx, -cw * 0.5, -ch * 0.5, cw, ch, cardCopy, globalT, micro, theme);
         ctx.restore();
       }
     } else if (layout === 'logo-assemble') {
@@ -905,32 +1008,61 @@
         }
       }
     } else if (layout === 'tilted-chart-dolly') {
-      // Opal-inspired 3D-foreshortened perspective bar chart with glowing cyan->amber focal bar
+      // Opal 2-phase perspective chart (matching user's Images 1 & 2):
+      // Phase 1 (0 -> 0.48*dur): Card starts laid nearly flat in 3D perspective (foreshortened) -> stands up smoothly!
+      // Phase 2 (0.48 -> 1.0*dur): Camera zooms deep (1.0x -> 2.15x) onto the center glowing bar as cyan->amber fill rises!
       var bars = Array.isArray(shot.bars) && shot.bars.length ? shot.bars : [0.35, 0.52, 0.44, 0.62, 0.92, 0.58, 0.48];
       var labels = Array.isArray(shot.labels) && shot.labels.length ? shot.labels : ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
       var hlIdx = shot.highlightIdx !== undefined ? Number(shot.highlightIdx) : 4;
-      var cardW = isPortrait ? safe.w * 0.88 : Math.min(820, safe.w * 0.78);
-      var cardH = isPortrait ? 460 : 380;
-      var tiltP = easeOutQuart(clamp(localTime / (dur * 0.55), 0, 1));
-      var perspScaleY = 0.72 + 0.28 * tiltP;
+      var cardW = isPortrait ? safe.w * 0.88 : Math.min(840, safe.w * 0.78);
+      var cardH = isPortrait ? 470 : 390;
 
-      ctx.save();
-      ctx.translate(cx, cy + (1 - tiltP) * 36);
-      ctx.scale(1.0, perspScaleY);
-      roundRect(ctx, -cardW * 0.5, -cardH * 0.5, cardW, cardH, 22);
-      ctx.fillStyle = 'rgba(18, 20, 28, 0.86)';
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.12)';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
+      var standEnd = dur * 0.46;
+      var standP = easeInOutExpo(clamp(localTime / Math.max(0.3, standEnd), 0, 1));
+      var zoomP = easeInOutExpo(clamp((localTime - standEnd * 0.92) / Math.max(0.35, dur * 0.44), 0, 1));
+      var zoomPrev = easeInOutExpo(clamp((localTime - 0.033 - standEnd * 0.92) / Math.max(0.35, dur * 0.44), 0, 1));
+      var zoomVelBlur = clamp(Math.abs(zoomP - zoomPrev) * 32, 0, 6.5);
 
-      // Avg dashed reference line
+      var barGap = (cardW * 0.78) / bars.length;
+      var barW = barGap * 0.48;
+      var hlBx = -cardW * 0.39 + hlIdx * barGap + barGap * 0.5;
       var baseY = cardH * 0.30;
       var maxBarH = cardH * 0.54;
       var avgY = baseY - maxBarH * 0.62;
+
+      var localZoom = 0.88 + 0.14 * standP + 1.18 * zoomP; // 0.88 -> 1.02 -> 2.20x deep into focal bar!
+      var perspScaleY = 0.44 + 0.56 * standP; // starts laid almost flat (0.44) -> stands upright (1.0)!
+      var skewX = (1 - standP) * -0.14;
+      var focusX = cx + hlBx * zoomP;
+      var focusY = cy + (baseY - maxBarH * 0.45) * zoomP;
+
       ctx.save();
-      ctx.setLineDash([6, 6]);
-      ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+      if (zoomVelBlur > 0.25) ctx.filter = 'blur(' + zoomVelBlur.toFixed(1) + 'px)';
+      ctx.translate(cx, cy + (1 - standP) * 54);
+      ctx.scale(localZoom, localZoom * perspScaleY);
+      ctx.transform(1, 0, skewX, 1, 0, 0);
+      ctx.translate(-focusX + cx, -focusY + cy);
+
+      roundRect(ctx, -cardW * 0.5, -cardH * 0.5, cardW, cardH, 22);
+      ctx.fillStyle = 'rgba(16, 18, 24, 0.90)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Subtle vertical grid lines + avg dashed line
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+      ctx.lineWidth = 1;
+      for (var gi = 0; gi <= bars.length; gi++) {
+        var gx = -cardW * 0.39 + gi * barGap;
+        ctx.beginPath();
+        ctx.moveTo(gx, -cardH * 0.24);
+        ctx.lineTo(gx, baseY);
+        ctx.stroke();
+      }
+      ctx.setLineDash([7, 7]);
+      ctx.strokeStyle = 'rgba(255,255,255,0.28)';
       ctx.beginPath();
       ctx.moveTo(-cardW * 0.42, avgY);
       ctx.lineTo(cardW * 0.42, avgY);
@@ -948,28 +1080,34 @@
         ctx.fillText(String(shot.avgLabel || 'avg'), cardW * 0.42, avgY - 8);
       }
 
-      var barGap = (cardW * 0.78) / bars.length;
-      var barW = barGap * 0.46;
       for (var bi = 0; bi < bars.length; bi++) {
-        var bp = easeOutCubic(clamp((localTime - 0.12 - bi * 0.06) / 0.55, 0, 1));
-        var bh = maxBarH * clamp(Number(bars[bi]) || 0.4, 0.1, 1.0) * bp;
+        var bp = easeOutCubic(clamp((localTime - 0.08 - bi * 0.05) / 0.45, 0, 1));
+        var fullH = maxBarH * clamp(Number(bars[bi]) || 0.4, 0.1, 1.0) * bp;
         var bx = -cardW * 0.39 + bi * barGap + (barGap - barW) * 0.5;
-        var by = baseY - bh;
-        ctx.save();
-        if (bi === hlIdx) {
-          var bg = ctx.createLinearGradient(bx, baseY, bx, by);
-          bg.addColorStop(0, theme.accent || '#2EDFDA');
-          bg.addColorStop(0.55, '#38BDF8');
-          bg.addColorStop(1, theme.secondary || '#F59E0B');
-          ctx.fillStyle = bg;
-          ctx.shadowColor = theme.accent || '#2EDFDA';
-          ctx.shadowBlur = 24;
-        } else {
-          ctx.fillStyle = 'rgba(255,255,255,0.16)';
-        }
-        roundRect(ctx, bx, by, barW, Math.max(4, bh), 6);
+        var by = baseY - fullH;
+
+        // Draw muted track bar first
+        ctx.fillStyle = 'rgba(255,255,255,0.16)';
+        roundRect(ctx, bx, by, barW, Math.max(4, fullH), 6);
         ctx.fill();
-        ctx.restore();
+
+        // Focal bar glows & fills up dynamically during Phase 2 zoom!
+        if (bi === hlIdx) {
+          var glowFillP = easeOutExpo(clamp((localTime - standEnd * 0.78) / Math.max(0.35, dur * 0.42), 0, 1));
+          var glowH = Math.max(4, fullH * glowFillP);
+          var glowY = baseY - glowH;
+          ctx.save();
+          var bg = ctx.createLinearGradient(bx, baseY, bx, glowY);
+          bg.addColorStop(0.0, '#00F0FF');
+          bg.addColorStop(0.62, '#38BDF8');
+          bg.addColorStop(1.0, glowFillP > 0.65 ? '#F59E0B' : '#2EDFDA');
+          ctx.fillStyle = bg;
+          ctx.shadowColor = glowFillP > 0.65 ? '#F59E0B' : '#00F0FF';
+          ctx.shadowBlur = 28;
+          roundRect(ctx, bx, glowY, barW, glowH, 6);
+          ctx.fill();
+          ctx.restore();
+        }
         if (!micro && labels[bi]) {
           ctx.fillStyle = bi === hlIdx ? theme.ink : theme.muted;
           ctx.font = '600 18px "Inter", "Segoe UI", sans-serif';
@@ -979,7 +1117,10 @@
       }
       ctx.restore();
     } else if (layout === 'metric-pills-tree') {
-      // Opal-inspired glowing counter pills + connector bracket rising to hero score
+      // Opal sequential 1-by-1 organic pill reveal + passive camera zoom-out (matching user's Images 3, 4 & 5):
+      // Beat 1: Pill 1 starts as glowing circle orb (macro zoomed 1.85x) -> expands into pill as border ring sweeps & number counts up!
+      // Beat 2: Camera smoothly pulls back as Pill 2 & Pill 3 each bloom 1-by-1 from glowing circles into pills!
+      // Beat 3: Camera pulls back to 1.0x as rounded connector bracket draws up & hero Score counts up!
       var pills = Array.isArray(shot.pills) && shot.pills.length
         ? shot.pills
         : [
@@ -987,25 +1128,40 @@
             { label: 'Focus', value: 43 },
             { label: 'Rest', value: 33 },
           ];
-      var countP = easeOutQuart(clamp(localTime / (dur * 0.65), 0, 1));
-      var treeP = easeOutCubic(clamp((localTime - dur * 0.32) / (dur * 0.35), 0, 1));
-      var pillW = isPortrait ? 210 : 185;
-      var pillH = 74;
+
+      var pillW = isPortrait ? 208 : 186;
+      var pillH = 76;
       var pillGap = isPortrait ? 24 : 38;
       var rowW = pills.length * pillW + (pills.length - 1) * pillGap;
-      var rowY = cy + (treeP * 84);
 
-      // Luminous connector bracket + hero score above
-      if (treeP > 0.02) {
+      var tPill1 = 0.0;
+      var tPill2 = dur * 0.24;
+      var tPill3 = dur * 0.44;
+      var tTree = dur * 0.64;
+
+      var pSpread = easeInOutExpo(clamp((localTime - tPill2 * 0.85) / (dur * 0.34), 0, 1));
+      var treeP = easeOutExpo(clamp((localTime - tTree) / Math.max(0.3, dur * 0.28), 0, 1));
+
+      // Passive continuous camera zoom-out from 1.78x (macro on Pill 1) -> 1.0x (full tree) + subtle breathing
+      var camZoom = 1.78 - 0.52 * pSpread - 0.26 * treeP + Math.sin(localTime * 1.4) * 0.012;
+      var rowY = cy + treeP * 86;
+
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.scale(camZoom, camZoom);
+      ctx.translate(-cx, -cy);
+
+      // Luminous rounded connector bracket + hero score above (Beat 3)
+      if (treeP > 0.01) {
         ctx.save();
         ctx.globalAlpha = exitFade * treeP;
         var leftX = cx - rowW * 0.5 + pillW * 0.5;
         var rightX = cx + rowW * 0.5 - pillW * 0.5;
         var midY = rowY - 72;
-        ctx.strokeStyle = 'rgba(226, 232, 240, 0.55)';
+        ctx.strokeStyle = 'rgba(226, 232, 240, 0.62)';
         ctx.lineWidth = 2.2;
         ctx.shadowColor = theme.accent || '#8D81B1';
-        ctx.shadowBlur = 14;
+        ctx.shadowBlur = 16;
         ctx.beginPath();
         ctx.moveTo(leftX, rowY - pillH * 0.5 - 8);
         ctx.lineTo(leftX, midY);
@@ -1017,7 +1173,7 @@
         ctx.shadowBlur = 0;
 
         if (!micro) {
-          var scoreVal = Math.round((Number(shot.scoreValue) || 94) * countP);
+          var scoreVal = Math.round((Number(shot.scoreValue) || 99) * treeP);
           ctx.fillStyle = theme.muted;
           ctx.font = '500 22px "Inter", "Segoe UI", sans-serif';
           ctx.textAlign = 'center';
@@ -1029,37 +1185,74 @@
         ctx.restore();
       }
 
+      // Sequential 1-by-1 pill bloom: circle orb -> expanding pill with sweeping glowing border!
+      var startTimes = [tPill1, tPill2, tPill3];
       for (var pi = 0; pi < pills.length; pi++) {
-        var pop = springPop(localTime - pi * 0.18);
-        if (pop <= 0.01) continue;
-        var px = cx - rowW * 0.5 + pi * (pillW + pillGap);
+        var st = startTimes[pi] !== undefined ? startTimes[pi] : pi * (dur * 0.22);
+        var dt = localTime - st;
+        if (dt < 0) continue;
+
+        var appearP = easeOutCubic(clamp(dt / 0.22, 0, 1));
+        var expandP = easeInOutExpo(clamp((dt - 0.08) / 0.42, 0, 1));
+        var countLocalP = easeOutQuart(clamp((dt - 0.05) / 0.55, 0, 1));
+
+        var curW = pillH + (pillW - pillH) * expandP; // starts as circle (pillH x pillH) -> expands to full pill!
+        var finalCx = cx - rowW * 0.5 + pi * (pillW + pillGap) + pillW * 0.5;
+        var pillCx = pi === 0 ? cx + (finalCx - cx) * pSpread : finalCx;
+
         ctx.save();
-        ctx.globalAlpha = exitFade * clamp(pop, 0, 1);
-        ctx.translate(px + pillW * 0.5, rowY);
-        ctx.scale(pop, pop);
-        roundRect(ctx, -pillW * 0.5, -pillH * 0.5, pillW, pillH, 999);
-        ctx.fillStyle = 'rgba(15, 16, 26, 0.92)';
+        ctx.globalAlpha = exitFade * appearP;
+        ctx.translate(pillCx, rowY);
+
+        // Opening luminous orb flash on the left edge when pill first spawns
+        if (dt < 0.38) {
+          var orbA = (1 - dt / 0.38) * 0.85;
+          var og = ctx.createRadialGradient(-curW * 0.22, 0, 2, -curW * 0.22, 0, 38);
+          og.addColorStop(0, 'rgba(255,255,255,' + orbA.toFixed(2) + ')');
+          og.addColorStop(1, 'rgba(141,129,177,0)');
+          ctx.fillStyle = og;
+          ctx.beginPath();
+          ctx.arc(-curW * 0.22, 0, 38, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Pill body + muted base rim
+        roundRect(ctx, -curW * 0.5, -pillH * 0.5, curW, pillH, 999);
+        ctx.fillStyle = 'rgba(13, 14, 24, 0.94)';
         ctx.fill();
-        ctx.strokeStyle = 'rgba(248, 250, 252, 0.72)';
-        ctx.lineWidth = 2.2;
-        ctx.shadowColor = theme.accent || '#8D81B1';
-        ctx.shadowBlur = 18;
+        ctx.strokeStyle = 'rgba(226, 232, 240, 0.26)';
+        ctx.lineWidth = 2.0;
         ctx.stroke();
-        ctx.shadowBlur = 0;
+
+        // Sweeping glowing progress border around the pill!
+        var perim = 2 * (curW - pillH) + Math.PI * pillH;
+        ctx.save();
+        roundRect(ctx, -curW * 0.5, -pillH * 0.5, curW, pillH, 999);
+        ctx.strokeStyle = 'rgba(248, 250, 252, 0.95)';
+        ctx.lineWidth = 3.2;
+        ctx.shadowColor = '#C4B5FD';
+        ctx.shadowBlur = 18;
+        ctx.setLineDash([perim * countLocalP, perim]);
+        ctx.stroke();
+        ctx.restore();
 
         if (!micro) {
-          var pv = Math.round((Number(pills[pi].value) || 50) * countP);
+          var pv = Math.round((Number(pills[pi].value) || 50) * countLocalP);
           ctx.fillStyle = '#FFFFFF';
           ctx.font = '700 32px "Inter", "Segoe UI", sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillText(String(pv), 0, 0);
+
+          var lblP = easeOutCubic(clamp((dt - 0.24) / 0.28, 0, 1));
+          ctx.globalAlpha = exitFade * appearP * lblP;
           ctx.fillStyle = theme.muted;
           ctx.font = '500 20px "Inter", "Segoe UI", sans-serif';
-          ctx.fillText(String(pills[pi].label || ''), 0, pillH * 0.5 + 26);
+          ctx.fillText(String(pills[pi].label || ''), 0, pillH * 0.5 + 28);
         }
         ctx.restore();
       }
+      ctx.restore();
     } else if (layout === 'neon-score-ring') {
       // Vercel-inspired emerald glow orb -> explosive radial ring sweep + pull-back reveal
       var sFrom = shot.scoreFrom !== undefined ? Number(shot.scoreFrom) : 10;
@@ -1223,29 +1416,249 @@
       }
       ctx.restore();
     } else if (layout === 'whip-cta-morph') {
-      // Vercel 6.60s-7.50s: blinding white orb -> bloom pill ("Visit ↗" / "Try Arunaki ↗") -> crisp lock
-      var pMorph = easeOutExpo(clamp(localTime / 0.42, 0, 1));
-      var pillW = 48 + (240 - 48) * pMorph;
-      var pillH = 48 + (76 - 48) * pMorph;
-      var bloom = (1 - pMorph) * 42 + 16;
+      // Opal-inspired 2-phase logo + dropping spark -> motion-blurred morph into wide glossy dark-violet "▶ Start" pill!
+      var impactT = dur * 0.42;
+      if (localTime < impactT) {
+        // Phase 1: Glossy dark rounded square brand icon + bright white light spark dropping from above!
+        var iconScale = easeOutBack(clamp(localTime / 0.28, 0, 1)) * (1.0 + 0.08 * (localTime / impactT));
+        var iconSz = isPortrait ? 154 : 128;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.scale(iconScale, iconScale);
+        roundRect(ctx, -iconSz * 0.5, -iconSz * 0.5, iconSz, iconSz, 30);
+        ctx.fillStyle = '#09090D';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
+        drawBrandMark(ctx, 0, 0, iconSz * 0.52, 1.0, '#FFFFFF');
+        ctx.restore();
+
+        // Falling luminous spark streak above icon
+        var dropU = clamp((localTime - 0.08) / Math.max(0.18, impactT - 0.08), 0, 1);
+        var sparkY = cy - 220 * (1 - dropU * dropU);
+        ctx.save();
+        ctx.shadowColor = '#FFFFFF';
+        ctx.shadowBlur = 22;
+        ctx.fillStyle = '#FFFFFF';
+        roundRect(ctx, cx - 5, sparkY - 12 - dropU * 18, 10, 24 + dropU * 26, 5);
+        ctx.fill();
+        ctx.restore();
+      } else {
+        // Phase 2: Fast motion-blurred horizontal expansion into wide glossy dark-violet glass pill ("▶ Start")
+        var dt2 = localTime - impactT;
+        var pMorph = easeOutExpo(clamp(dt2 / 0.36, 0, 1));
+        var pPrev = easeOutExpo(clamp((dt2 - 0.033) / 0.36, 0, 1));
+        var mBlur = clamp(Math.abs(pMorph - pPrev) * 44, 0, 8.5);
+        var driftScale = 1.0 + 0.06 * clamp(dt2 / Math.max(0.4, dur - impactT), 0, 1);
+
+        var pillW = 128 + ((isPortrait ? 620 : 540) - 128) * pMorph;
+        var pillH = 128 + (92 - 128) * pMorph;
+
+        ctx.save();
+        if (mBlur > 0.25) ctx.filter = 'blur(' + mBlur.toFixed(1) + 'px)';
+        ctx.translate(cx, cy);
+        ctx.scale(driftScale, driftScale);
+
+        var pg = ctx.createLinearGradient(0, -pillH * 0.5, 0, pillH * 0.5);
+        pg.addColorStop(0.0, 'rgba(22, 20, 32, 0.94)');
+        pg.addColorStop(0.75, 'rgba(54, 48, 78, 0.92)');
+        pg.addColorStop(1.0, 'rgba(138, 126, 178, 0.88)');
+        roundRect(ctx, -pillW * 0.5, -pillH * 0.5, pillW, pillH, 999);
+        ctx.fillStyle = pg;
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(226, 232, 240, 0.34)';
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
+
+        if (!micro && pMorph > 0.30) {
+          ctx.globalAlpha = exitFade * easeOutCubic((pMorph - 0.30) / 0.70);
+          ctx.fillStyle = '#FFFFFF';
+          ctx.font = '600 32px "Inter", "Segoe UI", sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('▶  ' + String(shot.ctaLabel || 'Start'), 0, 1);
+        }
+        ctx.restore();
+      }
+    } else if (layout === 'prompt-type-send') {
+      // Dynamic variable-pace prompt choreography:
+      // 1. Macro zoom (2.35x) on text input line, panning left as words are typed 1-by-1
+      // 2. Whip-pan to bottom-right Send arrow button
+      // 3. Button click press + shockwave ring -> full-screen bloom flash transition!
+      var boxW = isPortrait ? safe.w * 0.90 : Math.min(780, safe.w * 0.74);
+      var boxH = 152;
+      var words = String(shot.promptText || 'Buat video launch 60fps lokal lengkap dengan SFX & kamera 2.5D')
+        .trim()
+        .split(/\s+/);
+      var chips = Array.isArray(shot.chips) && shot.chips.length ? shot.chips : ['18 Skill', 'Kamera 2.5D', '0 Biaya Cloud', 'SFX Sinkron'];
+
+      var btnSz = 46;
+      var bx = cx + boxW * 0.5 - btnSz - 18;
+      var by = cy + boxH * 0.5 - btnSz - 16;
+      var btnCx = bx + btnSz * 0.5;
+      var btnCy = by + btnSz * 0.5;
+
+      var typeEndT = dur * 0.56;
+      var whipBtnEndT = dur * 0.72;
+      var clickT = dur * 0.74;
+      var flashStartT = dur * 0.82;
+
+      // Word-by-word reveal progress
+      var typeU = clamp(localTime / Math.max(0.4, typeEndT), 0, 1);
+      var wordFloat = typeU * words.length;
+      var fullCount = Math.min(words.length, Math.floor(wordFloat));
+      var partialWordAlpha = wordFloat - fullCount;
+
+      ctx.font = '400 25px "Inter", "Segoe UI", sans-serif';
+      var textStartX = cx - boxW * 0.5 + 28;
+      var textBaseY = cy - boxH * 0.5 + 34;
+      var currentTypedStr = words.slice(0, Math.min(words.length, fullCount + 1)).join(' ');
+      var cursorOffsetPx = Math.min(boxW - 140, ctx.measureText(currentTypedStr).width);
+
+      // Camera target during typing: follows the active word across the line (pans camera right -> text shifts left!)
+      var SmoothCursorX = textStartX + Math.min(boxW - 160, (typeU * (boxW - 180)));
+      var SmoothCursorY = textBaseY + 12;
+
+      var whipToBtn = easeInOutExpo(clamp((localTime - typeEndT) / Math.max(0.18, whipBtnEndT - typeEndT), 0, 1));
+      var whipToBtnPrev = easeInOutExpo(clamp((localTime - 0.033 - typeEndT) / Math.max(0.18, whipBtnEndT - typeEndT), 0, 1));
+      var punchThru = easeInOutExpo(clamp((localTime - flashStartT) / Math.max(0.15, dur - flashStartT), 0, 1));
+
+      var camZoom = 2.35 + (2.55 - 2.35) * whipToBtn + (6.8 - 2.55) * punchThru;
+      var focusX = SmoothCursorX + (btnCx - SmoothCursorX) * whipToBtn;
+      var focusY = SmoothCursorY + (btnCy - SmoothCursorY) * whipToBtn;
+      var whipBlur = clamp(Math.abs(whipToBtn - whipToBtnPrev) * 42 + punchThru * 8.0, 0, 9.0);
 
       ctx.save();
-      ctx.shadowColor = '#FFFFFF';
-      ctx.shadowBlur = bloom;
-      roundRect(ctx, cx - pillW * 0.5, cy - pillH * 0.5, pillW, pillH, 16);
-      ctx.fillStyle = '#FFFFFF';
+      if (whipBlur > 0.25) {
+        ctx.filter = 'blur(' + whipBlur.toFixed(1) + 'px)';
+      }
+      ctx.translate(cx, cy);
+      ctx.scale(camZoom, camZoom);
+      ctx.translate(-focusX, -focusY);
+
+      if (!micro) {
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = '600 ' + (isPortrait ? 40 : 36) + 'px "Inter", "Segoe UI", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(String(shot.headline || 'Apa yang ingin kamu ciptakan hari ini?'), cx, cy - boxH * 0.5 - 42);
+      }
+
+      // Prompt box
+      roundRect(ctx, cx - boxW * 0.5, cy - boxH * 0.5, boxW, boxH, 18);
+      ctx.fillStyle = 'rgba(12, 14, 22, 0.95)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Word-by-word rendering with subtle pop on the newest word
+      if (!micro) {
+        ctx.font = '400 24px "Inter", "Segoe UI", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        var wx = textStartX;
+        var spW = ctx.measureText(' ').width;
+        for (var wi = 0; wi < words.length; wi++) {
+          if (wi > fullCount) break;
+          var isNewest = wi === fullCount && localTime < typeEndT;
+          var wAlpha = isNewest ? easeOutCubic(partialWordAlpha) : 1.0;
+          var wDy = isNewest ? (1 - easeOutCubic(partialWordAlpha)) * 7 : 0;
+          ctx.save();
+          ctx.globalAlpha = wAlpha;
+          ctx.fillStyle = isNewest ? (theme.accent || '#6FEDA4') : '#F8FAFC';
+          ctx.fillText(words[wi], wx, textBaseY + wDy);
+          ctx.restore();
+          wx += ctx.measureText(words[wi]).width + spW;
+        }
+        // Caret
+        if (localTime < whipBtnEndT) {
+          ctx.fillStyle = theme.accent || '#6FEDA4';
+          ctx.fillRect(wx + 2, textBaseY + 2, 2.5, 24);
+        }
+
+        ctx.fillStyle = theme.muted;
+        ctx.font = '500 17px "Inter", "Segoe UI", sans-serif';
+        ctx.fillText(String(shot.modelTag || 'Arunaki Nexus Engine'), textStartX, cy + boxH * 0.5 - 38);
+      }
+
+      // Button click press & shockwave ripple
+      var clickElapsed = localTime - clickT;
+      var btnScale = 1.0;
+      if (clickElapsed > 0) {
+        if (clickElapsed < 0.09) {
+          btnScale = 1.0 - 0.24 * (clickElapsed / 0.09);
+        } else {
+          btnScale = 0.76 + 0.24 * easeOutBack(clamp((clickElapsed - 0.09) / 0.18, 0, 1));
+        }
+      }
+
+      if (clickElapsed > 0.04) {
+        var ripP = clamp((clickElapsed - 0.04) / 0.42, 0, 1);
+        ctx.save();
+        ctx.strokeStyle = theme.accent || '#6FEDA4';
+        ctx.globalAlpha = (1 - ripP) * 0.9;
+        ctx.lineWidth = 3.0 * (1 - ripP * 0.6);
+        ctx.beginPath();
+        ctx.arc(btnCx, btnCy, btnSz * (0.55 + ripP * 1.65), 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      ctx.save();
+      ctx.translate(btnCx, btnCy);
+      ctx.scale(btnScale, btnScale);
+      ctx.shadowColor = clickElapsed > 0.04 ? (theme.accent || '#6FEDA4') : '#FFFFFF';
+      ctx.shadowBlur = clickElapsed > 0.04 ? 36 : 20;
+      roundRect(ctx, -btnSz * 0.5, -btnSz * 0.5, btnSz, btnSz, 11);
+      ctx.fillStyle = clickElapsed > 0.04 ? (theme.accent || '#6FEDA4') : '#FFFFFF';
       ctx.fill();
       ctx.shadowBlur = 0;
+      ctx.strokeStyle = '#09090B';
+      ctx.lineWidth = 2.6;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(0, btnSz * 0.2);
+      ctx.lineTo(0, -btnSz * 0.2);
+      ctx.moveTo(-btnSz * 0.18, -btnSz * 0.04);
+      ctx.lineTo(0, -btnSz * 0.22);
+      ctx.lineTo(btnSz * 0.18, -btnSz * 0.04);
+      ctx.stroke();
+      ctx.restore();
 
-      if (!micro && pMorph > 0.35) {
-        ctx.globalAlpha = exitFade * easeOutCubic((pMorph - 0.35) / 0.65);
-        ctx.fillStyle = '#09090B';
-        ctx.font = '600 32px "Inter", "Segoe UI", sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(String(shot.ctaLabel || 'Start ↗'), cx, cy + 1);
+      // Feature chips
+      var chipW = (boxW - 36) / chips.length;
+      for (var chi = 0; chi < chips.length; chi++) {
+        var chx = cx - boxW * 0.5 + chi * (chipW + 12);
+        var chy = cy + boxH * 0.5 + 22;
+        roundRect(ctx, chx, chy, chipW, 38, 10);
+        ctx.fillStyle = 'rgba(255,255,255,0.06)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+        ctx.stroke();
+        if (!micro) {
+          ctx.fillStyle = theme.muted;
+          ctx.font = '500 16px "Inter", "Segoe UI", sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(String(chips[chi]), chx + chipW * 0.5, chy + 19, chipW - 14);
+        }
       }
       ctx.restore();
+
+      // Click-triggered radial bloom transition overlay at end of shot
+      if (punchThru > 0.01) {
+        ctx.save();
+        ctx.globalAlpha = Math.pow(punchThru, 1.5);
+        var fg = ctx.createRadialGradient(cx, cy, 10, cx, cy, Math.max(W, H) * 0.75);
+        fg.addColorStop(0.0, '#FFFFFF');
+        fg.addColorStop(0.45, theme.accent || '#6FEDA4');
+        fg.addColorStop(1.0, 'rgba(2, 6, 23, 0.95)');
+        ctx.fillStyle = fg;
+        ctx.fillRect(0, 0, W, H);
+        ctx.restore();
+      }
     }
 
     ctx.restore();

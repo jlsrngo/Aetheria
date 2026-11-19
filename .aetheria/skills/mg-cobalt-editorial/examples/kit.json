@@ -29,7 +29,9 @@
       "metric-pills-tree",
       "neon-score-ring",
       "macro-ui-prompt",
-      "whip-cta-morph"
+      "whip-cta-morph",
+      "orbit-carousel",
+      "prompt-type-send"
     ],
     "cameraPreset": [
       "static",
