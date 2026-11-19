@@ -177,12 +177,14 @@ pub fn render_generic_kit_index_html(
         .replace('>', "&gt;")
         .replace('"', "&quot;");
     let bg = if kit.background.trim().is_empty() { "#0F1115" } else { kit.background.trim() };
+    let uses_story_core = kit.core == Some(1);
     let mut script_tags = String::new();
+    let mut body_runtime_tags = String::new();
     if kit.use_three {
         script_tags.push_str("  <script src=\"/script/three.min.js\"></script>\n");
     }
     script_tags.push_str("  <script src=\"/script/aetheria-motion.js\"></script>\n");
-    if kit.core == Some(1) {
+    if uses_story_core {
         script_tags.push_str("  <script src=\"/script/story-core.js\"></script>\n");
     }
     let mut has_runtime = false;
@@ -190,12 +192,20 @@ pub fn render_generic_kit_index_html(
         if let Some(clean) = is_safe_script_rel(sc) {
             if clean == "script/story-runtime.js" {
                 has_runtime = true;
+                if uses_story_core {
+                    body_runtime_tags.push_str("  <script src=\"/script/story-runtime.js\"></script>\n");
+                    continue;
+                }
             }
             script_tags.push_str(&format!("  <script src=\"/{clean}\"></script>\n"));
         }
     }
     if !has_runtime {
-        script_tags.push_str("  <script src=\"/script/story-runtime.js\"></script>\n");
+        if uses_story_core {
+            body_runtime_tags.push_str("  <script src=\"/script/story-runtime.js\"></script>\n");
+        } else {
+            script_tags.push_str("  <script src=\"/script/story-runtime.js\"></script>\n");
+        }
     }
     for sc in custom_scripts {
         if let Some(clean) = is_safe_script_rel(sc) {
@@ -217,6 +227,16 @@ pub fn render_generic_kit_index_html(
         )
     };
 
+    let boot_block = if uses_story_core {
+        format!(
+            "  <script>\n    window.__filmMeta = {{ title: \"{safe_title}\", width: {width}, height: {height}, fps: 30, duration: 1, scenes: [] }};\n    window.renderAt = function () {{}};\n    window.__microstockMode = {ms_flag};\n    window.__ready = false;\n  </script>\n{body_runtime_tags}"
+        )
+    } else {
+        format!(
+            "  <script>\n    (function () {{\n      window.__filmMeta = {{ title: \"{safe_title}\", width: {width}, height: {height}, fps: 30, duration: 1, scenes: [] }};\n      window.renderAt = function () {{}};\n      window.__ready = false;\n      if (window.StoryRuntime && typeof window.StoryRuntime.boot === \"function\") {{\n        window.StoryRuntime.boot({{\n          {boot_canvas_args}\n          storyUrl: \"/story.json\",\n          fallbackStoryUrl: \"/story.example.json\",\n          isMicrostock: {ms_flag}\n        }});\n      }}\n    }})();\n  </script>\n"
+        )
+    };
+
     format!(
         r##"<!DOCTYPE html>
 <html lang="id">
@@ -234,20 +254,7 @@ pub fn render_generic_kit_index_html(
   <div id="stage">
 {canvases_html}
   </div>
-  <script>
-    (function () {{
-      window.__filmMeta = {{ title: "{title}", width: {w}, height: {h}, fps: 30, duration: 1, scenes: [] }};
-      window.renderAt = function () {{}};
-      window.__ready = false;
-      window.StoryRuntime.boot({{
-        {boot_canvas_args}
-        storyUrl: "/story.json",
-        fallbackStoryUrl: "/story.example.json",
-        isMicrostock: {ms_flag}
-      }});
-    }})();
-  </script>
-</body>
+{boot_block}</body>
 </html>
 "##,
         title = safe_title,
@@ -256,8 +263,7 @@ pub fn render_generic_kit_index_html(
         bg = bg,
         script_tags = script_tags,
         canvases_html = canvases_html,
-        boot_canvas_args = boot_canvas_args,
-        ms_flag = ms_flag,
+        boot_block = boot_block,
     )
 }
 
