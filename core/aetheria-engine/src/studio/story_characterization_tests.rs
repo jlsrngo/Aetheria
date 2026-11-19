@@ -273,3 +273,51 @@ fn k1_reconcile_snapshot_rollback_works_with_normalized_story() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn k3_kit_limits_are_enforced_with_story_kit_limit_exceeded() {
+    let tmp = std::env::temp_dir().join(format!(
+        "aetheria-k3-limits-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    let kit = json!({
+        "renderer": "2d-limits-test",
+        "useThree": false,
+        "scripts": ["script/story-runtime.js"],
+        "limits": {
+            "minShots": 2,
+            "maxShots": 4,
+            "minDurationSec": 3.0,
+            "maxDurationSec": 20.0,
+            "maxHeadlineChars": 12
+        }
+    });
+    std::fs::write(tmp.join("kit.json"), serde_json::to_string_pretty(&kit).unwrap()).unwrap();
+
+    let too_few_and_long_headline = json!({
+        "title": "Limits",
+        "canvas": { "w": 1080, "h": 1920, "fps": 30 },
+        "captions": { "enabled": false },
+        "shots": [
+            { "id": "s1", "start": 0.0, "duration": 25.0, "headline": "This headline is way too long" }
+        ]
+    });
+    let report = lint_story_json_value(&too_few_and_long_headline, Some(&tmp), "limits.json");
+    assert!(!report.valid);
+    let limit_issues: Vec<_> = report
+        .issues
+        .iter()
+        .filter(|i| i.code == "STORY_KIT_LIMIT_EXCEEDED")
+        .collect();
+    assert_eq!(
+        limit_issues.len(),
+        3,
+        "Expected 3 STORY_KIT_LIMIT_EXCEEDED issues (minShots, maxDurationSec, maxHeadlineChars), got: {:?}",
+        limit_issues
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}

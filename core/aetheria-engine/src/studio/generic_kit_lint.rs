@@ -9,9 +9,11 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+use super::story_checks::{
+    self, is_safe_script_rel, push_issue, KitLimits,
+};
 use super::story_lint::{StoryLintIssue, StoryLintReport};
 use crate::paths::contains_path;
-use crate::tool::film_audio::read_wav_duration_secs;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,27 +29,12 @@ pub struct KitManifest {
     pub scripts: Vec<String>,
     #[serde(default)]
     pub enums: HashMap<String, Vec<String>>,
+    #[serde(default)]
+    pub limits: Option<KitLimits>,
 }
 
 fn default_bg() -> String {
     "#0F1115".to_string()
-}
-
-fn push_issue(issues: &mut Vec<StoryLintIssue>, code: &str, path: impl Into<String>, hint: impl Into<String>) {
-    issues.push(StoryLintIssue {
-        code: code.to_string(),
-        path: path.into(),
-        hint: hint.into(),
-    });
-}
-
-fn is_safe_script_rel(raw: &str) -> Option<String> {
-    let clean = raw.trim().trim_start_matches('/').replace('\\', "/");
-    if clean.starts_with("script/") && clean.ends_with(".js") && !clean.contains("..") {
-        Some(clean)
-    } else {
-        None
-    }
 }
 
 /// Loads `<dir>/kit.json` if present and valid.
@@ -95,135 +82,75 @@ pub fn lint_generic_kit_story_value(
     let mut custom_shots = 0usize;
     let mut total_duration = 0.0f64;
 
-    match root.get("shots").and_then(Value::as_array) {
-        Some(shots) if !shots.is_empty() => {
-            total_shots = shots.len();
-            let mut seen_ids = HashSet::new();
-            let mut expected_start = 0.0f64;
+    if let Some(shots) = story_checks::require_shots_array(root, &mut issues) {
+        total_shots = shots.len();
+        let mut seen_ids = HashSet::new();
+        let mut expected_start = 0.0f64;
 
-            for (idx, shot_val) in shots.iter().enumerate() {
-                let sp = format!("shots[{}]", idx);
-                let Some(shot) = shot_val.as_object() else {
-                    push_issue(&mut issues, "STORY_INVALID_SHOT", sp, "Each shot must be a JSON object.");
+        for (idx, shot_val) in shots.iter().enumerate() {
+            let sp = format!("shots[{}]", idx);
+            let Some(shot) = story_checks::require_shot_object(shot_val, &sp, &mut issues) else {
+                continue;
+            };
+
+            let sid = story_checks::check_shot_id(shot, &sp, &mut seen_ids, &mut issues);
+            let _ = story_checks::check_shot_timing_and_wav(
+                shot_val,
+                shot,
+                &sid,
+                &sp,
+                &mut expected_start,
+                &mut total_duration,
+                0.02,
+                film_dir,
+                &mut issues,
+            );
+
+            // Validate per-shot enum fields declared in kit.enums
+            for (field, allowed) in &kit.enums {
+                if allowed.is_empty() {
                     continue;
-                };
-
-                let sid = shot.get("id").and_then(Value::as_str).unwrap_or("").trim();
-                if sid.is_empty() {
-                    push_issue(&mut issues, "STORY_INVALID_SHOT_ID", format!("{sp}.id"), "Provide a non-empty shot id.");
-                } else if !seen_ids.insert(sid.to_string()) {
-                    push_issue(&mut issues, "STORY_DUPLICATE_SHOT_ID", format!("{sp}.id"), format!("Duplicate shot id '{}'.", sid));
                 }
-
-                let start = shot.get("start").and_then(Value::as_f64);
-                let dur = shot.get("duration").and_then(Value::as_f64);
-                match (start, dur) {
-                    (Some(st), Some(du)) if st.is_finite() && du.is_finite() && st >= 0.0 && du > 0.0 => {
-                        if (st - expected_start).abs() > 0.02 {
-                            push_issue(
-                                &mut issues,
-                                "STORY_SHOT_DISCONTINUITY",
-                                format!("{sp}.start"),
-                                format!("Shot '{}' starts at {:.3}s, expected {:.3}s.", sid, st, expected_start),
-                            );
+                if let Some(v) = shot.get(field) {
+                    match v {
+                        Value::String(s) => {
+                            if !allowed.iter().any(|a| a == s) {
+                                push_issue(
+                                    &mut issues,
+                                    "STORY_KIT_ENUM_INVALID",
+                                    format!("{sp}.{field}"),
+                                    format!("Invalid `{field}` value '{s}'. Allowed by kit.json: {}.", allowed.join(", ")),
+                                );
+                            }
                         }
-                        expected_start = st + du;
-                        total_duration = expected_start;
-
-                        if let (Some(dir), Some(wav_rel)) = (
-                            film_dir,
-                            shot_val.pointer("/audio/wav").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()),
-                        ) {
-                            let wav_path = dir.join(wav_rel.trim_start_matches('/'));
-                            if contains_path(dir, &wav_path) && wav_path.is_file() {
-                                if let Ok(wav_dur) = read_wav_duration_secs(&wav_path) {
-                                    if du + 0.05 < wav_dur {
+                        Value::Array(arr) => {
+                            for (ai, item) in arr.iter().enumerate() {
+                                if let Some(s) = item.as_str() {
+                                    if !allowed.iter().any(|a| a == s) {
                                         push_issue(
                                             &mut issues,
-                                            "STORY_AUDIO_TRUNCATION",
-                                            format!("{sp}.duration"),
-                                            format!("Shot duration ({:.2}s) < WAV '{}' ({:.2}s).", du, wav_rel, wav_dur),
+                                            "STORY_KIT_ENUM_INVALID",
+                                            format!("{sp}.{field}[{ai}]"),
+                                            format!("Invalid `{field}` item '{s}'. Allowed by kit.json: {}.", allowed.join(", ")),
                                         );
                                     }
                                 }
                             }
                         }
-                    }
-                    _ => push_issue(&mut issues, "STORY_INVALID_SHOT_TIMING", sp.clone(), "Provide finite `start >= 0` and `duration > 0`."),
-                }
-
-                // Validate per-shot enum fields declared in kit.enums
-                for (field, allowed) in &kit.enums {
-                    if allowed.is_empty() {
-                        continue;
-                    }
-                    if let Some(v) = shot.get(field) {
-                        match v {
-                            Value::String(s) => {
-                                if !allowed.iter().any(|a| a == s) {
-                                    push_issue(
-                                        &mut issues,
-                                        "STORY_KIT_ENUM_INVALID",
-                                        format!("{sp}.{field}"),
-                                        format!("Invalid `{field}` value '{s}'. Allowed by kit.json: {}.", allowed.join(", ")),
-                                    );
-                                }
-                            }
-                            Value::Array(arr) => {
-                                for (ai, item) in arr.iter().enumerate() {
-                                    if let Some(s) = item.as_str() {
-                                        if !allowed.iter().any(|a| a == s) {
-                                            push_issue(
-                                                &mut issues,
-                                                "STORY_KIT_ENUM_INVALID",
-                                                format!("{sp}.{field}[{ai}]"),
-                                                format!("Invalid `{field}` item '{s}'. Allowed by kit.json: {}.", allowed.join(", ")),
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-
-                if let Some(custom_str) = shot.get("custom").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()) {
-                    custom_shots += 1;
-                    if is_safe_script_rel(custom_str).is_none() {
-                        push_issue(
-                            &mut issues,
-                            "STORY_INVALID_CUSTOM_PATH",
-                            format!("{sp}.custom"),
-                            "Custom shot script must match `script/<name>.js` without `..`.",
-                        );
+                        _ => {}
                     }
                 }
             }
+
+            story_checks::check_custom_script_path(shot, &sp, &mut custom_shots, &mut issues);
         }
-        _ => push_issue(&mut issues, "STORY_EMPTY_SHOTS", "shots", "Provide at least one shot in `shots` array."),
+
+        if let Some(limits) = &kit.limits {
+            story_checks::check_kit_limits(shots, total_duration, limits, &mut issues);
+        }
     }
 
-    if let Some(dir) = film_dir {
-        let film_json_path = dir.join("film.json");
-        if film_json_path.is_file() {
-            if let Ok(raw) = std::fs::read_to_string(&film_json_path) {
-                if let Ok(fj) = serde_json::from_str::<Value>(&raw) {
-                    if let Some(f_scenes) = fj.get("scenes").and_then(Value::as_array) {
-                        let film_total: f64 = f_scenes.iter().filter_map(|s| s.get("duration").and_then(Value::as_f64)).sum();
-                        if film_total > 0.0 && total_duration > 0.0 && (film_total - total_duration).abs() > 0.25 {
-                            push_issue(
-                                &mut issues,
-                                "STORY_FILM_DURATION_MISMATCH",
-                                "shots",
-                                format!("Story total duration ({:.2}s) differs from film.json total ({:.2}s).", total_duration, film_total),
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
+    story_checks::check_film_duration_alignment(film_dir, total_duration, &mut issues);
 
     StoryLintReport {
         valid: issues.is_empty(),
@@ -351,6 +278,7 @@ mod tests {
                 ("theme".to_string(), vec!["cyber".to_string(), "synth".to_string()]),
                 ("layout".to_string(), vec!["hero".to_string(), "cards".to_string()]),
             ]),
+            limits: None,
         };
 
         let ok = json!({
