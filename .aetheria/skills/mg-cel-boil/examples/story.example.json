@@ -1,92 +1,75 @@
 {
-  "version": 1,
   "meta": {
-    "title": "HAND MADE — Frame-by-Frame Cel Boil",
+    "title": "05-Cel-Boil Hand-Drawn Match & Flame Spirit",
     "width": 1080,
     "height": 1920,
-    "fps": 30,
-    "durationSec": 30,
-    "theme": "sketch-cream"
+    "fps": 24,
+    "durationSec": 30
   },
+  "aspect": "9:16",
+  "fps": 24,
+  "seed": 505,
+  "microstockMode": false,
   "shots": [
     {
-      "id": "s1-hero",
-      "startSec": 0,
-      "endSec": 5,
-      "layout": "cel-hero",
-      "theme": "sketch-cream",
-      "badge": "HAND-DRAWN 12FPS",
-      "headline": "GARIS YANG HIDUP",
-      "subtext": "Efek line-boil klasik untuk animasi penuh energi",
-      "sprite": "flame-spirit",
-      "transition": "ink-splash"
+      "id": "shot_1_strike",
+      "layout": "strike-smear",
+      "start": 0.0,
+      "duration": 7.5,
+      "startSec": 0.0,
+      "endSec": 7.5,
+      "exposure": "on-1s",
+      "drawingNumber": 12,
+      "sceneCode": "SC. 05A",
+      "headline": "STRIKE!",
+      "subheadline": "SMEAR & MULTIPLES",
+      "tagline": "24 FPS ON ONES · FRICTION SPARKS",
+      "spiritFace": "fierce"
     },
     {
-      "id": "s2-split",
-      "startSec": 5,
-      "endSec": 10,
-      "layout": "cel-split",
-      "theme": "comic-tomato",
-      "headline": "DUA RAHASIA CEL FX",
-      "items": [
-        { "label": "OUTLINE BERGETAR", "sprite": "star-burst" },
-        { "label": "WARNA OFF-REGISTER", "sprite": "smoke-puff" }
-      ],
-      "transition": "speedline-cut"
+      "id": "shot_2_ignition",
+      "layout": "spirit-jump",
+      "start": 7.5,
+      "duration": 7.5,
+      "startSec": 7.5,
+      "endSec": 15.0,
+      "exposure": "on-2s",
+      "drawingNumber": 48,
+      "sceneCode": "SC. 05B",
+      "headline": "IGNITE",
+      "subheadline": "SQUASH & STRETCH",
+      "tagline": "12 FPS ON TWOS · COL-ERASE ARCS",
+      "spiritFace": "squeeze"
     },
     {
-      "id": "s3-strip",
-      "startSec": 10,
-      "endSec": 15,
-      "layout": "cel-strip",
-      "theme": "studio-butter",
-      "headline": "EMPAT ELEMEN KARTUN",
-      "transition": "paper-flip"
+      "id": "shot_3_dance",
+      "layout": "box-dance",
+      "start": 15.0,
+      "duration": 7.5,
+      "startSec": 15.0,
+      "endSec": 22.5,
+      "exposure": "on-2s",
+      "drawingNumber": 96,
+      "sceneCode": "SC. 05C",
+      "headline": "CEL BOIL",
+      "subheadline": "OFF-REGISTER INK",
+      "tagline": "RUBBER-HOSE SPIRIT · HAND HATCHED",
+      "spiritFace": "happy"
     },
     {
-      "id": "s4-stat",
-      "startSec": 15,
-      "endSec": 20,
-      "layout": "cel-stat",
-      "theme": "ink-mint",
-      "metric": "12 FPS",
-      "headline": "RITME ANIMASI ON-TWOS",
-      "sprite": "lightning-zap",
-      "transition": "ink-splash"
-    },
-    {
-      "id": "s5-stack",
-      "startSec": 20,
-      "endSec": 25,
-      "layout": "cel-stack",
-      "theme": "night-chalk",
-      "headline": "RESEP VISUAL KLASIK",
-      "items": [
-        { "label": "01. Sketsa Kuas Tebal", "sprite": "pencil-nib" },
-        { "label": "02. Squash & Stretch", "sprite": "flame-spirit" },
-        { "label": "03. Pop & Sparkle", "sprite": "heart-pop" }
-      ],
-      "transition": "speedline-cut"
-    },
-    {
-      "id": "s6-cta",
-      "startSec": 25,
-      "endSec": 30,
-      "layout": "cel-cta",
-      "theme": "sketch-cream",
-      "badge": "STUDIO CEL",
-      "headline": "BUAT KARYA BERJIWA",
-      "subtext": "Hangat, ekspresif, dan langsung menonjol di feed",
-      "sprite": "star-burst",
-      "transition": "paper-flip"
+      "id": "shot_4_finale",
+      "layout": "badge-riffle",
+      "start": 22.5,
+      "duration": 7.5,
+      "startSec": 22.5,
+      "endSec": 30.0,
+      "exposure": "on-3s",
+      "drawingNumber": 146,
+      "sceneCode": "SC. 05D",
+      "headline": "HAND MADE",
+      "subheadline": "FRAME BY FRAME",
+      "tagline": "TOTAL 146 DRAWINGS · ACME PEG BAR",
+      "spiritFace": "wink"
     }
-  ],
-  "captions": [
-    { "startSec": 0.5, "endSec": 4.5, "text": "GARIS YANG HIDUP" },
-    { "startSec": 5.5, "endSec": 9.5, "text": "RAHASIA CEL FX" },
-    { "startSec": 10.5, "endSec": 14.5, "text": "EMPAT ELEMEN" },
-    { "startSec": 15.5, "endSec": 19.5, "text": "RITME 12 FPS" },
-    { "startSec": 20.5, "endSec": 24.5, "text": "RESEP KLASIK" },
-    { "startSec": 25.5, "endSec": 29.5, "text": "KARYA BERJIWA" }
   ]
 }

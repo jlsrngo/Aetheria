@@ -1,22 +1,21 @@
 {
-  "schemaVersion": 1,
-  "skillId": "mg-cel-boil",
-  "renderer": "2d-cel-boil",
-  "useThree": false,
-  "scripts": ["script/celboil-kit.js", "script/story-runtime.js"],
-  "enums": {
-    "themes": ["sketch-cream", "comic-tomato", "studio-butter", "ink-mint", "night-chalk"],
-    "layouts": ["cel-hero", "cel-split", "cel-stack", "cel-stat", "cel-strip", "cel-cta"],
-    "sprites": ["flame-spirit", "star-burst", "smoke-puff", "lightning-zap", "pencil-nib", "heart-pop"],
-    "transitions": ["ink-splash", "speedline-cut", "paper-flip"]
-  },
-  "limits": {
-    "minShots": 2,
-    "maxShots": 12,
-    "minDurationSec": 3.0,
-    "maxDurationSec": 90.0,
-    "maxHeadlineChars": 44,
-    "maxSubtextChars": 92,
-    "maxItems": 4
+  "slug": "mg-cel-boil",
+  "name": "Cel Boil Hand-Drawn Animator Kit (24fps / 12fps On-Twos / Off-Register Gouache)",
+  "paradigm": "canvas2d-procedural-kit",
+  "layouts": ["strike-smear", "spirit-jump", "box-dance", "badge-riffle"],
+  "components": [
+    "cel-paper-sheet",
+    "acme-peg-bar-holes",
+    "foreshortened-matchbox",
+    "matchstick-smear-multiples",
+    "rubber-hose-flame-spirit",
+    "boiled-scalloped-badge",
+    "off-register-brush-title",
+    "col-erase-exposure-slate",
+    "light-table-desk-pullback"
+  ],
+  "defaultSafeZone": {
+    "9:16": { "x": 56, "y": 80, "w": 896, "h": 1340 },
+    "16:9": { "x": 96, "y": 54, "w": 1574, "h": 908 }
   }
 }

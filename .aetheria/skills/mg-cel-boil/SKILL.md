@@ -1,33 +1,50 @@
 ---
 name: mg-cel-boil
-description: "Declarative Hand-Drawn Cel-Boil motion graphics skill with 12fps quantized line boil, off-register comic color fills, paper halftone texture, and squash-and-stretch cartoon sprites."
-tags:
-  - motion-graphics
-  - declarative-kit
-  - cel-boil
-  - hand-drawn
-command: /mg-cel-boil
+description: Hand-drawn 2D cel animation and variable-width brush boil engine (on-ones 24fps / on-twos 12fps / on-threes 8fps) with off-register gouache fills, diagonal ink hatching, smear multiples, rubber-hose flame spirit character, col-erase construction arcs, and light-table peg-bar pullback.
 ---
 
-# Hand-Drawn Cel Boil — Declarative Fast-Path Skill
+# `mg-cel-boil` — Declarative Hand-Drawn Cel Animation & Boil Engine (v2)
 
-## Visual Identity
-Traditional frame-by-frame animation warmth: 12fps quantized 3-frame line-boil outlines, slightly off-register hand-colored fills, halftone sketchbook paper, radial comic speedlines, and lively squash-and-stretch cel FX sprites.
+## 1. Visual DNA & Reference Craft (`05-cel-boil`)
+- **Surface & Ink**: Warm animation cel paper (`#F4E9D0`), highlight cream (`#FFF6E2`), dense sumi ink (`#1C1613`), tomato red (`#E5402B`), sunny yellow (`#FFC425`), col-erase red pencil (`#D9573F`), and onion-skin blue (`#5A7BB5`).
+- **Variable-Width Tapered Brush Engine (`outline` + `inkW` + `inkStroke` + `inkLoop`)**: Converts Catmull-Rom splines into variable-width polygons with round caps, tapered start/end, pressure jitter, heavier weight along the lower-right shadow normal, and animator corner overshoot (`edge`).
+- **Off-Register Boiled Fills (`fillShape`, `REG = { dx: -5, dy: 4 }`) & Hand-Inked Hatching (`hatch`)**: Every gouache fill is independently boiled and shifted `(-5px, +4px)` off-register under the ink line, paired with clipped diagonal ink hatch strokes on cast shadows and box side faces.
+- **Stepped Exposure Timing (`getDrawingState`)**: Supports `"on-1s"` (24fps fast action/smears), `"on-2s"` (12fps main character performance), and `"on-3s"` (8fps held locks with 3-drawing boil cycle).
 
-## Zero-JS Workflow
-Do **not** write custom canvas JS. Author only `story.json` matching `examples/kit.json` and `examples/story.schema.json`.
-1. Read `examples/kit.json` and `examples/story.example.json` for valid enums and structure.
-2. Write `story.json` with 2–12 shots (`durationSec` 3–90, `fps: 30`, `1080x1920` or `1920x1080`).
-3. Validate via `story_lint`, preview via `capture_film_preview`, and inspect `contact_sheet.jpg`.
-4. Mode `'M'` (`?microstock=1`) automatically hides all text and captions for clean cel-FX plates.
+## 2. Layouts (`examples/kit.json`)
+1. `strike-smear`: 3D foreshortened matchbox on the paper table + matchstick striking across the gritty striker strip with classic animation smear multiples, dry-brush speed lines, teardrop friction sparks, and red col-erase trajectory arc.
+2. `spirit-jump`: Newborn Flame Spirit leaping in a parabolic squash-and-stretch arc from the upright smoking burnt matchstick onto the matchbox top, guided by red col-erase spacing dots.
+3. `box-dance`: Hero rubber-hose Flame Spirit (with big paper-white cartoon gloves and two finger creases, rosy cheeks, expressive eyes, and rising fire droplets) performing a Ta-Da bounce atop the matchbox surrounded by boiled cream dust puffs and 4-point twinkles.
+4. `badge-riffle`: Pullback to the animator's wooden light-table desk (`84%` scale) showing warm stepped underlight, taped Acme peg bar, stacked paper sheets, blue col-erase onion-skin ghost, scalloped boiled fire badge, reborn tiny spirit holding a glowing ember, and a cartoon white-gloved thumb riffling the lifted lower-right page corner.
 
-## Kit Enums (`examples/kit.json`)
-- **themes**: `sketch-cream`, `comic-tomato`, `studio-butter`, `ink-mint`, `night-chalk`
-- **layouts**: `cel-hero`, `cel-split`, `cel-stack`, `cel-stat`, `cel-strip`, `cel-cta`
-- **sprites**: `flame-spirit`, `star-burst`, `smoke-puff`, `lightning-zap`, `pencil-nib`, `heart-pop`
-- **transitions**: `ink-splash`, `speedline-cut`, `paper-flip`
+## 3. Declarative Contract (`story.json`)
+Only author `story.json` (validated against `examples/story.schema.json`). Do not edit `examples/script/celboil-kit.js` or `examples/script/story-runtime.js`.
 
-## Limits & Safe-Zone Contract
-- `headline` <= 44 chars; `subtext` <= 92 chars; `items` <= 4.
-- Portrait `1080x1920` keeps all comic frames inside `x: 56..952`, `y: 80..1420`.
-- Pure deterministic function of `t`: 12fps boil index (`Math.floor(t * 12) % 3`) uses seeded hashing with zero randomness.
+```json
+{
+  "aspect": "9:16",
+  "fps": 24,
+  "seed": 505,
+  "microstockMode": false,
+  "shots": [
+    {
+      "id": "shot_1_strike",
+      "layout": "strike-smear",
+      "start": 0.0,
+      "duration": 2.5,
+      "exposure": "on-1s",
+      "drawingNumber": 12,
+      "sceneCode": "SC. 05A",
+      "headline": "STRIKE!",
+      "subheadline": "SMEAR & MULTIPLES",
+      "tagline": "24 FPS ON ONES · FRICTION SPARKS",
+      "spiritFace": "fierce"
+    }
+  ]
+}
+```
+
+## 4. Verification & Mode `'M'`
+- Deterministic render & contact sheet:
+  `node scripts/render-skill-example.mjs --dir ".aetheria/skills/mg-cel-boil/examples" --out "<outDir>"`
+- Microstock clean-plate mode (`?microstock=1` or key `'M'`): Suppresses all text titles, exposure slates, and drawing numbers while keeping the full hand-drawn cel animation intact.
