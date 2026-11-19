@@ -13,7 +13,10 @@
     "theme": [
       "cobalt-beam",
       "indigo-shaft",
-      "obsidian-ice"
+      "obsidian-ice",
+      "obsidian-violet",
+      "obsidian-emerald",
+      "obsidian-crimson"
     ],
     "layout": [
       "kinetic-word-reveal",
@@ -21,7 +24,20 @@
       "radial-wheel-list",
       "coverflow-carousel",
       "logo-assemble",
-      "brand-lockup-resolve"
+      "brand-lockup-resolve",
+      "tilted-chart-dolly",
+      "metric-pills-tree",
+      "neon-score-ring",
+      "macro-ui-prompt"
+    ],
+    "cameraPreset": [
+      "static",
+      "dolly-in",
+      "macro-pullback",
+      "macro-zoom-in",
+      "pan-sweep",
+      "tilt-push",
+      "rack-focus-in"
     ]
   },
   "limits": {

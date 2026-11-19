@@ -1,5 +1,5 @@
 {
-  "title": "Cobalt Editorial — Studio Showreel",
+  "title": "Cobalt Editorial & Dark Macro-UI — 10-Layout Showreel",
   "theme": "cobalt-beam",
   "canvas": {
     "w": 1280,
@@ -13,40 +13,94 @@
     {
       "id": "s1-hook",
       "start": 0.0,
-      "duration": 3.5,
+      "duration": 3.0,
       "layout": "kinetic-word-reveal",
+      "cameraPreset": "rack-focus-in",
       "headline": "Kreativitas itu seperti ruang bermain."
     },
     {
       "id": "s2-icons",
-      "start": 3.5,
-      "duration": 3.5,
+      "start": 3.0,
+      "duration": 3.0,
       "layout": "icon-row-morph",
+      "cameraPreset": "dolly-in",
       "anchor": "Aetheria",
       "leftIcons": ["layers", "wave", "sparkle", "cube"],
       "rightIcons": ["sliders", "play", "code", "bolt"]
     },
     {
       "id": "s3-wheel",
-      "start": 7.0,
-      "duration": 5.5,
+      "start": 6.0,
+      "duration": 4.5,
       "layout": "radial-wheel-list",
       "anchor": "Aetheria",
       "items": [
-        "Layer & Keyframe",
-        "Teks Animasi",
-        "Kamera 2D",
-        "Kaca Cair",
-        "Dunia 3D",
-        "Efek Suara",
+        "18 Skill Deklaratif",
+        "Kamera Virtual 2.5D",
+        "Render CDP + FFmpeg",
+        "Kaca Cair & Obsidian",
+        "Audio & SFX Sinkron",
         "Ekspor MP4 Lokal"
       ]
     },
     {
-      "id": "s4-carousel",
-      "start": 12.5,
-      "duration": 4.5,
+      "id": "s4-chart",
+      "start": 10.5,
+      "duration": 3.5,
+      "theme": "obsidian-violet",
+      "layout": "tilted-chart-dolly",
+      "cameraPreset": "tilt-push",
+      "metric": "9h 15m",
+      "avgLabel": "avg",
+      "bars": [0.32, 0.48, 0.42, 0.58, 0.94, 0.56, 0.46],
+      "highlightIdx": 4
+    },
+    {
+      "id": "s5-pills",
+      "start": 14.0,
+      "duration": 3.5,
+      "theme": "obsidian-violet",
+      "layout": "metric-pills-tree",
+      "cameraPreset": "dolly-in",
+      "scoreLabel": "Score",
+      "scoreValue": 94,
+      "pills": [
+        { "label": "Sleep", "value": 67 },
+        { "label": "Focus", "value": 43 },
+        { "label": "Rest", "value": 33 }
+      ]
+    },
+    {
+      "id": "s6-ring",
+      "start": 17.5,
+      "duration": 3.5,
+      "theme": "obsidian-emerald",
+      "layout": "neon-score-ring",
+      "cameraPreset": "macro-pullback",
+      "scoreFrom": 10,
+      "scoreTo": 96,
+      "headline": "Real Experience Score",
+      "badge": "Above 90 — Great"
+    },
+    {
+      "id": "s7-prompt",
+      "start": 21.0,
+      "duration": 3.5,
+      "theme": "obsidian-emerald",
+      "layout": "macro-ui-prompt",
+      "cameraPreset": "macro-pullback",
+      "headline": "What do you want to create?",
+      "promptText": "Build a 30fps local motion launch film with SFX",
+      "modelTag": "Aetheria Engine v2",
+      "chips": ["18 Skills", "2.5D Camera", "Zero Cloud", "SFX Sync"]
+    },
+    {
+      "id": "s8-carousel",
+      "start": 24.5,
+      "duration": 4.0,
+      "theme": "cobalt-beam",
       "layout": "coverflow-carousel",
+      "cameraPreset": "pan-sweep",
       "cards": [
         { "title": "Aurora Glass", "tag": "Liquid UI", "style": "cobalt-hero" },
         { "title": "Editorial", "tag": "Typography", "style": "editorial-light" },
@@ -56,19 +110,21 @@
       ]
     },
     {
-      "id": "s5-assemble",
-      "start": 17.0,
+      "id": "s9-assemble",
+      "start": 28.5,
       "duration": 3.0,
+      "theme": "cobalt-beam",
       "layout": "logo-assemble",
       "blackout": true
     },
     {
-      "id": "s6-lockup",
-      "start": 20.0,
-      "duration": 4.0,
+      "id": "s10-lockup",
+      "start": 31.5,
+      "duration": 3.5,
+      "theme": "cobalt-beam",
       "layout": "brand-lockup-resolve",
       "brand": "Aetheria",
-      "subtitle": "STUDIO MOTION LOKAL"
+      "subtitle": "LOCAL AI MOTION STUDIO"
     }
   ]
 }

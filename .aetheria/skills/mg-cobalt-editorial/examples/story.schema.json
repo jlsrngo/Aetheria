@@ -5,7 +5,16 @@
   "required": ["title", "canvas", "shots", "captions"],
   "properties": {
     "title": { "type": "string" },
-    "theme": { "enum": ["cobalt-beam", "indigo-shaft", "obsidian-ice"] },
+    "theme": {
+      "enum": [
+        "cobalt-beam",
+        "indigo-shaft",
+        "obsidian-ice",
+        "obsidian-violet",
+        "obsidian-emerald",
+        "obsidian-crimson"
+      ]
+    },
     "canvas": {
       "type": "object",
       "required": ["w", "h", "fps"],
@@ -43,7 +52,16 @@
               "brand-lockup-resolve"
             ]
           },
-          "theme": { "enum": ["cobalt-beam", "indigo-shaft", "obsidian-ice"] },
+          "theme": {
+      "enum": [
+        "cobalt-beam",
+        "indigo-shaft",
+        "obsidian-ice",
+        "obsidian-violet",
+        "obsidian-emerald",
+        "obsidian-crimson"
+      ]
+    },
           "headline": { "type": "string", "maxLength": 72 },
           "anchor": { "type": "string" },
           "brand": { "type": "string" },
