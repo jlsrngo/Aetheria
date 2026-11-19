@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "skillId": "mg-cobalt-editorial",
+  "renderer": "2d-cobalt-editorial",
+  "core": 1,
+  "useThree": false,
+  "background": "#020518",
+  "scripts": [
+    "script/cobalt-kit.js",
+    "script/story-runtime.js"
+  ],
+  "enums": {
+    "theme": [
+      "cobalt-beam",
+      "indigo-shaft",
+      "obsidian-ice"
+    ],
+    "layout": [
+      "kinetic-word-reveal",
+      "icon-row-morph",
+      "radial-wheel-list",
+      "coverflow-carousel",
+      "logo-assemble",
+      "brand-lockup-resolve"
+    ]
+  },
+  "limits": {
+    "minShots": 2,
+    "maxShots": 16,
+    "minDurationSec": 4.0,
+    "maxDurationSec": 90.0,
+    "maxHeadlineChars": 72,
+    "maxItems": 12
+  }
+}

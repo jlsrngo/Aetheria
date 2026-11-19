@@ -55,10 +55,10 @@ function parseRuntimeAmApiExports(): Set<string> {
 }
 
 describe("Harness F1 spec guards (skill-lint & AM API parity)", () => {
-  it("lints all 17 mg-* SKILL.md files against forbidden engine/non-harness boilerplate", () => {
+  it("lints all 18 mg-* SKILL.md files against forbidden engine/non-harness boilerplate", () => {
     const skillFiles = listMgSkillFiles();
-    // 16 original mg-* skills + 1 new declarative skill (mg-product-keynote)
-    expect(skillFiles.length).toBe(17);
+    // 16 original mg-* skills + mg-product-keynote + mg-cobalt-editorial
+    expect(skillFiles.length).toBe(18);
 
     const violations: string[] = [];
     for (const file of skillFiles) {

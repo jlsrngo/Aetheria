@@ -42,8 +42,8 @@ fn k1_all_17_builtin_skill_examples_pass_lint_and_midpoints() {
     let skills = discover_builtin_mg_skill_examples();
     assert_eq!(
         skills.len(),
-        17,
-        "Expected 17 built-in mg-* skill examples with story.example.json"
+        18,
+        "Expected 18 built-in mg-* skill examples with story.example.json"
     );
 
     println!("\n=== K1 Verification: 17 Built-in mg-* Skill Examples ===");

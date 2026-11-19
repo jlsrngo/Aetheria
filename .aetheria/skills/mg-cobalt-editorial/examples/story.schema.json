@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Cobalt Light-Beam Editorial Showreel Story (Dialect A)",
+  "type": "object",
+  "required": ["title", "canvas", "shots", "captions"],
+  "properties": {
+    "title": { "type": "string" },
+    "theme": { "enum": ["cobalt-beam", "indigo-shaft", "obsidian-ice"] },
+    "canvas": {
+      "type": "object",
+      "required": ["w", "h", "fps"],
+      "properties": {
+        "w": { "type": "integer", "minimum": 320, "maximum": 3840 },
+        "h": { "type": "integer", "minimum": 320, "maximum": 3840 },
+        "fps": { "type": "integer", "minimum": 12, "maximum": 60 }
+      }
+    },
+    "captions": {
+      "type": "object",
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "shots": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "required": ["id", "start", "duration", "layout"],
+        "properties": {
+          "id": { "type": "string" },
+          "start": { "type": "number", "minimum": 0 },
+          "duration": { "type": "number", "exclusiveMinimum": 0 },
+          "layout": {
+            "enum": [
+              "kinetic-word-reveal",
+              "icon-row-morph",
+              "radial-wheel-list",
+              "coverflow-carousel",
+              "logo-assemble",
+              "brand-lockup-resolve"
+            ]
+          },
+          "theme": { "enum": ["cobalt-beam", "indigo-shaft", "obsidian-ice"] },
+          "headline": { "type": "string", "maxLength": 72 },
+          "anchor": { "type": "string" },
+          "brand": { "type": "string" },
+          "subtitle": { "type": "string" },
+          "items": { "type": "array", "items": { "type": "string" } },
+          "cards": { "type": "array" },
+          "blackout": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

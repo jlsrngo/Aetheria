@@ -1,0 +1,74 @@
+{
+  "title": "Cobalt Editorial — Studio Showreel",
+  "theme": "cobalt-beam",
+  "canvas": {
+    "w": 1280,
+    "h": 720,
+    "fps": 30
+  },
+  "captions": {
+    "enabled": false
+  },
+  "shots": [
+    {
+      "id": "s1-hook",
+      "start": 0.0,
+      "duration": 3.5,
+      "layout": "kinetic-word-reveal",
+      "headline": "Kreativitas itu seperti ruang bermain."
+    },
+    {
+      "id": "s2-icons",
+      "start": 3.5,
+      "duration": 3.5,
+      "layout": "icon-row-morph",
+      "anchor": "Aetheria",
+      "leftIcons": ["layers", "wave", "sparkle", "cube"],
+      "rightIcons": ["sliders", "play", "code", "bolt"]
+    },
+    {
+      "id": "s3-wheel",
+      "start": 7.0,
+      "duration": 5.5,
+      "layout": "radial-wheel-list",
+      "anchor": "Aetheria",
+      "items": [
+        "Layer & Keyframe",
+        "Teks Animasi",
+        "Kamera 2D",
+        "Kaca Cair",
+        "Dunia 3D",
+        "Efek Suara",
+        "Ekspor MP4 Lokal"
+      ]
+    },
+    {
+      "id": "s4-carousel",
+      "start": 12.5,
+      "duration": 4.5,
+      "layout": "coverflow-carousel",
+      "cards": [
+        { "title": "Aurora Glass", "tag": "Liquid UI", "style": "cobalt-hero" },
+        { "title": "Editorial", "tag": "Typography", "style": "editorial-light" },
+        { "title": "Audio Sync", "tag": "BPM + SFX", "style": "waveform-ui" },
+        { "title": "Timeline", "tag": "Local 30fps", "style": "dark-studio" },
+        { "title": "Story Core", "tag": "Dialect A", "style": "code-matrix" }
+      ]
+    },
+    {
+      "id": "s5-assemble",
+      "start": 17.0,
+      "duration": 3.0,
+      "layout": "logo-assemble",
+      "blackout": true
+    },
+    {
+      "id": "s6-lockup",
+      "start": 20.0,
+      "duration": 4.0,
+      "layout": "brand-lockup-resolve",
+      "brand": "Aetheria",
+      "subtitle": "STUDIO MOTION LOKAL"
+    }
+  ]
+}

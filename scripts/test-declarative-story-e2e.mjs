@@ -262,11 +262,11 @@ async function main() {
           html: htmlName,
           outDir: renderOut,
           times,
-          contactSheet: false,
+          contactSheet: opts.keepTemp,
           microstock: false,
           extraScriptRoots: [path.join(REPO_ROOT, ".aetheria", "skills", opts.skill, "examples", "script")],
         });
-        renderSummary = report.summary;
+        renderSummary = { ...report.summary, contactSheetPath: report.contactSheetPath, outDir: renderOut };
       }
     }
 
