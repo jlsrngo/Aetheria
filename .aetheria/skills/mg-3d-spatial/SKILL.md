@@ -1,33 +1,24 @@
 ---
 name: mg-3d-spatial
-description: "Declarative 3D Spatial Product Motion graphics skill powered by offline Three.js WebGL PBR studio lighting, rippling MoGraph cloner fields, sculpted 3D primitives, and floating HUD cards."
-tags:
-  - motion-graphics
-  - declarative-kit
-  - 3d-spatial
-  - threejs
-command: /mg-3d-spatial
+description: Soft 3D PBR spatial render engine using Three.js with instanced hexagonal pastel capsule bed, extruded 3D sculpted wordmark, glossy vermilion sphere, radial capsule shockwaves, and soft studio shadows.
 ---
 
-# 3D Spatial Product Motion — Declarative Fast-Path Skill
+# `mg-3d-spatial` — Soft 3D PBR Hex-Capsule Bed Engine (v2)
 
-## Visual Identity
-C4D / Octane pastel & obsidian 3D product-ident look powered by offline Three.js r128 (`useThree: true`): three-point studio lighting, 5×5 rippling MoGraph sphere cloner field, sculpted PBR hero primitives with damped squash-and-stretch entrance, and translucent floating HUD cards.
+## 1. Visual DNA & Reference Craft (`04-3d-render`)
+- **Studio PBR & Hexagonal Capsule Bed (`initThree`)**: Soft pastel studio cyclorama (`#FDE8F0`), `PCFSoftShadowMap`, hemisphere + key + rim lights, and an instanced hexagonal bed of pastel capsules (`#F9B4C4`, `#FFE2A8`, `#D7C8F9`, `#BCEAD5`, `#FFC7B2`).
+- **3D Sculpted Letters & Glossy Sphere (`buildLetterMesh`)**: Extruded beveled 3D `S O F T` letterforms paired with a glossy vermilion sphere (`#FF5B4D`) that triggers radial capsule shockwaves.
 
-## Zero-JS Workflow
-Do **not** write custom WebGL/Three.js code. Author only `story.json` matching `examples/kit.json` and `examples/story.schema.json`.
-1. Read `examples/kit.json` and `examples/story.example.json` for valid enums and structure.
-2. Write `story.json` with 2–12 shots (`durationSec` 3–90, `fps: 30`, `1080x1920` or `1920x1080`).
-3. Validate via `story_lint`, preview via `capture_film_preview`, and inspect `contact_sheet.jpg`.
-4. Mode `'M'` (`?microstock=1`) automatically hides all HUD cards and captions for pure 3D WebGL renders.
+## 2. Layouts (`examples/kit.json`)
+1. `capsule-bed-drop`: Letter `S` drops onto the capsule bed, triggering a radial ripple.
+2. `letter-cascade`: Letters `O`, `F`, `T` cascade down in sequence.
+3. `sphere-shockwave`: Giant vermilion sphere slams into the bed, launching a radial capsule crown.
+4. `soft-finale`: Wide 3D `SOFT.` overview with gentle breathing motion.
 
-## Kit Enums (`examples/kit.json`)
-- **themes**: `pastel-candy`, `studio-cream`, `obsidian-chrome`, `mint-ceramic`, `lilac-dream`
-- **layouts**: `spatial-hero`, `spatial-showcase`, `spatial-specs`, `spatial-metric`, `spatial-orbit`, `spatial-cta`
-- **objects**: `candy-torus`, `crystal-icosa`, `floating-capsule`, `gyro-rings`, `prism-cube`, `orb-cluster`
-- **transitions**: `camera-push`, `elastic-drop`, `orbit-sweep`
+## 3. Declarative Contract (`story.json`)
+Only author `story.json` (validated against `examples/story.schema.json`). Do not edit `examples/script/spatial-kit.js` or `examples/script/story-runtime.js`.
 
-## Limits & Safe-Zone Contract
-- `headline` <= 44 chars; `subtext` <= 92 chars; `items` <= 4.
-- Portrait `1080x1920` keeps all HUD cards inside `x: 56..952`, `y: 80..1420` while keeping the upper stage clear for the 3D hero.
-- Pure deterministic function of `t`: 3D hero orbit, cloner effector wave, and camera sway derive strictly from `t`.
+## 4. Verification & Mode `'M'`
+- Deterministic render & contact sheet:
+  `node scripts/render-skill-example.mjs --dir ".aetheria/skills/mg-3d-spatial/examples" --html "story.html" --times "1,5,10,16,22,27" --out-dir "<outDir>"`
+- Microstock clean-plate mode (`?microstock=1` or key `'M'`): Suppresses the 2D HUD overlay while preserving the full 3D PBR render.

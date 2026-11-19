@@ -1,22 +1,19 @@
 {
-  "schemaVersion": 1,
-  "skillId": "mg-3d-spatial",
-  "renderer": "3d-spatial-three",
-  "useThree": true,
-  "scripts": ["script/spatial-kit.js", "script/story-runtime.js"],
-  "enums": {
-    "themes": ["pastel-candy", "studio-cream", "obsidian-chrome", "mint-ceramic", "lilac-dream"],
-    "layouts": ["spatial-hero", "spatial-showcase", "spatial-specs", "spatial-metric", "spatial-orbit", "spatial-cta"],
-    "objects": ["candy-torus", "crystal-icosa", "floating-capsule", "gyro-rings", "prism-cube", "orb-cluster"],
-    "transitions": ["camera-push", "elastic-drop", "orbit-sweep"]
-  },
-  "limits": {
-    "minShots": 2,
-    "maxShots": 12,
-    "minDurationSec": 3.0,
-    "maxDurationSec": 90.0,
-    "maxHeadlineChars": 44,
-    "maxSubtextChars": 92,
-    "maxItems": 4
+  "slug": "mg-3d-spatial",
+  "name": "Soft 3D PBR Hex-Capsule Bed & Sculpted Wordmark Engine (04-3d-render Craft)",
+  "paradigm": "threejs-pbr-spatial-kit",
+  "layouts": ["capsule-bed-drop", "letter-cascade", "sphere-shockwave", "soft-finale"],
+  "components": [
+    "pastel-studio-cyclorama",
+    "instanced-hex-capsule-bed",
+    "3d-extruded-soft-letters",
+    "glossy-vermilion-sphere",
+    "radial-capsule-shockwave",
+    "soft-studio-pbr-lighting",
+    "spatial-hud-overlay"
+  ],
+  "defaultSafeZone": {
+    "9:16": { "x": 56, "y": 80, "w": 896, "h": 1340 },
+    "16:9": { "x": 96, "y": 54, "w": 1574, "h": 908 }
   }
 }

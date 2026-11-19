@@ -1,64 +1,41 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "3D Spatial Product Motion Story",
+  "title": "mg-3d-spatial story.json schema",
   "type": "object",
-  "required": ["version", "meta", "shots"],
+  "required": ["aspect", "fps", "shots"],
   "properties": {
-    "version": { "const": 1 },
     "meta": {
       "type": "object",
-      "required": ["title", "width", "height", "fps", "durationSec", "theme"],
       "properties": {
         "title": { "type": "string" },
-        "width": { "type": "integer", "enum": [1080, 1920] },
-        "height": { "type": "integer", "enum": [1920, 1080] },
-        "fps": { "type": "integer", "const": 30 },
-        "durationSec": { "type": "number", "minimum": 3, "maximum": 90 },
-        "theme": { "enum": ["pastel-candy", "studio-cream", "obsidian-chrome", "mint-ceramic", "lilac-dream"] }
+        "width": { "type": "integer" },
+        "height": { "type": "integer" },
+        "fps": { "type": "integer" },
+        "durationSec": { "type": "number" }
       }
     },
+    "aspect": { "type": "string", "enum": ["9:16", "16:9"] },
+    "fps": { "type": "integer", "default": 24 },
+    "seed": { "type": "integer", "default": 404 },
+    "microstockMode": { "type": "boolean", "default": false },
     "shots": {
       "type": "array",
-      "minItems": 2,
-      "maxItems": 12,
+      "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["id", "startSec", "endSec", "layout", "headline"],
+        "required": ["id", "layout", "start", "duration"],
         "properties": {
           "id": { "type": "string" },
-          "startSec": { "type": "number", "minimum": 0 },
-          "endSec": { "type": "number", "minimum": 0.5 },
-          "layout": { "enum": ["spatial-hero", "spatial-showcase", "spatial-specs", "spatial-metric", "spatial-orbit", "spatial-cta"] },
-          "theme": { "enum": ["pastel-candy", "studio-cream", "obsidian-chrome", "mint-ceramic", "lilac-dream"] },
-          "badge": { "type": "string" },
-          "headline": { "type": "string", "maxLength": 44 },
-          "subtext": { "type": "string", "maxLength": 92 },
-          "metric": { "type": "string" },
-          "object": { "enum": ["candy-torus", "crystal-icosa", "floating-capsule", "gyro-rings", "prism-cube", "orb-cluster"] },
-          "transition": { "enum": ["camera-push", "elastic-drop", "orbit-sweep"] },
-          "items": {
-            "type": "array",
-            "maxItems": 4,
-            "items": {
-              "type": "object",
-              "required": ["label"],
-              "properties": {
-                "label": { "type": "string" }
-              }
-            }
-          }
-        }
-      }
-    },
-    "captions": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["startSec", "endSec", "text"],
-        "properties": {
+          "layout": {
+            "type": "string",
+            "enum": ["capsule-bed-drop", "letter-cascade", "sphere-shockwave", "soft-finale"]
+          },
+          "start": { "type": "number" },
+          "duration": { "type": "number" },
           "startSec": { "type": "number" },
           "endSec": { "type": "number" },
-          "text": { "type": "string" }
+          "headline": { "type": "string" },
+          "tagline": { "type": "string" }
         }
       }
     }
