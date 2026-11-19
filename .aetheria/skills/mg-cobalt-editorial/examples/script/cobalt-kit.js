@@ -601,37 +601,51 @@
   }
 
   /**
-   * True 3D Y-axis perspective rotation (trapezoid strip projection) so carousel cards
-   * genuinely angle along the curved cylinder rather than facing flat forward.
-   * yawSin < 0 (left side of ring) -> left edge recedes (shorter), right edge closer (taller).
-   * yawSin > 0 (right side of ring) -> left edge closer (taller), right edge recedes (shorter).
+   * True 3D cylindrical surface wrap: bends each card smoothly along the curved wall of a
+   * cylinder/ring ("ban") rather than flat polygon planes.
    */
-  function drawPerspectiveRotateY(ctx, src, cx, cy, destW, destH, yawSin, depthStrength) {
-    var slices = 28;
+  function drawCylindricalWrappedCard(ctx, src, cx, cy, theta, arcSpan, radius, baseH, tiltY, focal, camZ) {
+    var slices = 30;
     var sw = src.width;
     var sh = src.height;
-    var k = clamp(yawSin, -1, 1) * (depthStrength || 0.24);
-    var scaleLeft = 1 + k;
-    var scaleRight = 1 - k;
-    var startX = cx - destW * 0.5;
-    var sliceDstW = destW / slices;
     var sliceSrcW = sw / slices;
 
     for (var i = 0; i < slices; i++) {
-      var u = (i + 0.5) / slices;
-      var hScale = scaleLeft + (scaleRight - scaleLeft) * u;
-      var dh = destH * hScale;
-      var dx = startX + i * sliceDstW;
-      var dy = cy - dh * 0.5;
+      var u0 = i / slices - 0.5;
+      var u1 = (i + 1) / slices - 0.5;
+      var um = (u0 + u1) * 0.5;
+      var phi0 = theta + u0 * arcSpan;
+      var phi1 = theta + u1 * arcSpan;
+      var phim = theta + um * arcSpan;
+
+      var x0 = radius * Math.sin(phi0);
+      var z0 = radius * Math.cos(phi0);
+      var x1 = radius * Math.sin(phi1);
+      var z1 = radius * Math.cos(phi1);
+      var zm = radius * Math.cos(phim);
+
+      var p0 = focal / Math.max(120, camZ - z0);
+      var p1 = focal / Math.max(120, camZ - z1);
+      var pm = focal / Math.max(120, camZ - zm);
+
+      var sx0 = cx + x0 * p0;
+      var sx1 = cx + x1 * p1;
+      var dx = Math.min(sx0, sx1);
+      var dw = Math.abs(sx1 - sx0);
+      if (dw < 0.35) continue; // silhouette edge-on slice
+
+      var dh = baseH * pm;
+      var sy = cy + zm * tiltY * pm - dh * 0.5;
+
       ctx.drawImage(
         src,
         i * sliceSrcW,
         0,
-        Math.min(sw - i * sliceSrcW, sliceSrcW + 0.8),
+        Math.min(sw - i * sliceSrcW, sliceSrcW + 0.7),
         sh,
         dx,
-        dy,
-        sliceDstW + 1.15,
+        sy,
+        dw + 1.0,
         dh
       );
     }
@@ -642,15 +656,15 @@
    * real tilt-shift Depth-of-Field blur blending between sharp and blurred offscreen buffers.
    */
   function drawPerspectiveTiltX(ctx, srcSharp, srcBlur, cx, cy, destW, destH, tiltAmount, focusBandV) {
-    var slices = 44;
+    var slices = 52;
     var sw = srcSharp.width;
     var sh = srcSharp.height;
     var t = clamp(tiltAmount, 0, 1);
-    var scaleTop = 1.0 - 0.48 * t;     // top edge recedes deep into Z
-    var scaleBot = 1.0 + 0.30 * t;     // bottom edge widens toward camera
-    var totalH = destH * (1.0 - 0.38 * t);
-    var topY = cy - totalH * 0.5 + 32 * t;
-    var expY = 1.0 + 0.36 * t;         // perspective foreshortening compression near top
+    var scaleTop = 1.0 - 0.52 * t;     // top edge recedes deep into Z
+    var scaleBot = 1.0 + 0.46 * t;     // bottom edge widens strongly past viewport bottom
+    var totalH = destH * (1.0 - 0.14 * t);
+    var topY = cy - totalH * 0.5 + 115 * t; // pushed downward so lower half extends off-screen when flat
+    var expY = 1.0 + 0.42 * t;         // perspective foreshortening compression near top
 
     for (var i = 0; i < slices; i++) {
       var v0 = i / slices;
@@ -667,7 +681,7 @@
 
       // Depth-of-Field weight: razor-sharp at focusBandV, softly blurred near far top & near bottom when tilted
       var distF = Math.abs(vm - focusBandV);
-      var dofAlpha = t > 0.03 ? clamp((distF - 0.14) / 0.34, 0, 1) * t * 0.92 : 0;
+      var dofAlpha = t > 0.03 ? clamp((distF - 0.13) / 0.30, 0, 1) * t * 0.94 : 0;
 
       ctx.drawImage(srcSharp, 0, sy, sw, srcH, dx, y0, dw, stripH);
       if (dofAlpha > 0.02 && srcBlur) {
@@ -940,11 +954,14 @@
       var targetAngle = -(targetIdx / nCards) * Math.PI * 2;
       var currentRot = targetAngle - (1 - spinEase) * totalSweepRad;
 
-      // Tight ring radius so cards sit closely packed around the 3D cylinder
-      var ringRx = isPortrait ? safe.w * 0.34 : Math.min(340, W * 0.275);
-      var ringRy = isPortrait ? 52 : 56;
-      var baseW = isPortrait ? 255 : 235;
-      var baseH = isPortrait ? 345 : 300;
+      // True 3D cylindrical ring geometry: cards bend smoothly along the curved cylinder wall ("ban")
+      var cylRadius = isPortrait ? safe.w * 0.38 : Math.min(390, W * 0.305);
+      var cylFocal = isPortrait ? 920 : 1020;
+      var cylCamZ = cylRadius + (isPortrait ? 760 : 720);
+      var cylTiltY = isPortrait ? 0.14 : 0.16; // gentle 3D camera pitch so ring curves gracefully
+      var arcSpan = ((Math.PI * 2) / nCards) * 0.86; // tightly packed curved cards around the full 360° cylinder
+      var baseW = isPortrait ? 250 : 235;
+      var baseH = isPortrait ? 335 : 290;
 
       // Compute 3D cylindrical coordinates for each card (z = cos(theta), x = sin(theta))
       var items3d = [];
@@ -968,14 +985,7 @@
       for (var oi = 0; oi < items3d.length; oi++) {
         var it = items3d[oi];
         var depth01 = (it.cosT + 1) * 0.5; // 0 at back, 1 at front
-        var persp = 0.58 + 0.48 * Math.pow(depth01, 1.15);
-        // Stronger horizontal foreshortening on side cards so the ring feels truly round in 3D
-        var foreshortenX = 0.48 + 0.52 * Math.abs(it.cosT);
-        var cw = baseW * persp;
-        var ch = baseH * persp;
-        var cardX = cx + it.sinT * ringRx;
-        var cardY = cy + it.cosT * (ringRy * 0.52) - (1 - depth01) * 24;
-        var cardAlpha = clamp(0.24 + 0.76 * Math.pow(depth01, 1.25), 0.20, 1.0) * enterC;
+        var cardAlpha = clamp(0.20 + 0.80 * Math.pow(depth01, 1.3), 0.18, 1.0) * enterC;
         var isFrontHero = it.cosT > 0.92 && spinU > 0.72;
 
         // Subtle pulse on hero card when locked
@@ -988,18 +998,24 @@
         }
 
         var cardCopy = Object.assign({}, it.card, { __isHeroCenter: isFrontHero });
-        var pad = 28;
+        var pad = 22;
         var cardBuf = getScratchCanvas('orbitCard', baseW + pad * 2, baseH + pad * 2);
         if (cardBuf) {
           drawShowcaseCard(cardBuf.ctx, pad, pad, baseW, baseH, cardCopy, globalT, micro, theme);
-          var yawSign = it.cosT >= 0 ? it.sinT : -it.sinT * 0.65;
-          var projW = (cw + pad * 2 * persp) * foreshortenX * lockBounce;
-          var projH = (ch + pad * 2 * persp) * lockBounce;
-          drawPerspectiveRotateY(ctx, cardBuf.canvas, cardX, cardY, projW, projH, yawSign, 0.24);
-        } else {
-          ctx.translate(cardX, cardY);
-          ctx.scale(foreshortenX * lockBounce, lockBounce);
-          drawShowcaseCard(ctx, -cw * 0.5, -ch * 0.5, cw, ch, cardCopy, globalT, micro, theme);
+          var cardProjH = (baseH + pad * 2) * 0.76 * lockBounce;
+          drawCylindricalWrappedCard(
+            ctx,
+            cardBuf.canvas,
+            cx,
+            cy,
+            it.theta,
+            arcSpan * (isFrontHero ? 1.03 : 1.0),
+            cylRadius,
+            cardProjH,
+            cylTiltY,
+            cylFocal,
+            cylCamZ
+          );
         }
         ctx.restore();
       }
@@ -1090,8 +1106,8 @@
       var bars = Array.isArray(shot.bars) && shot.bars.length ? shot.bars : [0.35, 0.52, 0.44, 0.62, 0.92, 0.58, 0.48];
       var labels = Array.isArray(shot.labels) && shot.labels.length ? shot.labels : ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
       var hlIdx = shot.highlightIdx !== undefined ? Number(shot.highlightIdx) : 4;
-      var cardW = isPortrait ? 680 : 760;
-      var cardH = isPortrait ? 620 : 580;
+      var cardW = isPortrait ? 720 : 780;
+      var cardH = isPortrait ? 860 : 820;
 
       var standEnd = dur * 0.48;
       var standP = easeInOutExpo(clamp(localTime / Math.max(0.3, standEnd), 0, 1));
@@ -1099,12 +1115,12 @@
       var zoomP = easeInOutExpo(clamp((localTime - standEnd * 0.90) / Math.max(0.35, dur * 0.44), 0, 1));
       var zoomPrev = easeInOutExpo(clamp((localTime - 0.033 - standEnd * 0.90) / Math.max(0.35, dur * 0.44), 0, 1));
       var motionBlur = clamp((Math.abs(standP - standPrev) * 24) + (Math.abs(zoomP - zoomPrev) * 34), 0, 7.0);
-      var tiltAmount = 1.0 - standP; // 1.0 = laid flat forward -> 0.0 = standing upright
+      var tiltAmount = 1.0 - standP; // 1.0 = laid flat forward extending past viewport bottom -> 0.0 = standing upright
 
       var barGap = (cardW * 0.78) / bars.length;
       var barW = barGap * 0.46;
-      var topBaseY = cardH * 0.48;
-      var maxBarH = cardH * 0.25;
+      var topBaseY = cardH * 0.42;
+      var maxBarH = cardH * 0.22;
       var avgY = topBaseY - maxBarH * 0.64;
       var hlRelX = (-cardW * 0.39 + hlIdx * barGap + barGap * 0.5) / cardW; // -0.5..0.5
 
@@ -1246,12 +1262,12 @@
         blurBuf.ctx.drawImage(sharpBuf.canvas, 0, 0);
         blurBuf.ctx.restore();
 
-        // Project true 3D forward-tilted trapezoid onto main canvas + zoom deep into focal bar
-        var dispW = isPortrait ? safe.w * 0.88 : Math.min(780, safe.w * 0.72);
+        // Project true 3D forward-tilted tall dashboard (extends below viewport when laid flat) + zoom deep into focal bar
+        var dispW = isPortrait ? safe.w * 0.96 : Math.min(880, safe.w * 0.78);
         var dispH = dispW * (cardH / cardW);
-        var localZoom = 0.94 + 0.08 * standP + 1.25 * zoomP; // 0.94 -> 1.02 -> 2.27x
+        var localZoom = 1.02 + 0.06 * standP + 1.24 * zoomP; // starts large so bottom extends off-screen -> zooms 2.32x into focal bar
         var targetOffX = -hlRelX * dispW * zoomP;
-        var targetOffY = dispH * 0.12 * zoomP;
+        var targetOffY = dispH * 0.17 * zoomP + (1 - standP) * 40;
 
         ctx.save();
         if (motionBlur > 0.25) {
@@ -1261,7 +1277,7 @@
         ctx.scale(localZoom, localZoom);
         ctx.translate(targetOffX, targetOffY);
 
-        drawPerspectiveTiltX(ctx, sharpBuf.canvas, blurBuf.canvas, 0, 0, dispW, dispH, tiltAmount, 0.38);
+        drawPerspectiveTiltX(ctx, sharpBuf.canvas, blurBuf.canvas, 0, 0, dispW, dispH, tiltAmount, 0.36);
         ctx.restore();
 
         // Soft top/bottom atmospheric vignette while laid flat to heighten macro DoF focus
@@ -1585,16 +1601,19 @@
       // 4-Beat Opal-inspired CTA Transition:
       // 1. Spark drops from above onto glossy dark Arunaki icon (0 -> 0.26*dur)
       // 2. Impact triggers rapid zoom-in onto logo -> horizontal motion-blurred morph into "▶ Try Arunaki" pill (0.26 -> 0.48*dur)
-      // 3. Pill holds cleanly with subtle specular sweep (0.48 -> 0.72*dur)
-      // 4. Rapid zoom-out with motion blur + full-screen white flash wash into the final scene (0.72 -> 1.0*dur)
+      // 3. Pill holds cleanly with subtle specular presence (0.48 -> 0.68*dur)
+      // 4. Rapid ZOOM-IN directly into the white ▶ play triangle until the triangle fills the entire screen pure white! (0.68 -> 1.0*dur)
       var impactT = dur * 0.26;
-      var zoomOutStart = dur * 0.72;
+      var zoomThroughStart = dur * 0.68;
 
       var zoomInP = easeOutExpo(clamp((localTime - impactT * 0.85) / Math.max(0.20, dur * 0.22), 0, 1));
-      var zoomOutP = easeInOutExpo(clamp((localTime - zoomOutStart) / Math.max(0.25, dur - zoomOutStart), 0, 1));
-      var zoomOutPrev = easeInOutExpo(clamp((localTime - 0.033 - zoomOutStart) / Math.max(0.25, dur - zoomOutStart), 0, 1));
-      var ctaZoom = 1.0 + 0.42 * zoomInP - 0.74 * zoomOutP; // 1.0 -> 1.42x (zoom in) -> 0.68x (zoom out)
-      var zoomOutBlur = clamp(Math.abs(zoomOutP - zoomOutPrev) * 38, 0, 8.0);
+      var throughU = clamp((localTime - zoomThroughStart) / Math.max(0.25, dur - zoomThroughStart), 0, 1);
+      var throughP = Math.pow(throughU, 2.6); // accelerating plunge right into the white triangle!
+      var throughPrev = Math.pow(clamp((localTime - 0.033 - zoomThroughStart) / Math.max(0.25, dur - zoomThroughStart), 0, 1), 2.6);
+      var throughBlur = clamp(Math.abs(throughP - throughPrev) * 42, 0, 7.5);
+
+      // Exponential zoom: 1.0 -> 1.32x (on impact) -> up to 34x diving straight through the white ▶ triangle!
+      var ctaZoom = (1.0 + 0.32 * zoomInP) * Math.pow(28, throughP);
 
       if (localTime < impactT) {
         // Beat 1: Glossy dark rounded square brand icon + bright white light spark dropping from above
@@ -1623,19 +1642,30 @@
         ctx.fill();
         ctx.restore();
       } else {
-        // Beat 2-4: Impact zoom-in -> horizontal motion-blurred morph into pill -> rapid zoom-out + white screen wash
+        // Beat 2-4: Impact zoom-in -> horizontal motion-blurred morph into pill -> plunge zoom-in through the white ▶ triangle!
         var dt2 = localTime - impactT;
         var pMorph = easeOutExpo(clamp(dt2 / Math.max(0.22, dur * 0.20), 0, 1));
         var pPrev = easeOutExpo(clamp((dt2 - 0.033) / Math.max(0.22, dur * 0.20), 0, 1));
-        var mBlur = clamp(Math.abs(pMorph - pPrev) * 44 + zoomOutBlur, 0, 9.0);
+        var mBlur = clamp(Math.abs(pMorph - pPrev) * 44 + throughBlur, 0, 9.0);
 
         var pillW = 128 + ((isPortrait ? 580 : 500) - 128) * pMorph;
         var pillH = 128 + (88 - 128) * pMorph;
 
+        // Exact local X center of the white ▶ triangle inside the pill so the camera dives dead-center into it!
+        var labelText = String(shot.ctaLabel || 'Start');
+        ctx.font = '600 30px "Inter", "Segoe UI", sans-serif';
+        var txtW = micro ? 0 : ctx.measureText(labelText).width;
+        var triSz = 14;
+        var triGap = 16;
+        var groupW = micro ? triSz * 2 : triSz * 2 + triGap + txtW;
+        var triLocalX = -groupW * 0.5 + triSz * 0.9;
+        var pivotShiftX = -triLocalX * easeOutCubic(clamp(throughU / 0.55, 0, 1));
+
         ctx.save();
-        if (mBlur > 0.25) ctx.filter = 'blur(' + mBlur.toFixed(1) + 'px)';
+        if (mBlur > 0.25 && throughU < 0.85) ctx.filter = 'blur(' + mBlur.toFixed(1) + 'px)';
         ctx.translate(cx, cy);
         ctx.scale(ctaZoom, ctaZoom);
+        ctx.translate(pivotShiftX, 0);
 
         var pg = ctx.createLinearGradient(0, -pillH * 0.5, 0, pillH * 0.5);
         pg.addColorStop(0.0, 'rgba(22, 20, 32, 0.94)');
@@ -1659,26 +1689,35 @@
           ctx.restore();
         }
 
-        if (!micro && pMorph > 0.25) {
-          ctx.globalAlpha = easeOutCubic((pMorph - 0.25) / 0.75);
+        if (pMorph > 0.22) {
+          var contentAlpha = easeOutCubic((pMorph - 0.22) / 0.78);
+          ctx.save();
+          ctx.globalAlpha = contentAlpha;
+          // Crisp vector white ▶ play triangle (camera zooms directly through its white interior!)
           ctx.fillStyle = '#FFFFFF';
-          ctx.font = '600 30px "Inter", "Segoe UI", sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText('▶  ' + String(shot.ctaLabel || 'Start'), 0, 1);
+          ctx.beginPath();
+          ctx.moveTo(triLocalX - triSz * 0.65, -triSz * 0.88);
+          ctx.lineTo(triLocalX + triSz * 0.95, 0);
+          ctx.lineTo(triLocalX - triSz * 0.65, triSz * 0.88);
+          ctx.closePath();
+          ctx.fill();
+
+          if (!micro) {
+            ctx.font = '600 30px "Inter", "Segoe UI", sans-serif';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(labelText, triLocalX + triSz + triGap, 1);
+          }
+          ctx.restore();
         }
         ctx.restore();
 
-        // Beat 4: Full-screen white bloom wash as camera zooms out into final scene!
-        if (zoomOutP > 0.02) {
-          var whiteP = easeInOutCubic(clamp((zoomOutP - 0.08) / 0.88, 0, 1));
+        // Final pure-white lock at the very tail of the plunge so screen is 100% clean white before final scene
+        if (throughU > 0.72) {
+          var whiteLock = easeInOutCubic((throughU - 0.72) / 0.28);
           ctx.save();
-          ctx.globalAlpha = whiteP;
-          var wg = ctx.createRadialGradient(cx, cy, 10, cx, cy, Math.max(W, H) * (0.25 + 0.95 * whiteP));
-          wg.addColorStop(0.0, '#FFFFFF');
-          wg.addColorStop(0.65, 'rgba(255, 255, 255, 0.96)');
-          wg.addColorStop(1.0, 'rgba(248, 250, 252, ' + whiteP.toFixed(3) + ')');
-          ctx.fillStyle = wg;
+          ctx.globalAlpha = whiteLock;
+          ctx.fillStyle = '#FFFFFF';
           ctx.fillRect(0, 0, W, H);
           ctx.restore();
         }
