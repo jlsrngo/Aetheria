@@ -1,33 +1,24 @@
 ---
 name: mg-kinetic-calligraphy
-description: "Declarative Kinetic Calligraphy & Brush Impact motion graphics skill with tapered Enso ink strokes, dry-brush slashes, crimson Hanko seals, ink splatter particles, and dramatic typographic slams."
-tags:
-  - motion-graphics
-  - declarative-kit
-  - calligraphy
-  - kinetic-typography
-command: /mg-kinetic-calligraphy
+description: Kinetic calligraphy and spring-extruded display typography engine on warm Xuan paper with variable-pressure sumi-e brush strokes, radial manga focus rays, ink splatters, and vermilion hanko seal stamp.
 ---
 
-# Kinetic Calligraphy — Declarative Fast-Path Skill
+# `mg-kinetic-calligraphy` — Kinetic Calligraphy & Spring Typography Engine (v2)
 
-## Visual Identity
-Expressive oriental sumi-e calligraphy fused with modern kinetic poster typography: tapered Enso brush circles, diagonal dry-brush slashes, crimson Hanko stamp seals, floating ink splatters, and high-contrast slam headlines.
+## 1. Visual DNA & Reference Craft (`18-hanazi`)
+- **Xuan Paper & Sumi Brush (`drawXuanPaper` + `drawBrushStroke`)**: Warm textured Xuan paper (`#F4EFE6`), variable-pressure sumi ink (`#181614`) Enso & slash strokes, ink splatters, and 4-point gold/vermilion sparkles.
+- **Spring-Extruded Display & Hanko Seal (`drawKineticTitle` + `drawHankoStamp`)**: Damped spring pop (`zeta = 0.517`, `omega = 22`) with white inner stroke + extruded ink shadow, paired with a vermilion hanko seal (`#C82822`).
 
-## Zero-JS Workflow
-Do **not** write custom canvas JS. Author only `story.json` matching `examples/kit.json` and `examples/story.schema.json`.
-1. Read `examples/kit.json` and `examples/story.example.json` for valid enums and structure.
-2. Write `story.json` with 2–12 shots (`durationSec` 3–90, `fps: 30`, `1080x1920` or `1920x1080`).
-3. Validate via `story_lint`, preview via `capture_film_preview`, and inspect `contact_sheet.jpg`.
-4. Mode `'M'` (`?microstock=1`) automatically hides all text and captions for clean calligraphy plates.
+## 2. Layouts (`examples/kit.json`)
+1. `brush-reveal`: Enso & diagonal brush strokes draw in with ink splatter.
+2. `focus-burst`: Radial manga focus rays + spring-extruded headline.
+3. `ink-cascade`: Dense ink splatter energy + focus rays.
+4. `hanko-seal`: Full calligraphy lockup + stamped vermilion hanko seal.
 
-## Kit Enums (`examples/kit.json`)
-- **themes**: `sumi-rice`, `crimson-impact`, `obsidian-gold`, `indigo-brush`, `vermilion-scroll`
-- **layouts**: `brush-hero`, `brush-split`, `brush-stack`, `brush-stat`, `brush-slash`, `brush-cta`
-- **motifs**: `enso-circle`, `brush-wave`, `katana-slash`, `ink-blossom`, `hanko-seal`, `spark-kanji`
-- **transitions**: `brush-wipe`, `impact-flash`, `ink-burst`
+## 3. Declarative Contract (`story.json`)
+Only author `story.json` (validated against `examples/story.schema.json`). Do not edit `examples/script/calligraphy-kit.js` or `examples/script/story-runtime.js`.
 
-## Limits & Safe-Zone Contract
-- `headline` <= 42 chars; `subtext` <= 88 chars; `items` <= 4.
-- Portrait `1080x1920` keeps all scroll cards inside `x: 56..952`, `y: 80..1420`.
-- Pure deterministic function of `t`: stroke progression, slam scale, and ink particle drift derive strictly from `t`.
+## 4. Verification & Mode `'M'`
+- Deterministic render & contact sheet:
+  `node scripts/render-skill-example.mjs --dir ".aetheria/skills/mg-kinetic-calligraphy/examples" --html "story.html" --times "1,5,10,16,22,27" --out-dir "<outDir>"`
+- Microstock clean-plate mode (`?microstock=1` or key `'M'`): Suppresses all text headlines, taglines, and hanko seal text while preserving the sumi-e brush art and focus rays.

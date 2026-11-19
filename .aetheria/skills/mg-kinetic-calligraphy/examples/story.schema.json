@@ -1,65 +1,42 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Kinetic Calligraphy Story",
+  "title": "mg-kinetic-calligraphy story.json schema",
   "type": "object",
-  "required": ["version", "meta", "shots"],
+  "required": ["aspect", "fps", "shots"],
   "properties": {
-    "version": { "const": 1 },
     "meta": {
       "type": "object",
-      "required": ["title", "width", "height", "fps", "durationSec", "theme"],
       "properties": {
         "title": { "type": "string" },
-        "width": { "type": "integer", "enum": [1080, 1920] },
-        "height": { "type": "integer", "enum": [1920, 1080] },
-        "fps": { "type": "integer", "const": 30 },
-        "durationSec": { "type": "number", "minimum": 3, "maximum": 90 },
-        "theme": { "enum": ["sumi-rice", "crimson-impact", "obsidian-gold", "indigo-brush", "vermilion-scroll"] }
+        "width": { "type": "integer" },
+        "height": { "type": "integer" },
+        "fps": { "type": "integer" },
+        "durationSec": { "type": "number" }
       }
     },
+    "aspect": { "type": "string", "enum": ["9:16", "16:9"] },
+    "fps": { "type": "integer", "default": 30 },
+    "seed": { "type": "integer", "default": 1818 },
+    "microstockMode": { "type": "boolean", "default": false },
     "shots": {
       "type": "array",
-      "minItems": 2,
-      "maxItems": 12,
+      "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["id", "startSec", "endSec", "layout", "headline"],
+        "required": ["id", "layout", "start", "duration"],
         "properties": {
           "id": { "type": "string" },
-          "startSec": { "type": "number", "minimum": 0 },
-          "endSec": { "type": "number", "minimum": 0.5 },
-          "layout": { "enum": ["brush-hero", "brush-split", "brush-stack", "brush-stat", "brush-slash", "brush-cta"] },
-          "theme": { "enum": ["sumi-rice", "crimson-impact", "obsidian-gold", "indigo-brush", "vermilion-scroll"] },
-          "badge": { "type": "string" },
-          "headline": { "type": "string", "maxLength": 42 },
-          "subtext": { "type": "string", "maxLength": 88 },
-          "metric": { "type": "string" },
-          "motif": { "enum": ["enso-circle", "brush-wave", "katana-slash", "ink-blossom", "hanko-seal", "spark-kanji"] },
-          "transition": { "enum": ["brush-wipe", "impact-flash", "ink-burst"] },
-          "items": {
-            "type": "array",
-            "maxItems": 4,
-            "items": {
-              "type": "object",
-              "required": ["label"],
-              "properties": {
-                "label": { "type": "string" },
-                "motif": { "enum": ["enso-circle", "brush-wave", "katana-slash", "ink-blossom", "hanko-seal", "spark-kanji"] }
-              }
-            }
-          }
-        }
-      }
-    },
-    "captions": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["startSec", "endSec", "text"],
-        "properties": {
+          "layout": {
+            "type": "string",
+            "enum": ["brush-reveal", "focus-burst", "ink-cascade", "hanko-seal"]
+          },
+          "start": { "type": "number" },
+          "duration": { "type": "number" },
           "startSec": { "type": "number" },
           "endSec": { "type": "number" },
-          "text": { "type": "string" }
+          "headline": { "type": "string" },
+          "tagline": { "type": "string" },
+          "sealText": { "type": "string" }
         }
       }
     }

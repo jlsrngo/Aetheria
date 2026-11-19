@@ -1,22 +1,18 @@
 {
-  "schemaVersion": 1,
-  "skillId": "mg-kinetic-calligraphy",
-  "renderer": "2d-kinetic-calligraphy",
-  "useThree": false,
-  "scripts": ["script/calligraphy-kit.js", "script/story-runtime.js"],
-  "enums": {
-    "themes": ["sumi-rice", "crimson-impact", "obsidian-gold", "indigo-brush", "vermilion-scroll"],
-    "layouts": ["brush-hero", "brush-split", "brush-stack", "brush-stat", "brush-slash", "brush-cta"],
-    "motifs": ["enso-circle", "brush-wave", "katana-slash", "ink-blossom", "hanko-seal", "spark-kanji"],
-    "transitions": ["brush-wipe", "impact-flash", "ink-burst"]
-  },
-  "limits": {
-    "minShots": 2,
-    "maxShots": 12,
-    "minDurationSec": 3.0,
-    "maxDurationSec": 90.0,
-    "maxHeadlineChars": 42,
-    "maxSubtextChars": 88,
-    "maxItems": 4
+  "slug": "mg-kinetic-calligraphy",
+  "name": "Kinetic Calligraphy & Spring-Extruded Hanzi/Display Engine (18-hanazi Craft)",
+  "paradigm": "canvas2d-calligraphy-kinetic-kit",
+  "layouts": ["brush-reveal", "focus-burst", "ink-cascade", "hanko-seal"],
+  "components": [
+    "xuan-paper-grain-backdrop",
+    "variable-pressure-sumi-brush",
+    "spring-extruded-kinetic-glyphs",
+    "radial-manga-focus-rays",
+    "ink-splatter-and-sparkles",
+    "vermilion-hanko-seal-stamp"
+  ],
+  "defaultSafeZone": {
+    "9:16": { "x": 56, "y": 80, "w": 896, "h": 1340 },
+    "16:9": { "x": 96, "y": 54, "w": 1574, "h": 908 }
   }
 }
