@@ -626,7 +626,30 @@ pub fn inspect_workspace_film(html_path: &Path) -> FilmMeta {
             combined_source.push_str(code);
         }
     }
-    let lint = lint_html_film(&combined_source);
+    let mut lint = lint_html_film(&combined_source);
+
+    let story_json_path = html_path.parent().map(|p| p.join("story.json"));
+    let story_lint_report = story_json_path
+        .as_ref()
+        .filter(|p| p.is_file())
+        .map(|p| super::story_lint::lint_story_file(p));
+    if let Some(ref srep) = story_lint_report {
+        if !srep.valid {
+            lint.valid = false;
+            for issue in &srep.issues {
+                lint.issues.push(super::motion_linter::FilmLintIssue {
+                    severity: "error".to_string(),
+                    code: issue.code.clone(),
+                    message: if issue.path.is_empty() {
+                        issue.hint.clone()
+                    } else {
+                        format!("[{}] {}", issue.path, issue.hint)
+                    },
+                    line: None,
+                });
+            }
+        }
+    }
 
     let default_title = html_path
         .parent()
@@ -675,13 +698,46 @@ pub fn inspect_workspace_film(html_path: &Path) -> FilmMeta {
         .unwrap_or(0.0);
 
     let preliminary_dur = if duration > 0.0 { duration } else { 15.0 };
-    let scenes = parse_scenes_from_sources(
+    let mut scenes = parse_scenes_from_sources(
         &script_source,
         fps,
         preliminary_dur,
         &title,
         &script_names,
     );
+
+    if let Some(ref sp) = story_json_path.as_ref().filter(|p| p.is_file()) {
+        if let Ok(raw_story) = std::fs::read_to_string(sp) {
+            if let Ok(sv) = serde_json::from_str::<serde_json::Value>(&raw_story) {
+                if let Some(shots) = sv.get("shots").and_then(|v| v.as_array()) {
+                    let mut story_scenes = Vec::with_capacity(shots.len());
+                    for sh in shots {
+                        let id = sh.get("id").and_then(|v| v.as_str()).unwrap_or("shot").to_string();
+                        let start = sh.get("start").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        let dur = sh.get("duration").and_then(|v| v.as_f64()).unwrap_or(1.0);
+                        story_scenes.push(FilmSceneSpec {
+                            title: id.clone(),
+                            id,
+                            start,
+                            duration: dur,
+                            start_frame: (start * fps as f64).round() as u32,
+                            duration_frames: ((dur * fps as f64).round() as u32).max(1),
+                            audio: sh.pointer("/audio/wav").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(str::to_string),
+                            sfx: None,
+                            words: sh.pointer("/audio/words").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(str::to_string),
+                        });
+                    }
+                    if !story_scenes.is_empty() {
+                        let summed: f64 = story_scenes.iter().map(|s| s.duration.max(0.0)).sum();
+                        if summed > 0.0 {
+                            duration = summed;
+                        }
+                        scenes = story_scenes;
+                    }
+                }
+            }
+        }
+    }
 
     if duration <= 0.0 {
         let summed: f64 = scenes.iter().map(|s| s.duration.max(0.0)).sum();

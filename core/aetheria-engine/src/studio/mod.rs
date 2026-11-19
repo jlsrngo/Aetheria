@@ -40,6 +40,7 @@ pub mod renderer;
 pub mod scheduler;
 pub mod script_generator;
 pub mod stage_extractor;
+pub mod story_lint;
 pub mod styles;
 pub mod subtitles;
 pub mod timeline;

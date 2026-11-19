@@ -82,6 +82,8 @@ pub struct FilmPreviewCaptureResult {
     pub changed_since_last_capture: Option<bool>,
     pub compare_to_reference_overridden: bool,
     pub anti_cheat: super::fidelity_guard::AntiCheatReport,
+    pub story_qa: Option<Value>,
+    pub story_contact_sheet_data_url: Option<String>,
 }
 
 pub(crate) fn compute_relative_ratio(timestamp: f64, duration: f64) -> f64 {
@@ -246,6 +248,14 @@ pub async fn capture_film_preview_with_options(
     let (should_compare, compare_to_reference_overridden) =
         resolve_reference_comparison_policy(has_reference, compare_to_reference);
 
+    let story_json_path = film_root.join("story.json");
+    let has_story_json = story_json_path.is_file();
+    let story_midpoints = if has_story_json {
+        super::story_lint::story_shot_midpoints(&story_json_path)
+    } else {
+        Vec::new()
+    };
+
     let effective_requested = if requested_timestamps.is_empty() && should_compare {
         let aligned = super::reference_compare::recommended_reference_timestamps_for_film(
             &ref_root,
@@ -258,6 +268,12 @@ pub async fn capture_film_preview_with_options(
         } else {
             aligned
         }
+    } else if requested_timestamps.is_empty() && !story_midpoints.is_empty() {
+        story_midpoints
+            .iter()
+            .map(|(_, t)| *t)
+            .take(MAX_PREVIEW_FRAMES)
+            .collect()
     } else {
         requested_timestamps
     };
@@ -406,6 +422,163 @@ pub async fn capture_film_preview_with_options(
         (None, None)
     };
 
+    let (story_qa, story_contact_sheet_data_url) = if has_story_json {
+        let story_lint = super::story_lint::lint_story_file(&story_json_path);
+        let shot_state = cdp
+            .call(
+                "Runtime.evaluate",
+                json!({
+                    "expression": "(() => ({ shotReport: window.__shotReport || {}, storyStats: window.__storyStats || null }))()",
+                    "returnByValue": true
+                }),
+            )
+            .await
+            .ok()
+            .and_then(|v| v.pointer("/result/value").cloned())
+            .unwrap_or_else(|| json!({ "shotReport": {}, "storyStats": null }));
+
+        let shot_report_val = shot_state
+            .get("shotReport")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        let mut failed_shots: Vec<String> = Vec::new();
+        if let Some(map) = shot_report_val.as_object() {
+            for (sid, srep) in map {
+                let in_safe = srep
+                    .get("focusBboxInSafeZone")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let has_errs = srep
+                    .get("errors")
+                    .and_then(Value::as_array)
+                    .is_some_and(|a| !a.is_empty());
+                if !in_safe || has_errs {
+                    failed_shots.push(sid.clone());
+                }
+            }
+            failed_shots.sort();
+        }
+
+        // Stitch one contact_sheet.jpg (1 mid-frame per shot + safeZone + focus bbox) inside the active CDP page
+        let mut sheet_items = Vec::with_capacity(frames.len());
+        for (i, fr) in frames.iter().enumerate() {
+            let sid = story_midpoints
+                .get(i)
+                .map(|(id, _)| id.clone())
+                .unwrap_or_else(|| format!("shot{}", i + 1));
+            let srep = shot_report_val.get(&sid).cloned().unwrap_or(Value::Null);
+            sheet_items.push(json!({
+                "shotId": sid,
+                "t": fr.timestamp,
+                "dataUrl": fr.data_url,
+                "report": srep
+            }));
+        }
+        let items_json = serde_json::to_string(&sheet_items).unwrap_or_else(|_| "[]".to_string());
+        let stitch_expr = format!(
+            r#"((items, W, H) => new Promise(async (resolve) => {{
+                try {{
+                    const cols = Math.min(3, Math.max(1, items.length));
+                    const rows = Math.ceil(items.length / cols);
+                    const tw = 270;
+                    const th = Math.round((H / Math.max(1, W)) * tw);
+                    const pad = 12;
+                    const hdr = 30;
+                    const c = document.createElement('canvas');
+                    c.width = cols * tw + (cols + 1) * pad;
+                    c.height = rows * (th + hdr) + (rows + 1) * pad;
+                    const ctx = c.getContext('2d');
+                    ctx.fillStyle = '#0f172a';
+                    ctx.fillRect(0, 0, c.width, c.height);
+                    const sx = tw / Math.max(1, W);
+                    const sy = th / Math.max(1, H);
+                    for (let i = 0; i < items.length; i++) {{
+                        const it = items[i];
+                        const col = i % cols;
+                        const row = Math.floor(i / cols);
+                        const x = pad + col * (tw + pad);
+                        const y = pad + row * (th + hdr + pad);
+                        const rep = it.report || {{}};
+                        const ok = rep.focusBboxInSafeZone !== false && (!Array.isArray(rep.errors) || rep.errors.length === 0);
+                        ctx.fillStyle = '#1e293b';
+                        ctx.fillRect(x, y, tw, hdr);
+                        ctx.fillStyle = ok ? '#4ade80' : '#f87171';
+                        ctx.font = 'bold 12px monospace';
+                        ctx.fillText(it.shotId + ' t=' + Number(it.t || 0).toFixed(1) + 's [' + (ok ? 'SAFE' : 'FAIL') + ']', x + 6, y + 19);
+                        const img = new Image();
+                        await new Promise((r) => {{ img.onload = r; img.onerror = r; img.src = it.dataUrl; }});
+                        ctx.drawImage(img, x, y + hdr, tw, th);
+                        if (rep.safeZone) {{
+                            ctx.save();
+                            ctx.strokeStyle = 'rgba(56,189,248,0.85)';
+                            ctx.setLineDash([4, 3]);
+                            ctx.strokeRect(x + rep.safeZone.minX * sx, y + hdr + rep.safeZone.minY * sy, (rep.safeZone.maxX - rep.safeZone.minX) * sx, (rep.safeZone.maxY - rep.safeZone.minY) * sy);
+                            ctx.restore();
+                        }}
+                        if (rep.bbox) {{
+                            ctx.save();
+                            ctx.strokeStyle = ok ? '#22c55e' : '#ef4444';
+                            ctx.lineWidth = 2;
+                            ctx.strokeRect(x + rep.bbox.minX * sx, y + hdr + rep.bbox.minY * sy, rep.bbox.width * sx, rep.bbox.height * sy);
+                            ctx.restore();
+                        }}
+                    }}
+                    resolve(c.toDataURL('image/jpeg', 0.85));
+                }} catch (e) {{
+                    resolve('');
+                }}
+            }}))({items_json}, {w}, {h})"#,
+            items_json = items_json,
+            w = meta.width,
+            h = meta.height
+        );
+
+        let sheet_data_url = cdp
+            .call(
+                "Runtime.evaluate",
+                json!({ "expression": stitch_expr, "awaitPromise": true, "returnByValue": true }),
+            )
+            .await
+            .ok()
+            .and_then(|v| v.pointer("/result/value").and_then(Value::as_str).map(str::to_string))
+            .filter(|s| s.starts_with("data:image/jpeg;base64,"));
+
+        let mut contact_sheet_rel: Option<String> = None;
+        if let Some(ref url) = sheet_data_url {
+            if let Some(b64_part) = url.strip_prefix("data:image/jpeg;base64,") {
+                if let Ok(bytes) = B64.decode(b64_part) {
+                    let sheet_path = preview_dir.join("contact_sheet.jpg");
+                    if tokio::fs::write(&sheet_path, &bytes).await.is_ok() {
+                        contact_sheet_rel = Some(".aetheria/preview/contact_sheet.jpg".to_string());
+                    }
+                }
+            }
+        }
+
+        let rolled_back = super::story_lint::reconcile_story_snapshot_and_rollback(
+            &film_root,
+            story_lint.valid,
+            failed_shots.len(),
+            runtime_errors.len(),
+        );
+        let qa_json = json!({
+            "mode": "story",
+            "lintValid": story_lint.valid,
+            "lintIssues": story_lint.issues,
+            "totalShots": story_lint.total_shots,
+            "customShots": story_lint.custom_shots,
+            "failedShots": failed_shots,
+            "shotReport": shot_report_val,
+            "storyStats": shot_state.get("storyStats").cloned().unwrap_or(Value::Null),
+            "contactSheetRelPath": contact_sheet_rel,
+            "autoRolledBack": rolled_back,
+            "maxCorrectionPasses": 1
+        });
+        (Some(qa_json), sheet_data_url)
+    } else {
+        (None, None)
+    };
+
     crate::tool::film_state::record_preview_state(&film_root, runtime_errors.len());
 
     Ok(FilmPreviewCaptureResult {
@@ -420,6 +593,8 @@ pub async fn capture_film_preview_with_options(
         changed_since_last_capture,
         compare_to_reference_overridden,
         anti_cheat,
+        story_qa,
+        story_contact_sheet_data_url,
     })
 }
 

@@ -121,6 +121,38 @@ pub fn is_scaffold_stub_content(content: &str) -> bool {
 }
 
 fn collect_scene_specs(film_dir: &Path) -> Option<Vec<(String, String)>> {
+    let story_path = film_dir.join("story.json");
+    if contains_path(film_dir, &story_path) && story_path.is_file() {
+        if let Ok(raw) = std::fs::read_to_string(&story_path) {
+            if let Ok(sv) = serde_json::from_str::<Value>(&raw) {
+                if let Some(shots) = sv.get("shots").and_then(Value::as_array) {
+                    if !shots.is_empty() {
+                        let entries = shots
+                            .iter()
+                            .enumerate()
+                            .map(|(i, sh)| {
+                                let id = sh
+                                    .get("id")
+                                    .and_then(Value::as_str)
+                                    .map(str::to_string)
+                                    .unwrap_or_else(|| format!("shot{}", i + 1));
+                                let src = sh
+                                    .get("custom")
+                                    .and_then(Value::as_str)
+                                    .map(str::trim)
+                                    .filter(|s| !s.is_empty())
+                                    .map(normalize_rel_script)
+                                    .unwrap_or_else(|| "story.json".to_string());
+                                (id, src)
+                            })
+                            .collect();
+                        return Some(entries);
+                    }
+                }
+            }
+        }
+    }
+
     let manifest_path = film_dir.join("film.json");
     if contains_path(film_dir, &manifest_path) && manifest_path.is_file() {
         if let Ok(raw) = std::fs::read_to_string(&manifest_path) {
@@ -198,6 +230,12 @@ pub fn record_preview_state(film_dir: &Path, runtime_errors_count: usize) {
     };
 
     let mut script_sha256 = BTreeMap::new();
+    let story_path = film_dir.join("story.json");
+    if contains_path(film_dir, &story_path) && story_path.is_file() {
+        if let Ok(bytes) = std::fs::read(&story_path) {
+            script_sha256.insert("story.json".to_string(), sha256_hex(&bytes));
+        }
+    }
     let script_dir = film_dir.join("script");
     if contains_path(film_dir, &script_dir) && script_dir.is_dir() {
         if let Ok(entries) = std::fs::read_dir(&script_dir) {

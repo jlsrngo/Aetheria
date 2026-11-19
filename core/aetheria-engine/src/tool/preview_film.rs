@@ -118,6 +118,8 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
                         }
                     }
                 }
+            } else if let Some(sheet_url) = res.story_contact_sheet_data_url {
+                vision_images.push(Value::String(sheet_url));
             } else {
                 for f in &res.frames {
                     vision_images.push(Value::String(f.data_url.clone()));
@@ -223,11 +225,29 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
                 .and_then(|c| c.get("aspectRatioMismatch").and_then(Value::as_bool))
                 == Some(true);
             let anti_cheat_failed = !res.anti_cheat.passed;
+            let story_lint_failed = res
+                .story_qa
+                .as_ref()
+                .and_then(|q| q.get("lintValid").and_then(Value::as_bool))
+                == Some(false);
+            let story_failed_shots: Vec<String> = res
+                .story_qa
+                .as_ref()
+                .and_then(|q| q.get("failedShots").and_then(Value::as_array))
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let story_framing_failed = !story_failed_shots.is_empty();
             let preview_ok = !has_runtime_errors
                 && !ref_exec_failed
                 && !ref_threshold_failed
                 && !ref_ar_mismatch
-                && !anti_cheat_failed;
+                && !anti_cheat_failed
+                && !story_lint_failed
+                && !story_framing_failed;
 
             let mut failure_reasons = Vec::new();
             if has_runtime_errors {
@@ -276,6 +296,18 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
                     res.anti_cheat.violations.join(" | ")
                 ));
             }
+            if story_lint_failed {
+                failure_reasons.push(
+                    "story.json pre-render lint failed (see storyQa.lintIssues). Fix in at most 1 edit pass."
+                        .to_string(),
+                );
+            }
+            if story_framing_failed {
+                failure_reasons.push(format!(
+                    "Story shot framing/error failed on {:?} (see storyQa.shotReport & contact_sheet.jpg). Perform at most 1 targeted correction pass for failed shots only.",
+                    story_failed_shots
+                ));
+            }
 
             let runtime_note = if has_runtime_errors {
                 format!(
@@ -300,6 +332,7 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
                 "captured": captured,
                 "runtimeErrors": res.runtime_errors,
                 "referenceComparison": res.reference_comparison,
+                "storyQa": res.story_qa,
                 "output": format!(
                     "Captured {} visual preview frame(s) ({}x{} @ {}fps).{}{}{} Attached screenshots to vision context.",
                     res.frames.len(),

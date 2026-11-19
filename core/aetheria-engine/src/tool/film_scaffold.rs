@@ -125,6 +125,10 @@ pub fn film_scaffold_tool_definition() -> Value {
                         "type": "boolean",
                         "description": "Set true to disable Adobe Stock Microstock Mode ('M') before scaffolding a portrait or narrated video."
                     },
+                    "storyMode": {
+                        "type": "boolean",
+                        "description": "Set true (or write `story.json` first) for declarative story-kit skills (e.g. `mg-soft-clay-story`): generates managed `index.html` booting `StoryRuntime` without creating `script/scene*.js` stubs."
+                    },
                     "scenes": {
                         "type": "array",
                         "description": "Ordered list of film scenes. IDs must be unique.",
@@ -802,8 +806,45 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
         }),
     );
 
+    let story_path = film_dir.join("story.json");
+    let is_story_mode = arguments
+        .get("storyMode")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || story_path.is_file();
+
+    let mut custom_story_scripts: Vec<String> = Vec::new();
+    let story_lint_report = if story_path.is_file() {
+        if let Ok(raw_s) = std::fs::read_to_string(&story_path) {
+            if let Ok(sv) = serde_json::from_str::<Value>(&raw_s) {
+                if let Some(shots) = sv.get("shots").and_then(Value::as_array) {
+                    for sh in shots {
+                        if let Some(c) = sh.get("custom").and_then(Value::as_str).map(str::trim) {
+                            if !c.is_empty() && !custom_story_scripts.iter().any(|x| x == c) {
+                                custom_story_scripts.push(c.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Some(crate::studio::story_lint::lint_story_file(&story_path))
+    } else {
+        None
+    };
+
     if manage_index {
-        let html = render_managed_index_html(&manifest, lock.is_some());
+        let html = if is_story_mode {
+            crate::studio::story_lint::render_story_index_html(
+                &manifest.title,
+                manifest.width,
+                manifest.height,
+                &custom_story_scripts,
+                lock.is_some(),
+            )
+        } else {
+            render_managed_index_html(&manifest, lock.is_some())
+        };
         if let Err(e) = std::fs::write(&index_path, &html) {
             return json!({
                 "ok": false,
@@ -824,29 +865,33 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
     let mut existing_scenes = Vec::new();
     let mut scene_files = Vec::new();
 
-    for sc in &manifest.scenes {
-        scene_files.push(sc.script.clone());
-        let sc_path = film_dir.join(&sc.script);
-        if sc_path.is_file() {
-            existing_scenes.push(sc.script.clone());
-            continue;
+    if !is_story_mode {
+        for sc in &manifest.scenes {
+            scene_files.push(sc.script.clone());
+            let sc_path = film_dir.join(&sc.script);
+            if sc_path.is_file() {
+                existing_scenes.push(sc.script.clone());
+                continue;
+            }
+            let stub = render_scene_stub(sc, manifest.width, manifest.height, &manifest.background);
+            if let Err(e) = std::fs::write(&sc_path, &stub) {
+                return json!({
+                    "ok": false,
+                    "error": format!("Failed writing {}: {}", sc_path.display(), e)
+                });
+            }
+            emit_event(
+                workspace_dir,
+                "file.edited",
+                json!({
+                    "file": if film_root_rel.is_empty() { sc.script.clone() } else { format!("{}/{}", film_root_rel, sc.script) },
+                    "sessionID": session_id
+                }),
+            );
+            created_scenes.push(sc.script.clone());
         }
-        let stub = render_scene_stub(sc, manifest.width, manifest.height, &manifest.background);
-        if let Err(e) = std::fs::write(&sc_path, &stub) {
-            return json!({
-                "ok": false,
-                "error": format!("Failed writing {}: {}", sc_path.display(), e)
-            });
-        }
-        emit_event(
-            workspace_dir,
-            "file.edited",
-            json!({
-                "file": if film_root_rel.is_empty() { sc.script.clone() } else { format!("{}/{}", film_root_rel, sc.script) },
-                "sessionID": session_id
-            }),
-        );
-        created_scenes.push(sc.script.clone());
+    } else {
+        scene_files = custom_story_scripts.clone();
     }
 
     let meta = inspect_workspace_film(&index_path);
@@ -879,6 +924,14 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
     });
     if let Some(prog) = scene_progress {
         result["sceneProgress"] = prog;
+    }
+    if is_story_mode {
+        result["storyMode"] = json!(true);
+        if let Some(ref srep) = story_lint_report {
+            result["storyLint"] = serde_json::to_value(srep).unwrap_or(Value::Null);
+            result["customShots"] = json!(srep.custom_shots);
+            result["totalShots"] = json!(srep.total_shots);
+        }
     }
     result
 }

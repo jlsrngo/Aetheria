@@ -295,6 +295,12 @@ fn seed_skill_kit_scripts(workspace_dir: &str, skill_dir: &Path) -> Vec<String> 
             if !lower.ends_with(".js") || lower.starts_with("scene") {
                 continue;
             }
+            let use_legacy = std::env::var("AETHERIA_CLAY_STORY_MODE")
+                .map(|v| v.trim().eq_ignore_ascii_case("legacy"))
+                .unwrap_or(false);
+            if use_legacy && (lower == "clay-assets.js" || lower == "story-runtime.js") {
+                continue;
+            }
             let rel = format!("script/{fname}");
             if let Ok(dest) = crate::tool::path_guard::resolve_isolated_path(workspace_dir, &rel) {
                 if !dest.exists() {
@@ -363,10 +369,23 @@ fn resolve_dynamic_style_or_skill_command_inner(
                         let is_match = name == *tag || (tag.len() >= 3 && name.contains(tag));
 
                         if is_match {
-                            let skill_md = std::fs::read_to_string(path.join("SKILL.md"))
-                                .or_else(|_| std::fs::read_to_string(path.join("style.md")))
-                                .or_else(|_| std::fs::read_to_string(path.join("README.md")))
-                                .unwrap_or_default();
+                            let use_legacy_skill = std::env::var("AETHERIA_CLAY_STORY_MODE")
+                                .map(|v| v.trim().eq_ignore_ascii_case("legacy"))
+                                .unwrap_or(false);
+                            let skill_md = if use_legacy_skill {
+                                std::env::var("AETHERIA_LEGACY_SKILL_MD_PATH")
+                                    .ok()
+                                    .and_then(|p| std::fs::read_to_string(p).ok())
+                                    .unwrap_or_else(|| {
+                                        std::fs::read_to_string(path.join("SKILL.md"))
+                                            .unwrap_or_default()
+                                    })
+                            } else {
+                                std::fs::read_to_string(path.join("SKILL.md"))
+                                    .or_else(|_| std::fs::read_to_string(path.join("style.md")))
+                                    .or_else(|_| std::fs::read_to_string(path.join("README.md")))
+                                    .unwrap_or_default()
+                            };
                             let tokens_json = std::fs::read_to_string(path.join("tokens.json"))
                                 .unwrap_or_default();
                             let brief_content = std::fs::read_to_string(path.join("REMOTION_BRIEF.md"))
@@ -434,6 +453,18 @@ fn resolve_dynamic_style_or_skill_command_inner(
                                 )
                             };
 
+                            let has_story_kit = path
+                                .join("examples")
+                                .join("script")
+                                .join("story-runtime.js")
+                                .is_file()
+                                && path
+                                    .join("examples")
+                                    .join("story.example.json")
+                                    .is_file()
+                                && !std::env::var("AETHERIA_CLAY_STORY_MODE")
+                                    .map(|v| v.trim().eq_ignore_ascii_case("legacy"))
+                                    .unwrap_or(false);
                             let has_custom_stage_kit = !seeded_kits.is_empty()
                                 || path.join("examples").join("index.html").is_file();
                             let microstock_override =
@@ -441,7 +472,16 @@ fn resolve_dynamic_style_or_skill_command_inner(
                                     workspace_dir,
                                 );
                             let rules_block = if let Some(ref ms_override) = microstock_override {
-                                if has_custom_stage_kit {
+                                if has_story_kit {
+                                    format!(
+                                        "MANDATORY RULES FOR THIS GENERATION (DECLARATIVE STORY KIT — MICROSTOCK MODE 'M' LOCKED):\n\
+                                        1. Write ONLY `{project_rel_prefix}story.json` (<= 150 lines) matching `SKILL.md` with `captions: {{ \"enabled\": false }}` and the locked Microstock canvas dimensions. Do NOT hand-write `index.html` or `script/scene*.js` and DO NOT overwrite seeded `script/clay-*.js` or `script/story-runtime.js`.\n\
+                                        2. DO NOT call `film_audio`, `audio-director`, `voicebox_speak`, or `generate_smart_sfx` (Adobe Stock requires silent `-an` streams).\n\
+                                        3. Call `film_scaffold(..., {{ storyMode: true, useThree: true }})` to generate managed `index.html` and verify `storyLint.valid == true` (0 errors), then call `capture_film_preview` to inspect `contact_sheet.jpg` & `storyQa` (at most 1 targeted correction pass if any shot fails framing).\n\
+                                        4. Update `{project_rel_prefix}microstock/manifest.json` metadata.\n\n\
+                                        {ms_override}"
+                                    )
+                                } else if has_custom_stage_kit {
                                     format!(
                                         "MANDATORY RULES FOR THIS GENERATION (MICROSTOCK MODE 'M' LOCKED):\n\
                                         1. Delegate modular scene scripts (`{project_rel_prefix}script/scene1.js`..`sceneN.js`) + `{project_rel_prefix}index.html` (`manageIndexHtml: false` with `examples/index.html` dual-canvas template) to `task(subagent_type: \"motion-designer\")`. DO NOT call `audio-director`, `voicebox_speak`, or `generate_smart_sfx` (Adobe Stock requires silent `-an` streams).\n\
@@ -461,6 +501,14 @@ fn resolve_dynamic_style_or_skill_command_inner(
                                         path_display = path.display()
                                     )
                                 }
+                            } else if has_story_kit {
+                                format!(
+                                    "MANDATORY RULES FOR THIS GENERATION (DECLARATIVE STORY KIT — SINGLE SOURCE OF TRUTH):\n\
+                                    1. Generate narrated voiceover/SFX directly via `film_audio` from the coordinator so shot durations derive cleanly from WAV (or omit audio if silent).\n\
+                                    2. Write `{project_rel_prefix}story.json` (<= 150 lines) matching `SKILL.md` + `story.example.json` (or delegate solely `story.json` creation to `motion-designer`). Do NOT hand-write `index.html` or `script/scene*.js` (unless a specific shot truly requires `shots[].custom: \"script/sceneK.js\"`), and DO NOT overwrite seeded `script/clay-kit.js`, `script/clay-assets.js`, or `script/story-runtime.js`.\n\
+                                    3. Call `film_scaffold(..., {{ storyMode: true, useThree: true }})` to generate managed `{project_rel_prefix}index.html` and validate `storyLint` (0 errors required).\n\
+                                    4. Call `capture_film_preview` to render `.aetheria/preview/contact_sheet.jpg` (1 mid-frame per shot) and verify `storyQa.failedShots` is empty; apply at most 1 targeted correction pass if any shot fails framing or lint."
+                                )
                             } else if has_custom_stage_kit {
                                 format!(
                                     "MANDATORY RULES FOR THIS GENERATION:\n\
@@ -568,6 +616,24 @@ fn collect_skill_examples(skill_dir: &Path) -> String {
         return String::new();
     }
 
+    // Declarative story kits inject the compact `story.example.json` spec + pointer to auto-seeded scripts
+    // instead of dumping 40KB+ of internal Three.js runtime code into the prompt.
+    let story_example = examples_dir.join("story.example.json");
+    let story_runtime = examples_dir.join("script").join("story-runtime.js");
+    let use_legacy = std::env::var("AETHERIA_CLAY_STORY_MODE")
+        .map(|v| v.trim().eq_ignore_ascii_case("legacy"))
+        .unwrap_or(false);
+    if !use_legacy && story_example.is_file() && story_runtime.is_file() {
+        if let Ok(example_json) = std::fs::read_to_string(&story_example) {
+            return format!(
+                "\nREFERENCE EXAMPLE KIT (from {dir}/examples):\n\
+                 REFERENCE EXAMPLE (examples/script/clay-kit.js — auto-seeded into `script/clay-kit.js` alongside `script/clay-assets.js` & `script/story-runtime.js`; use `ClayKit` declaratively via `story.json` without rewriting JS).\n\n\
+                 REFERENCE EXAMPLE (examples/story.example.json — adapt into `<project>/story.json`):\n```json\n{example_json}\n```\n",
+                dir = skill_dir.display(),
+            );
+        }
+    }
+
     let mut files: Vec<std::path::PathBuf> = Vec::new();
     let mut stack = vec![examples_dir.clone()];
     while let Some(dir) = stack.pop() {
@@ -577,6 +643,15 @@ fn collect_skill_examples(skill_dir: &Path) -> String {
                 if p.is_dir() {
                     stack.push(p);
                 } else if p.is_file() {
+                    if use_legacy {
+                        let fname = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_ascii_lowercase();
+                        if matches!(
+                            fname.as_str(),
+                            "clay-assets.js" | "story-runtime.js" | "story.example.json" | "story.schema.json" | "story.html"
+                        ) {
+                            continue;
+                        }
+                    }
                     files.push(p);
                 }
             }

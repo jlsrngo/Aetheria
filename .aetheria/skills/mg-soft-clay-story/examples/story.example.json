@@ -1,0 +1,142 @@
+{
+  "title": "Petani Melawan Hama Sawah",
+  "canvas": { "w": 1080, "h": 1920, "fps": 30 },
+  "cast": [
+    {
+      "id": "petani",
+      "asset": { "kind": "humanoid", "palette": { "primary": "#60A5FA", "secondary": "#78716C", "hat": "#FDE68A", "accent": "#FB7185" }, "scale": 1.0, "accessories": ["hat-conical", "towel"], "tags": ["hero"] },
+      "pos": [0, 0, 1.4],
+      "rotY": 0.08
+    },
+    {
+      "id": "tetangga",
+      "asset": { "kind": "humanoid", "palette": { "primary": "#34D399", "secondary": "#57534E", "hat": "#FB7185", "accent": "#FACC15" }, "scale": 0.96, "accessories": ["hat-cap"], "tags": ["helper"] },
+      "pos": [-2.8, 0, 0.8],
+      "rotY": 0.35
+    },
+    {
+      "id": "wereng",
+      "asset": { "kind": "insect", "palette": { "primary": "#A3E635", "secondary": "#4D7C0F", "accent": "#E0F2FE" }, "scale": 0.95, "tags": ["pest"] },
+      "pos": [2.2, 0, 1.6],
+      "rotY": -0.55
+    }
+  ],
+  "props": [
+    {
+      "id": "bunga_kenikir",
+      "asset": { "kind": "flower-row", "palette": { "primary": "#FB923C", "accent": "#FACC15", "stem": "#4ADE80" }, "scale": 1.05, "tags": ["refugia"] },
+      "pos": [2.2, 0, 0.6],
+      "rotY": 0.0,
+      "visible": false
+    },
+    {
+      "id": "jeriken_organik",
+      "asset": { "kind": "container", "palette": { "primary": "#38BDF8", "accent": "#FACC15", "secondary": "#FFFDF9" }, "scale": 0.95, "tags": ["tool"] },
+      "pos": [-1.8, 0, 1.2],
+      "rotY": 0.25,
+      "visible": false
+    },
+    {
+      "id": "pohon_sawah",
+      "asset": { "kind": "tree", "palette": { "primary": "#4ADE80", "secondary": "#86EFAC" }, "scale": 1.1 },
+      "pos": [-4.6, 0, -3.5],
+      "rotY": 0.0
+    },
+    {
+      "id": "gubuk_tani",
+      "asset": { "kind": "building", "palette": { "primary": "#FDE68A", "accent": "#EA580C" }, "scale": 0.85 },
+      "pos": [4.4, 0, -4.6],
+      "rotY": -0.25
+    }
+  ],
+  "shots": [
+    {
+      "id": "shot1_sawah_pagi",
+      "start": 0,
+      "duration": 5.0,
+      "focus": "petani",
+      "camera": { "preset": "wide" },
+      "stage": "open-field",
+      "placements": { "petani": { "pos": [-1.4, 0, -0.8], "rotY": 0.12, "visible": true }, "wereng": { "visible": false }, "tetangga": { "visible": false }, "jeriken_organik": { "visible": false } },
+      "actions": [
+        { "target": "petani", "anim": "walk", "at": 0.2, "dur": 3.6, "from": [-1.4, 0, -0.8], "to": [0.2, 0, 1.8] }
+      ],
+      "caption": "Pagi tenang, Pak Tani berjalan menyusuri pematang sawah."
+    },
+    {
+      "id": "shot2_hama_muncul",
+      "start": 5.0,
+      "duration": 5.0,
+      "focus": "wereng",
+      "camera": { "preset": "close" },
+      "stage": "open-field",
+      "placements": { "wereng": { "pos": [1.8, 0, 0.8], "rotY": -0.45, "visible": true }, "petani": { "pos": [-2.6, 0, -0.4], "rotY": 0.45, "visible": true }, "tetangga": { "visible": false } },
+      "actions": [
+        { "target": "wereng", "anim": "hop", "at": 0, "dur": 1.4, "from": [1.8, 0, 0.8], "to": [0.9, 0, 1.5] },
+        { "target": "wereng", "anim": "hop", "at": 1.6, "dur": 1.4, "from": [0.9, 0, 1.5], "to": [0.1, 0, 2.2] },
+        { "target": "petani", "anim": "walk", "at": 1.2, "dur": 2.8, "from": [-2.6, 0, -0.4], "to": [-1.5, 0, 0.6] }
+      ],
+      "caption": "Tiba-tiba hama wereng melompat menyerang petak padi!"
+    },
+    {
+      "id": "shot3_solusi_organik",
+      "start": 10.0,
+      "duration": 5.0,
+      "focus": "jeriken_organik",
+      "camera": { "preset": "dolly-in" },
+      "stage": "open-field",
+      "placements": { "jeriken_organik": { "pos": [0, 0, 2.0], "rotY": 0.25, "visible": true }, "petani": { "pos": [-3.0, 0, 0.4], "rotY": 0.35, "visible": true }, "wereng": { "visible": false } },
+      "actions": [
+        { "target": "jeriken_organik", "anim": "pop-in", "at": 0, "dur": 1.0 },
+        { "target": "petani", "anim": "walk", "at": 0.6, "dur": 3.0, "from": [-3.0, 0, 0.4], "to": [-1.6, 0, 1.4] }
+      ],
+      "caption": "Pak Tani bergegas menyiapkan larutan organik ramah lingkungan."
+    },
+    {
+      "id": "shot4_tanam_kenikir",
+      "start": 15.0,
+      "duration": 5.0,
+      "focus": "bunga_kenikir",
+      "camera": { "preset": "medium" },
+      "stage": "open-field",
+      "placements": { "bunga_kenikir": { "pos": [0, 0, 2.0], "visible": true }, "petani": { "pos": [-2.8, 0, 0.0], "rotY": 0.3, "visible": true }, "tetangga": { "visible": false }, "wereng": { "visible": false } },
+      "actions": [
+        { "target": "bunga_kenikir", "anim": "grow", "at": 0, "dur": 4.0 },
+        { "target": "petani", "anim": "walk", "at": 0.4, "dur": 3.4, "from": [-2.8, 0, 0.0], "to": [-1.7, 0, 1.1] }
+      ],
+      "caption": "Bunga kenikir ditanam untuk mengundang predator alami."
+    },
+    {
+      "id": "shot5_gotong_royong",
+      "start": 20.0,
+      "duration": 5.0,
+      "focus": ["petani", "tetangga"],
+      "camera": { "preset": "orbit" },
+      "stage": "open-field",
+      "placements": { "petani": { "pos": [0.9, 0, 1.4], "rotY": -0.25, "visible": true }, "tetangga": { "pos": [-2.6, 0, 0.4], "rotY": 0.25, "visible": true }, "wereng": { "visible": false } },
+      "actions": [
+        { "target": "tetangga", "anim": "walk", "at": 0.2, "dur": 2.6, "from": [-2.6, 0, 0.4], "to": [-0.9, 0, 1.4] },
+        { "target": "petani", "anim": "hop", "at": 3.0, "dur": 1.1 },
+        { "target": "tetangga", "anim": "hop", "at": 3.2, "dur": 1.1 }
+      ],
+      "caption": "Tetangga datang berjalan membantu menjaga ekosistem sawah."
+    },
+    {
+      "id": "shot6_panen_aman",
+      "start": 25.0,
+      "duration": 5.0,
+      "focus": ["petani", "bunga_kenikir"],
+      "camera": { "preset": "wide" },
+      "stage": "open-field",
+      "placements": { "petani": { "pos": [-2.2, 0, 0.6], "rotY": 0.14, "visible": true }, "bunga_kenikir": { "pos": [1.15, 0, 1.4], "visible": true }, "tetangga": { "pos": [-3.2, 0, -0.2], "visible": true }, "wereng": { "visible": false } },
+      "actions": [
+        { "target": "petani", "anim": "walk", "at": 0.2, "dur": 2.4, "from": [-2.2, 0, 0.6], "to": [-1.0, 0, 1.5] },
+        { "target": "petani", "anim": "hop", "at": 2.9, "dur": 1.2 },
+        { "target": "bunga_kenikir", "anim": "grow", "at": 0, "dur": 0.4 }
+      ],
+      "caption": "Sawah kembali subur dan aman dari hama."
+    }
+  ],
+  "captions": { "enabled": true },
+  "audio": { "wav": "", "words": "" }
+}

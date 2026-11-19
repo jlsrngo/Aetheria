@@ -72,7 +72,11 @@ pub fn resolve_isolated_path(workspace_dir: &str, raw_file: &str) -> Result<Path
 
 fn is_film_artifact_rel(norm_rel: &str) -> bool {
     let lower = norm_rel.to_ascii_lowercase();
-    if lower == "index.html" || lower == "film.json" || lower == "microstock/manifest.json" {
+    if lower == "index.html"
+        || lower == "film.json"
+        || lower == "story.json"
+        || lower == "microstock/manifest.json"
+    {
         return true;
     }
     ["script/", "audio/", "img/", "images/"]
