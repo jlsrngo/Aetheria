@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PaperClip Sticker Explainer Story",
+  "type": "object",
+  "required": ["version", "meta", "shots"],
+  "properties": {
+    "version": { "const": 1 },
+    "meta": {
+      "type": "object",
+      "required": ["title", "width", "height", "fps", "durationSec", "theme"],
+      "properties": {
+        "title": { "type": "string" },
+        "width": { "type": "integer", "enum": [1080, 1920] },
+        "height": { "type": "integer", "enum": [1920, 1080] },
+        "fps": { "type": "integer", "const": 30 },
+        "durationSec": { "type": "number", "minimum": 3, "maximum": 90 },
+        "theme": { "enum": ["desk-slate", "explainer-coral", "studio-mint", "notebook-warm", "blueprint-desk"] }
+      }
+    },
+    "shots": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "required": ["id", "startSec", "endSec", "layout", "headline"],
+        "properties": {
+          "id": { "type": "string" },
+          "startSec": { "type": "number", "minimum": 0 },
+          "endSec": { "type": "number", "minimum": 0.5 },
+          "layout": { "enum": ["sticker-hero", "sticker-compare", "sticker-bars", "sticker-stat", "sticker-grid", "sticker-cta"] },
+          "theme": { "enum": ["desk-slate", "explainer-coral", "studio-mint", "notebook-warm", "blueprint-desk"] },
+          "badge": { "type": "string" },
+          "headline": { "type": "string", "maxLength": 48 },
+          "subtext": { "type": "string", "maxLength": 96 },
+          "metric": { "type": "string" },
+          "sticker": { "enum": ["phone-diecut", "chip-diecut", "globe-diecut", "flask-diecut", "battery-diecut", "rocket-diecut"] },
+          "transition": { "enum": ["whip-pan", "sticker-slap", "paper-peel"] },
+          "items": {
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+              "type": "object",
+              "required": ["label"],
+              "properties": {
+                "label": { "type": "string" },
+                "pct": { "type": "number", "minimum": 0, "maximum": 100 },
+                "sticker": { "enum": ["phone-diecut", "chip-diecut", "globe-diecut", "flask-diecut", "battery-diecut", "rocket-diecut"] }
+              }
+            }
+          }
+        }
+      }
+    },
+    "captions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["startSec", "endSec", "text"],
+        "properties": {
+          "startSec": { "type": "number" },
+          "endSec": { "type": "number" },
+          "text": { "type": "string" }
+        }
+      }
+    }
+  }
+}

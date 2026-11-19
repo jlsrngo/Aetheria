@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "skillId": "mg-paperclip-sticker",
+  "renderer": "2d-paperclip-sticker",
+  "useThree": false,
+  "scripts": ["script/sticker-kit.js", "script/story-runtime.js"],
+  "enums": {
+    "themes": ["desk-slate", "explainer-coral", "studio-mint", "notebook-warm", "blueprint-desk"],
+    "layouts": ["sticker-hero", "sticker-compare", "sticker-bars", "sticker-stat", "sticker-grid", "sticker-cta"],
+    "stickers": ["phone-diecut", "chip-diecut", "globe-diecut", "flask-diecut", "battery-diecut", "rocket-diecut"],
+    "transitions": ["whip-pan", "sticker-slap", "paper-peel"]
+  },
+  "limits": {
+    "minShots": 2,
+    "maxShots": 12,
+    "minDurationSec": 3.0,
+    "maxDurationSec": 90.0,
+    "maxHeadlineChars": 48,
+    "maxSubtextChars": 96,
+    "maxItems": 4
+  }
+}
