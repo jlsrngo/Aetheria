@@ -44,6 +44,8 @@ pub mod collage_lint;
 pub mod generic_kit_lint;
 pub mod keynote_lint;
 pub mod story_lint;
+#[cfg(test)]
+mod story_characterization_tests;
 pub mod styles;
 pub mod subtitles;
 pub mod timeline;

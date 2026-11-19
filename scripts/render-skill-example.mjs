@@ -52,28 +52,40 @@ const MIME_TYPES = {
 
 function parseArgs(argv) {
   const opts = {
+    all: false,
+    microstock: false,
     dir: path.join(REPO_ROOT, ".aetheria", "skills", "mg-soft-clay-story", "examples"),
     html: "index.html",
     outDir: "",
-    times: [0.3, 1.5, 3.0, 4.5, 6.0, 7.5],
+    times: null,
     contactSheet: true,
     extraScriptRoots: [],
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === "--dir" && argv[i + 1]) opts.dir = path.resolve(argv[++i]);
+    if (a === "--all") opts.all = true;
+    else if (a === "--microstock") opts.microstock = true;
+    else if (a === "--dir" && argv[i + 1]) opts.dir = path.resolve(argv[++i]);
     else if (a === "--html" && argv[i + 1]) opts.html = argv[++i];
     else if (a === "--out-dir" && argv[i + 1]) opts.outDir = path.resolve(argv[++i]);
     else if (a === "--times" && argv[i + 1]) {
-      opts.times = argv[++i]
-        .split(",")
-        .map((s) => Number(s.trim()))
-        .filter((n) => Number.isFinite(n) && n >= 0);
+      const raw = argv[++i];
+      if (raw === "auto") {
+        opts.times = null;
+      } else {
+        opts.times = raw
+          .split(",")
+          .map((s) => Number(s.trim()))
+          .filter((n) => Number.isFinite(n) && n >= 0);
+      }
     } else if (a === "--extra-script-dir" && argv[i + 1]) {
       opts.extraScriptRoots.push(path.resolve(argv[++i]));
     } else if (a === "--no-contact-sheet") {
       opts.contactSheet = false;
     }
+  }
+  if (!opts.all && !opts.times) {
+    opts.times = [0.3, 1.5, 3.0, 4.5, 6.0, 7.5];
   }
   if (!opts.outDir) {
     opts.outDir = fs.mkdtempSync(path.join(os.tmpdir(), "aetheria-skill-render-"));
@@ -81,6 +93,60 @@ function parseArgs(argv) {
     fs.mkdirSync(opts.outDir, { recursive: true });
   }
   return opts;
+}
+
+/**
+ * Derives 1 midpoint timestamp per shot from `story.example.json` (or `story.json`),
+ * supporting BOTH Dialect A (`start` + `duration`) and Dialect B (`startSec` + `endSec`).
+ */
+export function deriveShotMidpointsFromStory(examplesDir) {
+  const candidates = [
+    path.join(examplesDir, "story.example.json"),
+    path.join(examplesDir, "story.json"),
+  ];
+  for (const p of candidates) {
+    if (!fs.existsSync(p)) continue;
+    try {
+      const data = JSON.parse(fs.readFileSync(p, "utf8"));
+      const shots = Array.isArray(data.shots) ? data.shots : [];
+      const mids = [];
+      for (const sh of shots) {
+        if (!sh || typeof sh !== "object") continue;
+        let st = Number(sh.start);
+        let du = Number(sh.duration);
+        if (!Number.isFinite(st) || !Number.isFinite(du) || du <= 0) {
+          const sSec = Number(sh.startSec);
+          const eSec = Number(sh.endSec);
+          if (Number.isFinite(sSec) && Number.isFinite(eSec) && eSec > sSec) {
+            st = sSec;
+            du = eSec - sSec;
+          }
+        }
+        if (Number.isFinite(st) && Number.isFinite(du) && du > 0) {
+          mids.push(Math.round((st + du * 0.5) * 1000) / 1000);
+        }
+      }
+      if (mids.length > 0) return mids;
+    } catch {
+      // fall through
+    }
+  }
+  return [0.5, 2.0, 3.5, 5.0];
+}
+
+export function discoverBuiltinSkillExamples() {
+  const skillsRoot = path.join(REPO_ROOT, ".aetheria", "skills");
+  return fs
+    .readdirSync(skillsRoot, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && d.name.startsWith("mg-"))
+    .map((d) => d.name)
+    .sort()
+    .map((name) => {
+      const dir = path.join(skillsRoot, name, "examples");
+      const html = fs.existsSync(path.join(dir, "story.html")) ? "story.html" : "index.html";
+      return { name, dir, html };
+    })
+    .filter((s) => fs.existsSync(path.join(s.dir, "story.example.json")));
 }
 
 function safeResolveUnder(rootDir, relUrlPath) {
@@ -177,24 +243,28 @@ function classifyBbox(bbox, width, height, safeZone) {
   };
 }
 
-export async function renderSkillExample(opts) {
+export async function renderSkillExample(opts, sharedBrowser = null) {
   fs.mkdirSync(opts.outDir, { recursive: true });
   const { server, baseUrl } = await startStaticServer(opts.dir, opts.extraScriptRoots || []);
   const runtimeErrors = [];
   const http404s = [];
-  let browser;
+  let browser = sharedBrowser;
+  const ownsBrowser = !sharedBrowser;
+  let context = null;
   try {
-    browser = await chromium.launch({
-      headless: true,
-      args: [
-        "--use-gl=angle",
-        "--use-angle=swiftshader",
-        "--enable-webgl",
-        "--ignore-gpu-blocklist",
-        "--no-sandbox",
-      ],
-    });
-    const context = await browser.newContext({
+    if (!browser) {
+      browser = await chromium.launch({
+        headless: true,
+        args: [
+          "--use-gl=angle",
+          "--use-angle=swiftshader",
+          "--enable-webgl",
+          "--ignore-gpu-blocklist",
+          "--no-sandbox",
+        ],
+      });
+    }
+    context = await browser.newContext({
       viewport: { width: 1080, height: 1920 },
       deviceScaleFactor: 1,
     });
@@ -238,7 +308,8 @@ export async function renderSkillExample(opts) {
       }
     });
 
-    const targetUrl = `${baseUrl}/${opts.html.replace(/^\/+/, "")}`;
+    const qs = opts.microstock ? "?microstock=1" : "";
+    const targetUrl = `${baseUrl}/${opts.html.replace(/^\/+/, "")}${qs}`;
     await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
     await page.waitForFunction(() => window.__ready === true, null, { timeout: 20_000 });
 
@@ -431,9 +502,66 @@ export async function renderSkillExample(opts) {
     fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
     return { report, reportPath };
   } finally {
-    if (browser) await browser.close();
+    if (context) await context.close();
+    if (ownsBrowser && browser) await browser.close();
     await new Promise((r) => server.close(r));
   }
+}
+
+export async function renderAllSkillExamples(opts) {
+  const skills = discoverBuiltinSkillExamples();
+  const browser = await chromium.launch({
+    headless: true,
+    args: [
+      "--use-gl=angle",
+      "--use-angle=swiftshader",
+      "--enable-webgl",
+      "--ignore-gpu-blocklist",
+      "--no-sandbox",
+    ],
+  });
+  const results = [];
+  let totalErrors = 0;
+  try {
+    for (const sk of skills) {
+      const times = opts.times && opts.times.length > 0 ? opts.times : deriveShotMidpointsFromStory(sk.dir);
+      const skillOut = path.join(opts.outDir, sk.name);
+      const { report, reportPath } = await renderSkillExample(
+        {
+          dir: sk.dir,
+          html: sk.html,
+          outDir: skillOut,
+          times,
+          contactSheet: opts.contactSheet,
+          microstock: opts.microstock,
+          extraScriptRoots: opts.extraScriptRoots,
+        },
+        browser,
+      );
+      totalErrors += report.summary.runtimeErrorsCount;
+      results.push({
+        skill: sk.name,
+        html: sk.html,
+        reportPath,
+        frameCount: report.summary.frameCount,
+        runtimeErrorsCount: report.summary.runtimeErrorsCount,
+        avgRenderMs: report.summary.avgRenderMs,
+        hashes: report.frames.map((f) => ({ t: f.t, sha256: f.sha256 })),
+      });
+    }
+  } finally {
+    await browser.close();
+  }
+  const summaryPath = path.join(opts.outDir, "summary.json");
+  const summary = {
+    outDir: opts.outDir,
+    microstock: Boolean(opts.microstock),
+    skillCount: results.length,
+    totalRuntimeErrors: totalErrors,
+    skills: results,
+  };
+  fs.writeFileSync(summaryPath, JSON.stringify(summary, null, 2));
+  return { summary, summaryPath };
 }
 
 async function buildContactSheet(browser, frames, meta, safeZone, outPath) {
@@ -523,13 +651,34 @@ async function buildContactSheet(browser, frames, meta, safeZone, outPath) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const opts = parseArgs(process.argv.slice(2));
-  renderSkillExample(opts)
-    .then(({ report, reportPath }) => {
-      console.log(JSON.stringify({ reportPath, contactSheetPath: report.contactSheetPath, summary: report.summary }, null, 2));
-      process.exit(report.summary.runtimeErrorsCount > 0 ? 1 : 0);
-    })
-    .catch((err) => {
-      console.error("[render-skill-example] FAILED:", err);
-      process.exit(1);
-    });
+  const runner = opts.all
+    ? renderAllSkillExamples(opts).then(({ summary, summaryPath }) => {
+        console.log(
+          JSON.stringify(
+            {
+              summaryPath,
+              skillCount: summary.skillCount,
+              totalRuntimeErrors: summary.totalRuntimeErrors,
+              microstock: summary.microstock,
+            },
+            null,
+            2,
+          ),
+        );
+        process.exit(summary.totalRuntimeErrors > 0 ? 1 : 0);
+      })
+    : renderSkillExample(opts).then(({ report, reportPath }) => {
+        console.log(
+          JSON.stringify(
+            { reportPath, contactSheetPath: report.contactSheetPath, summary: report.summary },
+            null,
+            2,
+          ),
+        );
+        process.exit(report.summary.runtimeErrorsCount > 0 ? 1 : 0);
+      });
+  runner.catch((err) => {
+    console.error("[render-skill-example] FAILED:", err);
+    process.exit(1);
+  });
 }
