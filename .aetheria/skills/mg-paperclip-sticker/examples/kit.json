@@ -1,22 +1,18 @@
 {
-  "schemaVersion": 1,
-  "skillId": "mg-paperclip-sticker",
-  "renderer": "2d-paperclip-sticker",
-  "useThree": false,
-  "scripts": ["script/sticker-kit.js", "script/story-runtime.js"],
-  "enums": {
-    "themes": ["desk-slate", "explainer-coral", "studio-mint", "notebook-warm", "blueprint-desk"],
-    "layouts": ["sticker-hero", "sticker-compare", "sticker-bars", "sticker-stat", "sticker-grid", "sticker-cta"],
-    "stickers": ["phone-diecut", "chip-diecut", "globe-diecut", "flask-diecut", "battery-diecut", "rocket-diecut"],
-    "transitions": ["whip-pan", "sticker-slap", "paper-peel"]
-  },
-  "limits": {
-    "minShots": 2,
-    "maxShots": 12,
-    "minDurationSec": 3.0,
-    "maxDurationSec": 90.0,
-    "maxHeadlineChars": 48,
-    "maxSubtextChars": 96,
-    "maxItems": 4
+  "slug": "mg-paperclip-sticker",
+  "name": "Paperclip Die-Cut Sticker & Editorial Infographic Engine (19-paperclip Craft)",
+  "paradigm": "canvas2d-sticker-slap-kit",
+  "layouts": ["sticker-slap", "supply-chain", "chip-matrix", "bezel-pullback"],
+  "components": [
+    "dot-grid-board-surface",
+    "die-cut-white-border-stickers",
+    "slap-physics-shadow-wobble",
+    "periodic-element-tiles",
+    "dashed-route-connectors",
+    "device-bezel-desk-pullback"
+  ],
+  "defaultSafeZone": {
+    "9:16": { "x": 56, "y": 80, "w": 896, "h": 1340 },
+    "16:9": { "x": 96, "y": 54, "w": 1574, "h": 908 }
   }
 }

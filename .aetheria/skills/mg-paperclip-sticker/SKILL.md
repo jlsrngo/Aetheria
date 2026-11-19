@@ -1,33 +1,24 @@
 ---
 name: mg-paperclip-sticker
-description: "Declarative PaperClip-style Sticker & Scrapbook Explainer motion graphics skill with thick white die-cut stickers, metallic paperclips, pastel washi tape, marker highlights, and infographic bar charts."
-tags:
-  - motion-graphics
-  - declarative-kit
-  - paperclip
-  - sticker-explainer
-command: /mg-paperclip-sticker
+description: Paperclip die-cut sticker and editorial tech-infographic engine on a 44px dot-grid board with slap-physics drop shadows, damped wobble, periodic element tiles, dashed route connectors, and device bezel pullback.
 ---
 
-# PaperClip Sticker Explainer — Declarative Fast-Path Skill
+# `mg-paperclip-sticker` — Die-Cut Sticker & Editorial Infographic Engine (v2)
 
-## Visual Identity
-Lin Chao / PaperClip knowledge-explainer aesthetic: dot-matrix drafting desk, crisp white-bordered die-cut stickers with bold dark outlines, translucent washi tape strips, metallic paperclips, sweeping highlighter marker strokes, and exact percentage bar charts.
+## 1. Visual DNA & Reference Craft (`19-paperclip`)
+- **Dot-Grid Board & Device Bezel (`drawDotBoard`)**: Crisp `#E9EEF2` board with `#C5CFD8` dot grid, `#25313D` ink, `#FF5A36` vermilion orange accents, and dark desk `#1D2731` / `#0E141A` bezel pullback.
+- **Slap Physics (`slap` + `drawDieCutSticker`)**: Stickers drop from `1.32×` scale with dynamic lift shadow and damped wobble (`wob`).
 
-## Zero-JS Workflow
-Do **not** write custom canvas JS. Author only `story.json` matching `examples/kit.json` and `examples/story.schema.json`.
-1. Read `examples/kit.json` and `examples/story.example.json` for valid enums and structure.
-2. Write `story.json` with 2–12 shots (`durationSec` 3–90, `fps: 30`, `1080x1920` or `1920x1080`).
-3. Validate via `story_lint`, preview via `capture_film_preview`, and inspect `contact_sheet.jpg`.
-4. Mode `'M'` (`?microstock=1`) automatically hides all text and captions for clean sticker-explainer plates.
+## 2. Layouts (`examples/kit.json`)
+1. `sticker-slap`: Die-cut smartphone, PCB chip, and battery stickers slap onto the board.
+2. `supply-chain`: Dashed orange route connecting hardware & element nodes.
+3. `chip-matrix`: 2×2 periodic element tile matrix (`Li`, `Co`, `Sn`, `La`).
+4. `bezel-pullback`: Full device bezel pullback over the dark studio desk.
 
-## Kit Enums (`examples/kit.json`)
-- **themes**: `desk-slate`, `explainer-coral`, `studio-mint`, `notebook-warm`, `blueprint-desk`
-- **layouts**: `sticker-hero`, `sticker-compare`, `sticker-bars`, `sticker-stat`, `sticker-grid`, `sticker-cta`
-- **stickers**: `phone-diecut`, `chip-diecut`, `globe-diecut`, `flask-diecut`, `battery-diecut`, `rocket-diecut`
-- **transitions**: `whip-pan`, `sticker-slap`, `paper-peel`
+## 3. Declarative Contract (`story.json`)
+Only author `story.json` (validated against `examples/story.schema.json`). Do not edit `examples/script/sticker-kit.js` or `examples/script/story-runtime.js`.
 
-## Limits & Safe-Zone Contract
-- `headline` <= 48 chars; `subtext` <= 96 chars; `items` <= 4.
-- Portrait `1080x1920` keeps all sticker cards inside `x: 56..952`, `y: 80..1420`.
-- Pure deterministic function of `t`: sticker slap-pop scale, marker highlight sweep, and bar growth derive solely from `localTime`.
+## 4. Verification & Mode `'M'`
+- Deterministic render & contact sheet:
+  `node scripts/render-skill-example.mjs --dir ".aetheria/skills/mg-paperclip-sticker/examples" --html "story.html" --times "1,5,10,16,22,27" --out-dir "<outDir>"`
+- Microstock clean-plate mode (`?microstock=1` or key `'M'`): Suppresses all text headlines, taglines, and element symbols while keeping the die-cut stickers and dot-grid board.
