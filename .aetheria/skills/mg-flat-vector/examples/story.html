@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <title>Aetheria Flat Vector 2D Story</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #F8FAFC; font-family: "Inter", sans-serif; }
+    #stage { position: relative; width: 100%; height: 100%; }
+    #stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  </style>
+  <script src="/script/aetheria-motion.js"></script>
+  <script src="/script/flat-kit.js"></script>
+  <script src="/script/story-runtime.js"></script>
+</head>
+<body>
+  <div id="stage"><canvas id="stage-2d" width="1080" height="1920"></canvas></div>
+  <script>
+    (function () {
+      var p = new URLSearchParams(window.location.search || "");
+      window.StoryRuntime.boot({
+        canvas: document.getElementById("stage-2d"),
+        storyUrl: p.get("story") || "/story.json",
+        fallbackStoryUrl: "/story.example.json",
+        isMicrostock: p.get("microstock") === "1"
+      });
+    })();
+  </script>
+</body>
+</html>

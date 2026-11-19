@@ -1,0 +1,15 @@
+{
+  "renderer": "2d-flat-vector",
+  "useThree": false,
+  "background": "#F8FAFC",
+  "scripts": [
+    "script/flat-kit.js",
+    "script/story-runtime.js"
+  ],
+  "enums": {
+    "theme": ["clean-light", "midnight-tech", "mint-fresh", "coral-pop", "cobalt-deck"],
+    "layout": ["hero-center", "split-compare", "step-list", "stat-counter", "timeline-flow", "callout-card"],
+    "icon": ["dot-flow", "chart", "clock", "shield", "rocket", "bulb", "gear", "globe", "coin", "leaf", "phone", "check"],
+    "transition": ["slide-up", "zoom-pop", "cut"]
+  }
+}

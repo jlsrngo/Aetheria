@@ -1,0 +1,97 @@
+{
+  "renderer": "2d-flat-vector",
+  "title": "Cara Kerja Energi Surya — Explainer 2D",
+  "theme": "clean-light",
+  "canvas": { "w": 1080, "h": 1920, "fps": 30 },
+  "shots": [
+    {
+      "id": "shot1_hook",
+      "start": 0,
+      "duration": 5.0,
+      "layout": "hero-center",
+      "theme": "clean-light",
+      "badge": "EDUKASI ENERGI",
+      "icon": "bulb",
+      "headline": "LISTRIK DARI CAHAYA",
+      "subheadline": "Bagaimana panel surya mengubah sinar matahari menjadi daya.",
+      "accentColor": "#2563EB",
+      "secondaryColor": "#F59E0B",
+      "caption": "Setiap jam matahari mengirim energi cukup untuk seluruh bumi."
+    },
+    {
+      "id": "shot2_compare",
+      "start": 5.0,
+      "duration": 5.0,
+      "layout": "split-compare",
+      "theme": "mint-fresh",
+      "headline": "FOSIL VS SURYA",
+      "items": [
+        { "label": "EMISI TINGGI", "icon": "clock" },
+        { "label": "BERSIH & ABADI", "icon": "leaf" }
+      ],
+      "accentColor": "#10B981",
+      "secondaryColor": "#0EA5E9",
+      "caption": "Energi surya jauh lebih bersih dan tidak pernah habis."
+    },
+    {
+      "id": "shot3_steps",
+      "start": 10.0,
+      "duration": 5.0,
+      "layout": "step-list",
+      "theme": "midnight-tech",
+      "headline": "TIGA TAHAP KONVERSI",
+      "items": [
+        { "label": "01. TANGKAP FOTON", "icon": "dot-flow" },
+        { "label": "02. UBAH ARUS DC KE AC", "icon": "gear" },
+        { "label": "03. ALIRKAN KE RUMAH", "icon": "check" }
+      ],
+      "accentColor": "#38BDF8",
+      "secondaryColor": "#F59E0B",
+      "caption": "Panel menangkap foton lalu inverter mengubahnya menjadi listrik rumah."
+    },
+    {
+      "id": "shot4_stat",
+      "start": 15.0,
+      "duration": 5.0,
+      "layout": "stat-counter",
+      "theme": "cobalt-deck",
+      "icon": "chart",
+      "statValue": "80%",
+      "statLabel": "PENURUNAN BIAYA PANEL 10 TAHUN TERAKHIR",
+      "accentColor": "#FACC15",
+      "secondaryColor": "#38BDF8",
+      "caption": "Biaya teknologi panel surya turun drastis dalam satu dekade."
+    },
+    {
+      "id": "shot5_flow",
+      "start": 20.0,
+      "duration": 5.0,
+      "layout": "timeline-flow",
+      "theme": "coral-pop",
+      "headline": "DAMPAK JANGKA PANJANG",
+      "items": [
+        { "label": "TAGIHAN LEBIH HEMAT", "icon": "coin" },
+        { "label": "MANDIRI ENERGI", "icon": "shield" },
+        { "label": "BUMI LEBIH SEHAT", "icon": "globe" }
+      ],
+      "accentColor": "#F97316",
+      "secondaryColor": "#10B981",
+      "caption": "Hemat biaya bulanan sekaligus menjaga masa depan planet kita."
+    },
+    {
+      "id": "shot6_outro",
+      "start": 25.0,
+      "duration": 5.0,
+      "layout": "callout-card",
+      "theme": "clean-light",
+      "badge": "MULAI SEKARANG",
+      "icon": "rocket",
+      "headline": "MASA DEPAN ENERGI HIJAU",
+      "subheadline": "Simpan dan bagikan video edukasi ini.",
+      "accentColor": "#2563EB",
+      "secondaryColor": "#10B981",
+      "caption": "Langkah kecil hari ini membawa perubahan besar untuk esok."
+    }
+  ],
+  "captions": { "enabled": true }
+}

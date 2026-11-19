@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Aetheria Flat Vector 2D Declarative Story Spec",
+  "type": "object",
+  "required": ["renderer", "canvas", "shots", "captions"],
+  "properties": {
+    "renderer": { "const": "2d-flat-vector" },
+    "title": { "type": "string" },
+    "theme": { "type": "string", "enum": ["clean-light", "midnight-tech", "mint-fresh", "coral-pop", "cobalt-deck"] },
+    "canvas": { "type": "object", "required": ["w", "h", "fps"] },
+    "shots": { "type": "array", "minItems": 1 },
+    "captions": { "type": "object", "required": ["enabled"] }
+  }
+}
