@@ -41,6 +41,7 @@ pub mod scheduler;
 pub mod script_generator;
 pub mod stage_extractor;
 pub mod collage_lint;
+pub mod generic_kit_lint;
 pub mod keynote_lint;
 pub mod story_lint;
 pub mod styles;

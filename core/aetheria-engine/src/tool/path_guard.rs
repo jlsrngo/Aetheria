@@ -75,6 +75,7 @@ fn is_film_artifact_rel(norm_rel: &str) -> bool {
     if lower == "index.html"
         || lower == "film.json"
         || lower == "story.json"
+        || lower == "kit.json"
         || lower == "microstock/manifest.json"
     {
         return true;

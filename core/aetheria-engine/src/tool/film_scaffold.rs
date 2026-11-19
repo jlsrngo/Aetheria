@@ -845,14 +845,25 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
 
     if manage_index {
         let html = if is_story_mode {
-            crate::studio::story_lint::render_story_index_html_for_renderer(
-                &story_renderer,
-                &manifest.title,
-                manifest.width,
-                manifest.height,
-                &custom_story_scripts,
-                lock.is_some(),
-            )
+            if let Some(kit) = crate::studio::generic_kit_lint::load_kit_manifest(&film_dir) {
+                crate::studio::generic_kit_lint::render_generic_kit_index_html(
+                    &kit,
+                    &manifest.title,
+                    manifest.width,
+                    manifest.height,
+                    &custom_story_scripts,
+                    lock.is_some(),
+                )
+            } else {
+                crate::studio::story_lint::render_story_index_html_for_renderer(
+                    &story_renderer,
+                    &manifest.title,
+                    manifest.width,
+                    manifest.height,
+                    &custom_story_scripts,
+                    lock.is_some(),
+                )
+            }
         } else {
             render_managed_index_html(&manifest, lock.is_some())
         };

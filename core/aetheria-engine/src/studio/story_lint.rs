@@ -320,7 +320,7 @@ pub fn lint_story_json_value(
         );
     }
 
-    // Dispatch 2D declarative renderers (`2d-cutout-collage`, `2d-product-keynote`) to their dedicated validators
+    // Dispatch 2D/custom declarative renderers (`2d-cutout-collage`, `2d-product-keynote`, or generic `kit.json`)
     match root.get("renderer").and_then(Value::as_str) {
         Some("2d-cutout-collage") => {
             return super::collage_lint::lint_collage_story_value(root, film_dir, story_path_label, issues);
@@ -328,7 +328,11 @@ pub fn lint_story_json_value(
         Some("2d-product-keynote") => {
             return super::keynote_lint::lint_keynote_story_value(root, film_dir, story_path_label, issues);
         }
-        _ => {}
+        _ => {
+            if let Some(kit) = film_dir.and_then(super::generic_kit_lint::load_kit_manifest) {
+                return super::generic_kit_lint::lint_generic_kit_story_value(root, &kit, film_dir, story_path_label, issues);
+            }
+        }
     }
 
     // 3. Cast & Props validation

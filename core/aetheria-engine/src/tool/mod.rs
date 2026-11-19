@@ -315,7 +315,16 @@ async fn execute_tool_call_inner(
             let file_path = arguments.get("file_path").and_then(|v| v.as_str());
             let desc = arguments.get("description").and_then(|v| v.as_str());
             let content = arguments.get("content").and_then(|v| v.as_str());
-            match crate::studio::styles::register_style_internal(name, file_path, content, desc) {
+            let files: Option<Vec<crate::studio::styles::SkillPackageFile>> = arguments
+                .get("files")
+                .and_then(|v| serde_json::from_value(v.clone()).ok());
+            match crate::studio::styles::register_skill_package_internal(
+                name,
+                file_path,
+                content,
+                desc,
+                files.as_deref(),
+            ) {
                 Ok(style) => json!({
                     "success": true,
                     "style": style,

@@ -325,6 +325,18 @@ fn seed_skill_kit_scripts(workspace_dir: &str, skill_dir: &Path) -> Vec<String> 
             }
         }
     }
+    // Also seed `examples/kit.json` into project root when present (enables plug-and-play custom declarative kits)
+    let kit_manifest_src = skill_dir.join("examples").join("kit.json");
+    if kit_manifest_src.is_file() {
+        if let Ok(dest) = crate::tool::path_guard::resolve_isolated_path(workspace_dir, "kit.json") {
+            if !dest.exists() {
+                if let Some(parent) = dest.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let _ = std::fs::copy(&kit_manifest_src, &dest);
+            }
+        }
+    }
     seeded.sort();
     seeded
 }
@@ -476,6 +488,9 @@ fn resolve_dynamic_style_or_skill_command_inner(
                                     .unwrap_or(false);
                             let has_custom_stage_kit = !seeded_kits.is_empty()
                                 || path.join("examples").join("index.html").is_file();
+                            let custom_kit_manifest = crate::studio::generic_kit_lint::load_kit_manifest(
+                                &path.join("examples"),
+                            );
                             let is_2d_collage_kit = path
                                 .join("examples")
                                 .join("script")
@@ -486,13 +501,21 @@ fn resolve_dynamic_style_or_skill_command_inner(
                                 .join("script")
                                 .join("keynote-kit.js")
                                 .is_file();
-                            let scaffold_three_flag = if is_2d_collage_kit || is_2d_keynote_kit { "false" } else { "true" };
-                            let kit_glob_hint = if is_2d_collage_kit {
-                                "script/collage-*.js or script/story-runtime.js"
-                            } else if is_2d_keynote_kit {
-                                "script/keynote-*.js or script/story-runtime.js"
+                            let scaffold_three_flag = if let Some(ref km) = custom_kit_manifest {
+                                if km.use_three { "true" } else { "false" }
+                            } else if is_2d_collage_kit || is_2d_keynote_kit {
+                                "false"
                             } else {
-                                "script/clay-*.js or script/story-runtime.js"
+                                "true"
+                            };
+                            let kit_glob_hint = if let Some(ref km) = custom_kit_manifest {
+                                format!("seeded kit scripts ({})", km.scripts.join(", "))
+                            } else if is_2d_collage_kit {
+                                "script/collage-*.js or script/story-runtime.js".to_string()
+                            } else if is_2d_keynote_kit {
+                                "script/keynote-*.js or script/story-runtime.js".to_string()
+                            } else {
+                                "script/clay-*.js or script/story-runtime.js".to_string()
                             };
                             let microstock_override =
                                 crate::studio::microstock::build_microstock_hard_override_block(
