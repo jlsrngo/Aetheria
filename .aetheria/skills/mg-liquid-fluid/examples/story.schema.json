@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Liquid Fluid Story",
+  "type": "object",
+  "required": ["version", "meta", "shots"],
+  "properties": {
+    "version": { "const": 1 },
+    "meta": {
+      "type": "object",
+      "required": ["title", "width", "height", "fps", "durationSec", "theme"],
+      "properties": {
+        "title": { "type": "string" },
+        "width": { "type": "integer", "enum": [1080, 1920] },
+        "height": { "type": "integer", "enum": [1920, 1080] },
+        "fps": { "type": "integer", "const": 30 },
+        "durationSec": { "type": "number", "minimum": 3, "maximum": 90 },
+        "theme": { "enum": ["plum-candy", "ocean-splash", "citrus-fizz", "berry-velvet", "obsidian-lava"] }
+      }
+    },
+    "shots": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "required": ["id", "startSec", "endSec", "layout", "headline"],
+        "properties": {
+          "id": { "type": "string" },
+          "startSec": { "type": "number", "minimum": 0 },
+          "endSec": { "type": "number", "minimum": 0.5 },
+          "layout": { "enum": ["fluid-hero", "fluid-split", "fluid-stack", "fluid-stat", "fluid-pool", "fluid-cta"] },
+          "theme": { "enum": ["plum-candy", "ocean-splash", "citrus-fizz", "berry-velvet", "obsidian-lava"] },
+          "badge": { "type": "string" },
+          "headline": { "type": "string", "maxLength": 44 },
+          "subtext": { "type": "string", "maxLength": 92 },
+          "metric": { "type": "string" },
+          "form": { "enum": ["metaball-duo", "liquid-drop", "splash-crown", "ripple-pool", "wave-ribbon", "bubble-cluster"] },
+          "transition": { "enum": ["liquid-flood", "splash-wipe", "droplet-merge"] },
+          "items": {
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+              "type": "object",
+              "required": ["label"],
+              "properties": {
+                "label": { "type": "string" },
+                "form": { "enum": ["metaball-duo", "liquid-drop", "splash-crown", "ripple-pool", "wave-ribbon", "bubble-cluster"] }
+              }
+            }
+          }
+        }
+      }
+    },
+    "captions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["startSec", "endSec", "text"],
+        "properties": {
+          "startSec": { "type": "number" },
+          "endSec": { "type": "number" },
+          "text": { "type": "string" }
+        }
+      }
+    }
+  }
+}

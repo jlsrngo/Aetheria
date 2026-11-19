@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "skillId": "mg-liquid-fluid",
+  "renderer": "2d-liquid-fluid",
+  "useThree": false,
+  "scripts": ["script/liquid-kit.js", "script/story-runtime.js"],
+  "enums": {
+    "themes": ["plum-candy", "ocean-splash", "citrus-fizz", "berry-velvet", "obsidian-lava"],
+    "layouts": ["fluid-hero", "fluid-split", "fluid-stack", "fluid-stat", "fluid-pool", "fluid-cta"],
+    "forms": ["metaball-duo", "liquid-drop", "splash-crown", "ripple-pool", "wave-ribbon", "bubble-cluster"],
+    "transitions": ["liquid-flood", "splash-wipe", "droplet-merge"]
+  },
+  "limits": {
+    "minShots": 2,
+    "maxShots": 12,
+    "minDurationSec": 3.0,
+    "maxDurationSec": 90.0,
+    "maxHeadlineChars": 44,
+    "maxSubtextChars": 92,
+    "maxItems": 4
+  }
+}
