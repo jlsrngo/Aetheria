@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "skillId": "mg-pixel-arcade",
+  "renderer": "2d-pixel-arcade",
+  "useThree": false,
+  "scripts": ["script/pixel-kit.js", "script/story-runtime.js"],
+  "enums": {
+    "themes": ["pico8-night", "gameboy-dmg", "snes-sunset", "arcade-crt", "cyber-bit"],
+    "layouts": ["arcade-title", "arcade-vs", "arcade-quests", "arcade-highscore", "arcade-level", "arcade-continue"],
+    "sprites": ["hero-knight", "coin-spin", "slime-bounce", "treasure-chest", "heart-pixel", "rocket-8bit"],
+    "transitions": ["pixel-dissolve", "crt-off", "stage-wipe"]
+  },
+  "limits": {
+    "minShots": 2,
+    "maxShots": 12,
+    "minDurationSec": 3.0,
+    "maxDurationSec": 90.0,
+    "maxHeadlineChars": 40,
+    "maxSubtextChars": 88,
+    "maxItems": 4
+  }
+}

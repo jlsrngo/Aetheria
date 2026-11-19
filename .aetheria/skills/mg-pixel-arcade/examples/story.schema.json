@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pixel Arcade 16-Bit Story",
+  "type": "object",
+  "required": ["version", "meta", "shots"],
+  "properties": {
+    "version": { "const": 1 },
+    "meta": {
+      "type": "object",
+      "required": ["title", "width", "height", "fps", "durationSec", "theme"],
+      "properties": {
+        "title": { "type": "string" },
+        "width": { "type": "integer", "enum": [1080, 1920] },
+        "height": { "type": "integer", "enum": [1920, 1080] },
+        "fps": { "type": "integer", "const": 30 },
+        "durationSec": { "type": "number", "minimum": 3, "maximum": 90 },
+        "theme": { "enum": ["pico8-night", "gameboy-dmg", "snes-sunset", "arcade-crt", "cyber-bit"] }
+      }
+    },
+    "shots": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "required": ["id", "startSec", "endSec", "layout", "headline"],
+        "properties": {
+          "id": { "type": "string" },
+          "startSec": { "type": "number", "minimum": 0 },
+          "endSec": { "type": "number", "minimum": 0.5 },
+          "layout": { "enum": ["arcade-title", "arcade-vs", "arcade-quests", "arcade-highscore", "arcade-level", "arcade-continue"] },
+          "theme": { "enum": ["pico8-night", "gameboy-dmg", "snes-sunset", "arcade-crt", "cyber-bit"] },
+          "badge": { "type": "string" },
+          "headline": { "type": "string", "maxLength": 40 },
+          "subtext": { "type": "string", "maxLength": 88 },
+          "metric": { "type": "string" },
+          "sprite": { "enum": ["hero-knight", "coin-spin", "slime-bounce", "treasure-chest", "heart-pixel", "rocket-8bit"] },
+          "transition": { "enum": ["pixel-dissolve", "crt-off", "stage-wipe"] },
+          "items": {
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+              "type": "object",
+              "required": ["label"],
+              "properties": {
+                "label": { "type": "string" },
+                "sprite": { "enum": ["hero-knight", "coin-spin", "slime-bounce", "treasure-chest", "heart-pixel", "rocket-8bit"] }
+              }
+            }
+          }
+        }
+      }
+    },
+    "captions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["startSec", "endSec", "text"],
+        "properties": {
+          "startSec": { "type": "number" },
+          "endSec": { "type": "number" },
+          "text": { "type": "string" }
+        }
+      }
+    }
+  }
+}
