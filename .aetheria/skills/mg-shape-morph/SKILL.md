@@ -1,33 +1,44 @@
 ---
 name: mg-shape-morph
-description: "Declarative Geometric Shape Morphing motion graphics skill with 64-vertex equal-count path interpolation, vibrant color-field wipes, squash-and-stretch rotation, and continuous unbroken flow."
-tags:
-  - motion-graphics
-  - declarative-kit
-  - shape-morph
-  - kinetic-geometry
-command: /mg-shape-morph
+description: Swiss flat-color via-circle icon morph engine (240-vertex resampled contour correspondence, topological via-circle bridge, Oklab color-field radial & sea-horizon wipes, 360-degree loop flight path, and 7-dot capsule chapter HUD).
 ---
 
-# Geometric Shape Morph — Declarative Fast-Path Skill
+# `mg-shape-morph` — Continuous Via-Circle Icon Morph Engine (v2)
 
-## Visual Identity
-Hypnotic continuous vector transformation: vibrant color-field backdrops with crisp white cards, 64-vertex equal-count parametric shape interpolation (zero knotting or pinching), subtle rotation + squash-and-stretch, and hold-and-release beat rhythm.
+## 1. Visual DNA & Reference Craft (`08-morph`)
+- **Palette (`COLORS`) & Oklab Mixing (`oklab` / `fromOklab` / `mixC` / `tone`)**: Deep Ink (`#16151B`), Warm Cream (`#F4EEE3`), Marigold (`#FFB627`), Vermilion (`#FF4F2B`), Ultramarine (`#2438E8`), with perceptually uniform Oklab gradients and fold-facet shading.
+- **240-Vertex Via-Circle Topological Bridge (`blendParts` + `alignTo` + `bestShift`)**: Every hero icon consists of a 240-vertex closed body (`NB = 240`), a 72-vertex counter hole (`NH = 72`), eight 24-vertex round-cap auxiliary strokes (`NM = 24`), and a 60-vertex facet shade (`NS = 60`). Rather than folding self-intersecting edges directly across disparate silhouettes, each transition passes through a shared intermediate circle (`P.via = [cx, cy, R]`) at `u = 0.5` with rotational & directional squash-stretch (`makeM`).
+- **Expanding Color-Block Field Wipes (`FIELDS`)**: Radial circle blooms (`circleReg`), rising sea horizon flood (`seaTop`), and impact shockwave ring (`shockReg`) transition the entire canvas between Cream, Marigold, Vermilion, Ultramarine, and Ink in sync with the hero morphs.
 
-## Zero-JS Workflow
-Do **not** write custom canvas JS. Author only `story.json` matching `examples/kit.json` and `examples/story.schema.json`.
-1. Read `examples/kit.json` and `examples/story.example.json` for valid enums and structure.
-2. Write `story.json` with 2–12 shots (`durationSec` 3–90, `fps: 30`, `1080x1920` or `1920x1080`).
-3. Validate via `story_lint`, preview via `capture_film_preview`, and inspect `contact_sheet.jpg`.
-4. Mode `'M'` (`?microstock=1`) automatically hides all text and captions for pure shape-morph plates.
+## 2. Layouts (`examples/kit.json`)
+1. `morning-cup`: Falling drop lands and morphs into the steaming Ink coffee mug (`cup` with ring handle, saucer stroke, and 3 animated sine-wave steam plumes), then blooms a Marigold field and morphs via circle into the spinning 8-ray Vermilion `sun`.
+2. `sun-to-sea`: The sun sinks into the rising Ultramarine sea (`sunset` with 5 upper rays and 3 rippling water-reflection bars), then dives and breaches via circle into the flapping Cream `gull`.
+3. `flight-loop`: The gull morphs via circle into the faceted 3D `plane`, which accelerates around a full 360° vertical loop-the-loop (with trailing dashed trajectory path), stalls at the apex, and dives into the ground as the Vermilion map `pin` with 3 expanding elliptical shockwave rings.
+4. `heart-wordmark`: The pin hops and morphs via circle into the double-beating Cream `heart` over a Vermilion bloom, which then triggers an Ink wipe and buds out the letters of the `morphe.` wordmark + Vermilion full stop with 4 concentric heartbeat rings.
 
-## Kit Enums (`examples/kit.json`)
-- **themes**: `cobalt-pop`, `coral-field`, `emerald-morph`, `violet-pulse`, `amber-studio`
-- **layouts**: `morph-hero`, `morph-pair`, `morph-chain`, `morph-stat`, `morph-quartet`, `morph-cta`
-- **shapes**: `circle`, `squircle`, `star-6`, `triangle`, `capsule`, `diamond`
-- **transitions**: `color-wipe`, `morph-spin`, `scale-pop`
+## 3. Declarative Contract (`story.json`)
+Only author `story.json` (validated against `examples/story.schema.json`). Do not edit `examples/script/morph-kit.js` or `examples/script/story-runtime.js`.
 
-## Limits & Safe-Zone Contract
-- `headline` <= 44 chars; `subtext` <= 92 chars; `items` <= 4.
-- Portrait `1080x1920` keeps all morph cards inside `x: 56..952`, `y: 80..1420`.
-- Pure deterministic function of `t`: cubic morph progress and squash-stretch derive strictly from `t`.
+```json
+{
+  "aspect": "9:16",
+  "fps": 30,
+  "seed": 808,
+  "microstockMode": false,
+  "shots": [
+    {
+      "id": "shot_3_flight_loop",
+      "layout": "flight-loop",
+      "start": 15.0,
+      "duration": 7.5,
+      "tagline": "05 / 07 · TAKE OFF LOOP → ARRIVAL PIN",
+      "captions": ["GOOD MORNING", "SUNRISE", "SUNSET", "SEA BREEZE", "TAKE OFF", "ARRIVAL", "LOVE"]
+    }
+  ]
+}
+```
+
+## 4. Verification & Mode `'M'`
+- Deterministic render & contact sheet:
+  `node scripts/render-skill-example.mjs --dir ".aetheria/skills/mg-shape-morph/examples" --html "story.html" --times "1,5,10,16,22,27" --out-dir "<outDir>"`
+- Microstock clean-plate mode (`?microstock=1` or key `'M'`): Suppresses all chapter captions, wordmark letters, and taglines while preserving the pure geometric icon morphs, color-field wipes, and heartbeat rings.

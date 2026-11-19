@@ -1,22 +1,21 @@
 {
-  "schemaVersion": 1,
-  "skillId": "mg-shape-morph",
-  "renderer": "2d-shape-morph",
-  "useThree": false,
-  "scripts": ["script/morph-kit.js", "script/story-runtime.js"],
-  "enums": {
-    "themes": ["cobalt-pop", "coral-field", "emerald-morph", "violet-pulse", "amber-studio"],
-    "layouts": ["morph-hero", "morph-pair", "morph-chain", "morph-stat", "morph-quartet", "morph-cta"],
-    "shapes": ["circle", "squircle", "star-6", "triangle", "capsule", "diamond"],
-    "transitions": ["color-wipe", "morph-spin", "scale-pop"]
-  },
-  "limits": {
-    "minShots": 2,
-    "maxShots": 12,
-    "minDurationSec": 3.0,
-    "maxDurationSec": 90.0,
-    "maxHeadlineChars": 44,
-    "maxSubtextChars": 92,
-    "maxItems": 4
+  "slug": "mg-shape-morph",
+  "name": "Swiss Flat-Color Via-Circle Icon Morph Engine (08-morph Craft)",
+  "paradigm": "canvas2d-svg-morph-kit",
+  "layouts": ["morning-cup", "sun-to-sea", "flight-loop", "heart-wordmark"],
+  "components": [
+    "240-vertex-resampled-contour-morph",
+    "via-circle-topological-bridge",
+    "oklab-color-field-bloom-wipe",
+    "steaming-mug-to-sun-rays",
+    "horizon-sunset-to-flapping-gull",
+    "paper-plane-360-loop-flight",
+    "map-pin-shockwave-ripple",
+    "beating-heart-to-morphe-wordmark",
+    "7-dot-capsule-chapter-hud"
+  ],
+  "defaultSafeZone": {
+    "9:16": { "x": 56, "y": 80, "w": 896, "h": 1340 },
+    "16:9": { "x": 96, "y": 54, "w": 1574, "h": 908 }
   }
 }
