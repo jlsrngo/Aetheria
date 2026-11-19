@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "meta": {
+    "title": "SOFT 3D — Spatial Product Ident",
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "durationSec": 30,
+    "theme": "pastel-candy"
+  },
+  "shots": [
+    {
+      "id": "s1-hero",
+      "startSec": 0,
+      "endSec": 5,
+      "layout": "spatial-hero",
+      "theme": "pastel-candy",
+      "badge": "3D STUDIO PBR",
+      "headline": "DESAIN SPASIAL 3D",
+      "subtext": "Material lembut dengan pencahayaan studio tiga titik",
+      "object": "candy-torus",
+      "transition": "elastic-drop"
+    },
+    {
+      "id": "s2-showcase",
+      "startSec": 5,
+      "endSec": 10,
+      "layout": "spatial-showcase",
+      "theme": "studio-cream",
+      "badge": "CLONER WAVE",
+      "headline": "MEDAN EFEKTOR DINAMIS",
+      "subtext": "Barisan bola studio beriak sinkron dengan objek utama",
+      "object": "crystal-icosa",
+      "transition": "camera-push"
+    },
+    {
+      "id": "s3-orbit",
+      "startSec": 10,
+      "endSec": 15,
+      "layout": "spatial-orbit",
+      "theme": "obsidian-chrome",
+      "badge": "GYRO MOTION",
+      "headline": "ORBIT KROM PRESISI",
+      "subtext": "Refleksi metalik tajam untuk hardware dan AI",
+      "object": "gyro-rings",
+      "transition": "orbit-sweep"
+    },
+    {
+      "id": "s4-metric",
+      "startSec": 15,
+      "endSec": 20,
+      "layout": "spatial-metric",
+      "theme": "mint-ceramic",
+      "metric": "100% 3D",
+      "headline": "WEBGL OFFLINE DETERMINISTIK",
+      "object": "floating-capsule",
+      "transition": "elastic-drop"
+    },
+    {
+      "id": "s5-specs",
+      "startSec": 20,
+      "endSec": 25,
+      "layout": "spatial-specs",
+      "theme": "lilac-dream",
+      "headline": "TIGA PILAR MATERIAL",
+      "object": "prism-cube",
+      "items": [
+        { "label": "01. Roughness & Ceramic Matte" },
+        { "label": "02. Specular Rim Three-Point" },
+        { "label": "03. Squash & Stretch Damping" }
+      ],
+      "transition": "camera-push"
+    },
+    {
+      "id": "s6-cta",
+      "startSec": 25,
+      "endSec": 30,
+      "layout": "spatial-cta",
+      "theme": "pastel-candy",
+      "badge": "SPATIAL KIT",
+      "headline": "VISUAL SHOWREEL INSTAN",
+      "subtext": "Render 3D WebGL langsung di mesin lokal tanpa cloud",
+      "object": "orb-cluster",
+      "transition": "orbit-sweep"
+    }
+  ],
+  "captions": [
+    { "startSec": 0.5, "endSec": 4.5, "text": "DESAIN SPASIAL 3D" },
+    { "startSec": 5.5, "endSec": 9.5, "text": "MEDAN EFEKTOR" },
+    { "startSec": 10.5, "endSec": 14.5, "text": "ORBIT KROM" },
+    { "startSec": 15.5, "endSec": 19.5, "text": "100 PERSEN 3D" },
+    { "startSec": 20.5, "endSec": 24.5, "text": "TIGA MATERIAL" },
+    { "startSec": 25.5, "endSec": 29.5, "text": "SHOWREEL INSTAN" }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "skillId": "mg-3d-spatial",
+  "renderer": "3d-spatial-three",
+  "useThree": true,
+  "scripts": ["script/spatial-kit.js", "script/story-runtime.js"],
+  "enums": {
+    "themes": ["pastel-candy", "studio-cream", "obsidian-chrome", "mint-ceramic", "lilac-dream"],
+    "layouts": ["spatial-hero", "spatial-showcase", "spatial-specs", "spatial-metric", "spatial-orbit", "spatial-cta"],
+    "objects": ["candy-torus", "crystal-icosa", "floating-capsule", "gyro-rings", "prism-cube", "orb-cluster"],
+    "transitions": ["camera-push", "elastic-drop", "orbit-sweep"]
+  },
+  "limits": {
+    "minShots": 2,
+    "maxShots": 12,
+    "minDurationSec": 3.0,
+    "maxDurationSec": 90.0,
+    "maxHeadlineChars": 44,
+    "maxSubtextChars": 92,
+    "maxItems": 4
+  }
+}
