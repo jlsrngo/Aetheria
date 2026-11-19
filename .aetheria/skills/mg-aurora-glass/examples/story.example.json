@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "meta": {
+    "title": "Lumina AI — Think In Light",
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "durationSec": 30,
+    "theme": "indigo-aurora"
+  },
+  "shots": [
+    {
+      "id": "s1-hook",
+      "startSec": 0,
+      "endSec": 5,
+      "layout": "glass-hero",
+      "theme": "indigo-aurora",
+      "badge": "AI WORKSPACE 2026",
+      "headline": "THINK IN LIGHT",
+      "subtext": "Antarmuka kaca cair yang tenang dan responsif",
+      "widget": "orb-pulse",
+      "transition": "light-sweep"
+    },
+    {
+      "id": "s2-compare",
+      "startSec": 5,
+      "endSec": 10,
+      "layout": "glass-split",
+      "theme": "emerald-northern",
+      "headline": "SUARA & KONTEKS",
+      "items": [
+        { "label": "GELOMBANG SUARA ALAMI", "widget": "waveform" },
+        { "label": "KONTROL INSTAN", "widget": "toggle-grid" }
+      ],
+      "transition": "luminance-fade"
+    },
+    {
+      "id": "s3-lens",
+      "startSec": 10,
+      "endSec": 15,
+      "layout": "glass-lens",
+      "theme": "twilight-violet",
+      "headline": "LENSA REFRAKTIF",
+      "subtext": "Fokus otomatis pada detail percakapan terpenting",
+      "widget": "chat-bubble",
+      "transition": "prism-expand"
+    },
+    {
+      "id": "s4-metric",
+      "startSec": 15,
+      "endSec": 20,
+      "layout": "glass-metric",
+      "theme": "obsidian-cyan",
+      "metric": "42ms",
+      "headline": "LATENSI RESPON RATA-RATA",
+      "widget": "metric-ring",
+      "transition": "light-sweep"
+    },
+    {
+      "id": "s5-stack",
+      "startSec": 20,
+      "endSec": 25,
+      "layout": "glass-stack",
+      "theme": "rose-nebula",
+      "headline": "TIGA LAPISAN CAHAYA",
+      "items": [
+        { "label": "01. Mesh Aurora Adaptif", "widget": "orb-pulse" },
+        { "label": "02. Kaca Buram Spekular", "widget": "spark-prism" },
+        { "label": "03. Mikro-UI Tenang", "widget": "toggle-grid" }
+      ],
+      "transition": "luminance-fade"
+    },
+    {
+      "id": "s6-cta",
+      "startSec": 25,
+      "endSec": 30,
+      "layout": "glass-cta",
+      "theme": "indigo-aurora",
+      "badge": "COBA SEKARANG",
+      "headline": "MASA DEPAN ANTIGELAP",
+      "subtext": "Cepat, jernih, dan bebas distraksi",
+      "widget": "spark-prism",
+      "transition": "prism-expand"
+    }
+  ],
+  "captions": [
+    { "startSec": 0.5, "endSec": 4.5, "text": "THINK IN LIGHT" },
+    { "startSec": 5.5, "endSec": 9.5, "text": "SUARA ALAMI" },
+    { "startSec": 10.5, "endSec": 14.5, "text": "LENSA KACA" },
+    { "startSec": 15.5, "endSec": 19.5, "text": "42 MILIDETIK" },
+    { "startSec": 20.5, "endSec": 24.5, "text": "TIGA LAPISAN" },
+    { "startSec": 25.5, "endSec": 29.5, "text": "BEBAS DISTRAKSI" }
+  ]
+}
