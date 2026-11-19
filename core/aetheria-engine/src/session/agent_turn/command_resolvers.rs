@@ -476,6 +476,17 @@ fn resolve_dynamic_style_or_skill_command_inner(
                                     .unwrap_or(false);
                             let has_custom_stage_kit = !seeded_kits.is_empty()
                                 || path.join("examples").join("index.html").is_file();
+                            let is_2d_collage_kit = path
+                                .join("examples")
+                                .join("script")
+                                .join("collage-kit.js")
+                                .is_file();
+                            let scaffold_three_flag = if is_2d_collage_kit { "false" } else { "true" };
+                            let kit_glob_hint = if is_2d_collage_kit {
+                                "script/collage-*.js or script/story-runtime.js"
+                            } else {
+                                "script/clay-*.js or script/story-runtime.js"
+                            };
                             let microstock_override =
                                 crate::studio::microstock::build_microstock_hard_override_block(
                                     workspace_dir,
@@ -484,9 +495,9 @@ fn resolve_dynamic_style_or_skill_command_inner(
                                 if has_story_kit {
                                     format!(
                                         "MANDATORY RULES FOR THIS GENERATION (DECLARATIVE STORY KIT — MICROSTOCK MODE 'M' LOCKED):\n\
-                                        1. Write ONLY `{project_rel_prefix}story.json` (<= 150 lines) matching `SKILL.md` with `captions: {{ \"enabled\": false }}` and the locked Microstock canvas dimensions. Do NOT hand-write `index.html` or `script/scene*.js` and DO NOT overwrite seeded `script/clay-*.js` or `script/story-runtime.js`.\n\
+                                        1. Write ONLY `{project_rel_prefix}story.json` (<= 150 lines) matching `SKILL.md` with `captions: {{ \"enabled\": false }}` and the locked Microstock canvas dimensions. Do NOT hand-write `index.html` or `script/scene*.js` and DO NOT overwrite seeded {kit_glob_hint}.\n\
                                         2. DO NOT call `film_audio`, `audio-director`, `voicebox_speak`, or `generate_smart_sfx` (Adobe Stock requires silent `-an` streams).\n\
-                                        3. Call `film_scaffold(..., {{ storyMode: true, useThree: true }})` to generate managed `index.html` and verify `storyLint.valid == true` (0 errors), then call `capture_film_preview` to inspect `contact_sheet.jpg` & `storyQa` (at most 1 targeted correction pass if any shot fails framing).\n\
+                                        3. Call `film_scaffold(..., {{ storyMode: true, useThree: {scaffold_three_flag} }})` to generate managed `index.html` and verify `storyLint.valid == true` (0 errors), then call `capture_film_preview` to inspect `contact_sheet.jpg` & `storyQa` (at most 1 targeted correction pass if any shot fails framing).\n\
                                         4. Update `{project_rel_prefix}microstock/manifest.json` metadata.\n\n\
                                         {ms_override}"
                                     )
@@ -514,8 +525,8 @@ fn resolve_dynamic_style_or_skill_command_inner(
                                 format!(
                                     "MANDATORY RULES FOR THIS GENERATION (DECLARATIVE STORY KIT — SINGLE SOURCE OF TRUTH):\n\
                                     1. Generate narrated voiceover/SFX directly via `film_audio` from the coordinator so shot durations derive cleanly from WAV (or omit audio if silent).\n\
-                                    2. Write `{project_rel_prefix}story.json` (<= 150 lines) matching `SKILL.md` + `story.example.json` (or delegate solely `story.json` creation to `motion-designer`). Do NOT hand-write `index.html` or `script/scene*.js` (unless a specific shot truly requires `shots[].custom: \"script/sceneK.js\"`), and DO NOT overwrite seeded `script/clay-kit.js`, `script/clay-assets.js`, or `script/story-runtime.js`.\n\
-                                    3. Call `film_scaffold(..., {{ storyMode: true, useThree: true }})` to generate managed `{project_rel_prefix}index.html` and validate `storyLint` (0 errors required).\n\
+                                    2. Write `{project_rel_prefix}story.json` (<= 150 lines) matching `SKILL.md` + `story.example.json` (or delegate solely `story.json` creation to `motion-designer`). Do NOT hand-write `index.html` or `script/scene*.js` (unless a specific shot truly requires `shots[].custom: \"script/sceneK.js\"`), and DO NOT overwrite seeded {kit_glob_hint}.\n\
+                                    3. Call `film_scaffold(..., {{ storyMode: true, useThree: {scaffold_three_flag} }})` to generate managed `{project_rel_prefix}index.html` and validate `storyLint` (0 errors required).\n\
                                     4. Call `capture_film_preview` to render `.aetheria/preview/contact_sheet.jpg` (1 mid-frame per shot) and verify `storyQa.failedShots` is empty; apply at most 1 targeted correction pass if any shot fails framing or lint."
                                 )
                             } else if has_custom_stage_kit {

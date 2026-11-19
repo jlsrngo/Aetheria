@@ -313,6 +313,12 @@ export async function renderSkillExample(opts) {
               };
             }
           }
+        } else if (window.__shotReport) {
+          const vals = Object.values(window.__shotReport);
+          const match = vals.find((r) => r && Math.abs(Number(r.t) - ts) < 0.01) || vals[vals.length - 1];
+          if (match && match.bbox) {
+            heroBbox = match.bbox;
+          }
         }
 
         // Measure lower-third emptiness on the WebGL canvas (fraction of pixels with near-flat gradient/sidewalk color)

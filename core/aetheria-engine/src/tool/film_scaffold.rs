@@ -814,9 +814,17 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
         || story_path.is_file();
 
     let mut custom_story_scripts: Vec<String> = Vec::new();
+    let mut story_renderer = if film_dir.join("script").join("collage-kit.js").is_file() {
+        "2d-cutout-collage".to_string()
+    } else {
+        "3d-soft-clay".to_string()
+    };
     let story_lint_report = if story_path.is_file() {
         if let Ok(raw_s) = std::fs::read_to_string(&story_path) {
             if let Ok(sv) = serde_json::from_str::<Value>(&raw_s) {
+                if let Some(r) = sv.get("renderer").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()) {
+                    story_renderer = r.to_string();
+                }
                 if let Some(shots) = sv.get("shots").and_then(Value::as_array) {
                     for sh in shots {
                         if let Some(c) = sh.get("custom").and_then(Value::as_str).map(str::trim) {
@@ -835,7 +843,8 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
 
     if manage_index {
         let html = if is_story_mode {
-            crate::studio::story_lint::render_story_index_html(
+            crate::studio::story_lint::render_story_index_html_for_renderer(
+                &story_renderer,
                 &manifest.title,
                 manifest.width,
                 manifest.height,

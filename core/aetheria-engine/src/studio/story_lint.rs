@@ -320,6 +320,11 @@ pub fn lint_story_json_value(
         );
     }
 
+    // Dispatch 2D declarative renderers (e.g. `2d-cutout-collage`) to their dedicated validator
+    if root.get("renderer").and_then(Value::as_str) == Some("2d-cutout-collage") {
+        return super::collage_lint::lint_collage_story_value(root, film_dir, story_path_label, issues);
+    }
+
     // 3. Cast & Props validation
     let mut actor_ids = HashSet::new();
     match root.get("cast").and_then(Value::as_array) {
@@ -688,6 +693,20 @@ pub fn lint_story_file(story_path: &Path) -> StoryLintReport {
         }
     };
     lint_story_json_value(&val, story_path.parent(), &label)
+}
+
+pub fn render_story_index_html_for_renderer(
+    renderer: &str,
+    title: &str,
+    width: u32,
+    height: u32,
+    custom_scripts: &[String],
+    is_microstock: bool,
+) -> String {
+    if renderer == "2d-cutout-collage" {
+        return super::collage_lint::render_collage_index_html(title, width, height, custom_scripts, is_microstock);
+    }
+    render_story_index_html(title, width, height, custom_scripts, is_microstock)
 }
 
 /// Renders a minimal managed `index.html` for declarative `story.json` projects so models

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <title>Aetheria 2D Cutout Collage Story</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 1080px;
+      height: 1920px;
+      overflow: hidden;
+      background: #D7BE9B;
+      font-family: "Inter", sans-serif;
+    }
+    #stage {
+      position: relative;
+      width: 1080px;
+      height: 1920px;
+    }
+    #stage canvas {
+      position: absolute;
+      inset: 0;
+      width: 1080px;
+      height: 1920px;
+      display: block;
+    }
+  </style>
+  <script src="/script/aetheria-motion.js"></script>
+  <script src="/script/collage-kit.js"></script>
+  <script src="/script/collage-layouts.js"></script>
+  <script src="/script/story-runtime.js"></script>
+</head>
+<body>
+  <div id="stage">
+    <canvas id="stage-2d" width="1080" height="1920"></canvas>
+  </div>
+  <script>
+    (function () {
+      var params = new URLSearchParams(window.location.search || "");
+      var storyUrl = params.get("story") || "/story.json";
+      var isMicrostock = params.get("microstock") === "1";
+      window.StoryRuntime.boot({
+        canvas: document.getElementById("stage-2d"),
+        storyUrl: storyUrl,
+        fallbackStoryUrl: "/story.example.json",
+        isMicrostock: isMicrostock
+      });
+    })();
+  </script>
+</body>
+</html>
