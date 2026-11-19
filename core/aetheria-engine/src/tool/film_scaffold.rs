@@ -816,6 +816,8 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
     let mut custom_story_scripts: Vec<String> = Vec::new();
     let mut story_renderer = if film_dir.join("script").join("collage-kit.js").is_file() {
         "2d-cutout-collage".to_string()
+    } else if film_dir.join("script").join("keynote-kit.js").is_file() {
+        "2d-product-keynote".to_string()
     } else {
         "3d-soft-clay".to_string()
     };

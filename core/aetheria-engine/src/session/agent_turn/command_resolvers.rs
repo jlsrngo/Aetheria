@@ -481,9 +481,16 @@ fn resolve_dynamic_style_or_skill_command_inner(
                                 .join("script")
                                 .join("collage-kit.js")
                                 .is_file();
-                            let scaffold_three_flag = if is_2d_collage_kit { "false" } else { "true" };
+                            let is_2d_keynote_kit = path
+                                .join("examples")
+                                .join("script")
+                                .join("keynote-kit.js")
+                                .is_file();
+                            let scaffold_three_flag = if is_2d_collage_kit || is_2d_keynote_kit { "false" } else { "true" };
                             let kit_glob_hint = if is_2d_collage_kit {
                                 "script/collage-*.js or script/story-runtime.js"
+                            } else if is_2d_keynote_kit {
+                                "script/keynote-*.js or script/story-runtime.js"
                             } else {
                                 "script/clay-*.js or script/story-runtime.js"
                             };

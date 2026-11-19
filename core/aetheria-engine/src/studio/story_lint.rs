@@ -320,9 +320,15 @@ pub fn lint_story_json_value(
         );
     }
 
-    // Dispatch 2D declarative renderers (e.g. `2d-cutout-collage`) to their dedicated validator
-    if root.get("renderer").and_then(Value::as_str) == Some("2d-cutout-collage") {
-        return super::collage_lint::lint_collage_story_value(root, film_dir, story_path_label, issues);
+    // Dispatch 2D declarative renderers (`2d-cutout-collage`, `2d-product-keynote`) to their dedicated validators
+    match root.get("renderer").and_then(Value::as_str) {
+        Some("2d-cutout-collage") => {
+            return super::collage_lint::lint_collage_story_value(root, film_dir, story_path_label, issues);
+        }
+        Some("2d-product-keynote") => {
+            return super::keynote_lint::lint_keynote_story_value(root, film_dir, story_path_label, issues);
+        }
+        _ => {}
     }
 
     // 3. Cast & Props validation
@@ -705,6 +711,9 @@ pub fn render_story_index_html_for_renderer(
 ) -> String {
     if renderer == "2d-cutout-collage" {
         return super::collage_lint::render_collage_index_html(title, width, height, custom_scripts, is_microstock);
+    }
+    if renderer == "2d-product-keynote" {
+        return super::keynote_lint::render_keynote_index_html(title, width, height, custom_scripts, is_microstock);
     }
     render_story_index_html(title, width, height, custom_scripts, is_microstock)
 }

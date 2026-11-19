@@ -1,0 +1,101 @@
+{
+  "renderer": "2d-product-keynote",
+  "title": "Lumina Studio Pro — Keynote Product Launch",
+  "theme": "obsidian-pro",
+  "canvas": { "w": 1920, "h": 1080, "fps": 30 },
+  "shots": [
+    {
+      "id": "shot1_intro",
+      "start": 0,
+      "duration": 4.0,
+      "layout": "brand-intro",
+      "theme": "obsidian-pro",
+      "eyebrow": "INTRODUCING",
+      "headline": "LUMINA STUDIO PRO",
+      "subheadline": "Kecepatan desktop. Presisi studio dalam satu ruang kerja.",
+      "icon": "spark",
+      "accentColor": "#2997FF",
+      "secondaryColor": "#A855F7",
+      "transition": "zoom-cross"
+    },
+    {
+      "id": "shot2_device",
+      "start": 4.0,
+      "duration": 4.0,
+      "layout": "hero-device",
+      "theme": "pearl-studio",
+      "eyebrow": "DESAIN ULANG TOTAL",
+      "headline": "SIAP DI SETIAP LAYAR",
+      "subheadline": "Render lokal 100% offline tanpa jeda cloud.",
+      "device": "laptop",
+      "accentColor": "#0071E3",
+      "secondaryColor": "#38BDF8",
+      "transition": "slide-push"
+    },
+    {
+      "id": "shot3_bento",
+      "start": 8.0,
+      "duration": 4.0,
+      "layout": "bento-grid",
+      "theme": "aurora-keynote",
+      "eyebrow": "ARSITEKTUR BARU",
+      "headline": "EMPAT KEKUATAN INTI",
+      "items": [
+        { "stat": "3.2×", "label": "Lebih Cepat Render", "icon": "bolt" },
+        { "stat": "100%", "label": "Privat & Lokal", "icon": "shield" },
+        { "stat": "4K", "label": "Output Tajam", "icon": "camera" },
+        { "stat": "0", "label": "Biaya Cloud", "icon": "check" }
+      ],
+      "accentColor": "#38BDF8",
+      "secondaryColor": "#C084FC",
+      "transition": "zoom-cross"
+    },
+    {
+      "id": "shot4_stat",
+      "start": 12.0,
+      "duration": 4.0,
+      "layout": "spec-counter",
+      "theme": "titanium-warm",
+      "eyebrow": "BENCHMARK NYATA",
+      "statValue": "2.4×",
+      "statLabel": "PERCEPATAN ALUR PRODUKSI",
+      "subheadline": "Dari ide menjadi video siap tayang dalam hitungan menit.",
+      "accentColor": "#E2C799",
+      "secondaryColor": "#F59E0B",
+      "transition": "slide-push"
+    },
+    {
+      "id": "shot5_ui",
+      "start": 16.0,
+      "duration": 4.0,
+      "layout": "ui-showcase",
+      "theme": "mint-editorial",
+      "eyebrow": "ALUR KERJA CERDAS",
+      "headline": "OTOMATIS DARI AWAL HINGGA EKSPOR",
+      "items": [
+        { "label": "Validasi Framing Otomatis", "stat": "0 Error", "icon": "shield" },
+        { "label": "Sinkronisasi Beat & Transisi", "stat": "30 fps", "icon": "wave" },
+        { "label": "Pratinjau Lembar Kontak", "stat": "Instan", "icon": "play" }
+      ],
+      "accentColor": "#059669",
+      "secondaryColor": "#0EA5E9",
+      "transition": "zoom-cross"
+    },
+    {
+      "id": "shot6_outro",
+      "start": 20.0,
+      "duration": 4.0,
+      "layout": "cta-outro",
+      "theme": "obsidian-pro",
+      "headline": "LUMINA STUDIO PRO",
+      "subheadline": "Mulai berkarya hari ini.",
+      "cta": "COBA SEKARANG",
+      "icon": "spark",
+      "accentColor": "#2997FF",
+      "secondaryColor": "#A855F7",
+      "transition": "cut"
+    }
+  ],
+  "captions": { "enabled": false },
+  "audio": { "wav": "", "words": "" }
+}
