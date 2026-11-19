@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "skillId": "mg-shape-morph",
+  "renderer": "2d-shape-morph",
+  "useThree": false,
+  "scripts": ["script/morph-kit.js", "script/story-runtime.js"],
+  "enums": {
+    "themes": ["cobalt-pop", "coral-field", "emerald-morph", "violet-pulse", "amber-studio"],
+    "layouts": ["morph-hero", "morph-pair", "morph-chain", "morph-stat", "morph-quartet", "morph-cta"],
+    "shapes": ["circle", "squircle", "star-6", "triangle", "capsule", "diamond"],
+    "transitions": ["color-wipe", "morph-spin", "scale-pop"]
+  },
+  "limits": {
+    "minShots": 2,
+    "maxShots": 12,
+    "minDurationSec": 3.0,
+    "maxDurationSec": 90.0,
+    "maxHeadlineChars": 44,
+    "maxSubtextChars": 92,
+    "maxItems": 4
+  }
+}

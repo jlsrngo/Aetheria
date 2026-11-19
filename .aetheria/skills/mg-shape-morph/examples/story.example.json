@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "meta": {
+    "title": "MORPHE — Everything Is Connected",
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "durationSec": 30,
+    "theme": "cobalt-pop"
+  },
+  "shots": [
+    {
+      "id": "s1-hero",
+      "startSec": 0,
+      "endSec": 5,
+      "layout": "morph-hero",
+      "theme": "cobalt-pop",
+      "badge": "SEAMLESS MORPH",
+      "headline": "SEMUA SALING TERHUBUNG",
+      "subtext": "Transformasi geometri mulus tanpa potongan kasar",
+      "fromShape": "circle",
+      "toShape": "star-6",
+      "transition": "color-wipe"
+    },
+    {
+      "id": "s2-pair",
+      "startSec": 5,
+      "endSec": 10,
+      "layout": "morph-pair",
+      "theme": "coral-field",
+      "headline": "TRANSISI KONSTAN",
+      "items": [
+        { "label": "LINGKARAN KE SQUIRCLE", "fromShape": "circle", "toShape": "squircle" },
+        { "label": "SEGITIGA KE BERLIAN", "fromShape": "triangle", "toShape": "diamond" }
+      ],
+      "transition": "morph-spin"
+    },
+    {
+      "id": "s3-quartet",
+      "startSec": 10,
+      "endSec": 15,
+      "layout": "morph-quartet",
+      "theme": "emerald-morph",
+      "headline": "EMPAT RANTAI MORPH",
+      "transition": "scale-pop"
+    },
+    {
+      "id": "s4-stat",
+      "startSec": 15,
+      "endSec": 20,
+      "layout": "morph-stat",
+      "theme": "violet-pulse",
+      "metric": "64 VTX",
+      "headline": "INTERPOLASI SIMPUL SETARA",
+      "fromShape": "squircle",
+      "toShape": "diamond",
+      "transition": "color-wipe"
+    },
+    {
+      "id": "s5-chain",
+      "startSec": 20,
+      "endSec": 25,
+      "layout": "morph-chain",
+      "theme": "amber-studio",
+      "headline": "ALUR TANPA PUTUS",
+      "items": [
+        { "label": "01. Bentuk Awal", "fromShape": "circle", "toShape": "capsule" },
+        { "label": "02. Rotasi & Squash", "fromShape": "capsule", "toShape": "star-6" },
+        { "label": "03. Mendarat Presisi", "fromShape": "star-6", "toShape": "squircle" }
+      ],
+      "transition": "morph-spin"
+    },
+    {
+      "id": "s6-cta",
+      "startSec": 25,
+      "endSec": 30,
+      "layout": "morph-cta",
+      "theme": "cobalt-pop",
+      "badge": "MORPHE STUDIO",
+      "headline": "SATU BENTUK, RIBUAN IDE",
+      "subtext": "Sempurna untuk brand identity dan explainer modern",
+      "fromShape": "diamond",
+      "toShape": "circle",
+      "transition": "scale-pop"
+    }
+  ],
+  "captions": [
+    { "startSec": 0.5, "endSec": 4.5, "text": "SEMUA TERHUBUNG" },
+    { "startSec": 5.5, "endSec": 9.5, "text": "TRANSISI MULUS" },
+    { "startSec": 10.5, "endSec": 14.5, "text": "EMPAT RANTAI" },
+    { "startSec": 15.5, "endSec": 19.5, "text": "64 SIMPUL SETARA" },
+    { "startSec": 20.5, "endSec": 24.5, "text": "ALUR TANPA PUTUS" },
+    { "startSec": 25.5, "endSec": 29.5, "text": "RIBUAN IDE" }
+  ]
+}
