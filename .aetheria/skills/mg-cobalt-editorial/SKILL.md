@@ -27,15 +27,15 @@ Every shot supports cinematic camera motion:
 1. `kinetic-word-reveal`: Word-by-word blur/fade reveal (`headline`).
 2. `icon-row-morph`: Anchor word (`anchor`) flanked by staggered micro-UI icons (`leftIcons[]`, `rightIcons[]`).
 3. `radial-wheel-list`: Anchor word (`anchor`) + active focal dot (`•`) + tilted rotating radial list (`items[]`, 6–10 items).
-4. `coverflow-carousel` / `orbit-carousel`: 3D cylindrical ring carousel (`cards[]`: `{ title, tag, style }`, `targetIndex`, `turns`) with glowing floor ellipse, mirror reflections, fast spin, and sudden exponential brake locking onto the center hero card.
+4. `coverflow-carousel` / `orbit-carousel`: Tight 3D cylindrical ring carousel (`cards[]`: `{ title, tag, style }`, `targetIndex`, `turns`) directly over the clean backdrop with fast spin and sudden exponential brake locking onto the center hero card.
 5. `logo-assemble`: Geometric two-part brand mark assembling with spring snap + optional 1-beat blackout flash (`blackout`).
 6. `brand-lockup-resolve`: Geometric mark sliding left + halftone dissolve into crisp wordmark (`brand`, `subtitle`).
-7. `tilted-chart-dolly`: 2-phase 3D-foreshortened perspective bar chart (`metric`, `bars[]`, `highlightIdx`, `avgLabel`) starting laid flat, standing upright, then zooming deep into the glowing cyan-to-amber focal bar with velocity blur.
+7. `tilted-chart-dolly`: 2-phase true 3D forward-tilted perspective bar chart (`metric`, `bars[]`, `highlightIdx`, `avgLabel`) with soft matte charcoal-grey palette, tilt-shift Depth-of-Field blur, standing upright with motion blur, then zooming deep into the glowing cyan-to-amber focal bar.
 8. `metric-pills-tree`: Sequential 1-by-1 pill reveal (glowing circle orb → expanding pill with sweeping glowing border + passive continuous camera pull-back) rising through a luminous connector bracket to hero `score` (`pills[]`, `scoreLabel`, `scoreValue`).
 9. `neon-score-ring`: Glowing radial progress ring (`scoreFrom`, `scoreTo`, `headline`, `subtext`, `badge`) with macro zoom-out reveal.
 10. `macro-ui-prompt`: Dark obsidian SaaS prompt/dashboard bar (`headline`, `promptText`, `modelTag`, `chips[]`, `ctaLabel`) with macro zoom-out & typing reveal.
 11. `prompt-type-send`: Variable-pace 4-phase macro prompt (`headline`, `promptText`, `modelTag`, `chips[]`): zoomed `2.35×` follow-cam panning left as words type 1-by-1 → whip to `↑` Send button → click press + shockwave ripple → bloom flash transition.
-12. `whip-cta-morph`: Glossy dark brand icon + falling light spark morphing with horizontal motion blur into a wide glossy dark-violet `▶ Start` pill (`ctaLabel`, `brand`).
+12. `whip-cta-morph`: 4-beat CTA transition — falling light spark onto glossy dark brand icon → impact zoom-in & horizontal motion-blurred morph into wide glossy dark-violet `▶ Start` pill → rapid zoom-out with full-screen white flash wash into the final scene (`ctaLabel`, `brand`).
 
 ## Mode `'M'` (`?microstock=1`)
 Suppresses all typography and captions while preserving diagonal cobalt light beams, micro-UI geometry, 3D coverflow abstract cards, and geometric mark animation.

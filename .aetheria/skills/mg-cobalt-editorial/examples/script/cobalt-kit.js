@@ -579,6 +579,106 @@
     ctx.restore();
   }
 
+  // Reusable offscreen scratch canvas pool for true 3D perspective strip projection
+  var scratchPool = {};
+  function getScratchCanvas(key, w, h) {
+    var cw = Math.max(16, Math.ceil(w));
+    var ch = Math.max(16, Math.ceil(h));
+    var entry = scratchPool[key];
+    if (!entry) {
+      var c = typeof document !== 'undefined' && document.createElement ? document.createElement('canvas') : null;
+      if (!c) return null;
+      c.width = cw;
+      c.height = ch;
+      entry = { canvas: c, ctx: c.getContext('2d') };
+      scratchPool[key] = entry;
+    } else if (entry.canvas.width !== cw || entry.canvas.height !== ch) {
+      entry.canvas.width = cw;
+      entry.canvas.height = ch;
+    }
+    entry.ctx.clearRect(0, 0, cw, ch);
+    return entry;
+  }
+
+  /**
+   * True 3D Y-axis perspective rotation (trapezoid strip projection) so carousel cards
+   * genuinely angle along the curved cylinder rather than facing flat forward.
+   * yawSin < 0 (left side of ring) -> left edge recedes (shorter), right edge closer (taller).
+   * yawSin > 0 (right side of ring) -> left edge closer (taller), right edge recedes (shorter).
+   */
+  function drawPerspectiveRotateY(ctx, src, cx, cy, destW, destH, yawSin, depthStrength) {
+    var slices = 28;
+    var sw = src.width;
+    var sh = src.height;
+    var k = clamp(yawSin, -1, 1) * (depthStrength || 0.24);
+    var scaleLeft = 1 + k;
+    var scaleRight = 1 - k;
+    var startX = cx - destW * 0.5;
+    var sliceDstW = destW / slices;
+    var sliceSrcW = sw / slices;
+
+    for (var i = 0; i < slices; i++) {
+      var u = (i + 0.5) / slices;
+      var hScale = scaleLeft + (scaleRight - scaleLeft) * u;
+      var dh = destH * hScale;
+      var dx = startX + i * sliceDstW;
+      var dy = cy - dh * 0.5;
+      ctx.drawImage(
+        src,
+        i * sliceSrcW,
+        0,
+        Math.min(sw - i * sliceSrcW, sliceSrcW + 0.8),
+        sh,
+        dx,
+        dy,
+        sliceDstW + 1.15,
+        dh
+      );
+    }
+  }
+
+  /**
+   * True 3D X-axis perspective tilt (laid flat forward -> standing upright) with
+   * real tilt-shift Depth-of-Field blur blending between sharp and blurred offscreen buffers.
+   */
+  function drawPerspectiveTiltX(ctx, srcSharp, srcBlur, cx, cy, destW, destH, tiltAmount, focusBandV) {
+    var slices = 44;
+    var sw = srcSharp.width;
+    var sh = srcSharp.height;
+    var t = clamp(tiltAmount, 0, 1);
+    var scaleTop = 1.0 - 0.48 * t;     // top edge recedes deep into Z
+    var scaleBot = 1.0 + 0.30 * t;     // bottom edge widens toward camera
+    var totalH = destH * (1.0 - 0.38 * t);
+    var topY = cy - totalH * 0.5 + 32 * t;
+    var expY = 1.0 + 0.36 * t;         // perspective foreshortening compression near top
+
+    for (var i = 0; i < slices; i++) {
+      var v0 = i / slices;
+      var v1 = (i + 1) / slices;
+      var vm = (v0 + v1) * 0.5;
+      var y0 = topY + Math.pow(v0, expY) * totalH;
+      var y1 = topY + Math.pow(v1, expY) * totalH;
+      var stripH = Math.max(1.2, y1 - y0 + 1.25);
+      var wScale = scaleTop + (scaleBot - scaleTop) * vm;
+      var dw = destW * wScale;
+      var dx = cx - dw * 0.5;
+      var sy = v0 * sh;
+      var srcH = Math.min(sh - sy, (v1 - v0) * sh + 0.8);
+
+      // Depth-of-Field weight: razor-sharp at focusBandV, softly blurred near far top & near bottom when tilted
+      var distF = Math.abs(vm - focusBandV);
+      var dofAlpha = t > 0.03 ? clamp((distF - 0.14) / 0.34, 0, 1) * t * 0.92 : 0;
+
+      ctx.drawImage(srcSharp, 0, sy, sw, srcH, dx, y0, dw, stripH);
+      if (dofAlpha > 0.02 && srcBlur) {
+        ctx.save();
+        ctx.globalAlpha *= dofAlpha;
+        ctx.drawImage(srcBlur, 0, sy, sw, srcH, dx, y0, dw, stripH);
+        ctx.restore();
+      }
+    }
+  }
+
   /**
    * Main deterministic shot renderer called by `story-runtime.js`.
    */
@@ -605,9 +705,14 @@
     // 1. Signature diagonal cobalt light-beam (or obsidian glow) backdrop
     drawCobaltBeams(ctx, W, H, theme, globalT, beamIntensity);
 
-    // Subtle shot-end fade when transitioning out (except brand-lockup-resolve hold)
+    // Subtle shot-end fade when transitioning out (except hold / white-flash transition shots)
     var exitFade = 1.0;
-    if (layout !== 'brand-lockup-resolve' && layout !== 'logo-assemble' && layout !== 'prompt-type-send') {
+    if (
+      layout !== 'brand-lockup-resolve' &&
+      layout !== 'logo-assemble' &&
+      layout !== 'prompt-type-send' &&
+      layout !== 'whip-cta-morph'
+    ) {
       exitFade = clamp((dur - localTime) / 0.35, 0, 1);
     }
 
@@ -803,8 +908,8 @@
         ctx.restore();
       }
     } else if (layout === 'coverflow-carousel' || layout === 'orbit-carousel') {
-      // 3D Cylindrical Orbit Ring Carousel with glowing floor ring, mirror reflection,
-      // and dynamic speed-ramp: spins FAST then brakes SUDDENLY onto the hero card!
+      // Tight 3D Cylindrical Orbit Ring Carousel directly over clean backdrop
+      // with dynamic speed-ramp: spins FAST then brakes SUDDENLY onto the hero card!
       var cards = Array.isArray(shot.cards) && shot.cards.length
         ? shot.cards
         : [
@@ -822,12 +927,11 @@
       var targetIdx = shot.targetIndex !== undefined ? Number(shot.targetIndex) : 0;
       var enterC = easeOutCubic(clamp(localTime / 0.35, 0, 1));
 
-      // Variable pace: fast multi-card spin (1.35 turns) during first 58% of shot,
-      // then sudden exponential brake locking onto targetIdx for the last 42%!
+      // Variable pace: fast multi-card spin during first 62% of shot,
+      // then sudden exponential brake locking onto targetIdx for the last 38%!
       var spinDur = Math.max(0.6, dur * 0.62);
       var spinU = clamp(localTime / spinDur, 0, 1);
       var spinUprev = clamp((localTime - 0.033) / spinDur, 0, 1);
-      // Steep exponential brake curve (1 - (1-u)^4.5)
       var spinEase = 1 - Math.pow(1 - spinU, 4.6);
       var spinEasePrev = 1 - Math.pow(1 - spinUprev, 4.6);
       var spinVel = Math.abs(spinEase - spinEasePrev) / 0.033;
@@ -836,41 +940,13 @@
       var targetAngle = -(targetIdx / nCards) * Math.PI * 2;
       var currentRot = targetAngle - (1 - spinEase) * totalSweepRad;
 
-      var ringRx = isPortrait ? safe.w * 0.44 : Math.min(520, W * 0.40);
-      var ringRy = isPortrait ? 68 : 74;
-      var ringCenterY = cy + (isPortrait ? 150 : 128);
-      var baseW = isPortrait ? 245 : 210;
-      var baseH = isPortrait ? 335 : 275;
+      // Tight ring radius so cards sit closely packed around the 3D cylinder
+      var ringRx = isPortrait ? safe.w * 0.34 : Math.min(340, W * 0.275);
+      var ringRy = isPortrait ? 52 : 56;
+      var baseW = isPortrait ? 255 : 235;
+      var baseH = isPortrait ? 345 : 300;
 
-      // 1. Glowing floor reflection pool + neon elliptical ring (matching Image 1!)
-      ctx.save();
-      ctx.globalAlpha = exitFade * enterC;
-      var floorG = ctx.createRadialGradient(cx, ringCenterY + 12, 10, cx, ringCenterY + 12, ringRx * 1.18);
-      floorG.addColorStop(0.0, 'rgba(37, 99, 235, 0.42)');
-      floorG.addColorStop(0.55, 'rgba(29, 78, 216, 0.16)');
-      floorG.addColorStop(1.0, 'rgba(2, 6, 24, 0.0)');
-      ctx.fillStyle = floorG;
-      ctx.beginPath();
-      ctx.ellipse(cx, ringCenterY + 12, ringRx * 1.18, ringRy * 1.55, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Outer & inner luminous neon floor rings
-      ctx.strokeStyle = 'rgba(96, 165, 250, 0.85)';
-      ctx.lineWidth = 2.4;
-      ctx.shadowColor = '#3B82F6';
-      ctx.shadowBlur = 24;
-      ctx.beginPath();
-      ctx.ellipse(cx, ringCenterY + 10, ringRx * 1.04, ringRy * 1.08, 0, 0, Math.PI * 2);
-      ctx.stroke();
-
-      ctx.strokeStyle = 'rgba(147, 197, 253, 0.35)';
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.ellipse(cx, ringCenterY + 10, ringRx * 0.88, ringRy * 0.86, 0, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-
-      // 2. Compute 3D cylindrical coordinates for each card (z = cos(theta), x = sin(theta))
+      // Compute 3D cylindrical coordinates for each card (z = cos(theta), x = sin(theta))
       var items3d = [];
       for (var ci = 0; ci < nCards; ci++) {
         var theta = (ci / nCards) * Math.PI * 2 + currentRot;
@@ -892,14 +968,14 @@
       for (var oi = 0; oi < items3d.length; oi++) {
         var it = items3d[oi];
         var depth01 = (it.cosT + 1) * 0.5; // 0 at back, 1 at front
-        var persp = 0.52 + 0.54 * Math.pow(depth01, 1.15);
-        // Horizontal foreshortening on side cards so they angle along the cylinder!
-        var foreshortenX = 0.62 + 0.38 * Math.abs(it.cosT);
+        var persp = 0.58 + 0.48 * Math.pow(depth01, 1.15);
+        // Stronger horizontal foreshortening on side cards so the ring feels truly round in 3D
+        var foreshortenX = 0.48 + 0.52 * Math.abs(it.cosT);
         var cw = baseW * persp;
         var ch = baseH * persp;
         var cardX = cx + it.sinT * ringRx;
-        var cardY = cy - 16 + it.cosT * (ringRy * 0.52) - (1 - depth01) * 38;
-        var cardAlpha = clamp(0.22 + 0.78 * Math.pow(depth01, 1.3), 0.18, 1.0) * enterC;
+        var cardY = cy + it.cosT * (ringRy * 0.52) - (1 - depth01) * 24;
+        var cardAlpha = clamp(0.24 + 0.76 * Math.pow(depth01, 1.25), 0.20, 1.0) * enterC;
         var isFrontHero = it.cosT > 0.92 && spinU > 0.72;
 
         // Subtle pulse on hero card when locked
@@ -911,20 +987,20 @@
           ctx.filter = 'blur(' + (spinBlur * (1.1 - depth01 * 0.5)).toFixed(1) + 'px)';
         }
 
-        // Draw faint floor mirror reflection for front-half cards
-        if (it.cosT > 0.05) {
-          ctx.save();
-          ctx.globalAlpha = exitFade * cardAlpha * 0.18 * it.cosT;
-          ctx.translate(cardX, cardY + ch * 0.5 + 14);
-          ctx.scale(foreshortenX * lockBounce, -0.28);
-          drawShowcaseCard(ctx, -cw * 0.5, -ch * 0.5, cw, ch, it.card, globalT, true, theme);
-          ctx.restore();
-        }
-
-        ctx.translate(cardX, cardY);
-        ctx.scale(foreshortenX * lockBounce, lockBounce);
         var cardCopy = Object.assign({}, it.card, { __isHeroCenter: isFrontHero });
-        drawShowcaseCard(ctx, -cw * 0.5, -ch * 0.5, cw, ch, cardCopy, globalT, micro, theme);
+        var pad = 28;
+        var cardBuf = getScratchCanvas('orbitCard', baseW + pad * 2, baseH + pad * 2);
+        if (cardBuf) {
+          drawShowcaseCard(cardBuf.ctx, pad, pad, baseW, baseH, cardCopy, globalT, micro, theme);
+          var yawSign = it.cosT >= 0 ? it.sinT : -it.sinT * 0.65;
+          var projW = (cw + pad * 2 * persp) * foreshortenX * lockBounce;
+          var projH = (ch + pad * 2 * persp) * lockBounce;
+          drawPerspectiveRotateY(ctx, cardBuf.canvas, cardX, cardY, projW, projH, yawSign, 0.24);
+        } else {
+          ctx.translate(cardX, cardY);
+          ctx.scale(foreshortenX * lockBounce, lockBounce);
+          drawShowcaseCard(ctx, -cw * 0.5, -ch * 0.5, cw, ch, cardCopy, globalT, micro, theme);
+        }
         ctx.restore();
       }
     } else if (layout === 'logo-assemble') {
@@ -1008,114 +1084,204 @@
         }
       }
     } else if (layout === 'tilted-chart-dolly') {
-      // Opal 2-phase perspective chart (matching user's Images 1 & 2):
-      // Phase 1 (0 -> 0.48*dur): Card starts laid nearly flat in 3D perspective (foreshortened) -> stands up smoothly!
-      // Phase 2 (0.48 -> 1.0*dur): Camera zooms deep (1.0x -> 2.15x) onto the center glowing bar as cyan->amber fill rises!
+      // Opal 2-phase TRUE 3D forward-tilted perspective chart (rotateX laid flat -> stand upright -> deep zoom):
+      // Uses offscreen sharp + blurred buffers for genuine trapezoid perspective, soft matte charcoal-grey palette,
+      // tilt-shift Depth-of-Field blur (blurred far top & near bottom, sharp focal bar band), and velocity motion blur!
       var bars = Array.isArray(shot.bars) && shot.bars.length ? shot.bars : [0.35, 0.52, 0.44, 0.62, 0.92, 0.58, 0.48];
       var labels = Array.isArray(shot.labels) && shot.labels.length ? shot.labels : ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
       var hlIdx = shot.highlightIdx !== undefined ? Number(shot.highlightIdx) : 4;
-      var cardW = isPortrait ? safe.w * 0.88 : Math.min(840, safe.w * 0.78);
-      var cardH = isPortrait ? 470 : 390;
+      var cardW = isPortrait ? 680 : 760;
+      var cardH = isPortrait ? 620 : 580;
 
-      var standEnd = dur * 0.46;
+      var standEnd = dur * 0.48;
       var standP = easeInOutExpo(clamp(localTime / Math.max(0.3, standEnd), 0, 1));
-      var zoomP = easeInOutExpo(clamp((localTime - standEnd * 0.92) / Math.max(0.35, dur * 0.44), 0, 1));
-      var zoomPrev = easeInOutExpo(clamp((localTime - 0.033 - standEnd * 0.92) / Math.max(0.35, dur * 0.44), 0, 1));
-      var zoomVelBlur = clamp(Math.abs(zoomP - zoomPrev) * 32, 0, 6.5);
+      var standPrev = easeInOutExpo(clamp((localTime - 0.033) / Math.max(0.3, standEnd), 0, 1));
+      var zoomP = easeInOutExpo(clamp((localTime - standEnd * 0.90) / Math.max(0.35, dur * 0.44), 0, 1));
+      var zoomPrev = easeInOutExpo(clamp((localTime - 0.033 - standEnd * 0.90) / Math.max(0.35, dur * 0.44), 0, 1));
+      var motionBlur = clamp((Math.abs(standP - standPrev) * 24) + (Math.abs(zoomP - zoomPrev) * 34), 0, 7.0);
+      var tiltAmount = 1.0 - standP; // 1.0 = laid flat forward -> 0.0 = standing upright
 
       var barGap = (cardW * 0.78) / bars.length;
-      var barW = barGap * 0.48;
-      var hlBx = -cardW * 0.39 + hlIdx * barGap + barGap * 0.5;
-      var baseY = cardH * 0.30;
-      var maxBarH = cardH * 0.54;
-      var avgY = baseY - maxBarH * 0.62;
+      var barW = barGap * 0.46;
+      var topBaseY = cardH * 0.48;
+      var maxBarH = cardH * 0.25;
+      var avgY = topBaseY - maxBarH * 0.64;
+      var hlRelX = (-cardW * 0.39 + hlIdx * barGap + barGap * 0.5) / cardW; // -0.5..0.5
 
-      var localZoom = 0.88 + 0.14 * standP + 1.18 * zoomP; // 0.88 -> 1.02 -> 2.20x deep into focal bar!
-      var perspScaleY = 0.44 + 0.56 * standP; // starts laid almost flat (0.44) -> stands upright (1.0)!
-      var skewX = (1 - standP) * -0.14;
-      var focusX = cx + hlBx * zoomP;
-      var focusY = cy + (baseY - maxBarH * 0.45) * zoomP;
+      // Render crisp soft-charcoal dashboard card onto offscreen buffer
+      var sharpBuf = getScratchCanvas('chartSharp', cardW, cardH);
+      var blurBuf = getScratchCanvas('chartBlur', cardW, cardH);
 
-      ctx.save();
-      if (zoomVelBlur > 0.25) ctx.filter = 'blur(' + zoomVelBlur.toFixed(1) + 'px)';
-      ctx.translate(cx, cy + (1 - standP) * 54);
-      ctx.scale(localZoom, localZoom * perspScaleY);
-      ctx.transform(1, 0, skewX, 1, 0, 0);
-      ctx.translate(-focusX + cx, -focusY + cy);
+      if (sharpBuf && blurBuf) {
+        var sc = sharpBuf.ctx;
+        sc.save();
+        // Soft matte charcoal-grey surface (matching Opal dark-grey aesthetic)
+        var cardG = sc.createLinearGradient(0, 0, 0, cardH);
+        cardG.addColorStop(0.0, '#1C1E23');
+        cardG.addColorStop(0.55, '#17191E');
+        cardG.addColorStop(1.0, '#121418');
+        roundRect(sc, 10, 10, cardW - 20, cardH - 20, 26);
+        sc.fillStyle = cardG;
+        sc.fill();
+        sc.strokeStyle = 'rgba(226, 232, 240, 0.11)';
+        sc.lineWidth = 1.5;
+        sc.stroke();
 
-      roundRect(ctx, -cardW * 0.5, -cardH * 0.5, cardW, cardH, 22);
-      ctx.fillStyle = 'rgba(16, 18, 24, 0.90)';
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.14)';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
+        // Top section: metric header + soft grey weekly bars + dashed avg line
+        sc.save();
+        sc.strokeStyle = 'rgba(226, 232, 240, 0.06)';
+        sc.lineWidth = 1;
+        for (var gi = 0; gi <= bars.length; gi++) {
+          var gx = cardW * 0.11 + gi * barGap;
+          sc.beginPath();
+          sc.moveTo(gx, cardH * 0.20);
+          sc.lineTo(gx, topBaseY);
+          sc.stroke();
+        }
+        sc.setLineDash([7, 7]);
+        sc.strokeStyle = 'rgba(203, 213, 225, 0.30)';
+        sc.beginPath();
+        sc.moveTo(cardW * 0.08, avgY);
+        sc.lineTo(cardW * 0.90, avgY);
+        sc.stroke();
+        sc.restore();
 
-      // Subtle vertical grid lines + avg dashed line
-      ctx.save();
-      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-      ctx.lineWidth = 1;
-      for (var gi = 0; gi <= bars.length; gi++) {
-        var gx = -cardW * 0.39 + gi * barGap;
-        ctx.beginPath();
-        ctx.moveTo(gx, -cardH * 0.24);
-        ctx.lineTo(gx, baseY);
-        ctx.stroke();
-      }
-      ctx.setLineDash([7, 7]);
-      ctx.strokeStyle = 'rgba(255,255,255,0.28)';
-      ctx.beginPath();
-      ctx.moveTo(-cardW * 0.42, avgY);
-      ctx.lineTo(cardW * 0.42, avgY);
-      ctx.stroke();
-      ctx.restore();
+        if (!micro) {
+          sc.fillStyle = 'rgba(241, 245, 249, 0.92)';
+          sc.font = '700 36px "Inter", "Segoe UI", sans-serif';
+          sc.textAlign = 'left';
+          sc.fillText(String(shot.metric || '9h 15m'), cardW * 0.08, cardH * 0.14);
+          sc.fillStyle = 'rgba(148, 163, 184, 0.68)';
+          sc.font = '500 18px "Inter", "Segoe UI", sans-serif';
+          sc.textAlign = 'right';
+          sc.fillText(String(shot.avgLabel || 'avg'), cardW * 0.94, avgY + 5);
+          sc.fillText('0', cardW * 0.94, topBaseY + 4);
+        }
 
-      if (!micro) {
-        ctx.fillStyle = theme.ink;
-        ctx.font = '700 32px "Inter", "Segoe UI", sans-serif';
-        ctx.textAlign = 'left';
-        ctx.fillText(String(shot.metric || '9h 15m'), -cardW * 0.42, -cardH * 0.32);
-        ctx.fillStyle = theme.muted;
-        ctx.font = '500 18px "Inter", "Segoe UI", sans-serif';
-        ctx.textAlign = 'right';
-        ctx.fillText(String(shot.avgLabel || 'avg'), cardW * 0.42, avgY - 8);
-      }
+        for (var bi = 0; bi < bars.length; bi++) {
+          var bp = easeOutCubic(clamp((localTime - 0.06 - bi * 0.04) / 0.42, 0, 1));
+          var fullH = maxBarH * clamp(Number(bars[bi]) || 0.4, 0.12, 1.0) * bp;
+          var bx = cardW * 0.11 + bi * barGap + (barGap - barW) * 0.5;
+          var by = topBaseY - fullH;
 
-      for (var bi = 0; bi < bars.length; bi++) {
-        var bp = easeOutCubic(clamp((localTime - 0.08 - bi * 0.05) / 0.45, 0, 1));
-        var fullH = maxBarH * clamp(Number(bars[bi]) || 0.4, 0.1, 1.0) * bp;
-        var bx = -cardW * 0.39 + bi * barGap + (barGap - barW) * 0.5;
-        var by = baseY - fullH;
+          // Soft matte grey bars
+          sc.fillStyle = 'rgba(176, 184, 198, 0.24)';
+          roundRect(sc, bx, by, barW, Math.max(4, fullH), 6);
+          sc.fill();
 
-        // Draw muted track bar first
-        ctx.fillStyle = 'rgba(255,255,255,0.16)';
-        roundRect(ctx, bx, by, barW, Math.max(4, fullH), 6);
-        ctx.fill();
+          // Focal bar glows & rises dynamically as card stands up and camera zooms in!
+          if (bi === hlIdx) {
+            var glowFillP = easeOutExpo(clamp((localTime - standEnd * 0.72) / Math.max(0.35, dur * 0.44), 0, 1));
+            var glowH = Math.max(4, fullH * glowFillP);
+            var glowY = topBaseY - glowH;
+            sc.save();
+            var bg = sc.createLinearGradient(bx, topBaseY, bx, glowY);
+            bg.addColorStop(0.0, '#00F0FF');
+            bg.addColorStop(0.62, '#38BDF8');
+            bg.addColorStop(1.0, glowFillP > 0.68 ? '#F59E0B' : '#2EDFDA');
+            sc.fillStyle = bg;
+            sc.shadowColor = glowFillP > 0.68 ? '#F59E0B' : '#00F0FF';
+            sc.shadowBlur = 24;
+            roundRect(sc, bx, glowY, barW, glowH, 6);
+            sc.fill();
+            sc.restore();
+          }
 
-        // Focal bar glows & fills up dynamically during Phase 2 zoom!
-        if (bi === hlIdx) {
-          var glowFillP = easeOutExpo(clamp((localTime - standEnd * 0.78) / Math.max(0.35, dur * 0.42), 0, 1));
-          var glowH = Math.max(4, fullH * glowFillP);
-          var glowY = baseY - glowH;
+          if (!micro && labels[bi]) {
+            sc.fillStyle = bi === hlIdx ? 'rgba(241, 245, 249, 0.90)' : 'rgba(148, 163, 184, 0.65)';
+            sc.font = '600 18px "Inter", "Segoe UI", sans-serif';
+            sc.textAlign = 'center';
+            sc.fillText(String(labels[bi]), bx + barW * 0.5, topBaseY + 26);
+          }
+        }
+
+        // Bottom activity sub-chart (multi-color cyan / cobalt / amber mini bars matching Opal ref!)
+        var subTop = cardH * 0.62;
+        var subBot = cardH * 0.89;
+        var subH = subBot - subTop;
+        sc.strokeStyle = 'rgba(226, 232, 240, 0.08)';
+        sc.lineWidth = 1;
+        sc.beginPath();
+        sc.moveTo(cardW * 0.08, subTop);
+        sc.lineTo(cardW * 0.88, subTop);
+        sc.moveTo(cardW * 0.08, subTop + subH * 0.5);
+        sc.lineTo(cardW * 0.88, subTop + subH * 0.5);
+        sc.stroke();
+        if (!micro) {
+          sc.fillStyle = 'rgba(148, 163, 184, 0.58)';
+          sc.font = '500 16px "Inter", "Segoe UI", sans-serif';
+          sc.textAlign = 'right';
+          sc.fillText('60fps', cardW * 0.95, subTop + 6);
+          sc.fillText('30fps', cardW * 0.95, subTop + subH * 0.5 + 6);
+        }
+
+        var subBars = [0.72, 0.58, 0.14, 0.32, 0.18, 0.66, 0.52, 0.42, 0.46, 0.78, 0.54, 0.28, 0.44, 0.30, 0.24, 0.18];
+        var subGap = (cardW * 0.78) / subBars.length;
+        var subBw = subGap * 0.52;
+        for (var si = 0; si < subBars.length; si++) {
+          var sbp = easeOutCubic(clamp((localTime - 0.10 - si * 0.025) / 0.40, 0, 1));
+          var shVal = subH * subBars[si] * sbp;
+          var sbx = cardW * 0.09 + si * subGap;
+          var sby = subBot - shVal;
+          // Base soft cobalt-blue bar
+          sc.fillStyle = '#2563EB';
+          roundRect(sc, sbx, sby, subBw, Math.max(3, shVal), 3);
+          sc.fill();
+          // Cyan or warm amber cap accents
+          if (si === 0 || si === 5 || si === 6 || si === 12) {
+            sc.fillStyle = '#2DD4BF';
+            roundRect(sc, sbx, sby, subBw, Math.max(3, shVal * 0.32), 3);
+            sc.fill();
+          } else if (si === 1 || si === 9) {
+            sc.fillStyle = '#F59E0B';
+            roundRect(sc, sbx, sby, subBw, Math.max(3, shVal * 0.42), 3);
+            sc.fill();
+          }
+        }
+        sc.restore();
+
+        // Pre-blur copy once per frame for silky Depth-of-Field strip blending
+        blurBuf.ctx.save();
+        blurBuf.ctx.filter = 'blur(6.5px)';
+        blurBuf.ctx.drawImage(sharpBuf.canvas, 0, 0);
+        blurBuf.ctx.restore();
+
+        // Project true 3D forward-tilted trapezoid onto main canvas + zoom deep into focal bar
+        var dispW = isPortrait ? safe.w * 0.88 : Math.min(780, safe.w * 0.72);
+        var dispH = dispW * (cardH / cardW);
+        var localZoom = 0.94 + 0.08 * standP + 1.25 * zoomP; // 0.94 -> 1.02 -> 2.27x
+        var targetOffX = -hlRelX * dispW * zoomP;
+        var targetOffY = dispH * 0.12 * zoomP;
+
+        ctx.save();
+        if (motionBlur > 0.25) {
+          ctx.filter = 'blur(' + motionBlur.toFixed(1) + 'px)';
+        }
+        ctx.translate(cx, cy);
+        ctx.scale(localZoom, localZoom);
+        ctx.translate(targetOffX, targetOffY);
+
+        drawPerspectiveTiltX(ctx, sharpBuf.canvas, blurBuf.canvas, 0, 0, dispW, dispH, tiltAmount, 0.38);
+        ctx.restore();
+
+        // Soft top/bottom atmospheric vignette while laid flat to heighten macro DoF focus
+        if (tiltAmount > 0.05) {
           ctx.save();
-          var bg = ctx.createLinearGradient(bx, baseY, bx, glowY);
-          bg.addColorStop(0.0, '#00F0FF');
-          bg.addColorStop(0.62, '#38BDF8');
-          bg.addColorStop(1.0, glowFillP > 0.65 ? '#F59E0B' : '#2EDFDA');
-          ctx.fillStyle = bg;
-          ctx.shadowColor = glowFillP > 0.65 ? '#F59E0B' : '#00F0FF';
-          ctx.shadowBlur = 28;
-          roundRect(ctx, bx, glowY, barW, glowH, 6);
-          ctx.fill();
+          ctx.globalAlpha = exitFade * tiltAmount * 0.78;
+          var dofVigTop = ctx.createLinearGradient(0, 0, 0, H * 0.36);
+          dofVigTop.addColorStop(0.0, '#040507');
+          dofVigTop.addColorStop(1.0, 'rgba(4,5,7,0)');
+          ctx.fillStyle = dofVigTop;
+          ctx.fillRect(0, 0, W, H * 0.36);
+
+          var dofVigBot = ctx.createLinearGradient(0, H * 0.76, 0, H);
+          dofVigBot.addColorStop(0.0, 'rgba(4,5,7,0)');
+          dofVigBot.addColorStop(1.0, '#040507');
+          ctx.fillStyle = dofVigBot;
+          ctx.fillRect(0, H * 0.76, W, H * 0.24);
           ctx.restore();
         }
-        if (!micro && labels[bi]) {
-          ctx.fillStyle = bi === hlIdx ? theme.ink : theme.muted;
-          ctx.font = '600 18px "Inter", "Segoe UI", sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText(String(labels[bi]), bx + barW * 0.5, baseY + 28);
-        }
       }
-      ctx.restore();
     } else if (layout === 'metric-pills-tree') {
       // Opal sequential 1-by-1 organic pill reveal + passive camera zoom-out (matching user's Images 3, 4 & 5):
       // Beat 1: Pill 1 starts as glowing circle orb (macro zoomed 1.85x) -> expands into pill as border ring sweeps & number counts up!
@@ -1416,11 +1582,23 @@
       }
       ctx.restore();
     } else if (layout === 'whip-cta-morph') {
-      // Opal-inspired 2-phase logo + dropping spark -> motion-blurred morph into wide glossy dark-violet "▶ Start" pill!
-      var impactT = dur * 0.42;
+      // 4-Beat Opal-inspired CTA Transition:
+      // 1. Spark drops from above onto glossy dark Arunaki icon (0 -> 0.26*dur)
+      // 2. Impact triggers rapid zoom-in onto logo -> horizontal motion-blurred morph into "▶ Try Arunaki" pill (0.26 -> 0.48*dur)
+      // 3. Pill holds cleanly with subtle specular sweep (0.48 -> 0.72*dur)
+      // 4. Rapid zoom-out with motion blur + full-screen white flash wash into the final scene (0.72 -> 1.0*dur)
+      var impactT = dur * 0.26;
+      var zoomOutStart = dur * 0.72;
+
+      var zoomInP = easeOutExpo(clamp((localTime - impactT * 0.85) / Math.max(0.20, dur * 0.22), 0, 1));
+      var zoomOutP = easeInOutExpo(clamp((localTime - zoomOutStart) / Math.max(0.25, dur - zoomOutStart), 0, 1));
+      var zoomOutPrev = easeInOutExpo(clamp((localTime - 0.033 - zoomOutStart) / Math.max(0.25, dur - zoomOutStart), 0, 1));
+      var ctaZoom = 1.0 + 0.42 * zoomInP - 0.74 * zoomOutP; // 1.0 -> 1.42x (zoom in) -> 0.68x (zoom out)
+      var zoomOutBlur = clamp(Math.abs(zoomOutP - zoomOutPrev) * 38, 0, 8.0);
+
       if (localTime < impactT) {
-        // Phase 1: Glossy dark rounded square brand icon + bright white light spark dropping from above!
-        var iconScale = easeOutBack(clamp(localTime / 0.28, 0, 1)) * (1.0 + 0.08 * (localTime / impactT));
+        // Beat 1: Glossy dark rounded square brand icon + bright white light spark dropping from above
+        var iconScale = easeOutBack(clamp(localTime / 0.24, 0, 1)) * ctaZoom;
         var iconSz = isPortrait ? 154 : 128;
         ctx.save();
         ctx.translate(cx, cy);
@@ -1435,30 +1613,29 @@
         ctx.restore();
 
         // Falling luminous spark streak above icon
-        var dropU = clamp((localTime - 0.08) / Math.max(0.18, impactT - 0.08), 0, 1);
-        var sparkY = cy - 220 * (1 - dropU * dropU);
+        var dropU = clamp((localTime - 0.04) / Math.max(0.14, impactT - 0.04), 0, 1);
+        var sparkY = cy - 230 * (1 - dropU * dropU);
         ctx.save();
         ctx.shadowColor = '#FFFFFF';
-        ctx.shadowBlur = 22;
+        ctx.shadowBlur = 24;
         ctx.fillStyle = '#FFFFFF';
         roundRect(ctx, cx - 5, sparkY - 12 - dropU * 18, 10, 24 + dropU * 26, 5);
         ctx.fill();
         ctx.restore();
       } else {
-        // Phase 2: Fast motion-blurred horizontal expansion into wide glossy dark-violet glass pill ("▶ Start")
+        // Beat 2-4: Impact zoom-in -> horizontal motion-blurred morph into pill -> rapid zoom-out + white screen wash
         var dt2 = localTime - impactT;
-        var pMorph = easeOutExpo(clamp(dt2 / 0.36, 0, 1));
-        var pPrev = easeOutExpo(clamp((dt2 - 0.033) / 0.36, 0, 1));
-        var mBlur = clamp(Math.abs(pMorph - pPrev) * 44, 0, 8.5);
-        var driftScale = 1.0 + 0.06 * clamp(dt2 / Math.max(0.4, dur - impactT), 0, 1);
+        var pMorph = easeOutExpo(clamp(dt2 / Math.max(0.22, dur * 0.20), 0, 1));
+        var pPrev = easeOutExpo(clamp((dt2 - 0.033) / Math.max(0.22, dur * 0.20), 0, 1));
+        var mBlur = clamp(Math.abs(pMorph - pPrev) * 44 + zoomOutBlur, 0, 9.0);
 
-        var pillW = 128 + ((isPortrait ? 620 : 540) - 128) * pMorph;
-        var pillH = 128 + (92 - 128) * pMorph;
+        var pillW = 128 + ((isPortrait ? 580 : 500) - 128) * pMorph;
+        var pillH = 128 + (88 - 128) * pMorph;
 
         ctx.save();
         if (mBlur > 0.25) ctx.filter = 'blur(' + mBlur.toFixed(1) + 'px)';
         ctx.translate(cx, cy);
-        ctx.scale(driftScale, driftScale);
+        ctx.scale(ctaZoom, ctaZoom);
 
         var pg = ctx.createLinearGradient(0, -pillH * 0.5, 0, pillH * 0.5);
         pg.addColorStop(0.0, 'rgba(22, 20, 32, 0.94)');
@@ -1467,19 +1644,44 @@
         roundRect(ctx, -pillW * 0.5, -pillH * 0.5, pillW, pillH, 999);
         ctx.fillStyle = pg;
         ctx.fill();
-        ctx.strokeStyle = 'rgba(226, 232, 240, 0.34)';
+        ctx.strokeStyle = 'rgba(226, 232, 240, 0.36)';
         ctx.lineWidth = 1.6;
         ctx.stroke();
 
-        if (!micro && pMorph > 0.30) {
-          ctx.globalAlpha = exitFade * easeOutCubic((pMorph - 0.30) / 0.70);
+        // Impact flash burst right when spark hits
+        if (dt2 < 0.18) {
+          var impFlash = 1.0 - dt2 / 0.18;
+          ctx.save();
+          ctx.globalAlpha = impFlash * 0.7;
           ctx.fillStyle = '#FFFFFF';
-          ctx.font = '600 32px "Inter", "Segoe UI", sans-serif';
+          roundRect(ctx, -pillW * 0.5, -pillH * 0.5, pillW, pillH, 999);
+          ctx.fill();
+          ctx.restore();
+        }
+
+        if (!micro && pMorph > 0.25) {
+          ctx.globalAlpha = easeOutCubic((pMorph - 0.25) / 0.75);
+          ctx.fillStyle = '#FFFFFF';
+          ctx.font = '600 30px "Inter", "Segoe UI", sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillText('▶  ' + String(shot.ctaLabel || 'Start'), 0, 1);
         }
         ctx.restore();
+
+        // Beat 4: Full-screen white bloom wash as camera zooms out into final scene!
+        if (zoomOutP > 0.02) {
+          var whiteP = easeInOutCubic(clamp((zoomOutP - 0.08) / 0.88, 0, 1));
+          ctx.save();
+          ctx.globalAlpha = whiteP;
+          var wg = ctx.createRadialGradient(cx, cy, 10, cx, cy, Math.max(W, H) * (0.25 + 0.95 * whiteP));
+          wg.addColorStop(0.0, '#FFFFFF');
+          wg.addColorStop(0.65, 'rgba(255, 255, 255, 0.96)');
+          wg.addColorStop(1.0, 'rgba(248, 250, 252, ' + whiteP.toFixed(3) + ')');
+          ctx.fillStyle = wg;
+          ctx.fillRect(0, 0, W, H);
+          ctx.restore();
+        }
       }
     } else if (layout === 'prompt-type-send') {
       // Dynamic variable-pace prompt choreography:
