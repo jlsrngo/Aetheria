@@ -33,7 +33,9 @@ interface ClayAssetHandle {
     "hand-R": Object3DLike;
     ground: Object3DLike;
   };
-  animate: (name: string, progress: number) => Object3DLike;
+  animate: (name: string, progress: number, opts?: Record<string, unknown>) => Object3DLike;
+  setExpression: (name: string) => Object3DLike;
+  setEmote: (name: string, elapsedSec?: number) => Object3DLike;
 }
 
 interface ClaySpecError extends Error {
@@ -51,6 +53,10 @@ interface ClaySandbox {
     ASSET_KINDS: string[];
     HUMANOID_ACCESSORIES: string[];
     ASSET_ANIMATIONS: string[];
+    KIND_VARIANTS: { humanoid: string[]; building: string[] };
+    HAIR_STYLES: string[];
+    EXPRESSIONS: string[];
+    EMOTES: string[];
     makeAsset: (spec: unknown) => ClayAssetHandle;
   };
 }
@@ -83,6 +89,9 @@ function loadClaySandbox(): ClaySandbox {
     path.join(REPO_ROOT, "core", "aetheria-engine", "assets", "script", "three.min.js"),
     path.join(REPO_ROOT, "apps", "public", "script", "aetheria-motion.js"),
     path.join(REPO_ROOT, ".aetheria", "skills", "mg-soft-clay-story", "examples", "script", "clay-kit.js"),
+    path.join(REPO_ROOT, ".aetheria", "skills", "mg-soft-clay-story", "examples", "script", "clay-buildings.js"),
+    path.join(REPO_ROOT, ".aetheria", "skills", "mg-soft-clay-story", "examples", "script", "clay-people.js"),
+    path.join(REPO_ROOT, ".aetheria", "skills", "mg-soft-clay-story", "examples", "script", "clay-gestures.js"),
     path.join(REPO_ROOT, ".aetheria", "skills", "mg-soft-clay-story", "examples", "script", "clay-assets.js"),
   ];
   for (const f of files) {
@@ -101,7 +110,7 @@ function measureBox(sandbox: ClaySandbox, obj: Object3DLike) {
 describe("S1 ClayKit.makeAsset declarative layer", () => {
   const sandbox = loadClaySandbox();
 
-  it("exports exactly the 8 supported kinds, 3 humanoid accessories, and 5 standard animations", () => {
+  it("exports all 8 kinds, 7 humanoid accessories, 14 animations, building/humanoid variants, hair, expressions, and emotes", () => {
     expect(sandbox.ClayKit.ASSET_KINDS).toEqual([
       "humanoid",
       "flower-row",
@@ -112,8 +121,36 @@ describe("S1 ClayKit.makeAsset declarative layer", () => {
       "vehicle",
       "blob",
     ]);
-    expect(sandbox.ClayKit.HUMANOID_ACCESSORIES).toEqual(["hat-conical", "hat-cap", "towel"]);
-    expect(sandbox.ClayKit.ASSET_ANIMATIONS).toEqual(["idle", "walk", "hop", "grow", "pop-in"]);
+    expect(sandbox.ClayKit.HUMANOID_ACCESSORIES).toEqual([
+      "hat-conical",
+      "hat-cap",
+      "towel",
+      "glasses",
+      "backpack",
+      "beard",
+      "hijab",
+    ]);
+    expect(sandbox.ClayKit.ASSET_ANIMATIONS).toEqual([
+      "idle",
+      "walk",
+      "hop",
+      "grow",
+      "pop-in",
+      "run",
+      "wave",
+      "talk",
+      "point",
+      "cheer",
+      "shock",
+      "work",
+      "nod",
+      "dance",
+    ]);
+    expect(sandbox.ClayKit.KIND_VARIANTS.humanoid).toEqual(["adult", "kid", "elder", "chubby"]);
+    expect(sandbox.ClayKit.KIND_VARIANTS.building).toEqual(["shop", "house", "hut", "barn", "apartment", "school"]);
+    expect(sandbox.ClayKit.HAIR_STYLES).toEqual(["short", "long", "bun", "ponytail", "spiky", "bald"]);
+    expect(sandbox.ClayKit.EXPRESSIONS).toEqual(["happy", "laugh", "sad", "surprised", "angry", "worried", "sleepy"]);
+    expect(sandbox.ClayKit.EMOTES).toEqual(["exclaim", "question", "idea", "heart", "sweat", "anger", "sleep", "music"]);
   });
 
   it("builds all 8 kinds and all humanoid accessory combinations with valid anchors and reasonable bounding boxes", () => {
@@ -124,11 +161,21 @@ describe("S1 ClayKit.makeAsset declarative layer", () => {
       { id: "farmer-towel", kind: "humanoid", accessories: ["towel"], palette: { towel: "#FFFDF9" } },
       { id: "farmer-full", kind: "humanoid", accessories: ["hat-conical", "towel"], scale: 1.05 },
       { id: "farmer-cap-towel", kind: "humanoid", accessories: ["hat-cap", "towel"] },
+      { id: "kid-spiky", kind: "humanoid", variant: "kid", hair: "spiky", accessories: ["backpack"] },
+      { id: "elder-beard", kind: "humanoid", variant: "elder", hair: "bald", accessories: ["glasses", "beard"] },
+      { id: "chubby-hijab", kind: "humanoid", variant: "chubby", hair: "bun", accessories: ["hijab"] },
+      { id: "girl-long", kind: "humanoid", variant: "adult", hair: "long", accessories: ["glasses"] },
+      { id: "runner-ponytail", kind: "humanoid", variant: "adult", hair: "ponytail" },
       { id: "kenikir-row", kind: "flower-row", palette: { primary: "#FB923C", accent: "#FACC15" }, tags: ["crop"] },
       { id: "jeriken-1", kind: "container", palette: { primary: "#38BDF8", accent: "#FACC15" } },
       { id: "wereng-1", kind: "insect", palette: { primary: "#A3E635", accent: "#E0F2FE" } },
       { id: "pohon-1", kind: "tree", palette: { primary: "#4ADE80", secondary: "#86EFAC" } },
-      { id: "rumah-1", kind: "building", palette: { primary: "#FDA4AF", accent: "#E11D48" } },
+      { id: "rumah-shop", kind: "building", variant: "shop", palette: { primary: "#FDA4AF", accent: "#E11D48" } },
+      { id: "rumah-house", kind: "building", variant: "house", palette: { primary: "#FEF3C7", accent: "#EA580C" } },
+      { id: "rumah-hut", kind: "building", variant: "hut", palette: { primary: "#FDE68A", accent: "#D97706" } },
+      { id: "rumah-barn", kind: "building", variant: "barn", palette: { primary: "#EF4444", accent: "#78716C" } },
+      { id: "rumah-apt", kind: "building", variant: "apartment", palette: { primary: "#93C5FD", accent: "#3B82F6" } },
+      { id: "rumah-school", kind: "building", variant: "school", palette: { primary: "#FDE68A", accent: "#E11D48" } },
       { id: "mobil-1", kind: "vehicle", palette: { primary: "#FF8FAB", accent: "#FFF0F3" } },
       { id: "blob-1", kind: "blob", palette: { primary: "#FEF08A", secondary: "#FDE047", accent: "#F5D0FE" } },
     ];
@@ -155,11 +202,20 @@ describe("S1 ClayKit.makeAsset declarative layer", () => {
       const groundPos = asset.anchors.ground.getWorldPosition(new sandbox.THREE.Vector3());
       expect(headPos.y).toBeGreaterThan(groundPos.y + 0.5);
 
-      // Every standard animation runs cleanly across [0, 0.5, 1]
+      // Every standard animation, expression, and emote runs cleanly
       for (const anim of sandbox.ClayKit.ASSET_ANIMATIONS) {
         asset.animate(anim, 0);
         asset.animate(anim, 0.5);
         asset.animate(anim, 1);
+      }
+      if (spec.kind === "humanoid") {
+        for (const expr of sandbox.ClayKit.EXPRESSIONS) {
+          asset.setExpression(expr);
+        }
+        for (const em of sandbox.ClayKit.EMOTES) {
+          asset.setEmote(em, 0.5);
+        }
+        asset.setEmote("", 0);
       }
     }
   });

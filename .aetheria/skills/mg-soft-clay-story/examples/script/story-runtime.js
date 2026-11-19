@@ -137,7 +137,7 @@
       cars.forEach(function (c) {
         root.add(c.group);
       });
-    } else {
+    } else if (stageKind === "open-field") {
       // Preset 2: open-field (lush pastel paddy / meadow diorama extending cleanly into foreground)
       var meadow = new THREE.Mesh(
         new THREE.PlaneGeometry(110, 90),
@@ -230,6 +230,79 @@
       ).group;
       rail.position.set(0, 0.65, -6.2);
       root.add(rail);
+    } else if (stageKind === "indoor-room") {
+      // Preset 3: indoor-room (warm cozy pastel clay room for indoor/home/office scenes)
+      sunMesh.visible = false;
+      clouds.forEach(function (cl) {
+        cl.group.visible = false;
+      });
+      var floor = new THREE.Mesh(
+        new THREE.PlaneGeometry(40, 40),
+        new THREE.MeshLambertMaterial({ color: 0xe7c8a0 })
+      );
+      floor.rotation.x = -Math.PI / 2;
+      floor.position.set(0, -0.02, 2.0);
+      floor.receiveShadow = true;
+      root.add(floor);
+
+      var rugGeo = new THREE.CylinderGeometry(3.2, 3.3, 0.06, 28);
+      var rug = kit.addOutlinedMesh(
+        rugGeo,
+        new THREE.MeshLambertMaterial({ color: 0xfda4af }),
+        outlineMat,
+        0.025,
+        false,
+        true
+      ).group;
+      rug.position.set(0, 0.02, 1.2);
+      root.add(rug);
+
+      var backWall = kit.addOutlinedMesh(
+        new THREE.BoxGeometry(26, 12, 0.4),
+        new THREE.MeshLambertMaterial({ color: 0xfef3c7 }),
+        outlineMat,
+        0.04,
+        false,
+        true
+      ).group;
+      backWall.position.set(0, 5.9, -4.8);
+      root.add(backWall);
+
+      var baseboard = kit.addOutlinedMesh(
+        new THREE.BoxGeometry(26, 0.45, 0.5),
+        new THREE.MeshLambertMaterial({ color: 0xfffdf9 }),
+        outlineMat,
+        0.02,
+        false,
+        true
+      ).group;
+      baseboard.position.set(0, 0.22, -4.7);
+      root.add(baseboard);
+
+      var winFrame = kit.addOutlinedMesh(
+        new THREE.BoxGeometry(3.4, 2.6, 0.18),
+        new THREE.MeshLambertMaterial({ color: 0xfffdf9 }),
+        outlineMat,
+        0.03,
+        false,
+        false
+      ).group;
+      winFrame.position.set(-2.4, 3.6, -4.52);
+      var winPane = new THREE.Mesh(
+        new THREE.BoxGeometry(2.9, 2.1, 0.2),
+        mats.winGlass
+      );
+      winPane.position.set(-2.4, 3.6, -4.5);
+      root.add(winFrame, winPane);
+
+      var shelf = kit.addOutlinedMesh(
+        new THREE.BoxGeometry(3.2, 0.22, 0.65),
+        new THREE.MeshLambertMaterial({ color: 0xb47b4e }),
+        outlineMat,
+        0.026
+      ).group;
+      shelf.position.set(2.5, 3.1, -4.32);
+      root.add(shelf);
     }
 
     return {
@@ -511,7 +584,8 @@
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.65));
+    var ambientLight = new THREE.AmbientLight(0xffffff, 0.65);
+    scene.add(ambientLight);
     var sunLight = new THREE.DirectionalLight(0xfffbeb, 0.5);
     sunLight.position.set(10, 20, 14);
     sunLight.castShadow = true;
@@ -520,10 +594,12 @@
     var outlineMat = new THREE.MeshBasicMaterial({ color: OUTLINE_COLOR, side: THREE.BackSide });
     var stages = {
       "open-field": buildStageBackdrop(kit, "open-field", outlineMat),
-      "city-street": buildStageBackdrop(kit, "city-street", outlineMat)
+      "city-street": buildStageBackdrop(kit, "city-street", outlineMat),
+      "indoor-room": buildStageBackdrop(kit, "indoor-room", outlineMat)
     };
     scene.add(stages["open-field"].root);
     scene.add(stages["city-street"].root);
+    scene.add(stages["indoor-room"].root);
 
     // Instantiate cast + props via ClayKit.makeAsset
     var actors = {};
@@ -556,12 +632,14 @@
       var pos = Array.isArray(entry.pos) && entry.pos.length === 3 ? entry.pos : [0, 0, 0];
       var rotY = typeof entry.rotY === "number" ? entry.rotY : 0;
       var visible = entry.visible !== false;
+      var expression = typeof entry.expression === "string" ? entry.expression : "happy";
+      var emote = typeof entry.emote === "string" ? entry.emote : "";
       handle.group.position.set(pos[0], pos[1], pos[2]);
       handle.group.rotation.y = rotY;
       handle.group.visible = visible;
       scene.add(handle.group);
       actors[entry.id] = handle;
-      defaults[entry.id] = { pos: pos.slice(), rotY: rotY, visible: visible };
+      defaults[entry.id] = { pos: pos.slice(), rotY: rotY, visible: visible, expression: expression, emote: emote };
     });
 
     var shots = Array.isArray(storySpec.shots) ? storySpec.shots : [];
@@ -629,13 +707,43 @@
       var dur = Math.max(0.01, Number(shot.duration || 1));
       var errors = [];
 
-      // Switch active stage preset
-      var activeStage = shot.stage === "city-street" ? "city-street" : "open-field";
+      // Switch active stage preset & lighting mood
+      var activeStage =
+        shot.stage === "city-street"
+          ? "city-street"
+          : shot.stage === "indoor-room"
+          ? "indoor-room"
+          : "open-field";
       stages["open-field"].root.visible = activeStage === "open-field";
       stages["city-street"].root.visible = activeStage === "city-street";
+      stages["indoor-room"].root.visible = activeStage === "indoor-room";
       stages[activeStage].update(globalT);
 
-      // Reset all actors to default pose & placements, then apply shot overrides
+      var mood = shot.mood === "sunset" ? "sunset" : shot.mood === "night" ? "night" : "day";
+      if (mood === "sunset") {
+        ambientLight.color.setHex(0xffedd5);
+        ambientLight.intensity = 0.68;
+        sunLight.color.setHex(0xfb923c);
+        sunLight.intensity = 0.58;
+        scene.fog.color.setHex(0xfed7aa);
+        scene.background = new THREE.Color(0xfdba74);
+      } else if (mood === "night") {
+        ambientLight.color.setHex(0xbfdbfe);
+        ambientLight.intensity = 0.52;
+        sunLight.color.setHex(0x93c5fd);
+        sunLight.intensity = 0.42;
+        scene.fog.color.setHex(0x1e293b);
+        scene.background = new THREE.Color(0x1e293b);
+      } else {
+        ambientLight.color.setHex(0xffffff);
+        ambientLight.intensity = 0.65;
+        sunLight.color.setHex(0xfffbeb);
+        sunLight.intensity = 0.5;
+        scene.fog.color.setHex(0xdbeafe);
+        scene.background = null;
+      }
+
+      // Reset all actors to default pose, expression, emote & placements, then apply shot overrides
       var shotRestRotY = {};
       Object.keys(actors).forEach(function (id) {
         var a = actors[id];
@@ -645,6 +753,8 @@
         a.group.visible = d.visible;
         shotRestRotY[id] = d.rotY;
         a.animate("idle", (globalT * 0.5) % 1);
+        if (typeof a.setExpression === "function") a.setExpression(d.expression || "happy");
+        if (typeof a.setEmote === "function") a.setEmote(d.emote || "", globalT);
       });
 
       if (shot.placements && typeof shot.placements === "object") {
@@ -660,6 +770,20 @@
             shotRestRotY[id] = pl.rotY;
           }
           if (typeof pl.visible === "boolean") a.group.visible = pl.visible;
+          if (typeof pl.expression === "string" && typeof a.setExpression === "function") {
+            try {
+              a.setExpression(pl.expression);
+            } catch (eExpr) {
+              errors.push(String(eExpr && eExpr.message ? eExpr.message : eExpr));
+            }
+          }
+          if (typeof pl.emote === "string" && typeof a.setEmote === "function") {
+            try {
+              a.setEmote(pl.emote, globalT);
+            } catch (eEm) {
+              errors.push(String(eEm && eEm.message ? eEm.message : eEm));
+            }
+          }
         });
       }
 
@@ -726,6 +850,12 @@
           hasAnimated[act.target] = true;
           try {
             target.animate(act.anim, p, { elapsedSec: localT - actStart });
+            if (typeof act.expression === "string" && typeof target.setExpression === "function") {
+              target.setExpression(act.expression);
+            }
+            if (typeof act.emote === "string" && typeof target.setEmote === "function") {
+              target.setEmote(act.emote, localT - actStart);
+            }
           } catch (e) {
             errors.push(String(e && e.message ? e.message : e));
           }

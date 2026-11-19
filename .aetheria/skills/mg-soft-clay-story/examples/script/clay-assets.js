@@ -13,8 +13,17 @@
     "blob"
   ];
 
-  var HUMANOID_ACCESSORIES = ["hat-conical", "hat-cap", "towel"];
-  var ASSET_ANIMATIONS = ["idle", "walk", "hop", "grow", "pop-in"];
+  var HUMANOID_ACCESSORIES = ["hat-conical", "hat-cap", "towel", "glasses", "backpack", "beard", "hijab"];
+  // Gesture names (run..dance) are implemented in clay-gestures.js; idle/walk/hop/grow/pop-in live here.
+  var GESTURE_ANIMATIONS = ["run", "wave", "talk", "point", "cheer", "shock", "work", "nod", "dance"];
+  var ASSET_ANIMATIONS = ["idle", "walk", "hop", "grow", "pop-in"].concat(GESTURE_ANIMATIONS);
+  var KIND_VARIANTS = {
+    humanoid: ["adult", "kid", "elder", "chubby"],
+    building: ["shop", "house", "hut", "barn", "apartment", "school"]
+  };
+  var HAIR_STYLES = ["short", "long", "bun", "ponytail", "spiky", "bald"];
+  var EXPRESSIONS = ["happy", "laugh", "sad", "surprised", "angry", "worried", "sleepy"];
+  var EMOTES = ["exclaim", "question", "idea", "heart", "sweat", "anger", "sleep", "music"];
 
   function specError(code, path, hint) {
     var err = new Error("[" + code + "] " + (path || "<root>") + ": " + hint);
@@ -134,14 +143,51 @@
         tags.push(spec.tags[ti]);
       }
     }
+    var allowedVariants = KIND_VARIANTS[spec.kind] || [];
+    var variant = allowedVariants.length > 0 ? allowedVariants[0] : "";
+    if (spec.variant !== undefined) {
+      if (typeof spec.variant !== "string" || allowedVariants.indexOf(spec.variant) === -1) {
+        throw specError(
+          "UNKNOWN_VARIANT",
+          "variant",
+          allowedVariants.length > 0
+            ? "Unsupported variant '" + String(spec.variant) + "' for '" + spec.kind + "'. Allowed: " + allowedVariants.join(", ") + "."
+            : "Kind '" + spec.kind + "' has no variants (omit `variant`)."
+        );
+      }
+      variant = spec.variant;
+    }
+    var hair = spec.kind === "humanoid" ? "short" : "";
+    if (spec.hair !== undefined) {
+      if (spec.kind !== "humanoid" || typeof spec.hair !== "string" || HAIR_STYLES.indexOf(spec.hair) === -1) {
+        throw specError(
+          "UNKNOWN_HAIR",
+          "hair",
+          spec.kind !== "humanoid"
+            ? "Only 'humanoid' accepts `hair`."
+            : "Unsupported hair '" + String(spec.hair) + "'. Allowed: " + HAIR_STYLES.join(", ") + "."
+        );
+      }
+      hair = spec.hair;
+    }
     return {
       id: spec.id.trim(),
       kind: spec.kind,
+      variant: variant,
+      hair: hair,
       palette: palette,
       scale: scale,
       accessories: accessories,
       tags: tags
     };
+  }
+
+  function requireModule(kit, key, file, path) {
+    var mod = kit[key];
+    if (!mod) {
+      throw specError("MISSING_MODULE", path, "Load script/" + file + " (auto-seeded) before story-runtime.js.");
+    }
+    return mod;
   }
 
   function clamp01(v) {
@@ -182,13 +228,21 @@
     var shirtMat = lambert(pal.primary !== undefined ? pal.primary : (pal.shirt !== undefined ? pal.shirt : 0x60a5fa));
     var pantsMat = lambert(pal.secondary !== undefined ? pal.secondary : (pal.pants !== undefined ? pal.pants : 0x78716c));
     var accentMat = lambert(pal.accent !== undefined ? pal.accent : 0xfb7185);
-    var hairMat = lambert(pal.hair !== undefined ? pal.hair : 0x594637);
+    var hairMat = lambert(pal.hair !== undefined ? pal.hair : spec.variant === "elder" ? 0xe7e5e4 : 0x594637);
     var darkInk = basic(OUTLINE_COLOR);
     var blushMat = basic(pal.blush !== undefined ? pal.blush : 0xfda4af);
+    var people = spec.variant !== "adult" || spec.hair !== "short" || spec.accessories.some(function (a) {
+      return a !== "hat-conical" && a !== "hat-cap" && a !== "towel";
+    })
+      ? requireModule(kit, "__people", "clay-people.js", spec.variant !== "adult" ? "variant" : spec.hair !== "short" ? "hair" : "accessories")
+      : null;
 
     var rig = new THREE.Group();
     var bodyBounce = new THREE.Group();
     rig.add(bodyBounce);
+    // Torso + limbs live in `core` so body-shape variants can rescale them without touching animation pivots.
+    var core = new THREE.Group();
+    bodyBounce.add(core);
 
     // Rounded clay head
     var headGroup = new THREE.Group();
@@ -198,20 +252,24 @@
     headGeo.scale(1.06, 0.96, 0.94);
     headGroup.add(addOutlined(kit, headGeo, skinMat, outlineMat, 0.048).group);
 
-    // Soft hair cap at back/top
-    var hairGeo = new THREE.SphereGeometry(0.66, 28, 20, 0, Math.PI * 2, 0, Math.PI * 0.54);
-    hairGeo.scale(1.06, 0.95, 0.96);
-    var hairMesh = addOutlined(kit, hairGeo, hairMat, outlineMat, 0.036).group;
-    hairMesh.position.set(0, 0.04, -0.04);
-    hairMesh.rotation.x = -0.18;
-    headGroup.add(hairMesh);
+    // Soft hair cap at back/top (omitted for bald)
+    if (spec.hair !== "bald") {
+      var hairGeo = new THREE.SphereGeometry(0.66, 28, 20, 0, Math.PI * 2, 0, Math.PI * 0.54);
+      hairGeo.scale(1.06, 0.95, 0.96);
+      var hairMesh = addOutlined(kit, hairGeo, hairMat, outlineMat, 0.036).group;
+      hairMesh.position.set(0, 0.04, -0.04);
+      hairMesh.rotation.x = -0.18;
+      headGroup.add(hairMesh);
+    }
 
     // Eyes, blush & smile
+    var eyes = [];
     [-0.22, 0.22].forEach(function (ex) {
       var eye = new THREE.Mesh(new THREE.SphereGeometry(0.095, 16, 14), darkInk);
       eye.scale.set(0.85, 1.15, 0.4);
       eye.position.set(ex, 0.02, 0.58);
       headGroup.add(eye);
+      eyes.push(eye);
       var cheek = new THREE.Mesh(new THREE.SphereGeometry(0.11, 14, 12), blushMat);
       cheek.scale.set(1.15, 0.78, 0.25);
       cheek.position.set(ex * 1.65, -0.1, 0.54);
@@ -222,17 +280,16 @@
       new THREE.Vector3(0, -0.19, 0.61),
       new THREE.Vector3(0.08, -0.14, 0.59)
     ];
-    headGroup.add(
-      new THREE.Mesh(
-        new THREE.TubeGeometry(new THREE.CatmullRomCurve3(smilePts), 12, 0.022, 8, false),
-        darkInk
-      )
+    var smile = new THREE.Mesh(
+      new THREE.TubeGeometry(new THREE.CatmullRomCurve3(smilePts), 12, 0.022, 8, false),
+      darkInk
     );
+    headGroup.add(smile);
 
     // Torso (shirt + pants)
     var torso = new THREE.Group();
     torso.position.set(0, 0.86, 0);
-    bodyBounce.add(torso);
+    core.add(torso);
     var shirt = addOutlined(kit, kit.createSmoothTorsoPartGeometry(0.54, 0.62, 0.62, 0.76), shirtMat, outlineMat, 0.045);
     shirt.group.position.set(0, 0.12, 0);
     torso.add(shirt.group);
@@ -267,7 +324,26 @@
     var rightArm = makeLimbArm(1);
     var leftLeg = makeLimbLeg(-1);
     var rightLeg = makeLimbLeg(1);
-    bodyBounce.add(leftArm, rightArm, leftLeg, rightLeg);
+    core.add(leftArm, rightArm, leftLeg, rightLeg);
+
+    var peopleCtx = {
+      kit: kit,
+      spec: spec,
+      outlineMat: outlineMat,
+      headGroup: headGroup,
+      torso: torso,
+      core: core,
+      mats: { skin: skinMat, shirt: shirtMat, pants: pantsMat, accent: accentMat, hair: hairMat, darkInk: darkInk },
+      lambert: lambert,
+      basic: basic,
+      addOutlined: function (geo, mat, thickness) {
+        return addOutlined(kit, geo, mat, outlineMat, thickness).group;
+      }
+    };
+    var hasHijab = spec.accessories.indexOf("hijab") !== -1;
+    if (people && spec.hair !== "short") {
+      people.addHairStyle(peopleCtx, spec.hair, hasHijab);
+    }
 
     // Accessories
     var topY = 2.42;
@@ -323,8 +399,12 @@
         });
         towelG.position.set(0, 0.39, 0);
         torso.add(towelG);
+      } else if (people) {
+        topY = Math.max(topY, people.addAccessory(peopleCtx, acc) || 0);
       }
     }
+
+    var scaleMul = people ? people.applyBodyVariant(peopleCtx, spec.variant) : 1;
 
     var anchors = {
       head: makeAnchor("head", 0, topY - 1.76, 0),
@@ -341,7 +421,17 @@
       rig: rig,
       bodyBounce: bodyBounce,
       anchors: anchors,
-      parts: { headGroup: headGroup, leftArm: leftArm, rightArm: rightArm, leftLeg: leftLeg, rightLeg: rightLeg }
+      scaleMul: scaleMul,
+      parts: {
+        headGroup: headGroup,
+        leftArm: leftArm,
+        rightArm: rightArm,
+        leftLeg: leftLeg,
+        rightLeg: rightLeg,
+        eyes: eyes,
+        smile: smile,
+        darkInk: darkInk
+      }
     };
   }
 
@@ -561,29 +651,49 @@
 
   function buildBuilding(kit, spec, outlineMat) {
     var pal = spec.palette;
-    var mats = {
-      winLit: basic(pal.windowLit !== undefined ? pal.windowLit : 0xfef08a),
-      winGlass: basic(pal.windowGlass !== undefined ? pal.windowGlass : 0x7dd3fc)
-    };
     var rig = new THREE.Group();
     var bodyBounce = new THREE.Group();
     rig.add(bodyBounce);
-    var bldg = kit.createKawaiiBuilding(mats, outlineMat, {
-      x: 0,
-      z: 0,
-      w: 2.8,
-      h: 3.1,
-      d: 2.3,
-      bodyHex: pal.primary !== undefined ? pal.primary : 0xfda4af,
-      roofHex: pal.accent !== undefined ? pal.accent : 0xe11d48,
-      hasAwning: true
-    });
-    bodyBounce.add(bldg);
+    var topH = 3.55;
+    var halfW = 1.55;
+    if (spec.variant !== "shop") {
+      var builders = requireModule(kit, "__buildings", "clay-buildings.js", "variant");
+      var made = builders.build(spec.variant, {
+        kit: kit,
+        spec: spec,
+        outlineMat: outlineMat,
+        lambert: lambert,
+        basic: basic,
+        addOutlined: function (geo, mat, thickness, castShadow, receiveShadow) {
+          return addOutlined(kit, geo, mat, outlineMat, thickness, castShadow, receiveShadow).group;
+        }
+      });
+      bodyBounce.add(made.group);
+      topH = made.height + 0.45;
+      halfW = made.halfW;
+    } else {
+      var mats = {
+        winLit: basic(pal.windowLit !== undefined ? pal.windowLit : 0xfef08a),
+        winGlass: basic(pal.windowGlass !== undefined ? pal.windowGlass : 0x7dd3fc)
+      };
+      bodyBounce.add(
+        kit.createKawaiiBuilding(mats, outlineMat, {
+          x: 0,
+          z: 0,
+          w: 2.8,
+          h: 3.1,
+          d: 2.3,
+          bodyHex: pal.primary !== undefined ? pal.primary : 0xfda4af,
+          roofHex: pal.accent !== undefined ? pal.accent : 0xe11d48,
+          hasAwning: true
+        })
+      );
+    }
 
     var anchors = {
-      head: makeAnchor("head", 0, 3.55, 0),
-      "hand-L": makeAnchor("hand-L", -1.55, 1.8, 0),
-      "hand-R": makeAnchor("hand-R", 1.55, 1.8, 0),
+      head: makeAnchor("head", 0, topH, 0),
+      "hand-L": makeAnchor("hand-L", -halfW, 1.8, 0),
+      "hand-R": makeAnchor("hand-R", halfW, 1.8, 0),
       ground: makeAnchor("ground", 0, 0, 0)
     };
     bodyBounce.add(anchors.head, anchors["hand-L"], anchors["hand-R"]);
@@ -712,7 +822,7 @@
     var group = new THREE.Group();
     group.name = "asset_" + spec.id;
     group.userData.assetSpec = spec;
-    built.rig.scale.setScalar(spec.scale);
+    built.rig.scale.setScalar(spec.scale * (built.scaleMul || 1));
     group.add(built.rig);
 
     var leftLegBaseY = built.parts.leftLeg ? built.parts.leftLeg.position.y : 0;
@@ -861,7 +971,45 @@
       } else if (name === "pop-in") {
         var ps = Math.max(0.001, easeOutBack(p));
         bb.scale.setScalar(ps);
+      } else if (GESTURE_ANIMATIONS.indexOf(name) !== -1) {
+        var gestures = requireModule(kit, "__gestures", "clay-gestures.js", "anim");
+        gestures.applyGesture(name, p, opts, bb, parts, leftLegBaseY, rightLegBaseY);
       }
+      return group;
+    }
+
+    function setExpression(name) {
+      var expr = name === undefined || name === null || name === "" ? "happy" : String(name);
+      if (EXPRESSIONS.indexOf(expr) === -1) {
+        throw specError(
+          "UNKNOWN_EXPRESSION",
+          "expression",
+          "Unsupported expression '" + expr + "'. Supported: " + EXPRESSIONS.join(", ") + "."
+        );
+      }
+      if (kit.__gestures && typeof kit.__gestures.setExpression === "function") {
+        kit.__gestures.setExpression(built.parts, expr);
+      }
+      return group;
+    }
+
+    function setEmote(name, elapsedSec) {
+      if (name === undefined || name === null || name === "") {
+        if (kit.__gestures && typeof kit.__gestures.setEmote === "function") {
+          kit.__gestures.setEmote(built.anchors, built.parts, outlineMat, "", 0);
+        }
+        return group;
+      }
+      var em = String(name);
+      if (EMOTES.indexOf(em) === -1) {
+        throw specError(
+          "UNKNOWN_EMOTE",
+          "emote",
+          "Unsupported emote '" + em + "'. Supported: " + EMOTES.join(", ") + "."
+        );
+      }
+      var gestures = requireModule(kit, "__gestures", "clay-gestures.js", "emote");
+      gestures.setEmote(built.anchors, built.parts, outlineMat, em, elapsedSec);
       return group;
     }
 
@@ -869,6 +1017,8 @@
       group: group,
       anchors: built.anchors,
       animate: animate,
+      setExpression: setExpression,
+      setEmote: setEmote,
       spec: spec
     };
   }
@@ -878,4 +1028,11 @@
   GLOBAL_SCOPE.ClayKit.ASSET_KINDS = ASSET_KINDS.slice();
   GLOBAL_SCOPE.ClayKit.HUMANOID_ACCESSORIES = HUMANOID_ACCESSORIES.slice();
   GLOBAL_SCOPE.ClayKit.ASSET_ANIMATIONS = ASSET_ANIMATIONS.slice();
+  GLOBAL_SCOPE.ClayKit.KIND_VARIANTS = {
+    humanoid: KIND_VARIANTS.humanoid.slice(),
+    building: KIND_VARIANTS.building.slice()
+  };
+  GLOBAL_SCOPE.ClayKit.HAIR_STYLES = HAIR_STYLES.slice();
+  GLOBAL_SCOPE.ClayKit.EXPRESSIONS = EXPRESSIONS.slice();
+  GLOBAL_SCOPE.ClayKit.EMOTES = EMOTES.slice();
 })();

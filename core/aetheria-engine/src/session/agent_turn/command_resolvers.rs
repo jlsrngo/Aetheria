@@ -298,7 +298,16 @@ fn seed_skill_kit_scripts(workspace_dir: &str, skill_dir: &Path) -> Vec<String> 
             let use_legacy = std::env::var("AETHERIA_CLAY_STORY_MODE")
                 .map(|v| v.trim().eq_ignore_ascii_case("legacy"))
                 .unwrap_or(false);
-            if use_legacy && (lower == "clay-assets.js" || lower == "story-runtime.js") {
+            if use_legacy
+                && matches!(
+                    lower.as_str(),
+                    "clay-assets.js"
+                        | "clay-buildings.js"
+                        | "clay-people.js"
+                        | "clay-gestures.js"
+                        | "story-runtime.js"
+                )
+            {
                 continue;
             }
             let rel = format!("script/{fname}");
@@ -647,7 +656,14 @@ fn collect_skill_examples(skill_dir: &Path) -> String {
                         let fname = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_ascii_lowercase();
                         if matches!(
                             fname.as_str(),
-                            "clay-assets.js" | "story-runtime.js" | "story.example.json" | "story.schema.json" | "story.html"
+                            "clay-assets.js"
+                                | "clay-buildings.js"
+                                | "clay-people.js"
+                                | "clay-gestures.js"
+                                | "story-runtime.js"
+                                | "story.example.json"
+                                | "story.schema.json"
+                                | "story.html"
                         ) {
                             continue;
                         }

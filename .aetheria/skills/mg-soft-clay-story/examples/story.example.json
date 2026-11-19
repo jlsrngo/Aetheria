@@ -4,13 +4,13 @@
   "cast": [
     {
       "id": "petani",
-      "asset": { "kind": "humanoid", "palette": { "primary": "#60A5FA", "secondary": "#78716C", "hat": "#FDE68A", "accent": "#FB7185" }, "scale": 1.0, "accessories": ["hat-conical", "towel"], "tags": ["hero"] },
+      "asset": { "kind": "humanoid", "variant": "elder", "hair": "short", "palette": { "primary": "#60A5FA", "secondary": "#78716C", "hat": "#FDE68A", "accent": "#FB7185" }, "scale": 1.0, "accessories": ["hat-conical", "towel", "beard"], "tags": ["hero"] },
       "pos": [0, 0, 1.4],
       "rotY": 0.08
     },
     {
       "id": "tetangga",
-      "asset": { "kind": "humanoid", "palette": { "primary": "#34D399", "secondary": "#57534E", "hat": "#FB7185", "accent": "#FACC15" }, "scale": 0.96, "accessories": ["hat-cap"], "tags": ["helper"] },
+      "asset": { "kind": "humanoid", "variant": "adult", "hair": "bun", "palette": { "primary": "#34D399", "secondary": "#57534E", "hat": "#F472B6", "accent": "#FACC15" }, "scale": 0.96, "accessories": ["hijab", "glasses"], "tags": ["helper"] },
       "pos": [-2.8, 0, 0.8],
       "rotY": 0.35
     },
@@ -44,7 +44,7 @@
     },
     {
       "id": "gubuk_tani",
-      "asset": { "kind": "building", "palette": { "primary": "#FDE68A", "accent": "#EA580C" }, "scale": 0.85 },
+      "asset": { "kind": "building", "variant": "hut", "palette": { "primary": "#FDE68A", "accent": "#D97706" }, "scale": 0.85 },
       "pos": [4.4, 0, -4.6],
       "rotY": -0.25
     }
@@ -70,11 +70,12 @@
       "focus": "wereng",
       "camera": { "preset": "close" },
       "stage": "open-field",
-      "placements": { "wereng": { "pos": [1.8, 0, 0.8], "rotY": -0.45, "visible": true }, "petani": { "pos": [-2.6, 0, -0.4], "rotY": 0.45, "visible": true }, "tetangga": { "visible": false } },
+      "placements": { "wereng": { "pos": [1.8, 0, 0.8], "rotY": -0.45, "visible": true }, "petani": { "pos": [-2.6, 0, -0.4], "rotY": 0.45, "visible": true, "expression": "surprised", "emote": "exclaim" }, "tetangga": { "visible": false } },
       "actions": [
         { "target": "wereng", "anim": "hop", "at": 0, "dur": 1.4, "from": [1.8, 0, 0.8], "to": [0.9, 0, 1.5] },
         { "target": "wereng", "anim": "hop", "at": 1.6, "dur": 1.4, "from": [0.9, 0, 1.5], "to": [0.1, 0, 2.2] },
-        { "target": "petani", "anim": "walk", "at": 1.2, "dur": 2.8, "from": [-2.6, 0, -0.4], "to": [-1.5, 0, 0.6] }
+        { "target": "petani", "anim": "shock", "at": 0.4, "dur": 1.2, "expression": "surprised", "emote": "exclaim" },
+        { "target": "petani", "anim": "walk", "at": 1.7, "dur": 2.4, "from": [-2.6, 0, -0.4], "to": [-1.5, 0, 0.6], "expression": "worried" }
       ],
       "caption": "Tiba-tiba hama wereng melompat menyerang petak padi!"
     },
@@ -113,11 +114,12 @@
       "focus": ["petani", "tetangga"],
       "camera": { "preset": "orbit" },
       "stage": "open-field",
-      "placements": { "petani": { "pos": [0.9, 0, 1.4], "rotY": -0.25, "visible": true }, "tetangga": { "pos": [-2.6, 0, 0.4], "rotY": 0.25, "visible": true }, "wereng": { "visible": false } },
+      "placements": { "petani": { "pos": [0.9, 0, 1.4], "rotY": -0.25, "visible": true, "expression": "happy" }, "tetangga": { "pos": [-2.6, 0, 0.4], "rotY": 0.25, "visible": true, "expression": "happy", "emote": "idea" }, "wereng": { "visible": false } },
       "actions": [
-        { "target": "tetangga", "anim": "walk", "at": 0.2, "dur": 2.6, "from": [-2.6, 0, 0.4], "to": [-0.9, 0, 1.4] },
-        { "target": "petani", "anim": "hop", "at": 3.0, "dur": 1.1 },
-        { "target": "tetangga", "anim": "hop", "at": 3.2, "dur": 1.1 }
+        { "target": "tetangga", "anim": "walk", "at": 0.2, "dur": 2.5, "from": [-2.6, 0, 0.4], "to": [-0.9, 0, 1.4] },
+        { "target": "petani", "anim": "wave", "at": 0.6, "dur": 1.8, "expression": "happy" },
+        { "target": "tetangga", "anim": "talk", "at": 2.8, "dur": 1.8, "expression": "laugh", "emote": "heart" },
+        { "target": "petani", "anim": "nod", "at": 3.0, "dur": 1.6, "expression": "laugh" }
       ],
       "caption": "Tetangga datang berjalan membantu menjaga ekosistem sawah."
     },
@@ -128,10 +130,11 @@
       "focus": ["petani", "bunga_kenikir"],
       "camera": { "preset": "wide" },
       "stage": "open-field",
-      "placements": { "petani": { "pos": [-2.2, 0, 0.6], "rotY": 0.14, "visible": true }, "bunga_kenikir": { "pos": [1.15, 0, 1.4], "visible": true }, "tetangga": { "pos": [-3.2, 0, -0.2], "visible": true }, "wereng": { "visible": false } },
+      "mood": "sunset",
+      "placements": { "petani": { "pos": [-2.2, 0, 0.6], "rotY": 0.14, "visible": true, "expression": "laugh" }, "bunga_kenikir": { "pos": [1.15, 0, 1.4], "visible": true }, "tetangga": { "pos": [-3.2, 0, -0.2], "visible": true, "expression": "happy" }, "wereng": { "visible": false } },
       "actions": [
-        { "target": "petani", "anim": "walk", "at": 0.2, "dur": 2.4, "from": [-2.2, 0, 0.6], "to": [-1.0, 0, 1.5] },
-        { "target": "petani", "anim": "hop", "at": 2.9, "dur": 1.2 },
+        { "target": "petani", "anim": "walk", "at": 0.2, "dur": 2.3, "from": [-2.2, 0, 0.6], "to": [-1.0, 0, 1.5] },
+        { "target": "petani", "anim": "cheer", "at": 2.7, "dur": 1.8, "expression": "laugh", "emote": "heart" },
         { "target": "bunga_kenikir", "anim": "grow", "at": 0, "dur": 0.4 }
       ],
       "caption": "Sawah kembali subur dan aman dari hama."

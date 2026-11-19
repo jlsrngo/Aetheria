@@ -35,6 +35,9 @@ const FIXED_BRIEF =
 
 const SEEDED_KIT_FILES = new Set([
   "clay-kit.js",
+  "clay-buildings.js",
+  "clay-people.js",
+  "clay-gestures.js",
   "clay-assets.js",
   "story-runtime.js",
   "aetheria-motion.js",

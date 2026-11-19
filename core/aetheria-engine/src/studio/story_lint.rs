@@ -24,10 +24,26 @@ pub const VALID_ASSET_KINDS: &[&str] = &[
     "blob",
 ];
 
-pub const VALID_HUMANOID_ACCESSORIES: &[&str] = &["hat-conical", "hat-cap", "towel"];
-pub const VALID_ANIMATIONS: &[&str] = &["idle", "walk", "hop", "grow", "pop-in"];
+pub const VALID_HUMANOID_ACCESSORIES: &[&str] = &[
+    "hat-conical",
+    "hat-cap",
+    "towel",
+    "glasses",
+    "backpack",
+    "beard",
+    "hijab",
+];
+pub const VALID_HUMANOID_VARIANTS: &[&str] = &["adult", "kid", "elder", "chubby"];
+pub const VALID_BUILDING_VARIANTS: &[&str] = &["shop", "house", "hut", "barn", "apartment", "school"];
+pub const VALID_HAIR_STYLES: &[&str] = &["short", "long", "bun", "ponytail", "spiky", "bald"];
+pub const VALID_EXPRESSIONS: &[&str] = &["happy", "laugh", "sad", "surprised", "angry", "worried", "sleepy"];
+pub const VALID_EMOTES: &[&str] = &["exclaim", "question", "idea", "heart", "sweat", "anger", "sleep", "music"];
+pub const VALID_ANIMATIONS: &[&str] = &[
+    "idle", "walk", "run", "hop", "grow", "pop-in", "wave", "talk", "point", "cheer", "shock", "work", "nod", "dance",
+];
 pub const VALID_CAMERA_PRESETS: &[&str] = &["wide", "medium", "close", "dolly-in", "orbit"];
-pub const VALID_STAGES: &[&str] = &["city-street", "open-field"];
+pub const VALID_STAGES: &[&str] = &["city-street", "open-field", "indoor-room"];
+pub const VALID_MOODS: &[&str] = &["day", "sunset", "night"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -59,6 +75,35 @@ fn push_issue(issues: &mut Vec<StoryLintIssue>, code: &str, path: impl Into<Stri
         path: path.into(),
         hint: hint.into(),
     });
+}
+
+fn validate_expression_and_emote(
+    obj: &serde_json::Map<String, Value>,
+    base: &str,
+    issues: &mut Vec<StoryLintIssue>,
+) {
+    if let Some(ev) = obj.get("expression") {
+        let expr = ev.as_str().unwrap_or("");
+        if !VALID_EXPRESSIONS.contains(&expr) {
+            push_issue(
+                issues,
+                "STORY_UNKNOWN_EXPRESSION",
+                format!("{base}.expression"),
+                format!("Unsupported expression '{}'. Allowed: {}.", expr, VALID_EXPRESSIONS.join(", ")),
+            );
+        }
+    }
+    if let Some(mv) = obj.get("emote") {
+        let em = mv.as_str().unwrap_or("");
+        if !em.is_empty() && !VALID_EMOTES.contains(&em) {
+            push_issue(
+                issues,
+                "STORY_UNKNOWN_EMOTE",
+                format!("{base}.emote"),
+                format!("Unsupported emote '{}'. Allowed: {} (or \"\").", em, VALID_EMOTES.join(", ")),
+            );
+        }
+    }
 }
 
 fn validate_actor_list(
@@ -184,6 +229,37 @@ fn validate_actor_list(
                 }
             }
         }
+
+        if let Some(var_val) = asset.get("variant") {
+            let v = var_val.as_str().unwrap_or("");
+            let allowed: &[&str] = match kind {
+                "humanoid" => VALID_HUMANOID_VARIANTS,
+                "building" => VALID_BUILDING_VARIANTS,
+                _ => &[],
+            };
+            if !allowed.contains(&v) {
+                let hint = if allowed.is_empty() {
+                    format!("Kind '{}' has no variants; omit `variant`.", kind)
+                } else {
+                    format!("Unknown variant '{}' for '{}'. Allowed: {}.", v, kind, allowed.join(", "))
+                };
+                push_issue(issues, "STORY_UNKNOWN_VARIANT", format!("{base}.asset.variant"), hint);
+            }
+        }
+
+        if let Some(hair_val) = asset.get("hair") {
+            let h = hair_val.as_str().unwrap_or("");
+            if kind != "humanoid" || !VALID_HAIR_STYLES.contains(&h) {
+                let hint = if kind != "humanoid" {
+                    "Only 'humanoid' accepts `hair`.".to_string()
+                } else {
+                    format!("Unknown hair '{}'. Allowed: {}.", h, VALID_HAIR_STYLES.join(", "))
+                };
+                push_issue(issues, "STORY_UNKNOWN_HAIR", format!("{base}.asset.hair"), hint);
+            }
+        }
+
+        validate_expression_and_emote(obj, &base, issues);
     }
 }
 
@@ -402,7 +478,7 @@ pub fn lint_story_json_value(
                     );
                 }
 
-                // Stage preset
+                // Stage & optional mood preset
                 let stage = shot.get("stage").and_then(Value::as_str).unwrap_or("");
                 if !VALID_STAGES.contains(&stage) {
                     push_issue(
@@ -412,10 +488,21 @@ pub fn lint_story_json_value(
                         format!("Invalid stage '{}'. Allowed: {}.", stage, VALID_STAGES.join(", ")),
                     );
                 }
+                if let Some(mood_val) = shot.get("mood") {
+                    let mood = mood_val.as_str().unwrap_or("");
+                    if !VALID_MOODS.contains(&mood) {
+                        push_issue(
+                            &mut issues,
+                            "STORY_UNKNOWN_MOOD",
+                            format!("{sp}.mood"),
+                            format!("Invalid mood '{}'. Allowed: {}.", mood, VALID_MOODS.join(", ")),
+                        );
+                    }
+                }
 
-                // Placements ID check
+                // Placements ID + expression/emote check
                 if let Some(pls) = shot.get("placements").and_then(Value::as_object) {
-                    for pid in pls.keys() {
+                    for (pid, pval) in pls {
                         if !actor_ids.contains(pid) {
                             push_issue(
                                 &mut issues,
@@ -423,6 +510,9 @@ pub fn lint_story_json_value(
                                 format!("{sp}.placements.{pid}"),
                                 format!("Placement target '{}' is not declared in `cast` or `props`.", pid),
                             );
+                        }
+                        if let Some(pobj) = pval.as_object() {
+                            validate_expression_and_emote(pobj, &format!("{sp}.placements.{pid}"), &mut issues);
                         }
                     }
                 }
@@ -489,6 +579,9 @@ pub fn lint_story_json_value(
                                         );
                                     }
                                 }
+                            }
+                            if let Some(aobj) = av.as_object() {
+                                validate_expression_and_emote(aobj, &ap, &mut issues);
                             }
                         }
                     }
@@ -634,6 +727,9 @@ pub fn render_story_index_html(
   <script src="/script/three.min.js"></script>
   <script src="/script/aetheria-motion.js"></script>
   <script src="/script/clay-kit.js"></script>
+  <script src="/script/clay-buildings.js"></script>
+  <script src="/script/clay-people.js"></script>
+  <script src="/script/clay-gestures.js"></script>
   <script src="/script/clay-assets.js"></script>
   <script src="/script/story-runtime.js"></script>
 {custom_tags}</head>
@@ -896,6 +992,20 @@ mod tests {
         s["shots"][0]["actions"][0]["to"] = json!([0.4, 0.0]);
         let r = lint_story_json_value(&s, None, "story.json");
         assert!(r.issues.iter().any(|i| i.code == "STORY_INVALID_ACTION_POS" && i.path == "shots[0].actions[0].to"));
+
+        // 9c. Variety validation: variant, hair, expression, emote, mood
+        let mut s = minimal_valid_story();
+        s["cast"][0]["asset"]["variant"] = json!("giant");
+        s["cast"][0]["asset"]["hair"] = json!("mohawk");
+        s["shots"][0]["mood"] = json!("eclipse");
+        s["shots"][0]["actions"][0]["expression"] = json!("furious");
+        s["shots"][0]["actions"][0]["emote"] = json!("rainbow");
+        let r = lint_story_json_value(&s, None, "story.json");
+        assert!(r.issues.iter().any(|i| i.code == "STORY_UNKNOWN_VARIANT"));
+        assert!(r.issues.iter().any(|i| i.code == "STORY_UNKNOWN_HAIR"));
+        assert!(r.issues.iter().any(|i| i.code == "STORY_UNKNOWN_MOOD"));
+        assert!(r.issues.iter().any(|i| i.code == "STORY_UNKNOWN_EXPRESSION"));
+        assert!(r.issues.iter().any(|i| i.code == "STORY_UNKNOWN_EMOTE"));
 
         // 10. STORY_INVALID_CUSTOM_PATH
         let mut s = minimal_valid_story();

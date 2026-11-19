@@ -20,6 +20,9 @@ const SCRIPT_FILES = {
   "/script/three.min.js": path.join(REPO_ROOT, "core", "aetheria-engine", "assets", "script", "three.min.js"),
   "/script/aetheria-motion.js": path.join(REPO_ROOT, "apps", "public", "script", "aetheria-motion.js"),
   "/script/clay-kit.js": path.join(REPO_ROOT, ".aetheria", "skills", "mg-soft-clay-story", "examples", "script", "clay-kit.js"),
+  "/script/clay-buildings.js": path.join(REPO_ROOT, ".aetheria", "skills", "mg-soft-clay-story", "examples", "script", "clay-buildings.js"),
+  "/script/clay-people.js": path.join(REPO_ROOT, ".aetheria", "skills", "mg-soft-clay-story", "examples", "script", "clay-people.js"),
+  "/script/clay-gestures.js": path.join(REPO_ROOT, ".aetheria", "skills", "mg-soft-clay-story", "examples", "script", "clay-gestures.js"),
   "/script/clay-assets.js": path.join(REPO_ROOT, ".aetheria", "skills", "mg-soft-clay-story", "examples", "script", "clay-assets.js"),
 };
 
@@ -34,6 +37,27 @@ const SHOWCASE_SPECS = [
   { id: "blob", kind: "blob", palette: { primary: "#FEF08A", secondary: "#FDE047", accent: "#F5D0FE" }, anim: "pop-in", p: 1.0 },
 ];
 
+const PRESET_SPECS = {
+  base: SHOWCASE_SPECS,
+  buildings: [
+    { id: "b_shop", label: "building:shop", kind: "building", variant: "shop", palette: { primary: "#FDA4AF", accent: "#E11D48" }, anim: "idle", p: 0 },
+    { id: "b_house", label: "building:house", kind: "building", variant: "house", palette: { primary: "#FEF3C7", accent: "#EA580C" }, anim: "idle", p: 0 },
+    { id: "b_hut", label: "building:hut", kind: "building", variant: "hut", palette: { primary: "#FDE68A", accent: "#D97706" }, anim: "idle", p: 0 },
+    { id: "b_barn", label: "building:barn", kind: "building", variant: "barn", palette: { primary: "#EF4444", accent: "#78716C" }, anim: "idle", p: 0 },
+    { id: "b_apt", label: "building:apartment", kind: "building", variant: "apartment", palette: { primary: "#93C5FD", accent: "#3B82F6" }, anim: "idle", p: 0 },
+    { id: "b_school", label: "building:school", kind: "building", variant: "school", palette: { primary: "#FDE68A", accent: "#E11D48" }, anim: "idle", p: 0 },
+  ],
+  people: [
+    { id: "p_kid", label: "kid+spiky+backpack (wave)", kind: "humanoid", variant: "kid", hair: "spiky", accessories: ["backpack"], palette: { primary: "#38BDF8", accent: "#F97316" }, anim: "wave", p: 0.35, expression: "laugh", emote: "music" },
+    { id: "p_elder", label: "elder+beard+glasses (talk)", kind: "humanoid", variant: "elder", hair: "bald", accessories: ["glasses", "beard"], palette: { primary: "#A78BFA", secondary: "#57534E" }, anim: "talk", p: 0.3, expression: "happy", emote: "idea" },
+    { id: "p_hijab", label: "adult+hijab+glasses (cheer)", kind: "humanoid", variant: "adult", hair: "bun", accessories: ["hijab", "glasses"], palette: { primary: "#34D399", hat: "#F472B6" }, anim: "cheer", p: 0.3, expression: "laugh", emote: "heart" },
+    { id: "p_long", label: "adult+long (shock/surprised)", kind: "humanoid", variant: "adult", hair: "long", palette: { primary: "#FB7185", hair: "#292524" }, anim: "shock", p: 0.25, expression: "surprised", emote: "exclaim" },
+    { id: "p_chubby", label: "chubby+cap (angry)", kind: "humanoid", variant: "chubby", hair: "short", accessories: ["hat-cap"], palette: { primary: "#F59E0B", hat: "#EF4444" }, anim: "point", p: 0.4, expression: "angry", emote: "anger" },
+    { id: "p_pony", label: "adult+ponytail (run)", kind: "humanoid", variant: "adult", hair: "ponytail", palette: { primary: "#60A5FA", accent: "#FACC15" }, anim: "run", p: 0.31, expression: "worried", emote: "sweat" },
+    { id: "p_farmer", label: "adult+conical+towel (work)", kind: "humanoid", variant: "adult", hair: "short", accessories: ["hat-conical", "towel"], palette: { primary: "#4ADE80", hat: "#FDE68A" }, anim: "work", p: 0.35, expression: "happy", emote: "question" },
+    { id: "p_sleep", label: "kid+bun (dance/sleepy)", kind: "humanoid", variant: "kid", hair: "bun", palette: { primary: "#F472B6", accent: "#38BDF8" }, anim: "dance", p: 0.35, expression: "sleepy", emote: "sleep" },
+  ],
+};
 const HARNESS_HTML = `<!doctype html>
 <html>
 <head>
@@ -46,6 +70,9 @@ const HARNESS_HTML = `<!doctype html>
   <script src="/script/three.min.js"></script>
   <script src="/script/aetheria-motion.js"></script>
   <script src="/script/clay-kit.js"></script>
+  <script src="/script/clay-buildings.js"></script>
+  <script src="/script/clay-people.js"></script>
+  <script src="/script/clay-gestures.js"></script>
   <script src="/script/clay-assets.js"></script>
 </head>
 <body>
@@ -79,6 +106,8 @@ const HARNESS_HTML = `<!doctype html>
         if (currentObj) scene.remove(currentObj);
         var asset = window.ClayKit.makeAsset(spec);
         asset.animate(spec.anim || "idle", typeof spec.p === "number" ? spec.p : 0);
+        if (spec.expression && typeof asset.setExpression === "function") asset.setExpression(spec.expression);
+        if (spec.emote && typeof asset.setEmote === "function") asset.setEmote(spec.emote, 0.25);
         currentObj = asset.group;
         currentObj.rotation.y = spec.kind === "insect" || spec.kind === "vehicle" ? -0.45 : 0.28;
         scene.add(currentObj);
@@ -127,9 +156,12 @@ function startServer() {
 
 async function main() {
   let outDir = "";
+  let preset = "base";
   for (let i = 2; i < process.argv.length; i++) {
     if (process.argv[i] === "--out-dir" && process.argv[i + 1]) outDir = path.resolve(process.argv[++i]);
+    else if (process.argv[i] === "--preset" && process.argv[i + 1]) preset = process.argv[++i];
   }
+  const activeSpecs = PRESET_SPECS[preset] || SHOWCASE_SPECS;
   if (!outDir) outDir = fs.mkdtempSync(path.join(os.tmpdir(), "aetheria-s1-assets-"));
   else fs.mkdirSync(outDir, { recursive: true });
 
@@ -148,13 +180,14 @@ async function main() {
     await page.waitForFunction(() => window.__ready === true);
 
     const rendered = [];
-    for (const spec of SHOWCASE_SPECS) {
+    for (const spec of activeSpecs) {
       const boxInfo = await page.evaluate((s) => window.renderAssetSpec(s), spec);
-      const pngPath = path.join(outDir, `${spec.kind}.png`);
+      const fileStem = preset === "base" ? spec.kind : spec.id;
+      const pngPath = path.join(outDir, `${fileStem}.png`);
       const buf = await page.screenshot({ type: "png" });
       fs.writeFileSync(pngPath, buf);
       rendered.push({
-        kind: spec.kind,
+        kind: spec.label || spec.kind,
         id: spec.id,
         pngPath,
         sha256: crypto.createHash("sha256").update(buf).digest("hex"),

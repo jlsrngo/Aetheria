@@ -77,10 +77,17 @@ command: /mg-soft-clay-story
 
 ## Valid Enum Values & Contracts
 - **`asset.kind` (8):** `humanoid` | `flower-row` | `container` | `insect` | `tree` | `building` | `vehicle` | `blob`
-- **`accessories` (`humanoid` only):** `hat-conical` | `hat-cap` | `towel`
-- **`actions[].anim` (5):** `idle` | `walk` (leg/arm stride + bouncy steps) | `hop` | `grow` | `pop-in`. Optional locomotion on any action: `"from": [x,y,z], "to": [x,y,z]` (auto-faces travel direction and resumes `idle` on arrival; use `walk` + `to` so characters move naturally instead of standing still).
+- **`asset.variant`:**
+  - `humanoid` (4): `adult` (default) | `kid` | `elder` | `chubby`
+  - `building` (6): `shop` (default) | `house` | `hut` | `barn` | `apartment` | `school`
+- **`asset.hair` (`humanoid` only, 6):** `short` (default) | `long` | `bun` | `ponytail` | `spiky` | `bald`
+- **`accessories` (`humanoid` only, 7):** `hat-conical` | `hat-cap` | `towel` | `glasses` | `backpack` | `beard` | `hijab`
+- **`expression` (7, on cast/placements/actions):** `happy` (default) | `laugh` | `sad` | `surprised` | `angry` | `worried` | `sleepy`
+- **`emote` (8, floating 3D icon above `head` anchor):** `exclaim` | `question` | `idea` | `heart` | `sweat` | `anger` | `sleep` | `music`
+- **`actions[].anim` (14):** `idle` | `walk` | `run` | `hop` | `grow` | `pop-in` | `wave` | `talk` | `point` | `cheer` | `shock` | `work` | `nod` | `dance`. Optional locomotion on any action: `"from": [x,y,z], "to": [x,y,z]` (auto-faces travel direction and resumes `idle` on arrival).
 - **`camera.preset` (5, auto-framed inside 9:16 safe zone `X:49..960, Y:60..1440`):** `wide` | `medium` | `close` | `dolly-in` | `orbit`
-- **`stage` (2):** `open-field` (terraced meadow/paddy) | `city-street` (pastel town street)
+- **`stage` (3):** `open-field` (terraced meadow/paddy) | `city-street` (pastel town street) | `indoor-room` (cozy pastel interior)
+- **`mood` (3, optional per shot):** `day` (default) | `sunset` | `night`
 - **Timeline continuity:** `shots[0].start == 0`, `shots[k+1].start == shots[k].start + shots[k].duration`, and `duration >= wavDuration`.
 - **Captions:** Synced via `AM.drawSubtitles` to `/audio/*.words.json` (Zone 4 `Y: 1440–1700`, Neobrutalism 1-word chips). Set `captions.enabled: false` in Microstock Mode `'M'` (zero text). Never call `AM.drawTopHeader`.
-- **Placement hygiene:** Hide or move background props (`visible: false` or side `pos`) when they would sit between the camera and the shot's `focus` subject.
+- **Placement hygiene:** Hide or move background props (`visible: false` or side `pos`) when they would sit between the camera and the shot's `focus` subject. Vary `variant`, `hair`, `accessories`, `expression`, `emote`, `anim`, `stage`, and `mood` to match the story so each video looks distinct.
