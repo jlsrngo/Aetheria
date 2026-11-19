@@ -1,7 +1,7 @@
 {
   "version": 1,
   "meta": {
-    "title": "TARGET ACQUIRED — Aerospace FUI HUD",
+    "title": "KESTREL-9 — Target Acquired FUI",
     "width": 1080,
     "height": 1920,
     "fps": 30,
@@ -10,83 +10,85 @@
   },
   "shots": [
     {
-      "id": "s1-init",
+      "id": "s1-boot",
       "startSec": 0,
       "endSec": 5,
-      "layout": "hud-hero",
+      "layout": "scope-search",
       "theme": "cyber-cyan",
-      "badge": "ORBITAL LINK",
-      "headline": "SISTEM RADAR AKTIF",
-      "subtext": "Pemindaian telemetri real-time berpresisi tinggi",
-      "module": "radar-sweep",
+      "badge": "SEARCH MODE",
+      "headline": "ORBITAL SCAN ACTIVE",
+      "coords": "LEO 512 KM · QKD-7 UPLINK 9.6G",
+      "rangeKm": 1712.6,
       "transition": "scan-wipe"
     },
     {
-      "id": "s2-split",
+      "id": "s2-signal",
       "startSec": 5,
       "endSec": 10,
-      "layout": "hud-split",
+      "layout": "signal-detected",
       "theme": "stealth-emerald",
-      "headline": "DUAL SENSOR ARRAY",
-      "items": [
-        { "label": "GLOBE HOLOGRAM", "module": "wire-globe" },
-        { "label": "SPEKTRUM SINYAL", "module": "signal-wave" }
-      ],
+      "badge": "SIGNAL DETECTED",
+      "headline": "BEARING 041° CONTACT",
+      "coords": "▲ 8.412 GHz · SNR 41.2 dB",
+      "rangeKm": 1648.3,
       "transition": "glitch-cut"
     },
     {
-      "id": "s3-matrix",
+      "id": "s3-lock",
       "startSec": 10,
       "endSec": 15,
-      "layout": "hud-matrix",
-      "theme": "orbital-violet",
-      "headline": "PANEL TELEMETRI 4X",
-      "transition": "lock-snap"
+      "layout": "target-locked",
+      "theme": "alert-amber",
+      "badge": "TARGET LOCKED",
+      "headline": "TARGET ACQUIRED",
+      "coords": "N31°14′ E121°29′ · MATCH 99.7%",
+      "rangeKm": 842.4,
+      "transition": "shockwave-lock"
     },
     {
-      "id": "s4-lock",
+      "id": "s4-dive",
       "startSec": 15,
       "endSec": 20,
-      "layout": "hud-lock",
-      "theme": "alert-amber",
-      "metric": "99.8%",
-      "headline": "TARGET TERKUNCI PRESISI",
-      "module": "target-reticle",
+      "layout": "orbital-dive",
+      "theme": "crimson-lock",
+      "badge": "OPTICAL DIVE",
+      "metric": "99.7%",
+      "headline": "PRECISION TRACKING",
+      "coords": "MAG ×18.4 · GYRO Δ0.0003°",
+      "rangeKm": 312.8,
       "transition": "scan-wipe"
     },
     {
-      "id": "s5-telemetry",
+      "id": "s5-spectrum",
       "startSec": 20,
       "endSec": 25,
-      "layout": "hud-telemetry",
-      "theme": "crimson-lock",
-      "headline": "PROTOKOL KONTROL",
-      "items": [
-        { "label": "01. KALKULASI ORBIT", "module": "orbital-rings" },
-        { "label": "02. SINKRONISASI INTI", "module": "hex-core" },
-        { "label": "03. VERIFIKASI RADAR", "module": "radar-sweep" }
-      ],
+      "layout": "spectrum-analysis",
+      "theme": "orbital-violet",
+      "badge": "SPECTRUM SYNC",
+      "headline": "TELEMETRY VERIFIED",
+      "coords": "COHERENCE 98.4% · 4096² FPA",
+      "rangeKm": 235.0,
       "transition": "glitch-cut"
     },
     {
-      "id": "s6-cta",
+      "id": "s6-uplink",
       "startSec": 25,
       "endSec": 30,
-      "layout": "hud-cta",
+      "layout": "uplink-complete",
       "theme": "cyber-cyan",
       "badge": "MISSION READY",
-      "headline": "KENDALI PENUH DATA",
-      "subtext": "Visual FUI futuristik untuk cerita teknologi & AI",
-      "module": "orbital-rings",
-      "transition": "lock-snap"
+      "headline": "KESTREL-9 ONLINE",
+      "coords": "ALL CHANNELS NOMINAL · 30P",
+      "rangeKm": 235.0,
+      "transition": "shockwave-lock"
     }
   ],
   "captions": [
-    { "startSec": 0.5, "endSec": 4.5, "text": "SISTEM RADAR AKTIF" },
-    { "startSec": 5.5, "endSec": 9.5, "text": "DUAL SENSOR ARRAY" },
-    { "startSec": 10.5, "endSec": 14.5, "text": "PANEL TELEMETRI" },
-    { "startSec": 15.5, "endSec": 19.5, "text": "TARGET TERKUNCI" },
-    { "startSec": 20.5, "endSec": 24.5, "text": "PROTOKOL KONTROL" },
-    { "startSec": 25.5, "endSec": 29.5, "text": "KENDALI PENUH" }
+    { "startSec": 0.5, "endSec": 4.5, "text": "ORBITAL SCAN ACTIVE" },
+    { "startSec": 5.5, "endSec": 9.5, "text": "SIGNAL DETECTED" },
+    { "startSec": 10.5, "endSec": 14.5, "text": "TARGET ACQUIRED" },
+    { "startSec": 15.5, "endSec": 19.5, "text": "MATCH 99.7%" },
+    { "startSec": 20.5, "endSec": 24.5, "text": "TELEMETRY VERIFIED" },
+    { "startSec": 25.5, "endSec": 29.5, "text": "KESTREL-9 ONLINE" }
   ]
 }

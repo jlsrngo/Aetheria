@@ -1,22 +1,21 @@
 {
   "schemaVersion": 1,
   "skillId": "mg-sci-fi-hud",
-  "renderer": "2d-sci-fi-hud",
+  "renderer": "2d-fui-kestrel-hud",
   "useThree": false,
   "scripts": ["script/hud-kit.js", "script/story-runtime.js"],
   "enums": {
-    "themes": ["cyber-cyan", "alert-amber", "stealth-emerald", "orbital-violet", "crimson-lock"],
-    "layouts": ["hud-hero", "hud-split", "hud-telemetry", "hud-lock", "hud-matrix", "hud-cta"],
-    "modules": ["radar-sweep", "target-reticle", "wire-globe", "signal-wave", "hex-core", "orbital-rings"],
-    "transitions": ["glitch-cut", "scan-wipe", "lock-snap"]
+    "themes": ["cyber-cyan", "alert-amber", "crimson-lock", "stealth-emerald", "orbital-violet"],
+    "layouts": ["scope-search", "signal-detected", "target-locked", "orbital-dive", "spectrum-analysis", "uplink-complete"],
+    "transitions": ["glitch-cut", "shockwave-lock", "scan-wipe"]
   },
   "limits": {
     "minShots": 2,
     "maxShots": 12,
     "minDurationSec": 3.0,
     "maxDurationSec": 90.0,
-    "maxHeadlineChars": 44,
-    "maxSubtextChars": 92,
+    "maxHeadlineChars": 38,
+    "maxSubtextChars": 88,
     "maxItems": 4
   }
 }

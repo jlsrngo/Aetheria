@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Sci-Fi FUI HUD Story",
+  "title": "Sci-Fi Kestrel-9 FUI HUD Story",
   "type": "object",
   "required": ["version", "meta", "shots"],
   "properties": {
@@ -14,7 +14,7 @@
         "height": { "type": "integer", "enum": [1920, 1080] },
         "fps": { "type": "integer", "const": 30 },
         "durationSec": { "type": "number", "minimum": 3, "maximum": 90 },
-        "theme": { "enum": ["cyber-cyan", "alert-amber", "stealth-emerald", "orbital-violet", "crimson-lock"] }
+        "theme": { "enum": ["cyber-cyan", "alert-amber", "crimson-lock", "stealth-emerald", "orbital-violet"] }
       }
     },
     "shots": {
@@ -28,26 +28,15 @@
           "id": { "type": "string" },
           "startSec": { "type": "number", "minimum": 0 },
           "endSec": { "type": "number", "minimum": 0.5 },
-          "layout": { "enum": ["hud-hero", "hud-split", "hud-telemetry", "hud-lock", "hud-matrix", "hud-cta"] },
-          "theme": { "enum": ["cyber-cyan", "alert-amber", "stealth-emerald", "orbital-violet", "crimson-lock"] },
+          "layout": { "enum": ["scope-search", "signal-detected", "target-locked", "orbital-dive", "spectrum-analysis", "uplink-complete"] },
+          "theme": { "enum": ["cyber-cyan", "alert-amber", "crimson-lock", "stealth-emerald", "orbital-violet"] },
           "badge": { "type": "string" },
-          "headline": { "type": "string", "maxLength": 44 },
-          "subtext": { "type": "string", "maxLength": 92 },
+          "headline": { "type": "string", "maxLength": 38 },
+          "subtext": { "type": "string", "maxLength": 88 },
           "metric": { "type": "string" },
-          "module": { "enum": ["radar-sweep", "target-reticle", "wire-globe", "signal-wave", "hex-core", "orbital-rings"] },
-          "transition": { "enum": ["glitch-cut", "scan-wipe", "lock-snap"] },
-          "items": {
-            "type": "array",
-            "maxItems": 4,
-            "items": {
-              "type": "object",
-              "required": ["label"],
-              "properties": {
-                "label": { "type": "string" },
-                "module": { "enum": ["radar-sweep", "target-reticle", "wire-globe", "signal-wave", "hex-core", "orbital-rings"] }
-              }
-            }
-          }
+          "coords": { "type": "string" },
+          "rangeKm": { "type": "number" },
+          "transition": { "enum": ["glitch-cut", "shockwave-lock", "scan-wipe"] }
         }
       }
     },
