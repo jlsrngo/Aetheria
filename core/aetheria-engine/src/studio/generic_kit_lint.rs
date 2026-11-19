@@ -18,6 +18,8 @@ use crate::tool::film_audio::read_wav_duration_secs;
 pub struct KitManifest {
     pub renderer: String,
     #[serde(default)]
+    pub core: Option<u32>,
+    #[serde(default)]
     pub use_three: bool,
     #[serde(default = "default_bg")]
     pub background: String,
@@ -253,6 +255,9 @@ pub fn render_generic_kit_index_html(
         script_tags.push_str("  <script src=\"/script/three.min.js\"></script>\n");
     }
     script_tags.push_str("  <script src=\"/script/aetheria-motion.js\"></script>\n");
+    if kit.core == Some(1) {
+        script_tags.push_str("  <script src=\"/script/story-core.js\"></script>\n");
+    }
     let mut has_runtime = false;
     for sc in &kit.scripts {
         if let Some(clean) = is_safe_script_rel(sc) {
@@ -338,6 +343,7 @@ mod tests {
     fn generic_kit_validates_custom_enums_and_renders_valid_html() {
         let kit = KitManifest {
             renderer: "2d-custom-neon".to_string(),
+            core: Some(1),
             use_three: false,
             background: "#0B0F1A".to_string(),
             scripts: vec!["script/neon-kit.js".to_string(), "script/story-runtime.js".to_string()],

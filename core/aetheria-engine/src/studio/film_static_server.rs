@@ -105,6 +105,15 @@ async fn serve_static_film_file(film_root: &Path, _ws_root: &Path, rel_raw: &str
             .into_response();
     }
 
+    if super::builtin_runtime::is_builtin_story_core_path(target_rel) {
+        let code = super::builtin_runtime::resolve_story_core_code(&project_root());
+        return (
+            [(header::CONTENT_TYPE, "application/javascript; charset=utf-8")],
+            code,
+        )
+            .into_response();
+    }
+
     if target_rel.starts_with("sfx/") {
         let engine_pub = project_root().join("apps").join("public");
         let fallback = engine_pub.join(target_rel);

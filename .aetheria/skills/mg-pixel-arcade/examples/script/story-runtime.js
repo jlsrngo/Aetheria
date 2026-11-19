@@ -1,3 +1,7 @@
+/**
+ * mg-pixel-arcade story-runtime.js (Core API v1)
+ * Skill-specific layout rendering powered by /script/story-core.js.
+ */
 (function () {
   'use strict';
 
@@ -8,35 +12,6 @@
   var PW = 180;
   var PH = 320;
   var buf = null;
-
-  function isMicrostock() {
-    if (typeof window !== 'undefined' && window.location && window.location.search) {
-      return window.location.search.indexOf('microstock=1') !== -1;
-    }
-    return false;
-  }
-
-  function findShot(t) {
-    if (!story || !story.shots || !story.shots.length) return null;
-    for (var i = 0; i < story.shots.length; i++) {
-      var s = story.shots[i];
-      var st = s.start !== undefined ? s.start : (s.startSec || 0); var en = s.duration !== undefined ? st + s.duration : (s.endSec || st); if (t >= st && t < en) return s;
-    }
-    return story.shots[story.shots.length - 1];
-  }
-
-  function findCaption(t) {
-    if (!story || !story.captions) return null;
-    if (!Array.isArray(story.captions) && story.captions.enabled === false) return null;
-    var items = Array.isArray(story.captions) ? story.captions : (story.captions.items || []);
-    for (var i = 0; i < items.length; i++) {
-      var c = items[i];
-      var cs = c.start !== undefined ? c.start : (c.startSec || 0);
-      var ce = c.duration !== undefined ? cs + c.duration : (c.endSec || cs);
-      if (t >= cs && t < ce) return c;
-    }
-    return null;
-  }
 
   function splitWords(text, maxChars) {
     var words = String(text || '').trim().split(/\s+/);
@@ -56,11 +31,31 @@
     return lines;
   }
 
-  function renderShot(shot, t, localT) {
-    var stage = shot.theme || story.theme || (story.meta && story.meta.theme) || 'day';
+  window.StoryCore.boot({
+    id: 'mg-pixel-arcade',
+    defaultTitle: 'Pixel Quest 16-Bit',
+    init: function (env) {
+      story = env.story;
+      ctx = env.ctx;
+      W = env.W;
+      H = env.H;
+      PW = H > W ? 180 : 320;
+      PH = H > W ? 320 : 180;
+      buf = PixelKit.createPixelBuffer(PW, PH);
+      return { PW: PW, PH: PH, buf: buf };
+    },
+    renderShot: function (env) {
+      story = env.story;
+      ctx = env.ctx;
+      W = env.W;
+      H = env.H;
+      var shot = env.shot;
+      var t = env.t;
+      var localT = env.localTime;
+      var stage = shot.theme || story.theme || (story.meta && story.meta.theme) || 'day';
     var f = Math.round(t * 30);
     var lut = PixelKit.makeLUT(stage, f);
-    var micro = isMicrostock();
+    var micro = env.micro;
     var isPortrait = H > W;
     var layout = shot.layout || 'side-scroll';
 
@@ -193,7 +188,7 @@
       }
 
       // Bottom Caption bar inside pixel canvas
-      var cap = findCaption(t);
+      var cap = env.caption;
       if (cap && cap.text) {
         var cTxt = String(cap.text).toUpperCase();
         var cw = Math.min(PW - 24, cTxt.length * 6 + 16);
@@ -216,61 +211,7 @@
       width: safe.w,
       height: safe.h
     };
-    window.__shotReport = window.__shotReport || {};
-    window.__shotReport[shot.id] = {
-      shotId: shot.id,
-      t: +t.toFixed(3),
-      localTime: +localT.toFixed(3),
-      layout: layout,
-      focusBboxInSafeZone: true,
-      bbox: bbox,
-      overlapCount: 0,
-      safeZone: { minX: safe.x, maxX: safe.x + safe.w, minY: safe.y, maxY: safe.y + safe.h },
-      errors: []
-    };
-  }
-
-  function renderAt(t) {
-    if (!story || !ctx || !buf) return;
-    var shot = findShot(t);
-    if (!shot) return;
-    var shotStart = shot.start !== undefined ? shot.start : (shot.startSec || 0); renderShot(shot, t, Math.max(0, t - shotStart));
-  }
-
-  async function init() {
-    var canvas = document.getElementById('stage-2d') || document.querySelector('canvas');
-    if (!canvas) return;
-    var res = await fetch('story.json');
-    if (!res.ok) res = await fetch('story.example.json');
-    story = await res.json();
-    W = (story.canvas && story.canvas.w) || (story.meta && story.meta.width) || 1080;
-    H = (story.canvas && story.canvas.h) || (story.meta && story.meta.height) || 1920;
-    canvas.width = W;
-    canvas.height = H;
-    ctx = canvas.getContext('2d');
-
-    // Exact integer x6 internal resolution (180x320 portrait or 320x180 landscape)
-    PW = H > W ? 180 : 320;
-    PH = H > W ? 320 : 180;
-    buf = PixelKit.createPixelBuffer(PW, PH);
-
-    var dur = (story.meta && story.meta.durationSec) || (story.shots || []).reduce(function (a, sh) { var st = sh.start !== undefined ? sh.start : (sh.startSec || 0); var en = sh.duration !== undefined ? st + sh.duration : (sh.endSec || st); return Math.max(a, en); }, 0) || 30;
-    var fps = (story.canvas && story.canvas.fps) || (story.meta && story.meta.fps) || 30;
-    window.renderAt = renderAt;
-    window.__filmMeta = {
-      title: story.title || (story.meta && story.meta.title) || 'Pixel Quest 16-Bit',
-      width: W,
-      height: H,
-      fps: fps,
-      duration: dur,
-      durationInFrames: Math.round(dur * fps),
-      scenes: (story.shots || []).map(function (s) {
-        var st = s.start !== undefined ? s.start : (s.startSec || 0); var du = s.duration !== undefined ? s.duration : ((s.endSec || st) - st); return { id: s.id, title: s.id, start: st, duration: du };
-      })
-    };
-    renderAt(0);
-    window.__ready = true;
-  }
-
-  init();
+      return bbox;
+    }
+  });
 })();

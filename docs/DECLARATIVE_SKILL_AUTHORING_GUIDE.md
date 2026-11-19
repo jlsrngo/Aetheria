@@ -38,7 +38,7 @@ All package files must use relative paths inside the skill folder (`<slug>` in l
         └── story-runtime.js        # MUST be named `story-runtime.js` (exports window.StoryRuntime)
 ```
 
-> **Security & Offline Constraints:** Allowed upload extensions are `.md`, `.json`, `.js`, `.html`, `.css`, `.svg`. Path traversal (`..`) and external CDN/network URLs are forbidden — every script must run **100% offline**. The engine already serves `/script/aetheria-motion.js` and Three.js r128 at `/script/three.min.js`.
+> **Security & Offline Constraints:** Allowed upload extensions are `.md`, `.json`, `.js`, `.html`, `.css`, `.svg`. Path traversal (`..`) and external CDN/network URLs are forbidden — every script must run **100% offline**. The engine already serves `/script/aetheria-motion.js`, `/script/story-core.js` (Core API v1), and Three.js r128 at `/script/three.min.js`.
 
 ---
 
@@ -49,6 +49,7 @@ The engine reads `examples/kit.json` generically to generate `index.html` and va
 ```json
 {
   "renderer": "2d-neon-explainer",
+  "core": 1,
   "useThree": false,
   "background": "#0B0F1A",
   "scripts": [
@@ -65,6 +66,7 @@ The engine reads `examples/kit.json` generically to generate `index.html` and va
 ```
 
 - `renderer`: Unique identifier for the skill (`"2d-<name>"` or `"3d-<name>"`).
+- `core`: Optional integer `1` — injects `/script/story-core.js` (`window.StoryCore`) automatically before kit scripts so `story-runtime.js` stays thin (~20–40 lines) without duplicating bootstrap, dialect normalization, shot/caption lookup, safe-zone math, or Mode `'M'` handling.
 - `useThree`: `false` for Canvas 2D (`#stage-2d`), `true` for Three.js WebGL (`#stage-webgl` + `#stage-hud`).
 - `background`: Default CSS background color for the HTML stage.
 - `scripts`: Ordered list of `script/*.js` files to load (end with `"script/story-runtime.js"`).
@@ -73,6 +75,8 @@ The engine reads `examples/kit.json` generically to generate `index.html` and va
 ---
 
 ## 4. `examples/script/story-runtime.js` Runtime Contract (Required)
+
+Preferred approach (Core API v1, `"core": 1` in `kit.json`): load `/script/story-core.js` and call `window.StoryCore.boot({ id, defaultTitle, init?, renderShot, measureShot? })`. `StoryCore` handles fetching `/story.json` (with `/story.example.json` fallback), Dialect A/B normalization, `window.renderAt`, `window.__seek`, `window.__ready`, `window.__filmMeta`, `window.__shotReport`, and Mode `'M'` (`?microstock=1` + key `M`).
 
 The headless previewer and renderer rely on the following global contract:
 

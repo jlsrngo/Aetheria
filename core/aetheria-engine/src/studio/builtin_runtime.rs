@@ -7,6 +7,9 @@ pub const THREE_MIN_JS: &str = include_str!("../../assets/script/three.min.js");
 /// Embedded Aetheria Motion runtime (`window.AM`) fallback when disk `apps/public` is absent.
 pub const AETHERIA_MOTION_JS: &str = include_str!("../../../../apps/public/script/aetheria-motion.js");
 
+/// Embedded Declarative Story Core runtime (`window.StoryCore`) fallback when disk `apps/public` is absent.
+pub const STORY_CORE_JS: &str = include_str!("../../../../apps/public/script/story-core.js");
+
 /// Returns true when the requested relative path refers to the bundled Three.js runtime.
 pub fn is_builtin_three_path(rel: &str) -> bool {
     let trimmed = rel.trim().trim_start_matches('/').replace('\\', "/");
@@ -31,10 +34,28 @@ pub fn resolve_motion_runtime_code(project_root: &std::path::Path) -> String {
     std::fs::read_to_string(disk_path).unwrap_or_else(|_| AETHERIA_MOTION_JS.to_string())
 }
 
+/// Returns true when the requested relative path refers to the built-in `story-core.js` runtime.
+pub fn is_builtin_story_core_path(rel: &str) -> bool {
+    let trimmed = rel.trim().trim_start_matches('/').replace('\\', "/");
+    trimmed.eq_ignore_ascii_case("script/story-core.js")
+        || trimmed.eq_ignore_ascii_case("story-core.js")
+}
+
+/// Resolves `story-core.js` from repo `apps/public/script/` when present, falling back to embedded bytes.
+pub fn resolve_story_core_code(project_root: &std::path::Path) -> String {
+    let disk_path = project_root
+        .join("apps")
+        .join("public")
+        .join("script")
+        .join("story-core.js");
+    std::fs::read_to_string(disk_path).unwrap_or_else(|_| STORY_CORE_JS.to_string())
+}
+
 /// Returns true for third-party / engine runtime bundles that should never be linted as user scene scripts.
 pub fn is_vendor_script_name(name: &str) -> bool {
     let base = name.trim();
     base.eq_ignore_ascii_case("aetheria-motion.js")
+        || base.eq_ignore_ascii_case("story-core.js")
         || base.eq_ignore_ascii_case("three.min.js")
         || base.eq_ignore_ascii_case("three.js")
 }

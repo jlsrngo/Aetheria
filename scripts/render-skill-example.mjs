@@ -35,6 +35,13 @@ const BUILTIN_SCRIPT_MAP = {
     "script",
     "aetheria-motion.js",
   ),
+  "/script/story-core.js": path.join(
+    REPO_ROOT,
+    "apps",
+    "public",
+    "script",
+    "story-core.js",
+  ),
 };
 
 const MIME_TYPES = {

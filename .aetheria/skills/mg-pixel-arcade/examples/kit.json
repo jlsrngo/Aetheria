@@ -46,5 +46,6 @@
     "maxHeadlineChars": 32,
     "maxSubtextChars": 80,
     "maxItems": 4
-  }
+  },
+  "core": 1
 }
