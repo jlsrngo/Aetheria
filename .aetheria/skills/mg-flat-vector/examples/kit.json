@@ -1,15 +1,18 @@
 {
-  "renderer": "2d-flat-vector",
-  "useThree": false,
-  "background": "#F8FAFC",
-  "scripts": [
-    "script/flat-kit.js",
-    "script/story-runtime.js"
+  "slug": "mg-flat-vector",
+  "name": "Popwise Bold Flat-Vector & Spring-Pop Engine (01-flat-vector Craft)",
+  "paradigm": "canvas2d-flat-vector-kit",
+  "layouts": ["sky-dot-bounce", "city-pop-rise", "character-ping", "popwise-wordmark"],
+  "components": [
+    "ultramarine-tone-on-tone-sky",
+    "coral-sun-with-12-rays",
+    "spring-pop-flat-skyline",
+    "puffy-cream-clouds-and-mint-trees",
+    "notification-ping-bubble",
+    "popwise-bouncing-dot-wordmark"
   ],
-  "enums": {
-    "theme": ["clean-light", "midnight-tech", "mint-fresh", "coral-pop", "cobalt-deck"],
-    "layout": ["hero-center", "split-compare", "step-list", "stat-counter", "timeline-flow", "callout-card"],
-    "icon": ["dot-flow", "chart", "clock", "shield", "rocket", "bulb", "gear", "globe", "coin", "leaf", "phone", "check"],
-    "transition": ["slide-up", "zoom-pop", "cut"]
+  "defaultSafeZone": {
+    "9:16": { "x": 56, "y": 80, "w": 896, "h": 1340 },
+    "16:9": { "x": 96, "y": 54, "w": 1574, "h": 908 }
   }
 }

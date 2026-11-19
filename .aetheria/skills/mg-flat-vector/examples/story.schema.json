@@ -1,14 +1,43 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Aetheria Flat Vector 2D Declarative Story Spec",
+  "title": "mg-flat-vector story.json schema",
   "type": "object",
-  "required": ["renderer", "canvas", "shots", "captions"],
+  "required": ["aspect", "fps", "shots"],
   "properties": {
-    "renderer": { "const": "2d-flat-vector" },
-    "title": { "type": "string" },
-    "theme": { "type": "string", "enum": ["clean-light", "midnight-tech", "mint-fresh", "coral-pop", "cobalt-deck"] },
-    "canvas": { "type": "object", "required": ["w", "h", "fps"] },
-    "shots": { "type": "array", "minItems": 1 },
-    "captions": { "type": "object", "required": ["enabled"] }
+    "meta": {
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "width": { "type": "integer" },
+        "height": { "type": "integer" },
+        "fps": { "type": "integer" },
+        "durationSec": { "type": "number" }
+      }
+    },
+    "aspect": { "type": "string", "enum": ["9:16", "16:9"] },
+    "fps": { "type": "integer", "default": 30 },
+    "seed": { "type": "integer", "default": 101 },
+    "microstockMode": { "type": "boolean", "default": false },
+    "shots": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "layout", "start", "duration"],
+        "properties": {
+          "id": { "type": "string" },
+          "layout": {
+            "type": "string",
+            "enum": ["sky-dot-bounce", "city-pop-rise", "character-ping", "popwise-wordmark"]
+          },
+          "start": { "type": "number" },
+          "duration": { "type": "number" },
+          "startSec": { "type": "number" },
+          "endSec": { "type": "number" },
+          "headline": { "type": "string" },
+          "tagline": { "type": "string" }
+        }
+      }
+    }
   }
 }

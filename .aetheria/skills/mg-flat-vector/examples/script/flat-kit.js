@@ -1,161 +1,240 @@
+/**
+ * FlatKit v2 — Popwise Bold Flat-Vector & Spring-Pop Engine
+ * Adapted from references/aetheria-motion/demos/01-flat-vector/index.html.
+ * Pure deterministic Canvas2D, zero external dependencies, 9:16 & 16:9 adaptive.
+ */
 (function () {
-  var GLOBAL_SCOPE = typeof window !== "undefined" ? window : globalThis;
+  'use strict';
 
-  var THEMES = {
-    "clean-light": { bg: "#F8FAFC", surface: "#FFFFFF", ink: "#0F172A", muted: "#475569", accent: "#2563EB", accent2: "#10B981", dot: "rgba(15,23,42,0.06)", border: "#E2E8F0", dark: false },
-    "midnight-tech": { bg: "#0F172A", surface: "#1E293B", ink: "#F8FAFC", muted: "#94A3B8", accent: "#38BDF8", accent2: "#F59E0B", dot: "rgba(248,250,252,0.07)", border: "#334155", dark: true },
-    "mint-fresh": { bg: "#ECFDF5", surface: "#FFFFFF", ink: "#064E3B", muted: "#047857", accent: "#10B981", accent2: "#0EA5E9", dot: "rgba(6,78,59,0.07)", border: "#A7F3D0", dark: false },
-    "coral-pop": { bg: "#FFF7ED", surface: "#FFFFFF", ink: "#1C1917", muted: "#57534E", accent: "#F97316", accent2: "#EF4444", dot: "rgba(28,25,23,0.06)", border: "#FED7AA", dark: false },
-    "cobalt-deck": { bg: "#1E3A8A", surface: "#172554", ink: "#F8FAFC", muted: "#BFDBFE", accent: "#FACC15", accent2: "#38BDF8", dot: "rgba(255,255,255,0.08)", border: "#3B82F6", dark: true }
+  const C = {
+    U: '#2B2BFF',
+    UT: '#3B3BFF',
+    UL: '#4D4DFF',
+    CO: '#FF5A4E',
+    SU: '#FFC62B',
+    MI: '#2EE6A8',
+    CR: '#FFF6E9',
+    INK: '#151433'
   };
 
-  function drawFlatBackground(ctx, w, h, themeName, t) {
-    var th = THEMES[themeName] || THEMES["clean-light"];
-    ctx.save();
-    ctx.fillStyle = th.bg;
-    ctx.fillRect(0, 0, w, h);
+  const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a)); return t * t * (3 - 2 * t); };
 
-    // Clean flat decorative corner circles
-    ctx.globalAlpha = th.dark ? 0.14 : 0.12;
-    ctx.fillStyle = th.accent;
-    ctx.beginPath();
-    ctx.arc(w * 0.88, h * 0.12 + Math.sin(t * 1.1) * 12, Math.min(w, h) * 0.22, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = th.accent2;
-    ctx.beginPath();
-    ctx.arc(w * 0.1, h * 0.86 + Math.cos(t * 0.9) * 12, Math.min(w, h) * 0.18, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = 1;
-
-    // Crisp dot matrix
-    ctx.fillStyle = th.dot;
-    var step = 52;
-    for (var y = 26; y < h; y += step) {
-      for (var x = 26; x < w; x += step) {
-        ctx.beginPath();
-        ctx.arc(x, y, 2.5, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-    ctx.restore();
-    return th;
+  function spring(t, f = 2.4, z = 0.42) {
+    if (t <= 0) return 0;
+    const w = 2 * Math.PI * f, a = z * w, b = w * Math.sqrt(1 - z * z);
+    return 1 - Math.exp(-a * t) * (Math.cos(b * t) + (a / b) * Math.sin(b * t));
   }
 
-  function drawFlatCard(ctx, x, y, w, h, r, th, opts) {
-    var o = opts || {};
-    ctx.save();
-    ctx.fillStyle = th.dark ? "rgba(0,0,0,0.28)" : "rgba(15,23,42,0.08)";
-    ctx.beginPath();
-    ctx.roundRect(x + 8, y + 10, w, h, r || 26);
-    ctx.fill();
-
-    ctx.fillStyle = o.fill || th.surface;
-    ctx.beginPath();
-    ctx.roundRect(x, y, w, h, r || 26);
-    ctx.fill();
-    ctx.strokeStyle = o.border || th.border;
-    ctx.lineWidth = o.borderWidth || 3;
-    ctx.stroke();
-    ctx.restore();
+  function hs(a, b = 0) {
+    let h = (a * 374761393 + b * 668265263) | 0;
+    h = ((h ^ (h >>> 13)) * 1274126177) | 0;
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
   }
 
-  function drawFlatIcon(ctx, kind, cx, cy, r, accent, accent2, t) {
-    var a1 = accent || "#2563EB";
-    var a2 = accent2 || "#10B981";
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
+  function drawSkyShapes(ctx, W, H, sc, u) {
+    ctx.fillStyle = C.U;
+    ctx.fillRect(0, 0, W, H);
 
-    if (kind === "dot-flow") {
-      var pts = [[-0.55, 0.2], [0, -0.35], [0.55, 0.2]];
-      ctx.strokeStyle = a1;
-      ctx.lineWidth = Math.max(6, r * 0.14);
+    // Tone-on-tone geometric brand shapes
+    ctx.save();
+    ctx.strokeStyle = C.UT;
+    ctx.fillStyle = C.UT;
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 22 * sc;
+
+    const s1 = spring(u * 2.2);
+    if (s1 > 0.01) {
       ctx.beginPath();
-      ctx.moveTo(pts[0][0] * r, pts[0][1] * r);
-      ctx.lineTo(pts[1][0] * r, pts[1][1] * r);
-      ctx.lineTo(pts[2][0] * r, pts[2][1] * r);
+      ctx.arc(W * 0.22, H * 0.26, 68 * sc * s1, 0, Math.PI * 2);
       ctx.stroke();
-      pts.forEach(function (pt, i) {
-        ctx.fillStyle = i === 1 ? a2 : a1;
-        ctx.beginPath();
-        ctx.arc(pt[0] * r, pt[1] * r, r * (0.22 + (i === 1 ? Math.sin((t || 0) * 3) * 0.03 : 0)), 0, Math.PI * 2);
-        ctx.fill();
-      });
-    } else if (kind === "chart") {
-      [[-0.45, 0.45, a2], [0, 0.72, a1], [0.45, 0.96, a2]].forEach(function (b) {
-        var bh = r * 1.2 * b[1];
-        ctx.fillStyle = b[2];
-        ctx.beginPath();
-        ctx.roundRect(b[0] * r - r * 0.16, r * 0.6 - bh, r * 0.32, bh, 10);
-        ctx.fill();
-      });
-    } else if (kind === "clock") {
-      ctx.fillStyle = a1;
-      ctx.beginPath(); ctx.arc(0, 0, r * 0.76, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "#FFFFFF";
-      ctx.beginPath(); ctx.arc(0, 0, r * 0.58, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = a2; ctx.lineWidth = r * 0.14;
-      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -r * 0.36); ctx.moveTo(0, 0); ctx.lineTo(r * 0.3, r * 0.12); ctx.stroke();
-    } else if (kind === "shield") {
-      ctx.fillStyle = a1;
+    }
+
+    const px = W * 0.78, py = H * 0.30, pr = 26 * sc * spring(Math.max(0, u - 0.1) * 2.2);
+    if (pr > 1) {
       ctx.beginPath();
-      ctx.moveTo(0, -r * 0.8); ctx.lineTo(r * 0.66, -r * 0.5); ctx.lineTo(r * 0.54, r * 0.22);
-      ctx.quadraticCurveTo(0, r * 0.84, 0, r * 0.84); ctx.quadraticCurveTo(0, r * 0.84, -r * 0.54, r * 0.22);
-      ctx.lineTo(-r * 0.66, -r * 0.5); ctx.closePath(); ctx.fill();
-      ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = r * 0.14;
-      ctx.beginPath(); ctx.moveTo(-r * 0.24, 0); ctx.lineTo(-r * 0.04, r * 0.22); ctx.lineTo(r * 0.3, -r * 0.2); ctx.stroke();
-    } else if (kind === "rocket") {
-      ctx.rotate(-0.4);
-      ctx.fillStyle = a1;
+      ctx.moveTo(px - pr, py); ctx.lineTo(px + pr, py);
+      ctx.moveTo(px, py - pr); ctx.lineTo(px, py + pr);
+      ctx.stroke();
+    }
+
+    const pw = 160 * sc * spring(Math.max(0, u - 0.15) * 2.2);
+    if (pw > 2) {
       ctx.beginPath();
-      ctx.moveTo(0, -r * 0.82); ctx.quadraticCurveTo(r * 0.42, -r * 0.15, r * 0.28, r * 0.45);
-      ctx.lineTo(-r * 0.28, r * 0.45); ctx.quadraticCurveTo(-r * 0.42, -r * 0.15, 0, -r * 0.82); ctx.fill();
-      ctx.fillStyle = a2;
-      ctx.beginPath(); ctx.moveTo(-r * 0.26, r * 0.16); ctx.lineTo(-r * 0.58, r * 0.56); ctx.lineTo(-r * 0.2, r * 0.45); ctx.fill();
-      ctx.beginPath(); ctx.moveTo(r * 0.26, r * 0.16); ctx.lineTo(r * 0.58, r * 0.56); ctx.lineTo(r * 0.2, r * 0.45); ctx.fill();
-      ctx.fillStyle = "#FFFFFF"; ctx.beginPath(); ctx.arc(0, -r * 0.1, r * 0.18, 0, Math.PI * 2); ctx.fill();
-    } else if (kind === "bulb") {
-      ctx.fillStyle = a2; ctx.beginPath(); ctx.arc(0, -r * 0.16, r * 0.52, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = a1; ctx.beginPath(); ctx.roundRect(-r * 0.24, r * 0.3, r * 0.48, r * 0.36, 8); ctx.fill();
-    } else if (kind === "gear") {
-      ctx.fillStyle = a1;
-      ctx.beginPath();
-      for (var i = 0; i < 16; i++) {
-        var rr = i % 2 === 0 ? r * 0.78 : r * 0.56;
-        var ang = (i / 16) * Math.PI * 2 + (t || 0) * 0.6;
-        if (i === 0) ctx.moveTo(Math.cos(ang) * rr, Math.sin(ang) * rr);
-        else ctx.lineTo(Math.cos(ang) * rr, Math.sin(ang) * rr);
-      }
-      ctx.closePath(); ctx.fill();
-      ctx.fillStyle = "#FFFFFF"; ctx.beginPath(); ctx.arc(0, 0, r * 0.26, 0, Math.PI * 2); ctx.fill();
-    } else if (kind === "globe") {
-      ctx.fillStyle = a1; ctx.beginPath(); ctx.arc(0, 0, r * 0.74, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = r * 0.09;
-      ctx.beginPath(); ctx.ellipse(0, 0, r * 0.34, r * 0.72, 0, 0, Math.PI * 2); ctx.moveTo(-r * 0.72, 0); ctx.lineTo(r * 0.72, 0); ctx.stroke();
-    } else if (kind === "coin") {
-      ctx.fillStyle = a2; ctx.beginPath(); ctx.arc(0, 0, r * 0.74, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = r * 0.08; ctx.beginPath(); ctx.arc(0, 0, r * 0.54, 0, Math.PI * 2); ctx.stroke();
-    } else if (kind === "leaf") {
-      ctx.fillStyle = a2;
-      ctx.beginPath(); ctx.moveTo(-r * 0.5, r * 0.5); ctx.quadraticCurveTo(-r * 0.6, -r * 0.6, r * 0.6, -r * 0.6); ctx.quadraticCurveTo(r * 0.6, r * 0.6, -r * 0.5, r * 0.5); ctx.fill();
-      ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = r * 0.1; ctx.beginPath(); ctx.moveTo(-r * 0.45, r * 0.45); ctx.lineTo(r * 0.35, -r * 0.35); ctx.stroke();
-    } else if (kind === "phone") {
-      ctx.fillStyle = a1; ctx.beginPath(); ctx.roundRect(-r * 0.42, -r * 0.72, r * 0.84, r * 1.44, 18); ctx.fill();
-      ctx.fillStyle = "#FFFFFF"; ctx.beginPath(); ctx.roundRect(-r * 0.32, -r * 0.54, r * 0.64, r * 1.04, 10); ctx.fill();
-      ctx.fillStyle = a2; ctx.beginPath(); ctx.roundRect(-r * 0.22, -r * 0.36, r * 0.44, r * 0.24, 6); ctx.fill();
-    } else {
-      ctx.fillStyle = a2; ctx.beginPath(); ctx.arc(0, 0, r * 0.74, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = r * 0.16;
-      ctx.beginPath(); ctx.moveTo(-r * 0.3, 0.02 * r); ctx.lineTo(-r * 0.06, r * 0.26); ctx.lineTo(r * 0.34, -r * 0.22); ctx.stroke();
+      ctx.roundRect(W * 0.28 - pw * 0.5, H * 0.62, pw, 52 * sc, 26 * sc);
+      ctx.fill();
     }
     ctx.restore();
   }
 
-  GLOBAL_SCOPE.FlatKit = {
-    THEMES: THEMES,
-    drawFlatBackground: drawFlatBackground,
-    drawFlatCard: drawFlatCard,
-    drawFlatIcon: drawFlatIcon
-  };
+  function drawCloud(ctx, x, y, sc) {
+    ctx.save();
+    ctx.fillStyle = C.CR;
+    ctx.translate(x, y);
+    ctx.scale(sc, sc);
+    ctx.beginPath();
+    ctx.roundRect(-80, -22, 160, 44, 22);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(-20, -24, 34, 0, Math.PI * 2);
+    ctx.arc(32, -16, 26, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawSunAndRays(ctx, cx, cy, r, sc, u) {
+    ctx.save();
+    ctx.fillStyle = C.CO;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 12 crisp rounded rays
+    ctx.strokeStyle = C.CO;
+    ctx.lineWidth = 10 * sc;
+    ctx.lineCap = 'round';
+    const rayLen = 36 * sc * smooth(0.1, 0.5, u);
+    if (rayLen > 1) {
+      for (let i = 0; i < 12; i++) {
+        const a = (i / 12) * Math.PI * 2 + u * 0.35;
+        const r0 = r + 18 * sc, r1 = r0 + rayLen;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
+        ctx.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawSkyline(ctx, W, H, safe, sc, u) {
+    const groundY = safe.y + safe.h * 0.78;
+
+    // Far tone-on-tone skyline
+    ctx.save();
+    ctx.fillStyle = C.UL;
+    for (let i = 0; i < 10; i++) {
+      const bw = (70 + hs(i, 1) * 70) * sc;
+      const bh = (160 + hs(i, 2) * 180) * sc * spring(Math.max(0, u - i * 0.03) * 2.0);
+      const bx = safe.x + (i / 9.5) * safe.w * 0.92;
+      ctx.fillRect(bx, groundY - bh, bw, bh);
+    }
+    ctx.restore();
+
+    // Hero foreground flat-vector buildings
+    const blds = [
+      { f: 0.16, w: 120, h: 240, col: C.CR },
+      { f: 0.36, w: 145, h: 330, col: C.SU },
+      { f: 0.58, w: 130, h: 280, col: C.CR },
+      { f: 0.78, w: 115, h: 210, col: C.MI }
+    ];
+    blds.forEach((b, i) => {
+      const s = spring(Math.max(0, u - i * 0.06) * 2.1);
+      const bh = b.h * sc * s;
+      const bw = b.w * sc;
+      const bx = safe.x + safe.w * b.f - bw * 0.5;
+      ctx.fillStyle = b.col;
+      ctx.beginPath();
+      ctx.roundRect(bx, groundY - bh, bw, bh, [14 * sc, 14 * sc, 0, 0]);
+      ctx.fill();
+
+      // Crisp rounded windows
+      ctx.fillStyle = b.col === C.CR ? C.U : C.INK;
+      for (let r = 0; r < 3; r++) {
+        for (let c = 0; c < 2; c++) {
+          const wx = bx + bw * (0.26 + c * 0.34);
+          const wy = groundY - bh + 30 * sc + r * 48 * sc;
+          if (wy < groundY - 24 * sc) {
+            ctx.beginPath();
+            ctx.roundRect(wx, wy, 18 * sc, 24 * sc, 5 * sc);
+            ctx.fill();
+          }
+        }
+      }
+    });
+
+    // Ground strip
+    ctx.fillStyle = C.INK;
+    ctx.fillRect(0, groundY, W, H - groundY);
+  }
+
+  function renderShot(ctx, W, H, safe, shot, localTime, micro) {
+    const dur = Math.max(0.01, shot.duration || 7.5);
+    const u = clamp(localTime / dur);
+    const isPortrait = H > W;
+    const sc = isPortrait ? safe.w / 896 : safe.h / 908;
+    const cx = safe.x + safe.w * 0.5;
+    const cy = safe.y + safe.h * 0.45;
+
+    if (shot.layout === 'sky-dot-bounce') {
+      drawSkyShapes(ctx, W, H, sc, u);
+      const bounceY = cy + 160 * sc - Math.abs(Math.sin(u * Math.PI * 2.5)) * 280 * sc * (1 - u * 0.5);
+      drawSunAndRays(ctx, cx, bounceY, 68 * sc, sc, smooth(0.5, 0.9, u));
+    } else if (shot.layout === 'city-pop-rise') {
+      drawSkyShapes(ctx, W, H, sc, 1);
+      drawSunAndRays(ctx, safe.x + safe.w * 0.76, safe.y + safe.h * 0.25, 74 * sc, sc, 1);
+      drawCloud(ctx, safe.x + safe.w * 0.24 + u * 30 * sc, safe.y + safe.h * 0.22, sc * 0.9);
+      drawCloud(ctx, safe.x + safe.w * 0.72 - u * 24 * sc, safe.y + safe.h * 0.38, sc * 0.7);
+      drawSkyline(ctx, W, H, safe, sc, u);
+    } else if (shot.layout === 'character-ping') {
+      drawSkyShapes(ctx, W, H, sc, 1);
+      drawSunAndRays(ctx, safe.x + safe.w * 0.76, safe.y + safe.h * 0.25, 74 * sc, sc, 1);
+      drawSkyline(ctx, W, H, safe, sc, 1);
+
+      // Notification Ping Bubble popping above the skyline
+      const ps = spring(Math.max(0, u - 0.12) * 2.5);
+      if (ps > 0.01) {
+        const bx = cx, by = safe.y + safe.h * 0.36;
+        ctx.save();
+        ctx.translate(bx, by);
+        ctx.scale(ps, ps);
+        ctx.fillStyle = C.SU;
+        ctx.beginPath();
+        ctx.roundRect(-110 * sc, -48 * sc, 220 * sc, 96 * sc, 48 * sc);
+        ctx.fill();
+        ctx.fillStyle = C.CO;
+        ctx.beginPath();
+        ctx.arc(-50 * sc, 0, 18 * sc, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = C.INK;
+        ctx.beginPath();
+        ctx.roundRect(-12 * sc, -10 * sc, 84 * sc, 20 * sc, 10 * sc);
+        ctx.fill();
+        ctx.restore();
+      }
+    } else {
+      // popwise-wordmark finale
+      ctx.fillStyle = C.U;
+      ctx.fillRect(0, 0, W, H);
+      drawSkyShapes(ctx, W, H, sc, 1);
+
+      // Bouncing Coral Dot next to wordmark
+      const dotS = spring(u * 2.2);
+      const dotY = cy - Math.abs(Math.sin(clamp((u - 0.3) * 2.5) * Math.PI)) * 60 * sc;
+      ctx.fillStyle = C.CO;
+      ctx.beginPath();
+      ctx.arc(cx + (micro ? 0 : 230 * sc), dotY, 42 * sc * dotS, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    if (!micro) {
+      ctx.save();
+      ctx.fillStyle = C.CR;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const isFinale = shot.layout === 'popwise-wordmark';
+      ctx.font = `800 ${Math.round((isFinale ? 96 : 56) * sc)}px "Fredoka", "Segoe UI", sans-serif`;
+      ctx.fillText(String(shot.headline || 'popwise'), isFinale ? cx - 28 * sc : cx, isFinale ? cy : safe.y + 84 * sc);
+
+      if (shot.tagline) {
+        ctx.fillStyle = C.SU;
+        ctx.font = `700 ${Math.round(20 * sc)}px "Courier New", monospace`;
+        ctx.fillText(String(shot.tagline).toUpperCase(), cx, safe.y + safe.h - 48 * sc);
+      }
+      ctx.restore();
+    }
+  }
+
+  window.FlatKit = { renderShot, C };
 })();
