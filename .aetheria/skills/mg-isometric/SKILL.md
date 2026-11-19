@@ -1,33 +1,24 @@
 ---
 name: mg-isometric
-description: "Declarative 2.5D Isometric Architecture & System Explainer motion graphics skill with true 30-degree axonometric projection, three-shade directional cubes, smart-city modules, and cloud/data blocks."
-tags:
-  - motion-graphics
-  - declarative-kit
-  - isometric
-  - system-explainer
-command: /mg-isometric
+description: Isopolis 2.5D isometric floating city engine with lilac dot-grid sky, 4-layer stepped island base, depth-sorted 12x12 city map, blueprint cyan-edge clay extrusion, radial scanline pastel ignition, animated vehicles, and City OS HUD.
 ---
 
-# Isometric 2.5D — Declarative Fast-Path Skill
+# `mg-isometric` — Isopolis 2.5D Floating City Engine (v2)
 
-## Visual Identity
-True 30° axonometric projection for cloud architecture, smart cities, and logistics explainers: isometric diamond grid backdrop, three-shade directional blocks (light top, mid left, shadowed right), and clean modular structures.
+## 1. Visual DNA & Reference Craft (`03-isometric`)
+- **Sky & Island (`drawBackground` + `drawIslandBase`)**: Soft lilac gradient (`#EEEAFC` → `#C4BAEF`), isometric dot grid (`#A79EE2`), floating clouds, and a 4-layer stepped soil slab (`#FFFFFF` → `#9F95E1`) supporting the 12×12 city grid.
+- **Clay-to-Pastel Ignition (`drawIsoBox` + `drawWindows`)**: Buildings extrude in clay (`#F1EEFA`) with cyan blueprint edges (`#62F0F2`), then ignite into pastel facades (`#FFC4AC` peach, `#A8D2FF` sky, `#D9D1FA` lilac, `#FFE6A1` butter) with warm lit windows (`#FFF0C8`).
 
-## Zero-JS Workflow
-Do **not** write custom canvas JS. Author only `story.json` matching `examples/kit.json` and `examples/story.schema.json`.
-1. Read `examples/kit.json` and `examples/story.example.json` for valid enums and structure.
-2. Write `story.json` with 2–12 shots (`durationSec` 3–90, `fps: 30`, `1080x1920` or `1920x1080`).
-3. Validate via `story_lint`, preview via `capture_film_preview`, and inspect `contact_sheet.jpg`.
-4. Mode `'M'` (`?microstock=1`) automatically hides all text and captions for clean isometric plates.
+## 2. Layouts (`examples/kit.json`)
+1. `clay-grid`: Buildings extrude upward in clay with cyan blueprint edges.
+2. `city-ignition`: Expanding cyan pulse ring sweeps outward from the central core tower, igniting pastel colors.
+3. `traffic-flow`: Full-color city with animated vehicles cruising the perimeter road loop.
+4. `isopolis-overview`: Complete floating metropolis overview with glowing core antenna and City OS HUD.
 
-## Kit Enums (`examples/kit.json`)
-- **themes**: `pastel-city`, `cloud-slate`, `mint-campus`, `sunset-logistics`, `dark-datacenter`
-- **layouts**: `iso-hero`, `iso-split`, `iso-stack`, `iso-stat`, `iso-campus`, `iso-cta`
-- **structures**: `smart-tower`, `server-rack`, `cloud-node`, `factory-hub`, `energy-grid`, `data-cube`
-- **transitions**: `elevator-lift`, `grid-slice`, `tile-drop`
+## 3. Declarative Contract (`story.json`)
+Only author `story.json` (validated against `examples/story.schema.json`). Do not edit `examples/script/isometric-kit.js` or `examples/script/story-runtime.js`.
 
-## Limits & Safe-Zone Contract
-- `headline` <= 44 chars; `subtext` <= 92 chars; `items` <= 4.
-- Portrait `1080x1920` keeps all isometric frames inside `x: 56..952`, `y: 80..1420`.
-- Pure deterministic function of `t`: gentle modular levitation derives strictly from `t`.
+## 4. Verification & Mode `'M'`
+- Deterministic render & contact sheet:
+  `node scripts/render-skill-example.mjs --dir ".aetheria/skills/mg-isometric/examples" --html "story.html" --times "1,5,10,16,22,27" --out-dir "<outDir>"`
+- Microstock clean-plate mode (`?microstock=1` or key `'M'`): Suppresses all HUD titles and metrics while preserving the full 2.5D isometric city.

@@ -1,92 +1,59 @@
 {
-  "version": 1,
   "meta": {
-    "title": "SMART CITY OS — Isometric Architecture",
+    "title": "03-Isometric — Isopolis 2.5D Floating City",
     "width": 1080,
     "height": 1920,
     "fps": 30,
-    "durationSec": 30,
-    "theme": "pastel-city"
+    "durationSec": 30
   },
+  "aspect": "9:16",
+  "fps": 30,
+  "seed": 303,
+  "microstockMode": false,
   "shots": [
     {
-      "id": "s1-hero",
-      "startSec": 0,
-      "endSec": 5,
-      "layout": "iso-hero",
-      "theme": "pastel-city",
-      "badge": "SMART CITY OS",
-      "headline": "ARSITEKTUR KOTA PINTAR",
-      "subtext": "Proyeksi isometrik 30° yang rapi dan mudah dipahami",
-      "structure": "smart-tower",
-      "transition": "tile-drop"
+      "id": "shot_1_clay",
+      "layout": "clay-grid",
+      "start": 0.0,
+      "duration": 7.5,
+      "startSec": 0.0,
+      "endSec": 7.5,
+      "headline": "BLUEPRINT",
+      "tagline": "ISOMETRIC 2.5D · CLAY EXTRUSION",
+      "metric": "GRID 12×12"
     },
     {
-      "id": "s2-split",
-      "startSec": 5,
-      "endSec": 10,
-      "layout": "iso-split",
-      "theme": "cloud-slate",
-      "headline": "CLOUD & INFRASTRUKTUR",
-      "items": [
-        { "label": "NODE CLOUD", "structure": "cloud-node" },
-        { "label": "RAK SERVER", "structure": "server-rack" }
-      ],
-      "transition": "elevator-lift"
+      "id": "shot_2_ignition",
+      "layout": "city-ignition",
+      "start": 7.5,
+      "duration": 7.5,
+      "startSec": 7.5,
+      "endSec": 15.0,
+      "headline": "IGNITION",
+      "tagline": "CYAN SCANLINE · PASTEL BLOOM",
+      "metric": "CORE ONLINE"
     },
     {
-      "id": "s3-campus",
-      "startSec": 10,
-      "endSec": 15,
-      "layout": "iso-campus",
-      "theme": "mint-campus",
-      "headline": "EMPAT ZONA EKOSISTEM",
-      "transition": "grid-slice"
+      "id": "shot_3_traffic",
+      "layout": "traffic-flow",
+      "start": 15.0,
+      "duration": 7.5,
+      "startSec": 15.0,
+      "endSec": 22.5,
+      "headline": "CITY OS",
+      "tagline": "TRANSIT & DATA PULSE",
+      "metric": "99.4% SYNC"
     },
     {
-      "id": "s4-stat",
-      "startSec": 15,
-      "endSec": 20,
-      "layout": "iso-stat",
-      "theme": "dark-datacenter",
-      "metric": "99.99%",
-      "headline": "UPTIME JARINGAN DATA",
-      "structure": "data-cube",
-      "transition": "tile-drop"
-    },
-    {
-      "id": "s5-stack",
-      "startSec": 20,
-      "endSec": 25,
-      "layout": "iso-stack",
-      "theme": "sunset-logistics",
-      "headline": "RANTAI LOGISTIK",
-      "items": [
-        { "label": "01. Pusat Produksi", "structure": "factory-hub" },
-        { "label": "02. Grid Energi", "structure": "energy-grid" },
-        { "label": "03. Distribusi Cloud", "structure": "cloud-node" }
-      ],
-      "transition": "elevator-lift"
-    },
-    {
-      "id": "s6-cta",
-      "startSec": 25,
-      "endSec": 30,
-      "layout": "iso-cta",
-      "theme": "pastel-city",
-      "badge": "ISOMETRIC 2.5D",
-      "headline": "JELASKAN SISTEM KOMPLEKS",
-      "subtext": "Ideal untuk SaaS, cloud architecture, dan kota pintar",
-      "structure": "energy-grid",
-      "transition": "grid-slice"
+      "id": "shot_4_overview",
+      "layout": "isopolis-overview",
+      "start": 22.5,
+      "duration": 7.5,
+      "startSec": 22.5,
+      "endSec": 30.0,
+      "headline": "ISOPOLIS",
+      "tagline": "2.5D FLOATING METROPOLIS",
+      "metric": "BUILD 2.5D"
     }
-  ],
-  "captions": [
-    { "startSec": 0.5, "endSec": 4.5, "text": "ARSITEKTUR KOTA PINTAR" },
-    { "startSec": 5.5, "endSec": 9.5, "text": "CLOUD DAN SERVER" },
-    { "startSec": 10.5, "endSec": 14.5, "text": "EMPAT ZONA" },
-    { "startSec": 15.5, "endSec": 19.5, "text": "UPTIME 99.99%" },
-    { "startSec": 20.5, "endSec": 24.5, "text": "RANTAI LOGISTIK" },
-    { "startSec": 25.5, "endSec": 29.5, "text": "SISTEM KOMPLEKS" }
   ]
 }
