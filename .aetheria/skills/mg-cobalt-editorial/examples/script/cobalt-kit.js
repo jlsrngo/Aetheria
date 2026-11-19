@@ -12,14 +12,14 @@
 
   var THEMES = {
     'cobalt-beam': {
-      bg: '#020516',
-      beamLow: 'rgba(18, 43, 128, 0.0)',
-      beamMid: 'rgba(34, 78, 224, 0.56)',
-      beamCore: 'rgba(92, 146, 255, 0.78)',
-      beamHot: 'rgba(155, 195, 255, 0.42)',
+      bg: '#040818',
+      beamLow: 'rgba(18, 36, 98, 0.0)',
+      beamMid: 'rgba(34, 68, 166, 0.26)',
+      beamCore: 'rgba(64, 106, 212, 0.42)',
+      beamHot: 'rgba(98, 138, 228, 0.14)',
       ink: '#F8FAFC',
-      muted: 'rgba(203, 218, 255, 0.62)',
-      accent: '#3B82F6',
+      muted: 'rgba(203, 218, 255, 0.65)',
+      accent: '#4F7DF3',
     },
     'indigo-shaft': {
       bg: '#04041A',
@@ -81,20 +81,45 @@
   };
 
   var CAMERA_PRESETS = {
-    static: { zoomFrom: 1.0, zoomTo: 1.0, panXFrom: 0, panXTo: 0, panYFrom: 0, panYTo: 0, rollFromDeg: 0, rollToDeg: 0, blurFrom: 0, blurTo: 0 },
-    'dolly-in': { zoomFrom: 0.94, zoomTo: 1.14, panXFrom: 0, panXTo: 0, panYFrom: 12, panYTo: -6, rollFromDeg: 0, rollToDeg: 0, blurFrom: 0, blurTo: 0 },
-    'macro-pullback': { zoomFrom: 2.15, zoomTo: 1.0, panXFrom: -40, panXTo: 0, panYFrom: 28, panYTo: 0, rollFromDeg: 3.5, rollToDeg: 0, blurFrom: 4.5, blurTo: 0 },
-    'macro-zoom-in': { zoomFrom: 0.92, zoomTo: 1.48, panXFrom: 0, panXTo: 18, panYFrom: 18, panYTo: -24, rollFromDeg: -1.5, rollToDeg: 1.0, blurFrom: 2.0, blurTo: 0 },
-    'pan-sweep': { zoomFrom: 1.08, zoomTo: 1.04, panXFrom: 75, panXTo: -75, panYFrom: 0, panYTo: 0, rollFromDeg: 1.2, rollToDeg: -1.2, blurFrom: 0, blurTo: 0 },
-    'tilt-push': { zoomFrom: 0.90, zoomTo: 1.22, panXFrom: 0, panXTo: 0, panYFrom: 45, panYTo: -18, rollFromDeg: -4.0, rollToDeg: 0.5, blurFrom: 2.5, blurTo: 0 },
-    'rack-focus-in': { zoomFrom: 1.18, zoomTo: 1.0, panXFrom: 0, panXTo: 0, panYFrom: 0, panYTo: 0, rollFromDeg: 0, rollToDeg: 0, blurFrom: 7.0, blurTo: 0 },
+    static: { zoomFrom: 1.0, zoomTo: 1.0, pivotX: 0.5, pivotY: 0.5, panXFrom: 0, panXTo: 0, panYFrom: 0, panYTo: 0, rollFromDeg: 0, rollToDeg: 0, curve: 'whip-out', velocityBlur: 0 },
+    'dolly-in': { zoomFrom: 0.92, zoomTo: 1.18, pivotX: 0.5, pivotY: 0.5, panXFrom: 0, panXTo: 0, panYFrom: 14, panYTo: -8, rollFromDeg: 0, rollToDeg: 0, curve: 'whip-out', velocityBlur: 1.2 },
+    'macro-pullback': { zoomFrom: 3.1, zoomTo: 1.0, pivotX: 0.28, pivotY: 0.34, panXFrom: -24, panXTo: 0, panYFrom: 18, panYTo: 0, rollFromDeg: 2.8, rollToDeg: 0, curve: 'whip-out', velocityBlur: 4.2 },
+    'macro-zoom-in': { zoomFrom: 1.0, zoomTo: 2.35, pivotX: 0.32, pivotY: 0.45, panXFrom: 0, panXTo: 20, panYFrom: 0, panYTo: -16, rollFromDeg: 0, rollToDeg: -1.8, curve: 'whip-inout', velocityBlur: 3.8 },
+    'pan-sweep': { zoomFrom: 1.16, zoomTo: 1.02, pivotX: 0.5, pivotY: 0.5, panXFrom: 120, panXTo: -95, panYFrom: 0, panYTo: 0, rollFromDeg: 1.8, rollToDeg: -1.4, curve: 'whip-out', velocityBlur: 2.6 },
+    'tilt-push': { zoomFrom: 0.88, zoomTo: 1.42, pivotX: 0.55, pivotY: 0.55, panXFrom: -20, panXTo: 10, panYFrom: 52, panYTo: -22, rollFromDeg: -4.5, rollToDeg: 0.6, curve: 'whip-out', velocityBlur: 3.0 },
+    'rack-focus-in': { zoomFrom: 1.32, zoomTo: 1.0, pivotX: 0.5, pivotY: 0.5, panXFrom: 0, panXTo: 0, panYFrom: 0, panYTo: 0, rollFromDeg: 0, rollToDeg: 0, curve: 'whip-out', velocityBlur: 5.5 },
   };
+
+  function easeOutExpo(x) {
+    var c = clamp(x, 0, 1);
+    return c === 1 ? 1 : 1 - Math.pow(2, -10 * c);
+  }
+
+  function easeInOutExpo(x) {
+    var c = clamp(x, 0, 1);
+    if (c === 0) return 0;
+    if (c === 1) return 1;
+    return c < 0.5 ? Math.pow(2, 20 * c - 10) * 0.5 : (2 - Math.pow(2, -20 * c + 10)) * 0.5;
+  }
+
+  function evalCamCurve(curve, u) {
+    if (curve === 'whip-inout') return easeInOutExpo(u);
+    if (curve === 'linear') return clamp(u, 0, 1);
+    return easeOutExpo(u);
+  }
 
   function resolveCamera(shot, localTime, dur) {
     var cam = shot.camera && typeof shot.camera === 'object' ? shot.camera : {};
     var presetName = cam.preset || shot.cameraPreset || 'static';
     var base = CAMERA_PRESETS[presetName] || CAMERA_PRESETS.static;
-    var p = easeOutQuart(clamp(localTime / Math.max(0.4, dur * 0.78), 0, 1));
+    var curve = cam.curve || base.curve || 'whip-out';
+    var span = Math.max(0.28, Number(cam.moveDuration) || Math.min(dur * 0.68, 0.95));
+    var u = clamp(localTime / span, 0, 1);
+    var uPrev = clamp((localTime - 0.033) / span, 0, 1);
+    var p = evalCamCurve(curve, u);
+    var pPrev = evalCamCurve(curve, uPrev);
+    var vel = Math.abs(p - pPrev) / 0.033; // normalized curve velocity
+
     var lerp = function (a, b) { return a + (b - a) * p; };
     var z0 = cam.zoomFrom !== undefined ? cam.zoomFrom : base.zoomFrom;
     var z1 = cam.zoomTo !== undefined ? cam.zoomTo : base.zoomTo;
@@ -104,15 +129,37 @@
     var py1 = cam.panYTo !== undefined ? cam.panYTo : base.panYTo;
     var r0 = cam.rollFromDeg !== undefined ? cam.rollFromDeg : base.rollFromDeg;
     var r1 = cam.rollToDeg !== undefined ? cam.rollToDeg : base.rollToDeg;
-    var b0 = cam.blurFrom !== undefined ? cam.blurFrom : base.blurFrom;
-    var b1 = cam.blurTo !== undefined ? cam.blurTo : base.blurTo;
-    var blurP = easeOutCubic(clamp(localTime / Math.max(0.3, dur * 0.35), 0, 1));
+    var pivX = cam.pivotX !== undefined ? cam.pivotX : (base.pivotX !== undefined ? base.pivotX : 0.5);
+    var pivY = cam.pivotY !== undefined ? cam.pivotY : (base.pivotY !== undefined ? base.pivotY : 0.5);
+    var vBlurScale = cam.velocityBlur !== undefined ? cam.velocityBlur : (base.velocityBlur || 0);
+
+    // Optional exit whip-up in last 0.22s when shot.whipExit is true
+    var exitPanY = 0;
+    var exitBlur = 0;
+    if (shot.whipExit && localTime > dur - 0.24) {
+      var eu = clamp((localTime - (dur - 0.24)) / 0.24, 0, 1);
+      var ep = eu * eu * eu;
+      exitPanY = -ep * 260;
+      exitBlur = ep * 9.0;
+    }
+
+    var manualBlur = 0;
+    if (cam.blurFrom !== undefined || cam.blurTo !== undefined) {
+      var b0 = cam.blurFrom !== undefined ? cam.blurFrom : 0;
+      var b1 = cam.blurTo !== undefined ? cam.blurTo : 0;
+      manualBlur = b0 + (b1 - b0) * easeOutExpo(clamp(localTime / 0.35, 0, 1));
+    }
+
+    var autoBlur = clamp(vel * 0.55 * vBlurScale, 0, 10.0);
+
     return {
       zoom: lerp(z0, z1),
+      pivotX: pivX,
+      pivotY: pivY,
       panX: lerp(px0, px1),
-      panY: lerp(py0, py1),
+      panY: lerp(py0, py1) + exitPanY,
       rollRad: (lerp(r0, r1) * Math.PI) / 180,
-      blur: b0 + (b1 - b0) * blurP,
+      blur: Math.max(manualBlur, autoBlur, exitBlur),
     };
   }
 
@@ -186,50 +233,39 @@
     var diag = Math.hypot(W, H);
     var cx = W * 0.5;
     var cy = H * 0.5;
-    var drift = Math.sin(globalT * 0.42) * diag * 0.045;
-    var drift2 = Math.cos(globalT * 0.29) * diag * 0.035;
+    var drift = Math.sin(globalT * 0.36) * diag * 0.035;
 
     ctx.translate(cx, cy);
-    ctx.rotate(-0.54); // ~-31 deg signature diagonal shaft angle
+    ctx.rotate(-0.48); // gentle diffused diagonal wash
 
-    var bands = [
-      { offset: -diag * 0.27 + drift, width: diag * 0.25, alpha: 0.92 },
-      { offset: diag * 0.04 + drift2, width: diag * 0.30, alpha: 1.0 },
-      { offset: diag * 0.36 - drift * 0.7, width: diag * 0.24, alpha: 0.85 },
-    ];
+    // Single wide, ultra-soft atmospheric wash (no harsh zebra stripes)
+    var mainW = diag * 0.82;
+    var y0 = drift - mainW * 0.5;
+    var y1 = drift + mainW * 0.5;
+    var g = ctx.createLinearGradient(0, y0, 0, y1);
+    g.addColorStop(0.0, theme.beamLow);
+    g.addColorStop(0.28, theme.beamMid);
+    g.addColorStop(0.50, theme.beamCore);
+    g.addColorStop(0.72, theme.beamMid);
+    g.addColorStop(1.0, theme.beamLow);
+    ctx.fillStyle = g;
+    ctx.fillRect(-diag, y0, diag * 2, mainW);
 
-    for (var i = 0; i < bands.length; i++) {
-      var b = bands[i];
-      var y0 = b.offset - b.width * 0.5;
-      var y1 = b.offset + b.width * 0.5;
-      var g = ctx.createLinearGradient(0, y0, 0, y1);
-      g.addColorStop(0.0, theme.beamLow);
-      g.addColorStop(0.26, theme.beamMid);
-      g.addColorStop(0.50, theme.beamCore);
-      g.addColorStop(0.74, theme.beamMid);
-      g.addColorStop(1.0, theme.beamLow);
-      ctx.save();
-      ctx.globalAlpha = mult * b.alpha;
-      ctx.fillStyle = g;
-      ctx.fillRect(-diag, y0, diag * 2, b.width);
-      ctx.restore();
-    }
-
-    // Subtle specular hot streak along primary center beam
-    var hy0 = diag * 0.04 + drift2 - diag * 0.07;
-    var hy1 = diag * 0.04 + drift2 + diag * 0.07;
-    var hg = ctx.createLinearGradient(0, hy0, 0, hy1);
-    hg.addColorStop(0, 'rgba(255,255,255,0)');
-    hg.addColorStop(0.5, theme.beamHot);
-    hg.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = hg;
-    ctx.fillRect(-diag, hy0, diag * 2, hy1 - hy0);
+    // Subtle secondary wide soft glow near upper-left for depth
+    var secW = diag * 0.56;
+    var sy0 = -diag * 0.34 - drift * 0.5 - secW * 0.5;
+    var sg = ctx.createLinearGradient(0, sy0, 0, sy0 + secW);
+    sg.addColorStop(0.0, theme.beamLow);
+    sg.addColorStop(0.50, theme.beamHot);
+    sg.addColorStop(1.0, theme.beamLow);
+    ctx.fillStyle = sg;
+    ctx.fillRect(-diag, sy0, diag * 2, secW);
     ctx.restore();
 
-    // Soft radial edge vignette for cinematic contrast
-    var vg = ctx.createRadialGradient(cx, cy, Math.min(W, H) * 0.22, cx, cy, diag * 0.62);
+    // Gentle radial edge vignette
+    var vg = ctx.createRadialGradient(cx, cy, Math.min(W, H) * 0.28, cx, cy, diag * 0.68);
     vg.addColorStop(0, 'rgba(0,0,0,0)');
-    vg.addColorStop(1, 'rgba(2,4,18,0.62)');
+    vg.addColorStop(1, 'rgba(3,6,20,0.48)');
     ctx.fillStyle = vg;
     ctx.fillRect(0, 0, W, H);
   }
@@ -554,18 +590,20 @@
       exitFade = clamp((dur - localTime) / 0.35, 0, 1);
     }
 
-    // 2. Virtual 2.5D Camera Transform (zoom / pan / roll / rack-focus blur)
+    // 2. Virtual 2.5D Camera Transform (off-center pivot zoom / pan / roll / velocity blur)
     var cam = resolveCamera(shot, localTime, dur);
+    var pvx = W * cam.pivotX;
+    var pvy = H * cam.pivotY;
 
     ctx.save();
     ctx.globalAlpha = exitFade;
-    if (cam.blur > 0.15) {
+    if (cam.blur > 0.2) {
       ctx.filter = 'blur(' + cam.blur.toFixed(1) + 'px)';
     }
-    ctx.translate(cx + cam.panX, cy + cam.panY);
+    ctx.translate(pvx + cam.panX, pvy + cam.panY);
     ctx.rotate(cam.rollRad);
     ctx.scale(cam.zoom, cam.zoom);
-    ctx.translate(-cx, -cy);
+    ctx.translate(-pvx, -pvy);
 
     if (layout === 'kinetic-word-reveal') {
       if (!micro) {
@@ -1023,29 +1061,46 @@
         ctx.restore();
       }
     } else if (layout === 'neon-score-ring') {
-      // Vercel-inspired neon emerald radial score ring counting up with macro pull-back
-      var sFrom = shot.scoreFrom !== undefined ? Number(shot.scoreFrom) : 12;
-      var sTo = shot.scoreTo !== undefined ? Number(shot.scoreTo) : 96;
-      var prog = easeOutQuart(clamp(localTime / (dur * 0.68), 0, 1));
+      // Vercel-inspired emerald glow orb -> explosive radial ring sweep + pull-back reveal
+      var sFrom = shot.scoreFrom !== undefined ? Number(shot.scoreFrom) : 10;
+      var sTo = shot.scoreTo !== undefined ? Number(shot.scoreTo) : 98;
+      var ringColor = theme.accent || '#6FEDA4';
+      var orbPhase = clamp(localTime / 0.24, 0, 1);
+
+      if (orbPhase < 0.99) {
+        // Opening pure glowing emerald orb expanding from center (like 3.00s in reference!)
+        var orbR = 14 + easeOutExpo(orbPhase) * 44;
+        ctx.save();
+        var og = ctx.createRadialGradient(cx, cy - 18, 2, cx, cy - 18, orbR * 2.2);
+        og.addColorStop(0, '#FFFFFF');
+        og.addColorStop(0.32, ringColor);
+        og.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = og;
+        ctx.globalAlpha = exitFade * (1 - orbPhase * 0.75);
+        ctx.beginPath();
+        ctx.arc(cx, cy - 18, orbR * 2.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      var prog = easeOutExpo(clamp((localTime - 0.08) / Math.max(0.45, dur * 0.58), 0, 1));
       var curScore = Math.round(sFrom + (sTo - sFrom) * prog);
       var ringR = isPortrait ? 130 : 108;
-      var ringColor = theme.accent || '#6FEDA4';
 
-      // Track ring
       ctx.save();
+      ctx.globalAlpha = exitFade * easeOutCubic(clamp((localTime - 0.06) / 0.18, 0, 1));
       ctx.strokeStyle = 'rgba(255,255,255,0.10)';
       ctx.lineWidth = 12;
       ctx.beginPath();
       ctx.arc(cx, cy - 18, ringR, 0, Math.PI * 2);
       ctx.stroke();
 
-      // Glowing progress arc
       var endAng = -Math.PI * 0.5 + (curScore / 100) * Math.PI * 2;
       ctx.strokeStyle = ringColor;
       ctx.lineWidth = 12;
       ctx.lineCap = 'round';
       ctx.shadowColor = ringColor;
-      ctx.shadowBlur = 28;
+      ctx.shadowBlur = 32;
       ctx.beginPath();
       ctx.arc(cx, cy - 18, ringR, -Math.PI * 0.5, endAng);
       ctx.stroke();
@@ -1058,7 +1113,7 @@
         ctx.textBaseline = 'middle';
         ctx.fillText(String(curScore), cx, cy - 18);
 
-        var labelP = easeOutCubic(clamp((localTime - dur * 0.35) / 0.45, 0, 1));
+        var labelP = easeOutExpo(clamp((localTime - 0.35) / 0.38, 0, 1));
         ctx.globalAlpha = exitFade * labelP;
         ctx.fillStyle = theme.muted;
         ctx.font = '500 22px "Inter", "Segoe UI", sans-serif';
@@ -1069,13 +1124,38 @@
       }
       ctx.restore();
     } else if (layout === 'macro-ui-prompt') {
-      // Vercel v0-inspired dark obsidian AI prompt bar with typing reveal + glowing arrow button
+      // Vercel v0 2-phase macro camera: 3.4x locked on bottom-right arrow -> whip pull-back -> rapid type -> whip zoom-in!
       var boxW = isPortrait ? safe.w * 0.90 : Math.min(760, safe.w * 0.72);
       var boxH = 148;
-      var promptStr = String(shot.promptText || 'Build a 30fps local motion showreel with synced SFX');
-      var typeP = clamp((localTime - 0.35) / Math.max(0.6, dur * 0.55), 0, 1);
+      var promptStr = String(shot.promptText || 'Build a 30fps local motion launch film with SFX');
+      var chips = Array.isArray(shot.chips) && shot.chips.length ? shot.chips : ['18 Skills', '2.5D Camera', 'Zero Cloud', 'SFX Sync'];
+
+      var btnSz = 44;
+      var bx = cx + boxW * 0.5 - btnSz - 18;
+      var by = cy + boxH * 0.5 - btnSz - 16;
+
+      // Internal 2-phase Vercel macro camera when shot.cameraPreset is 'static' or 'macro-pullback'
+      var phase1Pull = easeInOutExpo(clamp((localTime - 0.32) / 0.52, 0, 1));
+      var phase2Zoom = easeInOutExpo(clamp((localTime - (dur * 0.62)) / 0.45, 0, 1));
+      var localZoom = 3.4 + (1.0 - 3.4) * phase1Pull + (1.82 - 1.0) * phase2Zoom;
+      var localFocusX = (bx + btnSz * 0.5) + (cx - (bx + btnSz * 0.5)) * phase1Pull + ((cx - boxW * 0.24) - cx) * phase2Zoom;
+      var localFocusY = (by + btnSz * 0.5) + (cy - (by + btnSz * 0.5)) * phase1Pull + ((cy - 12) - cy) * phase2Zoom;
+
+      // Velocity blur during phase1Pull or phase2Zoom whips
+      var p1Prev = easeInOutExpo(clamp((localTime - 0.033 - 0.32) / 0.52, 0, 1));
+      var p2Prev = easeInOutExpo(clamp((localTime - 0.033 - (dur * 0.62)) / 0.45, 0, 1));
+      var whipBlur = clamp((Math.abs(phase1Pull - p1Prev) + Math.abs(phase2Zoom - p2Prev)) * 38, 0, 7.5);
+
+      ctx.save();
+      if (shot.cameraPreset === 'static' || !shot.cameraPreset) {
+        if (whipBlur > 0.25) ctx.filter = 'blur(' + whipBlur.toFixed(1) + 'px)';
+        ctx.translate(cx, cy);
+        ctx.scale(localZoom, localZoom);
+        ctx.translate(-localFocusX, -localFocusY);
+      }
+
+      var typeP = clamp((localTime - 0.72) / Math.max(0.45, dur * 0.44), 0, 1);
       var visibleText = promptStr.slice(0, Math.round(promptStr.length * typeP));
-      var chips = Array.isArray(shot.chips) && shot.chips.length ? shot.chips : ['18 Skills', 'Local CDP', 'Zero Cloud', 'SFX Sync'];
 
       if (!micro) {
         ctx.fillStyle = '#FFFFFF';
@@ -1084,11 +1164,10 @@
         ctx.fillText(String(shot.headline || 'What do you want to create?'), cx, cy - boxH * 0.5 - 42);
       }
 
-      // Prompt box
       roundRect(ctx, cx - boxW * 0.5, cy - boxH * 0.5, boxW, boxH, 18);
-      ctx.fillStyle = 'rgba(12, 14, 22, 0.92)';
+      ctx.fillStyle = 'rgba(12, 14, 22, 0.94)';
       ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+      ctx.strokeStyle = 'rgba(255,255,255,0.20)';
       ctx.lineWidth = 1.5;
       ctx.stroke();
 
@@ -1097,20 +1176,17 @@
         ctx.font = '400 24px "Inter", "Segoe UI", sans-serif';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
-        ctx.fillText(visibleText + (Math.floor(localTime * 3) % 2 === 0 ? '|' : ''), cx - boxW * 0.5 + 26, cy - boxH * 0.5 + 26, boxW - 110);
+        ctx.fillText(visibleText + (Math.floor(localTime * 4) % 2 === 0 ? '|' : ''), cx - boxW * 0.5 + 26, cy - boxH * 0.5 + 26, boxW - 110);
 
         ctx.fillStyle = theme.muted;
         ctx.font = '500 17px "Inter", "Segoe UI", sans-serif';
-        ctx.fillText(String(shot.modelTag || 'Aetheria Engine v2'), cx - boxW * 0.5 + 26, cy + boxH * 0.5 - 38);
+        ctx.fillText(String(shot.modelTag || 'Arunaki Nexus Engine'), cx - boxW * 0.5 + 26, cy + boxH * 0.5 - 38);
       }
 
       // Glowing white submit arrow button
-      var btnSz = 44;
-      var bx = cx + boxW * 0.5 - btnSz - 18;
-      var by = cy + boxH * 0.5 - btnSz - 16;
       ctx.save();
       ctx.shadowColor = '#FFFFFF';
-      ctx.shadowBlur = 18;
+      ctx.shadowBlur = 22;
       roundRect(ctx, bx, by, btnSz, btnSz, 11);
       ctx.fillStyle = '#FFFFFF';
       ctx.fill();
@@ -1128,7 +1204,6 @@
       ctx.stroke();
       ctx.restore();
 
-      // Feature chips underneath
       var chipW = (boxW - 36) / chips.length;
       for (var ci = 0; ci < chips.length; ci++) {
         var chx = cx - boxW * 0.5 + ci * (chipW + 12);
@@ -1146,6 +1221,31 @@
           ctx.fillText(String(chips[ci]), chx + chipW * 0.5, chy + 19, chipW - 14);
         }
       }
+      ctx.restore();
+    } else if (layout === 'whip-cta-morph') {
+      // Vercel 6.60s-7.50s: blinding white orb -> bloom pill ("Visit ↗" / "Try Arunaki ↗") -> crisp lock
+      var pMorph = easeOutExpo(clamp(localTime / 0.42, 0, 1));
+      var pillW = 48 + (240 - 48) * pMorph;
+      var pillH = 48 + (76 - 48) * pMorph;
+      var bloom = (1 - pMorph) * 42 + 16;
+
+      ctx.save();
+      ctx.shadowColor = '#FFFFFF';
+      ctx.shadowBlur = bloom;
+      roundRect(ctx, cx - pillW * 0.5, cy - pillH * 0.5, pillW, pillH, 16);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      if (!micro && pMorph > 0.35) {
+        ctx.globalAlpha = exitFade * easeOutCubic((pMorph - 0.35) / 0.65);
+        ctx.fillStyle = '#09090B';
+        ctx.font = '600 32px "Inter", "Segoe UI", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(String(shot.ctaLabel || 'Start ↗'), cx, cy + 1);
+      }
+      ctx.restore();
     }
 
     ctx.restore();
