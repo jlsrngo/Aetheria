@@ -1,92 +1,104 @@
 {
   "version": 1,
   "meta": {
-    "title": "PIXEL QUEST — 16-Bit Arcade",
+    "title": "PIXEL QUEST — 16-Bit Side-Scroller",
     "width": 1080,
     "height": 1920,
     "fps": 30,
     "durationSec": 30,
-    "theme": "pico8-night"
+    "theme": "day"
   },
   "shots": [
     {
-      "id": "s1-title",
+      "id": "s1-morning",
       "startSec": 0,
       "endSec": 5,
-      "layout": "arcade-title",
-      "theme": "pico8-night",
-      "badge": "INSERT COIN",
-      "headline": "PIXEL QUEST 1989",
-      "subtext": "Petualangan retro 16-bit dengan sprite tajam",
-      "sprite": "hero-knight",
-      "transition": "pixel-dissolve"
+      "layout": "side-scroll",
+      "theme": "day",
+      "heroAction": "run",
+      "badge": "WORLD 1-1",
+      "headline": "PIXEL QUEST",
+      "subtext": "Petualangan 16-bit melintasi lembah air terjun",
+      "score": 1200,
+      "coins": 4,
+      "transition": "palette-shift"
     },
     {
-      "id": "s2-vs",
+      "id": "s2-jump",
       "startSec": 5,
       "endSec": 10,
-      "layout": "arcade-vs",
-      "theme": "snes-sunset",
-      "headline": "STAGE 1 BOSS",
-      "items": [
-        { "label": "P1 KNIGHT", "sprite": "hero-knight" },
-        { "label": "KING SLIME", "sprite": "slime-bounce" }
-      ],
-      "transition": "stage-wipe"
-    },
-    {
-      "id": "s3-level",
-      "startSec": 10,
-      "endSec": 15,
-      "layout": "arcade-level",
-      "theme": "gameboy-dmg",
-      "headline": "ITEM INVENTORY",
-      "transition": "crt-off"
-    },
-    {
-      "id": "s4-score",
-      "startSec": 15,
-      "endSec": 20,
-      "layout": "arcade-highscore",
-      "theme": "arcade-crt",
-      "metric": "99,900",
-      "headline": "NEW HIGH SCORE RECORD",
-      "sprite": "treasure-chest",
+      "layout": "boss-encounter",
+      "theme": "afternoon",
+      "heroAction": "bop",
+      "badge": "COMBO +500",
+      "headline": "LOMPAT SLIME",
+      "subtext": "Kumpulkan koin emas dan kalahkan slime penjaga",
+      "score": 2800,
+      "coins": 9,
       "transition": "pixel-dissolve"
     },
     {
-      "id": "s5-quests",
-      "startSec": 20,
-      "endSec": 25,
-      "layout": "arcade-quests",
-      "theme": "cyber-bit",
-      "headline": "DAILY QUESTS",
-      "items": [
-        { "label": "01. COLLECT 50 COINS", "sprite": "coin-spin" },
-        { "label": "02. EXTRA HEART", "sprite": "heart-pixel" },
-        { "label": "03. LAUNCH ROCKET", "sprite": "rocket-8bit" }
-      ],
-      "transition": "stage-wipe"
+      "id": "s3-golden",
+      "startSec": 10,
+      "endSec": 15,
+      "layout": "dialogue-cutscene",
+      "theme": "golden",
+      "heroAction": "run",
+      "badge": "GOLDEN HOUR",
+      "headline": "JEMBATAN EMAS",
+      "subtext": "Langit senja berubah halus lewat palet 32 warna",
+      "score": 4500,
+      "coins": 14,
+      "transition": "palette-shift"
     },
     {
-      "id": "s6-continue",
+      "id": "s4-chest",
+      "startSec": 15,
+      "endSec": 20,
+      "layout": "treasure-reveal",
+      "theme": "sunset",
+      "heroAction": "item-get",
+      "metric": "99,900 PTS",
+      "headline": "KRISTAL DITEMUKAN",
+      "subtext": "Peti harta terbuka dengan aura kristal biru",
+      "score": 99900,
+      "coins": 25,
+      "transition": "crt-flash"
+    },
+    {
+      "id": "s5-dusk",
+      "startSec": 20,
+      "endSec": 25,
+      "layout": "stage-clear",
+      "theme": "dusk",
+      "heroAction": "cheer",
+      "badge": "STAGE CLEAR",
+      "headline": "MISI SELESAI",
+      "subtext": "Bintang bermunculan di langit senja piksel",
+      "score": 99900,
+      "coins": 30,
+      "transition": "palette-shift"
+    },
+    {
+      "id": "s6-title",
       "startSec": 25,
       "endSec": 30,
-      "layout": "arcade-continue",
-      "theme": "pico8-night",
+      "layout": "title-logo",
+      "theme": "night",
+      "heroAction": "cheer",
       "badge": "PRESS START",
-      "headline": "READY PLAYER ONE",
-      "subtext": "Aktifkan mode piksel untuk konten gamingmu",
-      "sprite": "rocket-8bit",
-      "transition": "crt-off"
+      "headline": "PIXEL QUEST",
+      "score": 99900,
+      "coins": 30,
+      "transition": "crt-flash"
     }
   ],
   "captions": [
-    { "startSec": 0.5, "endSec": 4.5, "text": "PIXEL QUEST 1989" },
-    { "startSec": 5.5, "endSec": 9.5, "text": "STAGE ONE BOSS" },
-    { "startSec": 10.5, "endSec": 14.5, "text": "ITEM INVENTORY" },
-    { "startSec": 15.5, "endSec": 19.5, "text": "NEW HIGH SCORE" },
-    { "startSec": 20.5, "endSec": 24.5, "text": "DAILY QUESTS" },
-    { "startSec": 25.5, "endSec": 29.5, "text": "READY PLAYER ONE" }
+    { "startSec": 0.5, "endSec": 4.5, "text": "WORLD 1-1 START" },
+    { "startSec": 5.5, "endSec": 9.5, "text": "COMBO +500" },
+    { "startSec": 10.5, "endSec": 14.5, "text": "JEMBATAN EMAS" },
+    { "startSec": 15.5, "endSec": 19.5, "text": "KRISTAL BARU" },
+    { "startSec": 20.5, "endSec": 24.5, "text": "STAGE CLEAR" },
+    { "startSec": 25.5, "endSec": 29.5, "text": "PRESS START" }
   ]
 }
