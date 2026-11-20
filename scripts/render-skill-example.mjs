@@ -349,6 +349,8 @@ export async function renderSkillExample(opts, sharedBrowser = null) {
         const world = window.__clayStageWorld || window.__storyWorld || null;
 
         let heroBbox = null;
+        let bboxMeasured = false;
+        let reportedSafeZone = null;
         if (world && world.camera && typeof THREE !== "undefined") {
           const targetObj =
             (world.getActiveFocusObject && world.getActiveFocusObject()) ||
@@ -389,6 +391,7 @@ export async function renderSkillExample(opts, sharedBrowser = null) {
                 width: Math.round((maxX - minX) * 10) / 10,
                 height: Math.round((maxY - minY) * 10) / 10,
               };
+              bboxMeasured = true;
             }
           }
         } else if (window.__shotReport) {
@@ -396,6 +399,19 @@ export async function renderSkillExample(opts, sharedBrowser = null) {
           const match = vals.find((r) => r && Math.abs(Number(r.t) - ts) < 0.01) || vals[vals.length - 1];
           if (match && match.bbox) {
             heroBbox = match.bbox;
+            reportedSafeZone = match.safeZone || null;
+            if (typeof match.bboxMeasured === "boolean") {
+              bboxMeasured = match.bboxMeasured;
+            } else if (reportedSafeZone) {
+              const sameAsSafe =
+                Math.abs(Number(heroBbox.minX) - Number(reportedSafeZone.minX)) <= 1 &&
+                Math.abs(Number(heroBbox.maxX) - Number(reportedSafeZone.maxX)) <= 1 &&
+                Math.abs(Number(heroBbox.minY) - Number(reportedSafeZone.minY)) <= 1 &&
+                Math.abs(Number(heroBbox.maxY) - Number(reportedSafeZone.maxY)) <= 1;
+              bboxMeasured = !sameAsSafe;
+            } else {
+              bboxMeasured = true;
+            }
           }
         }
 
@@ -437,7 +453,8 @@ export async function renderSkillExample(opts, sharedBrowser = null) {
         }
 
         const shotReport = window.__shotReport ? JSON.parse(JSON.stringify(window.__shotReport)) : null;
-        return { heroBbox, lowerThirdEmptyFraction, shotReport };
+        const cameraReport = window.__cameraReport ? JSON.parse(JSON.stringify(window.__cameraReport)) : null;
+        return { heroBbox, bboxMeasured, reportedSafeZone, lowerThirdEmptyFraction, shotReport, cameraReport };
       }, t);
 
       const pngName = `frame_${String(i).padStart(2, "0")}_t${t.toFixed(2).replace(".", "_")}.png`;
@@ -446,6 +463,13 @@ export async function renderSkillExample(opts, sharedBrowser = null) {
       fs.writeFileSync(pngPath, pngBuf);
       const renderMs = Math.round((performance.now() - t0) * 10) / 10;
       const sha256 = crypto.createHash("sha256").update(pngBuf).digest("hex");
+      const sameAsRendererSafe =
+        metrics.heroBbox &&
+        Math.abs(Number(metrics.heroBbox.minX) - safeZone.minX) <= 1 &&
+        Math.abs(Number(metrics.heroBbox.maxX) - safeZone.maxX) <= 1 &&
+        Math.abs(Number(metrics.heroBbox.minY) - safeZone.minY) <= 1 &&
+        Math.abs(Number(metrics.heroBbox.maxY) - safeZone.maxY) <= 1;
+      const bboxMeasured = Boolean(metrics.bboxMeasured && !sameAsRendererSafe);
       const boxStatus = classifyBbox(metrics.heroBbox, meta.width, meta.height, safeZone);
 
       frames.push({
@@ -455,12 +479,14 @@ export async function renderSkillExample(opts, sharedBrowser = null) {
         sha256,
         renderMs,
         heroBbox: metrics.heroBbox,
-        inViewport: boxStatus.inViewport,
-        inSafeZone: boxStatus.inSafeZone,
-        clippedViewportEdges: boxStatus.clippedViewportEdges,
-        clippedSafeEdges: boxStatus.clippedSafeEdges,
+        bboxMeasured,
+        inViewport: bboxMeasured ? boxStatus.inViewport : null,
+        inSafeZone: bboxMeasured ? boxStatus.inSafeZone : null,
+        clippedViewportEdges: bboxMeasured ? boxStatus.clippedViewportEdges : [],
+        clippedSafeEdges: bboxMeasured ? boxStatus.clippedSafeEdges : [],
         lowerThirdEmptyFraction: metrics.lowerThirdEmptyFraction,
         shotReport: metrics.shotReport,
+        cameraReport: metrics.cameraReport,
       });
     }
 
@@ -470,8 +496,11 @@ export async function renderSkillExample(opts, sharedBrowser = null) {
       await buildContactSheet(browser, frames, meta, safeZone, contactSheetPath);
     }
 
-    const outOfSafeZoneCount = frames.filter((f) => !f.inSafeZone).length;
-    const outOfViewportCount = frames.filter((f) => !f.inViewport).length;
+    const measuredFrames = frames.filter((f) => f.bboxMeasured);
+    const unmeasuredFrameCount = frames.length - measuredFrames.length;
+    const bboxMeasured = measuredFrames.length > 0;
+    const outOfSafeZoneCount = measuredFrames.filter((f) => f.inSafeZone === false).length;
+    const outOfViewportCount = measuredFrames.filter((f) => f.inViewport === false).length;
     const totalRenderMs = Math.round(frames.reduce((s, f) => s + f.renderMs, 0) * 10) / 10;
     const avgRenderMs = Math.round((totalRenderMs / Math.max(1, frames.length)) * 10) / 10;
     const lowerFracs = frames
@@ -481,6 +510,9 @@ export async function renderSkillExample(opts, sharedBrowser = null) {
       lowerFracs.length > 0
         ? Math.round((lowerFracs.reduce((a, b) => a + b, 0) / lowerFracs.length) * 1000) / 1000
         : null;
+    const lastCameraReport = frames[frames.length - 1]?.cameraReport || null;
+    const cameraEntries = lastCameraReport ? Object.values(lastCameraReport) : [];
+    const cameraRepeatOfPreviousCount = cameraEntries.filter((e) => e && e.repeatOfPrevious === true).length;
 
     const report = {
       skillDir: opts.dir,
@@ -491,15 +523,25 @@ export async function renderSkillExample(opts, sharedBrowser = null) {
       safeZone,
       summary: {
         frameCount: frames.length,
+        bboxMeasured,
+        measuredFrameCount: measuredFrames.length,
+        unmeasuredFrameCount,
         runtimeErrorsCount: runtimeErrors.length,
         avgRenderMs,
         totalRenderMs,
-        outOfSafeZoneCount,
-        outOfSafeZonePct: Math.round((outOfSafeZoneCount / Math.max(1, frames.length)) * 1000) / 10,
-        outOfViewportCount,
-        outOfViewportPct: Math.round((outOfViewportCount / Math.max(1, frames.length)) * 1000) / 10,
+        outOfSafeZoneCount: bboxMeasured ? outOfSafeZoneCount : null,
+        outOfSafeZonePct: bboxMeasured
+          ? Math.round((outOfSafeZoneCount / Math.max(1, measuredFrames.length)) * 1000) / 10
+          : null,
+        outOfViewportCount: bboxMeasured ? outOfViewportCount : null,
+        outOfViewportPct: bboxMeasured
+          ? Math.round((outOfViewportCount / Math.max(1, measuredFrames.length)) * 1000) / 10
+          : null,
         meanLowerThirdEmptyFraction,
+        cameraReportCount: cameraEntries.length,
+        cameraRepeatOfPreviousCount,
       },
+      cameraReport: lastCameraReport,
       runtimeErrors,
       http404s,
       frames,
@@ -551,6 +593,11 @@ export async function renderAllSkillExamples(opts) {
         html: sk.html,
         reportPath,
         frameCount: report.summary.frameCount,
+        bboxMeasured: report.summary.bboxMeasured,
+        measuredFrameCount: report.summary.measuredFrameCount,
+        unmeasuredFrameCount: report.summary.unmeasuredFrameCount,
+        outOfSafeZoneCount: report.summary.outOfSafeZoneCount,
+        cameraRepeatOfPreviousCount: report.summary.cameraRepeatOfPreviousCount,
         runtimeErrorsCount: report.summary.runtimeErrorsCount,
         avgRenderMs: report.summary.avgRenderMs,
         hashes: report.frames.map((f) => ({ t: f.t, sha256: f.sha256 })),
@@ -583,6 +630,7 @@ async function buildContactSheet(browser, frames, meta, safeZone, outPath) {
 
   const items = frames.map((f) => ({
     t: f.t,
+    bboxMeasured: Boolean(f.bboxMeasured),
     inSafeZone: f.inSafeZone,
     inViewport: f.inViewport,
     heroBbox: f.heroBbox,
@@ -610,9 +658,9 @@ async function buildContactSheet(browser, frames, meta, safeZone, outPath) {
 
         ctx.fillStyle = "#1f2937";
         ctx.fillRect(x, y, thumbW, headerH);
-        ctx.fillStyle = it.inSafeZone ? "#4ade80" : "#f87171";
+        ctx.fillStyle = !it.bboxMeasured ? "#fbbf24" : it.inSafeZone ? "#4ade80" : "#f87171";
         ctx.font = "bold 13px monospace";
-        const tag = it.inSafeZone ? "SAFE" : it.inViewport ? "OUT-SAFE" : "CLIPPED";
+        const tag = !it.bboxMeasured ? "UNMEASURED" : it.inSafeZone ? "SAFE" : it.inViewport ? "OUT-SAFE" : "CLIPPED";
         ctx.fillText(`t=${it.t.toFixed(2)}s [${tag}] lowEmpty=${Math.round((it.lowerEmpty || 0) * 100)}%`, x + 8, y + 23);
 
         const img = new Image();
