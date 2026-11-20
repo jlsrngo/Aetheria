@@ -329,10 +329,12 @@ pub(crate) async fn run_direct_per_scene_remake(
         .await;
     }
 
-    let temperature = if model_id.to_ascii_lowercase().contains("gemini-3") {
-        1.0
+    // OpenCode pattern: omit `temperature` for all Gemini models (2.5 & 3.x) so native sampling
+    // is preserved; use 0.35 only for non-Gemini models.
+    let temperature = if model_id.to_ascii_lowercase().contains("gemini") {
+        None
     } else {
-        0.35
+        Some(0.35)
     };
     let max_tokens = 16_384u64;
     let max_scene_steps: usize = std::env::var("AETHERIA_SCENE_MAX_STEPS")
@@ -560,11 +562,24 @@ pub(crate) async fn run_direct_per_scene_remake(
                         step_captions.push(cap);
                     }
 
+                    let model_text = crate::tool::truncator::format_tool_result_for_model(
+                        fn_name,
+                        &outcome.result_json,
+                    );
+                    let direction = crate::tool::truncator::preferred_direction_for_tool(fn_name);
+                    let (bounded_text, _, _) =
+                        crate::tool::truncator::bound_tool_output_with_spill(
+                            fn_name,
+                            &model_text,
+                            Some(workspace_dir),
+                            Some(&cid),
+                            direction,
+                        );
                     scene_msgs.push(json!({
                         "role": "tool",
                         "tool_call_id": cid,
                         "name": fn_name,
-                        "content": serde_json::to_string(&outcome.result_json).unwrap_or_else(|_| "{}".to_string()),
+                        "content": bounded_text,
                     }));
                 }
 

@@ -36,6 +36,11 @@ pub async fn send_resilient_chat_completion(
     temperature: f64,
     max_tokens: u64,
 ) -> Result<ResilientCompletionOutput, String> {
+    let opt_temp = if model_id.to_ascii_lowercase().contains("gemini") {
+        None
+    } else {
+        Some(temperature)
+    };
     send_resilient_chat_completion_with_options(
         client,
         base_url,
@@ -43,7 +48,7 @@ pub async fn send_resilient_chat_completion(
         model_id,
         chat_messages,
         tools,
-        temperature,
+        opt_temp,
         max_tokens,
         None,
     )
@@ -54,28 +59,34 @@ pub(crate) fn build_resilient_chat_payload(
     model_id: &str,
     chat_messages: &[Value],
     tools: &[Value],
-    temperature: f64,
+    temperature: Option<f64>,
     max_tokens: u64,
     reasoning_effort: Option<&str>,
 ) -> Value {
+    let mut outbound_msgs = chat_messages.to_vec();
+    super::history::bound_inline_images(&mut outbound_msgs);
     let mut payload = json!({
         "model": model_id,
-        "messages": chat_messages,
-        "temperature": temperature,
+        "messages": outbound_msgs,
         "max_tokens": max_tokens,
         "stream": true
     });
+    // OpenCode pattern: omit `temperature` when `None` (especially for all Gemini 2.5/3 models
+    // so they run at their native calibrated temperature instead of degraded 0.3 overrides).
+    if let Some(temp) = temperature {
+        payload["temperature"] = json!(temp);
+    }
     if let Some(effort) = reasoning_effort.map(str::trim).filter(|s| !s.is_empty()) {
         payload["reasoning_effort"] = json!(effort);
     }
     if !tools.is_empty() {
-        payload["tools"] = json!(tools);
-        payload["tool_choice"] = json!("auto");
+        let normalized_tools = crate::bridge::schema::normalize_tools_for_model(model_id, tools);
+        payload["tools"] = Value::Array(normalized_tools);
     }
     payload
 }
 
-/// Variant of `send_resilient_chat_completion` accepting per-role `reasoning_effort` override.
+/// Variant of `send_resilient_chat_completion` accepting optional `temperature` and per-role `reasoning_effort`.
 #[allow(clippy::too_many_arguments)]
 pub async fn send_resilient_chat_completion_with_options(
     client: &reqwest::Client,
@@ -84,7 +95,7 @@ pub async fn send_resilient_chat_completion_with_options(
     model_id: &mut String,
     chat_messages: &mut Vec<Value>,
     tools: &[Value],
-    temperature: f64,
+    temperature: Option<f64>,
     max_tokens: u64,
     reasoning_effort: Option<&str>,
 ) -> Result<ResilientCompletionOutput, String> {

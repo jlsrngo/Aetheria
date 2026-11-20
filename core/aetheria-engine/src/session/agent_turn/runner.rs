@@ -152,7 +152,9 @@ pub async fn run_agent_turn(
         crate::tool::profiles::ToolProfile::GeneralChat
     };
     let tools_def = if should_attach_document_tools(prompt_text, history) {
-        crate::tool::profiles::filter_tools_for_profile(active_profile, build_tool_definitions())
+        let profile_tools =
+            crate::tool::profiles::filter_tools_for_profile(active_profile, build_tool_definitions());
+        crate::tool::profiles::filter_tools_for_model(&current_model_id, profile_tools)
     } else {
         Vec::new()
     };
@@ -712,7 +714,10 @@ async fn prepare_initial_chat_messages(
             }
         }
     }
-    let sys_prompt = assemble_system_prompt_for_turn(workspace_dir, prompt_text);
+    let sys_prompt = super::context::optimize_system_prompt_for_model(
+        assemble_system_prompt_for_turn(workspace_dir, prompt_text),
+        model_id,
+    );
     let (effective_history, was_compacted) = crate::session::compaction::compact_session_history(
         history,
         crate::session::compaction::DEFAULT_CONTEXT_WINDOW,

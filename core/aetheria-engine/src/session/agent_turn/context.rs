@@ -132,12 +132,12 @@ pub fn assemble_system_prompt(workspace_dir: &str) -> String {
 }
 
 /// Assembles base system prompt plus turn-filtered & budget-capped dynamic context blocks (`F6`).
+/// Uses date-only (`YYYY-MM-DD (Day)`) without clock minutes so provider prompt caches stay hot.
 pub fn assemble_system_prompt_for_turn(workspace_dir: &str, prompt_text: &str) -> String {
     let base_prompt_template = include_str!("../prompt/default.txt");
     let now = chrono::Local::now();
     let today_date_str = now.format("%Y-%m-%d").to_string();
     let day_of_week = now.format("%A").to_string();
-    let current_time_str = now.format("%H:%M").to_string();
 
     let mut sys_prompt = format!(
         "{}\n\nHere is some useful information about the environment you are running in:\n\
@@ -145,14 +145,12 @@ pub fn assemble_system_prompt_for_turn(workspace_dir: &str, prompt_text: &str) -
           Working directory: {}\n\
           Platform: {}\n\
           Today's date: {} ({})\n\
-          Current local time: {}\n\
         </env>",
         base_prompt_template.trim(),
         workspace_dir,
         std::env::consts::OS,
         today_date_str,
         day_of_week,
-        current_time_str
     );
 
     let cfg = crate::provider::read_aetheria_config();
@@ -301,6 +299,30 @@ pub fn assemble_system_prompt_for_turn(workspace_dir: &str, prompt_text: &str) -
         sys_prompt.push_str(&ms_block);
     }
 
+    sys_prompt
+}
+
+/// Applies thin OpenCode-style model-family prompt optimization (`plugin/optimize.ts`).
+/// - Frontier Gemini models stay on the lean base prompt (zero extra bloat).
+/// - Anthropic Claude appends a concise 2-line code-comment guideline.
+/// - OpenAI GPT-5+ appends concise autonomy/commentary guidance.
+pub fn optimize_system_prompt_for_model(sys_prompt: String, model_id: &str) -> String {
+    let lower = model_id.to_ascii_lowercase();
+    if lower.contains("gemini") {
+        return sys_prompt;
+    }
+    if lower.contains("claude") || lower.contains("anthropic") {
+        return format!(
+            "{}\n\n# Style Note\n- Keep code comments sparse and explain *why* rather than restating *what*; skip filler preambles.",
+            sys_prompt
+        );
+    }
+    if lower.contains("gpt-5") || lower.contains("codex") {
+        return format!(
+            "{}\n\n# Execution Style\n- Keep intermediate commentary brief and bias toward concrete tool actions, batching independent calls in parallel.",
+            sys_prompt
+        );
+    }
     sys_prompt
 }
 

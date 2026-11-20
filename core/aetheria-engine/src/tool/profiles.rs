@@ -56,9 +56,6 @@ pub fn check_tool_allowed_runtime(profile: ToolProfile, tool_name: &str) -> Resu
         return Ok(());
     }
     let hint = match profile {
-        ToolProfile::Director { .. } if matches!(tool_name, "write" | "edit" | "apply_patch") => {
-            "Delegate scene/script authoring to `task(subagent_type: \"motion-designer\")` after running `film_scaffold`."
-        }
         ToolProfile::Director { .. }
             if matches!(tool_name, "voicebox_speak" | "generate_smart_sfx") =>
         {
@@ -198,6 +195,30 @@ pub fn filter_tools_for_profile(profile: ToolProfile, all_tools: Vec<Value>) -> 
                 .unwrap_or("");
             is_tool_allowed_in_role(role, name, include_render)
         })
+        .collect()
+}
+
+/// Model-aware tool filter (mirrors OpenCode `tool/model-policy.ts`).
+/// Hides redundant `apply_patch` for Gemini / Claude / OSS models when `edit` + `write` are
+/// already exposed (reducing schema noise and avoiding edit-vs-patch confusion), while keeping
+/// `apply_patch` exposed for GPT-5+ / Codex models that are natively tuned for unified patch syntax.
+pub fn filter_tools_for_model(model_id: &str, tools: Vec<Value>) -> Vec<Value> {
+    let lower = model_id.to_ascii_lowercase();
+    let prefers_apply_patch = lower.contains("gpt-5") || lower.contains("codex");
+    if prefers_apply_patch {
+        return tools;
+    }
+    let has_edit_and_write = tools.iter().any(|t| {
+        t.pointer("/function/name").and_then(Value::as_str) == Some("edit")
+    }) && tools.iter().any(|t| {
+        t.pointer("/function/name").and_then(Value::as_str) == Some("write")
+    });
+    if !has_edit_and_write {
+        return tools;
+    }
+    tools
+        .into_iter()
+        .filter(|t| t.pointer("/function/name").and_then(Value::as_str) != Some("apply_patch"))
         .collect()
 }
 
@@ -405,6 +426,22 @@ pub fn resolve_coordinator_profile(
         ToolProfile::General
     } else if prompt_needs_code_or_write_tools(prompt_text)
         || history_used_write_or_exec_tools(history)
+        || (!history.is_empty()
+            && [
+                "lanjut",
+                "teruskan",
+                "continue",
+                "coba",
+                "cek",
+                "benerin",
+                "rapikan",
+                "lakukan",
+                "kerjakan",
+                "do it",
+                "go ahead",
+            ]
+            .iter()
+            .any(|k| lower.contains(k)))
     {
         ToolProfile::GeneralCode
     } else {

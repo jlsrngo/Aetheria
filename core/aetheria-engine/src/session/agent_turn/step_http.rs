@@ -296,6 +296,22 @@ fn build_step_request_body(ctx: &StepHttpContext<'_>, tools_def: &[Value]) -> Va
         "stream": true,
         "stream_options": { "include_usage": true }
     });
+    if let Some(effort) = ctx
+        .cfg
+        .pointer("/agent/default/reasoning")
+        .or_else(|| ctx.cfg.pointer("/reasoning_effort"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        if super::runner::model_supports_reasoning_from_config(
+            Some(ctx.cfg),
+            ctx.current_provider_id,
+            ctx.current_model_id,
+        ) {
+            req_body["reasoning_effort"] = json!(effort);
+        }
+    }
     if !tools_def.is_empty() {
         let normalized_tools =
             crate::bridge::schema::normalize_tools_for_model(ctx.current_model_id, tools_def);

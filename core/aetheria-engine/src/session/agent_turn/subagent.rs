@@ -589,11 +589,12 @@ async fn run_subagent_loop(
         }
 
         steps_run += 1;
-        // Gemini-3 thinking models perform best at temperature 1.0 (lower values degrade reasoning/visual craft).
-        let subagent_temperature = if model_id.to_ascii_lowercase().contains("gemini-3") {
-            1.0
+        // OpenCode pattern: omit `temperature` for ALL Gemini models (2.5 & 3.x) so they retain
+        // their native calibrated sampling instead of being degraded by 0.3 overrides.
+        let subagent_temperature = if model_id.to_ascii_lowercase().contains("gemini") {
+            None
         } else {
-            0.3
+            Some(0.3)
         };
         let completion = match send_resilient_chat_completion_with_options(
             &client,

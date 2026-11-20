@@ -280,7 +280,8 @@ function startSmartHarnessMockLlm() {
           }
           if (step === 5) {
             const badPatchMsg = toolMsgs.find((m) => m.tool_call_id === "s1_bad_patch");
-            if (badPatchMsg && String(badPatchMsg.content || "").includes('"ok":false')) {
+            const badPatchText = String(badPatchMsg?.content || "");
+            if (badPatchText.startsWith("Error:") || badPatchText.includes('"ok":false')) {
               badPatchErroredCleanly = true;
             }
             // Real surgical patch

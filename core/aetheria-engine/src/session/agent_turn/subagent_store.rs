@@ -491,16 +491,26 @@ pub fn load_or_init_child_session_with_images(
     let now = now_ms();
     with_store(|store| {
         if let Some(existing_id) = requested_child_id.filter(|s| !s.trim().is_empty()) {
-            if let Some(existing_msgs) = store.messages.get_mut(existing_id) {
-                if !existing_msgs.is_empty() {
-                    existing_msgs.push(build_user_msg_payload(user_prompt, image_urls));
-                    let cloned = existing_msgs.clone();
-                    if let Some(sess) = store.sessions.get_mut(existing_id) {
-                        sess["updatedAt"] = json!(now);
-                        sess["state"] = json!("running");
+            // Enforce parentID ownership so a session cannot hijack another session's child subagent.
+            let owns_child = store
+                .sessions
+                .get(existing_id)
+                .and_then(|s| s.get("parentID"))
+                .and_then(Value::as_str)
+                .map(|pid| pid == parent_session_id)
+                .unwrap_or(true);
+            if owns_child {
+                if let Some(existing_msgs) = store.messages.get_mut(existing_id) {
+                    if !existing_msgs.is_empty() {
+                        existing_msgs.push(build_user_msg_payload(user_prompt, image_urls));
+                        let cloned = existing_msgs.clone();
+                        if let Some(sess) = store.sessions.get_mut(existing_id) {
+                            sess["updatedAt"] = json!(now);
+                            sess["state"] = json!("running");
+                        }
+                        save_store(store);
+                        return (existing_id.to_string(), cloned, true);
                     }
-                    save_store(store);
-                    return (existing_id.to_string(), cloned, true);
                 }
             }
         }
