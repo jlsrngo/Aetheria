@@ -80,7 +80,9 @@
     },
   };
 
-  var CAMERA_PRESETS = {
+  var COBALT_CAMERA_LIMITS = { maxZoom: 1.35, maxPan: 0.08, maxRollDeg: 3.5 };
+
+  var CAMERA_PRESETS = (global.StoryCamera && global.StoryCamera.LEGACY_PRESETS) || {
     static: { zoomFrom: 1.0, zoomTo: 1.0, pivotX: 0.5, pivotY: 0.5, panXFrom: 0, panXTo: 0, panYFrom: 0, panYTo: 0, rollFromDeg: 0, rollToDeg: 0, curve: 'whip-out', velocityBlur: 0 },
     'dolly-in': { zoomFrom: 0.92, zoomTo: 1.18, pivotX: 0.5, pivotY: 0.5, panXFrom: 0, panXTo: 0, panYFrom: 14, panYTo: -8, rollFromDeg: 0, rollToDeg: 0, curve: 'whip-out', velocityBlur: 1.2 },
     'macro-pullback': { zoomFrom: 3.1, zoomTo: 1.0, pivotX: 0.28, pivotY: 0.34, panXFrom: -24, panXTo: 0, panYFrom: 18, panYTo: 0, rollFromDeg: 2.8, rollToDeg: 0, curve: 'whip-out', velocityBlur: 4.2 },
@@ -102,69 +104,81 @@
     return c < 0.5 ? Math.pow(2, 20 * c - 10) * 0.5 : (2 - Math.pow(2, -20 * c + 10)) * 0.5;
   }
 
-  function evalCamCurve(curve, u) {
-    if (curve === 'whip-inout') return easeInOutExpo(u);
-    if (curve === 'linear') return clamp(u, 0, 1);
-    return easeOutExpo(u);
+  function measureShot(ctx, W, H, safe, shot, micro) {
+    var layout = (shot && shot.layout) || 'kinetic-word-reveal';
+    var isPortrait = H > W;
+    var cx = W * 0.5;
+    var cy = H * 0.5;
+    if (layout === 'kinetic-word-reveal') {
+      if (micro) {
+        var bw = W * 0.24;
+        return { minX: cx - bw * 0.5, maxX: cx + bw * 0.5, minY: cy - 8, maxY: cy + 8, width: bw, height: 16 };
+      }
+      var words = String((shot && shot.headline) || 'Kreativitas butuh ruang bermain.').trim().split(/\s+/);
+      var fs = isPortrait ? 46 : 42;
+      ctx.save();
+      ctx.font = '500 ' + fs + 'px "Inter", "Segoe UI", sans-serif';
+      var spaceW = ctx.measureText(' ').width;
+      var totalW = 0;
+      for (var wi = 0; wi < words.length; wi++) totalW += ctx.measureText(words[wi]).width;
+      totalW += spaceW * Math.max(0, words.length - 1);
+      ctx.restore();
+      var maxLineW = safe.w * 0.88;
+      var scaleFit = totalW > maxLineW ? maxLineW / totalW : 1.0;
+      var drawnW = totalW * scaleFit;
+      var drawnH = fs * scaleFit * 1.35;
+      return {
+        minX: cx - drawnW * 0.5,
+        maxX: cx + drawnW * 0.5,
+        minY: cy - drawnH * 0.5,
+        maxY: cy + drawnH * 0.5,
+        width: drawnW,
+        height: drawnH,
+      };
+    }
+    if (layout === 'icon-row-morph') {
+      var leftIcons = (shot && shot.leftIcons) || ['layers', 'wave', 'sparkle', 'cube', 'sliders'];
+      var rightIcons = (shot && shot.rightIcons) || ['play', 'code', 'bolt', 'grid'];
+      var anchor = String((shot && shot.anchor) || 'Aetheria');
+      var iconSz = isPortrait ? 34 : 30;
+      var gap = isPortrait ? 48 : 44;
+      var anchorFs = isPortrait ? 42 : 36;
+      ctx.save();
+      ctx.font = '600 ' + anchorFs + 'px "Inter", "Segoe UI", sans-serif';
+      var anchorW = micro ? 0 : ctx.measureText(anchor).width + 36;
+      ctx.restore();
+      var fullW = leftIcons.length * gap + anchorW + rightIcons.length * gap;
+      var boxH = Math.max(anchorFs, iconSz) * 1.45;
+      return {
+        minX: cx - fullW * 0.5,
+        maxX: cx + fullW * 0.5,
+        minY: cy - boxH * 0.5,
+        maxY: cy + boxH * 0.5,
+        width: fullW,
+        height: boxH,
+      };
+    }
+    return null;
   }
 
-  function resolveCamera(shot, localTime, dur) {
-    var cam = shot.camera && typeof shot.camera === 'object' ? shot.camera : {};
-    var presetName = cam.preset || shot.cameraPreset || 'static';
-    var base = CAMERA_PRESETS[presetName] || CAMERA_PRESETS.static;
-    var curve = cam.curve || base.curve || 'whip-out';
-    var span = Math.max(0.28, Number(cam.moveDuration) || Math.min(dur * 0.68, 0.95));
-    var u = clamp(localTime / span, 0, 1);
-    var uPrev = clamp((localTime - 0.033) / span, 0, 1);
-    var p = evalCamCurve(curve, u);
-    var pPrev = evalCamCurve(curve, uPrev);
-    var vel = Math.abs(p - pPrev) / 0.033; // normalized curve velocity
-
-    var lerp = function (a, b) { return a + (b - a) * p; };
-    var z0 = cam.zoomFrom !== undefined ? cam.zoomFrom : base.zoomFrom;
-    var z1 = cam.zoomTo !== undefined ? cam.zoomTo : base.zoomTo;
-    var px0 = cam.panXFrom !== undefined ? cam.panXFrom : base.panXFrom;
-    var px1 = cam.panXTo !== undefined ? cam.panXTo : base.panXTo;
-    var py0 = cam.panYFrom !== undefined ? cam.panYFrom : base.panYFrom;
-    var py1 = cam.panYTo !== undefined ? cam.panYTo : base.panYTo;
-    var r0 = cam.rollFromDeg !== undefined ? cam.rollFromDeg : base.rollFromDeg;
-    var r1 = cam.rollToDeg !== undefined ? cam.rollToDeg : base.rollToDeg;
-    var pivX = cam.pivotX !== undefined ? cam.pivotX : (base.pivotX !== undefined ? base.pivotX : 0.5);
-    var pivY = cam.pivotY !== undefined ? cam.pivotY : (base.pivotY !== undefined ? base.pivotY : 0.5);
-    var vBlurScale = cam.velocityBlur !== undefined ? cam.velocityBlur : (base.velocityBlur || 0);
-
-    // Optional exit whip-up in last 0.22s when shot.whipExit is true
-    var exitPanY = 0;
-    var exitBlur = 0;
-    if (shot.whipExit && localTime > dur - 0.24) {
-      var eu = clamp((localTime - (dur - 0.28)) / 0.28, 0, 1);
-      var ep = eu * eu * eu;
-      exitPanY = -ep * 300;
-      exitBlur = ep * 14.0;
+  function resolveCamera(shot, localTime, dur, W, H, story, safe, focusBox) {
+    if (global.StoryCamera) {
+      var res = global.StoryCamera.resolve(
+        story || { shots: [shot] },
+        shot,
+        localTime,
+        dur,
+        {
+          W: W || 1280,
+          H: H || 720,
+          safe: safe || null,
+          focusBox: focusBox || null,
+          limits: COBALT_CAMERA_LIMITS,
+        }
+      );
+      return res.rig;
     }
-
-    var manualBlur = 0;
-    if (cam.blurFrom !== undefined || cam.blurTo !== undefined) {
-      var b0 = cam.blurFrom !== undefined ? cam.blurFrom : 0;
-      var b1 = cam.blurTo !== undefined ? cam.blurTo : 0;
-      manualBlur = b0 + (b1 - b0) * easeOutExpo(clamp(localTime / 0.35, 0, 1));
-    }
-
-    // Generous cinematic shutter motion blur: stronger velocity-driven blur + soft entrance rack-blur
-    var enterMotionBlur = (Math.abs(z1 - z0) > 0.02 || Math.abs(px1 - px0) > 4 || Math.abs(py1 - py0) > 4)
-      ? (1 - easeOutCubic(clamp(localTime / 0.26, 0, 1))) * 4.5
-      : 0;
-    var autoBlur = clamp(vel * 0.95 * vBlurScale, 0, 14.0);
-
-    return {
-      zoom: lerp(z0, z1),
-      pivotX: pivX,
-      pivotY: pivY,
-      panX: lerp(px0, px1),
-      panY: lerp(py0, py1) + exitPanY,
-      rollRad: (lerp(r0, r1) * Math.PI) / 180,
-      blur: Math.max(manualBlur, autoBlur, exitBlur, enterMotionBlur),
-    };
+    return { zoom: 1, pivotX: 0.5, pivotY: 0.5, panX: 0, panY: 0, rollRad: 0, blur: 0 };
   }
 
   function clamp(v, lo, hi) {
@@ -700,7 +714,7 @@
   /**
    * Main deterministic shot renderer called by `story-runtime.js`.
    */
-  function renderShot(ctx, W, H, safe, shot, localTime, globalT, defaultTheme, micro) {
+  function renderShot(ctx, W, H, safe, shot, localTime, globalT, defaultTheme, micro, story) {
     var theme = getTheme(shot.theme || defaultTheme || 'cobalt-beam');
     var layout = shot.layout || 'kinetic-word-reveal';
     var dur = Math.max(0.5, Number(shot.duration) || 4.0);
@@ -734,20 +748,25 @@
       exitFade = clamp((dur - localTime) / 0.35, 0, 1);
     }
 
-    // 2. Virtual 2.5D Camera Transform (off-center pivot zoom / pan / roll / velocity blur)
-    var cam = resolveCamera(shot, localTime, dur);
-    var pvx = W * cam.pivotX;
-    var pvy = H * cam.pivotY;
+    // 2. Shared Declarative 2.5D Camera Transform (via StoryCamera.resolve + StoryCamera.apply2D)
+    var focusBox = measureShot(ctx, W, H, safe, shot, micro);
+    var cam = resolveCamera(shot, localTime, dur, W, H, story, safe, focusBox);
 
     ctx.save();
     ctx.globalAlpha = exitFade;
-    if (cam.blur > 0.2) {
-      ctx.filter = 'blur(' + cam.blur.toFixed(1) + 'px)';
+    if (global.StoryCamera && typeof global.StoryCamera.apply2D === 'function') {
+      global.StoryCamera.apply2D(ctx, cam, W, H);
+    } else {
+      var pvx = W * cam.pivotX;
+      var pvy = H * cam.pivotY;
+      if (cam.blur > 0.2) {
+        ctx.filter = 'blur(' + cam.blur.toFixed(1) + 'px)';
+      }
+      ctx.translate(pvx + cam.panX, pvy + cam.panY);
+      ctx.rotate(cam.rollRad);
+      ctx.scale(cam.zoom, cam.zoom);
+      ctx.translate(-pvx, -pvy);
     }
-    ctx.translate(pvx + cam.panX, pvy + cam.panY);
-    ctx.rotate(cam.rollRad);
-    ctx.scale(cam.zoom, cam.zoom);
-    ctx.translate(-pvx, -pvy);
 
     if (layout === 'kinetic-word-reveal') {
       if (!micro) {
@@ -1948,12 +1967,19 @@
       ctx.fillRect(0, 0, W, H);
       ctx.restore();
     }
+
+    if (focusBox && global.StoryCamera && typeof global.StoryCamera.projectBox2D === 'function') {
+      return global.StoryCamera.projectBox2D(focusBox, cam, W, H);
+    }
+    return focusBox || null;
   }
 
   global.CobaltKit = {
     THEMES: THEMES,
     CAMERA_PRESETS: CAMERA_PRESETS,
+    COBALT_CAMERA_LIMITS: COBALT_CAMERA_LIMITS,
     getTheme: getTheme,
+    measureShot: measureShot,
     resolveCamera: resolveCamera,
     drawCobaltBeams: drawCobaltBeams,
     drawBrandMark: drawBrandMark,

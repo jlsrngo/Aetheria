@@ -18,10 +18,11 @@ Declarative Canvas 2D motion skill inspired by minimalist cobalt light-shaft stu
 - `captions`: `{ "enabled": false }` (kinetic typography lives inside shots)
 - `shots[]`: contiguous `{ "id", "start", "duration", "layout", "cameraPreset"?, "camera"?, ... }`
 
-## Virtual 2.5D Camera (`shot.cameraPreset` or `shot.camera`)
-Every shot supports cinematic camera motion:
-- Presets: `"static"`, `"dolly-in"`, `"macro-pullback"` (`2.2x -> 1.0x`), `"macro-zoom-in"` (`0.95x -> 1.48x`), `"pan-sweep"`, `"tilt-push"`, `"rack-focus-in"`.
-- Optional overrides inside `camera`: `{ zoomFrom, zoomTo, panXFrom, panXTo, panYFrom, panYTo, rollFromDeg, rollToDeg, blurFrom, blurTo }`.
+## Shared Declarative Camera (`story.cameraStyle` & `shot.camera`)
+- Set `"cameraStyle": "editorial"` (or `"calm"` | `"kinetic"`) at the root of `story.json` plus an integer `"seed"` so `/script/story-camera.js` varies shot framing deterministically without repeating consecutive moves/directions.
+- Do **not** hand-author raw numeric camera overrides unless a shot genuinely needs custom framing; prefer `cameraStyle` at root or `camera: { "move", "intensity", "dir" }` per shot (`hold`, `push-in`, `pull-out`, `pan`, `tilt`, `truck`, `orbit`, `crane`, `handheld`, `whip`, `rack-focus-in`).
+- Legacy compatibility: `shot.cameraPreset` (`static`, `dolly-in`, `macro-pullback`, `macro-zoom-in`, `pan-sweep`, `tilt-push`, `rack-focus-in`) and numeric `camera{}` overrides remain supported via `StoryCamera.LEGACY_PRESETS`.
+- Internal layout cameras: `macro-ui-prompt` (when `cameraPreset` is absent/`static`) and `whip-cta-morph` keep their built-in macro choreography.
 
 ## Layouts (`kit.enums.layout`, 13 Presets)
 1. `kinetic-word-reveal`: Word-by-word blur/fade reveal (`headline`).

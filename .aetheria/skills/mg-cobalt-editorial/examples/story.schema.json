@@ -5,6 +5,10 @@
   "required": ["title", "canvas", "shots", "captions"],
   "properties": {
     "title": { "type": "string" },
+    "seed": { "type": "integer" },
+    "cameraStyle": {
+      "enum": ["calm", "kinetic", "editorial"]
+    },
     "theme": {
       "enum": [
         "cobalt-beam",
@@ -75,7 +79,43 @@
           "subtitle": { "type": "string" },
           "items": { "type": "array", "items": { "type": "string" } },
           "cards": { "type": "array" },
-          "blackout": { "type": "boolean" }
+          "blackout": { "type": "boolean" },
+          "cameraPreset": {
+            "enum": [
+              "static",
+              "dolly-in",
+              "macro-pullback",
+              "macro-zoom-in",
+              "pan-sweep",
+              "tilt-push",
+              "rack-focus-in"
+            ]
+          },
+          "camera": {
+            "type": "object",
+            "properties": {
+              "move": {
+                "enum": [
+                  "hold",
+                  "push-in",
+                  "pull-out",
+                  "pan",
+                  "tilt",
+                  "truck",
+                  "orbit",
+                  "crane",
+                  "handheld",
+                  "whip",
+                  "rack-focus-in"
+                ]
+              },
+              "intensity": { "type": "number", "minimum": 0, "maximum": 1 },
+              "dir": { "enum": ["auto", "left", "right", "up", "down", "in", "out"] },
+              "seed": { "type": "integer" },
+              "moveDuration": { "type": ["number", "string"] },
+              "curve": { "enum": ["ease-out", "ease-in-out", "linear", "whip", "whip-out", "whip-inout"] }
+            }
+          }
         }
       }
     }

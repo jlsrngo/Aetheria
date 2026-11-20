@@ -3,6 +3,12 @@
   "skillId": "mg-cobalt-editorial",
   "renderer": "2d-cobalt-editorial",
   "core": 1,
+  "camera": {
+    "version": 1,
+    "maxZoom": 1.35,
+    "maxPan": 0.08,
+    "maxRollDeg": 3.5
+  },
   "useThree": false,
   "background": "#020518",
   "scripts": [
@@ -41,6 +47,11 @@
       "pan-sweep",
       "tilt-push",
       "rack-focus-in"
+    ],
+    "cameraStyle": [
+      "calm",
+      "kinetic",
+      "editorial"
     ]
   },
   "limits": {

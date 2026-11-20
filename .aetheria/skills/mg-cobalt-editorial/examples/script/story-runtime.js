@@ -11,7 +11,7 @@
     renderShot: function (env) {
       if (!env.ctx || !window.CobaltKit) return null;
       env.ctx.save();
-      window.CobaltKit.renderShot(
+      var bbox = window.CobaltKit.renderShot(
         env.ctx,
         env.W,
         env.H,
@@ -20,10 +20,11 @@
         env.localTime,
         env.t,
         env.story.theme || 'cobalt-beam',
-        env.micro
+        env.micro,
+        env.story
       );
       env.ctx.restore();
-      return null;
+      return bbox || null;
     }
   });
 })();
