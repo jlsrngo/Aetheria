@@ -198,6 +198,30 @@ pub fn format_tool_result_for_model(tool_name: &str, result: &Value) -> String {
                 return out;
             }
         }
+        "glob" | "list" => {
+            if let Some(files) = obj.get("files").and_then(Value::as_array) {
+                let count = obj
+                    .get("count")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(files.len() as u64);
+                let trunc = obj.get("truncated").and_then(Value::as_bool) == Some(true);
+                let mut lines = Vec::with_capacity(files.len() + 2);
+                lines.push(format!(
+                    "Found {} file(s){}:",
+                    count,
+                    if trunc { " (truncated)" } else { "" }
+                ));
+                for f in files {
+                    if let Some(s) = f.as_str() {
+                        lines.push(s.to_string());
+                    }
+                }
+                if let Some(hint) = intervention {
+                    lines.push(format!("\n[harness-note]\n{}", hint));
+                }
+                return lines.join("\n");
+            }
+        }
         "edit" | "write" | "apply_patch" | "multiedit" => {
             let mut sections = Vec::new();
             let mut meta = obj.clone();

@@ -339,19 +339,38 @@ pub(crate) async fn execute_scene_micro_tool(
             }
         }
         "bash" | "shell" | "terminal" => {
+            let before = tokio::fs::read_to_string(ctx.script_path).await.ok();
             let res =
                 crate::tool::bash::execute_bash(ctx.session_id, ctx.workspace_dir, args).await;
+            let after = tokio::fs::read_to_string(ctx.script_path).await.ok();
+            let modified_via_bash = match (before.as_deref(), after.as_deref()) {
+                (Some(b), Some(a)) => {
+                    b != a
+                        && a.contains("registerScene")
+                        && !crate::tool::film_state::is_scaffold_stub_content(a)
+                }
+                (None, Some(a)) => {
+                    a.contains("registerScene")
+                        && !crate::tool::film_state::is_scaffold_stub_content(a)
+                }
+                _ => false,
+            };
             SceneToolOutcome {
                 result_json: res,
                 vision_images: Vec::new(),
                 vision_caption: None,
-                script_modified: false,
+                script_modified: modified_via_bash,
                 rendered_score: None,
                 rendered_errors: None,
             }
         }
-        "write_scene_script" => {
-            let Some(code) = args.get("code").and_then(Value::as_str) else {
+        "write_scene_script" | "write" | "write_to_file" => {
+            let Some(code) = args
+                .get("code")
+                .or_else(|| args.get("content"))
+                .or_else(|| args.get("CodeContent"))
+                .and_then(Value::as_str)
+            else {
                 return SceneToolOutcome {
                     result_json: json!({ "ok": false, "error": "Missing required string parameter `code`." }),
                     vision_images: Vec::new(),
@@ -413,9 +432,19 @@ pub(crate) async fn execute_scene_micro_tool(
                 rendered_errors: None,
             }
         }
-        "patch_scene_script" => {
-            let old_text = args.get("oldText").and_then(Value::as_str).unwrap_or("");
-            let new_text = args.get("newText").and_then(Value::as_str).unwrap_or("");
+        "patch_scene_script" | "edit" | "replace_file_content" => {
+            let old_text = args
+                .get("oldText")
+                .or_else(|| args.get("oldString"))
+                .or_else(|| args.get("TargetContent"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let new_text = args
+                .get("newText")
+                .or_else(|| args.get("newString"))
+                .or_else(|| args.get("ReplacementContent"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
             if !crate::paths::contains_path(ctx.ws_root, ctx.script_path) {
                 return SceneToolOutcome {
                     result_json: json!({ "ok": false, "error": "Scene script path resolved outside workspace." }),

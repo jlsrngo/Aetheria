@@ -6,6 +6,7 @@ similarity, Sobel/Canny edge structure overlap, and renders a side-by-side
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -385,8 +386,8 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
         row_prev = np.hstack(prev_row_tiles)
         row_diff = np.hstack(diff_row_tiles)
         grid_6b = np.vstack([row_ref, row_prev, row_diff])
-        digits = "".join(ch for ch in sid if ch.isdigit())
-        s_num = int(digits) if digits else 1
+        m_num = re.search(r"(\d+)", sid)
+        s_num = int(m_num.group(1)) if m_num else 1
         beat_out = strip_out.parent / f"scene_{s_num:02d}_compare_6beats.jpg"
         if cv2.imwrite(str(beat_out), grid_6b, [cv2.IMWRITE_JPEG_QUALITY, 88]):
             scene_beat_strips[sid] = str(beat_out)

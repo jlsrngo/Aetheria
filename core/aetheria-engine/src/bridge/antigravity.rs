@@ -290,14 +290,58 @@ async fn handle_antigravity_with_cred(
         }
 
         let user_parts = build_gemini_user_parts(m.get("content"));
-        // Merge consecutive plain "user" turns, but NEVER mix plain user text/images into a
-        // `functionResponse` turn (Gemini requires `functionResponse` turns to contain only tool outputs).
+        // Strict Gemini user/model alternation:
+        // - If previous turn is a plain `user` turn (no `functionResponse`), merge parts directly.
+        // - If previous turn is a `functionResponse` turn on Gemini 3+, attach inline images into
+        //   the last `functionResponse.parts` (OpenCode `protocols/gemini.ts:399-410`) and any text
+        //   note into `functionResponse.response.visualNote` so alternation stays strictly valid!
         if let Some(last) = contents.last_mut() {
             if last.get("role").and_then(|v| v.as_str()) == Some("user") {
                 if let Some(existing_parts) = last.get_mut("parts").and_then(|v| v.as_array_mut()) {
-                    if !existing_parts.iter().any(|p| p.get("functionResponse").is_some()) {
+                    let has_fn_resp = existing_parts
+                        .iter()
+                        .any(|p| p.get("functionResponse").is_some());
+                    if !has_fn_resp {
                         existing_parts.extend(user_parts);
                         continue;
+                    }
+                    if upstream_model.starts_with("gemini-3") {
+                        let mut media_parts: Vec<Value> = Vec::new();
+                        let mut note_texts: Vec<String> = Vec::new();
+                        for up in &user_parts {
+                            if up.get("inlineData").is_some() {
+                                media_parts.push(up.clone());
+                            } else if let Some(t) = up.get("text").and_then(|v| v.as_str()) {
+                                if !t.trim().is_empty() {
+                                    note_texts.push(t.trim().to_string());
+                                }
+                            }
+                        }
+                        if let Some(last_fr) = existing_parts
+                            .iter_mut()
+                            .rev()
+                            .find_map(|p| p.get_mut("functionResponse").and_then(|v| v.as_object_mut()))
+                        {
+                            if !media_parts.is_empty() {
+                                let arr = last_fr
+                                    .entry("parts".to_string())
+                                    .or_insert_with(|| Value::Array(Vec::new()));
+                                if let Some(a) = arr.as_array_mut() {
+                                    a.extend(media_parts);
+                                }
+                            }
+                            if !note_texts.is_empty() {
+                                if let Some(resp_obj) =
+                                    last_fr.get_mut("response").and_then(|v| v.as_object_mut())
+                                {
+                                    resp_obj.insert(
+                                        "visualNote".to_string(),
+                                        Value::String(note_texts.join("\n")),
+                                    );
+                                }
+                            }
+                            continue;
+                        }
                     }
                 }
             }
@@ -411,15 +455,38 @@ async fn handle_antigravity_with_cred(
     }
     if !cloaked.declarations.is_empty() {
         inner_req["tools"] = json!([{ "functionDeclarations": cloaked.declarations }]);
-        let fc_mode = match body.get("tool_choice").and_then(|v| v.as_str()) {
-            Some("none") => "NONE",
-            Some("required") => "ANY",
-            _ => "VALIDATED",
-        };
-        inner_req["toolConfig"] = json!({
-            "functionCallingConfig": {
-                "mode": fc_mode
+        let mut fc_cfg = match body.get("tool_choice") {
+            Some(Value::String(s)) if s == "none" => json!({ "mode": "NONE" }),
+            Some(Value::String(s)) if s == "required" => json!({ "mode": "ANY" }),
+            Some(Value::Object(obj)) => {
+                if let Some(target_fn) = obj
+                    .get("function")
+                    .and_then(|f| f.get("name"))
+                    .and_then(Value::as_str)
+                    .or_else(|| obj.get("name").and_then(Value::as_str))
+                {
+                    let cloaked_target =
+                        cloak_history_tool_name(target_fn, &cloaked.orig_to_cloaked);
+                    json!({
+                        "mode": "ANY",
+                        "allowedFunctionNames": [cloaked_target]
+                    })
+                } else {
+                    json!({ "mode": "VALIDATED" })
+                }
             }
+            _ => json!({ "mode": "VALIDATED" }),
+        };
+        if fc_cfg.get("mode").and_then(Value::as_str) == Some("ANY")
+            && fc_cfg.get("allowedFunctionNames").is_none()
+            && cloaked.declarations.len() == 1
+        {
+            if let Some(only_name) = cloaked.declarations[0].get("name").and_then(Value::as_str) {
+                fc_cfg["allowedFunctionNames"] = json!([only_name]);
+            }
+        }
+        inner_req["toolConfig"] = json!({
+            "functionCallingConfig": fc_cfg
         });
     }
 
@@ -485,6 +552,16 @@ async fn handle_antigravity_with_cred(
     if !resp.status().is_success() {
         let st = resp.status();
         let txt = resp.text().await.unwrap_or_default();
+        let preview: String = txt.chars().take(320).collect();
+        crate::paths::log_engine(
+            "bridge",
+            &format!(
+                "⚠️ Antigravity upstream HTTP {} for '{}': {}",
+                st.as_u16(),
+                upstream_model,
+                preview.replace('\n', " ")
+            ),
+        );
         record_upstream_outcome(&account_key, st, &txt);
         return (
             st,

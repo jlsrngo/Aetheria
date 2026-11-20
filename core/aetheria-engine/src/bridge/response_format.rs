@@ -149,6 +149,15 @@ pub(crate) fn make_sse_response_with_reasoning_and_finish(
             .pointer("/function/arguments")
             .and_then(|v| v.as_str())
             .unwrap_or("{}");
+        let mut tc_delta = json!({
+            "index": idx,
+            "id": id,
+            "type": "function",
+            "function": { "name": name, "arguments": args }
+        });
+        if let Some(extra) = tc.get("extra_content").filter(|v| !v.is_null()) {
+            tc_delta["extra_content"] = extra.clone();
+        }
         chunks.push(format!(
             "data: {}\n\n",
             json!({
@@ -159,12 +168,7 @@ pub(crate) fn make_sse_response_with_reasoning_and_finish(
                 "choices": [{
                     "index": 0,
                     "delta": {
-                        "tool_calls": [{
-                            "index": idx,
-                            "id": id,
-                            "type": "function",
-                            "function": { "name": name, "arguments": args }
-                        }]
+                        "tool_calls": [tc_delta]
                     },
                     "finish_reason": Value::Null
                 }]

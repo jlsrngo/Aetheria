@@ -55,13 +55,14 @@ pub async fn send_resilient_chat_completion(
     .await
 }
 
-pub(crate) fn build_resilient_chat_payload(
+pub(crate) fn build_resilient_chat_payload_with_tool_choice(
     model_id: &str,
     chat_messages: &[Value],
     tools: &[Value],
     temperature: Option<f64>,
     max_tokens: u64,
     reasoning_effort: Option<&str>,
+    tool_choice: Option<&Value>,
 ) -> Value {
     let mut outbound_msgs = chat_messages.to_vec();
     super::history::bound_inline_images(&mut outbound_msgs);
@@ -82,6 +83,9 @@ pub(crate) fn build_resilient_chat_payload(
     if !tools.is_empty() {
         let normalized_tools = crate::bridge::schema::normalize_tools_for_model(model_id, tools);
         payload["tools"] = Value::Array(normalized_tools);
+        if let Some(tc) = tool_choice {
+            payload["tool_choice"] = tc.clone();
+        }
     }
     payload
 }
@@ -99,6 +103,35 @@ pub async fn send_resilient_chat_completion_with_options(
     max_tokens: u64,
     reasoning_effort: Option<&str>,
 ) -> Result<ResilientCompletionOutput, String> {
+    send_resilient_chat_completion_with_tool_choice(
+        client,
+        base_url,
+        api_key,
+        model_id,
+        chat_messages,
+        tools,
+        temperature,
+        max_tokens,
+        reasoning_effort,
+        None,
+    )
+    .await
+}
+
+/// Variant accepting an explicit `tool_choice` override (e.g. grammar-enforced `write_scene_script`).
+#[allow(clippy::too_many_arguments)]
+pub async fn send_resilient_chat_completion_with_tool_choice(
+    client: &reqwest::Client,
+    base_url: &mut String,
+    api_key: &mut String,
+    model_id: &mut String,
+    chat_messages: &mut Vec<Value>,
+    tools: &[Value],
+    temperature: Option<f64>,
+    max_tokens: u64,
+    reasoning_effort: Option<&str>,
+    tool_choice: Option<&Value>,
+) -> Result<ResilientCompletionOutput, String> {
     let max_retries: usize = 6;
     let mut attempt: usize = 0;
     let mut timeout_retries: usize = 0;
@@ -107,13 +140,14 @@ pub async fn send_resilient_chat_completion_with_options(
 
     loop {
         let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-        let payload = build_resilient_chat_payload(
+        let payload = build_resilient_chat_payload_with_tool_choice(
             model_id,
             chat_messages,
             tools,
             temperature,
             max_tokens,
             reasoning_effort,
+            tool_choice,
         );
 
         let mut req = client
@@ -319,5 +353,29 @@ mod tests {
         let (sse_text, _, sse_reason) = parse_completion_body(sse_body).expect("valid sse");
         assert_eq!(sse_text, "Part 1 Part 2");
         assert_eq!(sse_reason, "length");
+    }
+
+    #[test]
+    fn test_build_resilient_chat_payload_forwards_tool_choice_and_omits_gemini_temp() {
+        let msgs = vec![json!({ "role": "user", "content": "hi" })];
+        let tools = vec![json!({
+            "type": "function",
+            "function": { "name": "write_scene_script", "parameters": { "type": "object" } }
+        })];
+        let tc = json!({ "type": "function", "function": { "name": "write_scene_script" } });
+        let payload = build_resilient_chat_payload_with_tool_choice(
+            "gemini-3.8-flash-high",
+            &msgs,
+            &tools,
+            None,
+            32768,
+            None,
+            Some(&tc),
+        );
+        assert!(payload.get("temperature").is_none());
+        assert_eq!(
+            payload.pointer("/tool_choice/function/name").and_then(Value::as_str),
+            Some("write_scene_script")
+        );
     }
 }

@@ -29,7 +29,7 @@ use super::direct_scene_prompt::{
 use super::direct_scene_tools::{
     build_scene_tool_definitions, execute_scene_micro_tool, SceneToolContext,
 };
-use super::resilience::send_resilient_chat_completion_with_options;
+use super::resilience::send_resilient_chat_completion_with_tool_choice;
 use crate::tool::json_repair::parse_or_repair_tool_args;
 
 #[derive(Debug, Clone)]
@@ -336,21 +336,30 @@ pub(crate) async fn run_direct_per_scene_remake(
     } else {
         Some(0.35)
     };
-    let max_tokens = 16_384u64;
+    let max_tokens = 32_768u64;
     let max_scene_steps: usize = std::env::var("AETHERIA_SCENE_MAX_STEPS")
         .ok()
         .and_then(|v| v.trim().parse::<usize>().ok())
-        .map(|n| n.clamp(3, 14))
-        .unwrap_or(8);
+        .map(|n| n.clamp(3, 16))
+        .unwrap_or(10);
     let scene_tools = build_scene_tool_definitions();
+    let write_only_tools: Vec<Value> = scene_tools
+        .iter()
+        .filter(|t| {
+            t.pointer("/function/name")
+                .and_then(Value::as_str)
+                .is_some_and(|n| n == "write_scene_script")
+        })
+        .cloned()
+        .collect();
     let total_scenes = film_scenes.len();
     let mut outcomes = Vec::with_capacity(total_scenes);
 
     crate::paths::log_engine(
         "direct_remake",
         &format!(
-            "🚀 Starting Smart Per-Scene Agentic Remake (ZERO subagents, 5 micro-tools, max {} steps/scene): {} scenes on model={}",
-            max_scene_steps, total_scenes, model_id
+            "🚀 Starting Smart Per-Scene Agentic Remake (ZERO subagents, {} micro-tools, max {} steps/scene): {} scenes on model={}",
+            scene_tools.len(), max_scene_steps, total_scenes, model_id
         ),
     );
 
@@ -442,22 +451,57 @@ pub(crate) async fn run_direct_per_scene_remake(
             build_vision_user_message(hard_facts.clone(), &pass1_images),
         ];
 
-        // Interactive Antigravity-grade per-scene tool loop (inspect -> sample -> write -> render -> surgical patch)
+        // Interactive Antigravity-grade per-scene tool loop (inspect -> sample -> write -> render -> surgical patch).
+        // Anti-analysis-paralysis gate: allow up to 2 probe steps before writing; on step >= 3 with no
+        // code written yet, expose ONLY `write_scene_script` with grammar-enforced `tool_choice` AND
+        // reject non-write calls in the dispatcher so the model writes its initial draft immediately,
+        // then restore all 6 tools for render/compare/surgical-patch polish!
+        let force_write_choice = json!({
+            "type": "function",
+            "function": { "name": "write_scene_script" }
+        });
         for step_idx in 0..max_scene_steps {
-            let Ok(comp) = send_resilient_chat_completion_with_options(
+            let enforce_write_now =
+                !has_written && step_idx >= 2 && !write_only_tools.is_empty();
+            let active_tools: &[Value] = if enforce_write_now {
+                &write_only_tools
+            } else {
+                &scene_tools
+            };
+            let active_tool_choice = if enforce_write_now {
+                Some(&force_write_choice)
+            } else {
+                None
+            };
+            let comp = match send_resilient_chat_completion_with_tool_choice(
                 client,
                 base_url,
                 api_key,
                 model_id,
                 &mut scene_msgs,
-                &scene_tools,
+                active_tools,
                 temperature,
                 max_tokens,
                 None,
+                active_tool_choice,
             )
             .await
-            else {
-                break;
+            {
+                Ok(c) => c,
+                Err(err) => {
+                    crate::paths::log_engine(
+                        "direct_remake",
+                        &format!(
+                            "⚠️ Scene {}/{} ({}) step {} LLM error: {}",
+                            scene_num,
+                            total_scenes,
+                            scene_id,
+                            step_idx + 1,
+                            err
+                        ),
+                    );
+                    break;
+                }
             };
             passes_run += 1;
 
@@ -502,6 +546,42 @@ pub(crate) async fn run_direct_per_scene_remake(
                             rendered_score: None,
                             rendered_errors: None,
                         }
+                    } else if enforce_write_now
+                        && !matches!(
+                            fn_name,
+                            "write_scene_script"
+                                | "write"
+                                | "write_to_file"
+                                | "patch_scene_script"
+                                | "edit"
+                                | "replace_file_content"
+                        )
+                    {
+                        crate::paths::log_engine(
+                            "direct_remake",
+                            &format!(
+                                "🚧 Scene {}/{} ({}) step {} blocked probe tool='{}' while write_scene_script is required",
+                                scene_num,
+                                total_scenes,
+                                scene_id,
+                                step_idx + 1,
+                                fn_name
+                            ),
+                        );
+                        super::direct_scene_tools::SceneToolOutcome {
+                            result_json: json!({
+                                "ok": false,
+                                "error": format!(
+                                    "Probing phase ended at step 2; `{}` is temporarily disabled until you write the initial script. Call `write_scene_script({{ code }})` NOW for `{}` — right after writing, all 6 tools return for render_and_compare_scene and polish.",
+                                    fn_name, script_rel
+                                )
+                            }),
+                            vision_images: Vec::new(),
+                            vision_caption: None,
+                            script_modified: false,
+                            rendered_score: None,
+                            rendered_errors: None,
+                        }
                     } else {
                         emit_event(
                             workspace_dir,
@@ -513,7 +593,30 @@ pub(crate) async fn run_direct_per_scene_remake(
                                 "timestamp": now_ms()
                             }),
                         );
-                        execute_scene_micro_tool(&tool_ctx, fn_name, &parsed_args).await
+                        let out = execute_scene_micro_tool(&tool_ctx, fn_name, &parsed_args).await;
+                        let tool_ok = out.result_json.get("ok").and_then(Value::as_bool) != Some(false)
+                            && out.result_json.get("error").is_none();
+                        let err_preview = out
+                            .result_json
+                            .get("error")
+                            .and_then(Value::as_str)
+                            .map(|s| format!(" err={}", s.chars().take(120).collect::<String>()))
+                            .unwrap_or_default();
+                        crate::paths::log_engine(
+                            "direct_remake",
+                            &format!(
+                                "🔧 Scene {}/{} ({}) step {} tool='{}' ok={} modified={}{}",
+                                scene_num,
+                                total_scenes,
+                                scene_id,
+                                step_idx + 1,
+                                fn_name,
+                                tool_ok,
+                                out.script_modified,
+                                err_preview
+                            ),
+                        );
+                        out
                     };
 
                     if outcome.script_modified {
@@ -583,13 +686,44 @@ pub(crate) async fn run_direct_per_scene_remake(
                     }));
                 }
 
+                let budget_nudge = if !has_written && step_idx + 1 < max_scene_steps {
+                    if step_idx >= 1 {
+                        Some(format!(
+                            "Step {}/{} complete — probing is finished. Call `write_scene_script` NOW with your complete, studio-grade Canvas 2D implementation for Scene {}/{} (`{}`). Right after writing, all 6 tools return so you can call `render_and_compare_scene` and polish surgically with `patch_scene_script`.",
+                            step_idx + 1,
+                            max_scene_steps,
+                            scene_num,
+                            total_scenes,
+                            script_rel
+                        ))
+                    } else {
+                        Some(format!(
+                            "Step {}/{} complete. Finish any needed probe in at most 1 more step, then call `write_scene_script` to author `{}` and verify via `render_and_compare_scene`.",
+                            step_idx + 1,
+                            max_scene_steps,
+                            script_rel
+                        ))
+                    }
+                } else {
+                    None
+                };
+
                 if !step_images.is_empty() {
-                    let caption = if step_captions.is_empty() {
+                    let mut caption = if step_captions.is_empty() {
                         "Visual tool output attached above. Inspect closely and patch surgically if anything mismatches.".to_string()
                     } else {
                         step_captions.join("\n")
                     };
+                    if let Some(nudge) = budget_nudge {
+                        caption.push_str("\n\n");
+                        caption.push_str(&nudge);
+                    }
                     scene_msgs.push(build_vision_user_message(caption, &step_images));
+                } else if let Some(nudge) = budget_nudge {
+                    scene_msgs.push(json!({
+                        "role": "user",
+                        "content": nudge
+                    }));
                 }
                 continue;
             }

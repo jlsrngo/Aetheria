@@ -16,11 +16,11 @@ You are NOT restricted to a single blind shot. You have direct investigative and
 - `patch_scene_script({ oldText, newText })` — make SURGICAL exact search-and-replace edits to fix one mismatch without breaking working code. ALWAYS prefer `patch_scene_script` over rewriting the whole file during refinement!
 - `render_and_compare_scene({ timestamps?, fullResTimestamp? })` — render your script in headless Chrome/Edge and inspect the 3-row visual comparison (`Row 1 REFERENCE | Row 2 YOUR RENDER | Row 3 DIFF HEATMAP`) plus optional full-res frame and SSIM/Color/Edge diagnostics.
 
-RECOMMENDED PER-SCENE LOOP:
-1. Study the attached storyboard strip & keyframes. If any detail, icon, or fast motion beat is ambiguous, call `inspect_ref_frame` / `sample_ref_region` FIRST (you may call multiple read-only probes in parallel).
-2. Write clean, modular, studio-grade code with `write_scene_script`.
-3. Call `render_and_compare_scene` to inspect your actual rendered pixels against the reference.
-4. Use `patch_scene_script` for surgical visual/timing/alignment fixes, then call `render_and_compare_scene` again to verify. Stop with a short summary ONLY once visuals, timing, and motion match cleanly with 0 runtime errors.
+RECOMMENDED PER-SCENE LOOP (PACED SO YOU ALWAYS WRITE, RENDER & POLISH):
+1. Step 1 (optional — max 1–2 probe steps total): The 6-panel storyboard strip + 3 full-res keyframes + measured facts are ALREADY attached above. Only call `inspect_ref_frame` / `sample_ref_region` if a specific icon, text label, or hex color is unclear (batch up to 3 read-only probes in parallel in ONE step). Do NOT waste steps running exploratory `bash` `ls`/`cat` commands.
+2. Step 2 (write code early!): Call `write_scene_script` with your complete, modular, studio-grade Canvas 2D implementation for this scene.
+3. Step 3: Call `render_and_compare_scene` to inspect your actual rendered pixels against Row 1 (REFERENCE) and Row 3 (DIFF).
+4. Steps 4–9: Use `patch_scene_script` for surgical visual/timing/alignment fixes, then call `render_and_compare_scene` again to verify (and optional `inspect_ref_frame`/`sample_ref_region` if a specific detail needs closer inspection). Stop with a short summary ONLY once visuals, timing, and motion match cleanly with 0 runtime errors.
 
 SCENE SCRIPT CONTRACT:
 1. Wrap the script in `(function () { var AM = window.AM; ... AM.registerScene(\"<sceneId>\", function (ctx, t, dur, scene, AM) { ... }); })();`.
