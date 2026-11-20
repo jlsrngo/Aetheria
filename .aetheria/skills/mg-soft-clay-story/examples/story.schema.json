@@ -7,6 +7,8 @@
   "additionalProperties": false,
   "properties": {
     "title": { "type": "string", "minLength": 1 },
+    "seed": { "type": "integer" },
+    "cameraStyle": { "type": "string", "enum": ["calm", "kinetic", "editorial"] },
     "canvas": {
       "type": "object",
       "required": ["w", "h", "fps"],
@@ -48,7 +50,14 @@
             "required": ["preset"],
             "additionalProperties": false,
             "properties": {
-              "preset": { "type": "string", "enum": ["wide", "medium", "close", "dolly-in", "orbit"] }
+              "preset": { "type": "string", "enum": ["wide", "medium", "close", "dolly-in", "orbit"] },
+              "style": { "type": "string", "enum": ["calm", "kinetic", "editorial"] },
+              "move": { "type": "string", "enum": ["hold", "push-in", "pull-out", "truck", "pan", "tilt", "orbit", "crane", "handheld", "whip-pan", "rack-focus-in"] },
+              "dir": { "type": "string", "enum": ["auto", "left", "right", "up", "down", "in", "out", "cw", "ccw", "none"] },
+              "intensity": { "type": "number", "minimum": 0, "maximum": 1 },
+              "moveDuration": { "oneOf": [{ "type": "number", "minimum": 0.1 }, { "type": "string", "enum": ["shot", "burst"] }] },
+              "curve": { "type": "string", "enum": ["linear", "ease-out", "ease-in-out", "whip-out", "whip-inout", "spring"] },
+              "seed": { "type": "integer" }
             }
           },
           "stage": { "type": "string", "enum": ["city-street", "open-field", "indoor-room"] },

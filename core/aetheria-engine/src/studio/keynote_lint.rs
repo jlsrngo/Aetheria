@@ -163,6 +163,7 @@ pub fn render_keynote_index_html(
     #stage canvas {{ position: absolute; inset: 0; width: {w}px; height: {h}px; display: block; }}
   </style>
   <script src="/script/aetheria-motion.js"></script>
+  <script src="/script/story-camera.js"></script>
   <script src="/script/keynote-kit.js"></script>
   <script src="/script/keynote-layouts.js"></script>
   <script src="/script/story-runtime.js"></script>

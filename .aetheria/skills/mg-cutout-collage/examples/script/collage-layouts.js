@@ -413,8 +413,75 @@
     };
   }
 
+  function measureShotLayout(shot, state) {
+    var sz = state.safeZone;
+    var safeW = sz.maxX - sz.minX;
+    var safeH = sz.maxY - sz.minY;
+    var isPortrait = state.height > state.width;
+    var silent = !!state.silentMode;
+    var rects = [];
+
+    var headerH = isPortrait ? 110 : 88;
+    if (!silent && (shot.header || shot.stamp)) {
+      rects.push({ x: sz.minX + 12, y: sz.minY + 10, w: safeW - 24, h: headerH });
+    }
+
+    var bodyTop = sz.minY + headerH + 22;
+    var plaqueH = silent ? 0 : isPortrait ? 235 : 175;
+    var bodyBottom = sz.maxY - (plaqueH > 0 ? plaqueH + 24 : 16);
+    var bodyH = Math.max(240, bodyBottom - bodyTop);
+    var cx = sz.minX + safeW / 2;
+    var layout = shot.layout || "dossier-hero";
+
+    if (layout === "dossier-hero") {
+      var bedW = Math.min(safeW - 44, isPortrait ? 780 : 960);
+      var bedH = Math.min(bodyH - 28, isPortrait ? 650 : 470);
+      var heroW = Math.min(bedW * 0.72, isPortrait ? 560 : 540);
+      var heroH = Math.min(bedH * 0.92, isPortrait ? 610 : 450);
+      rects.push({ x: cx - heroW / 2, y: bodyTop + (bodyH - heroH) / 2, w: heroW, h: heroH });
+    } else if (layout === "split-compare") {
+      var gap = 28;
+      var cardW = (safeW - 56 - gap) / 2;
+      var cardH = Math.min(bodyH - 40, isPortrait ? 600 : 460);
+      var cardY = bodyTop + (bodyH - cardH) / 2;
+      rects.push({ x: sz.minX + 28, y: cardY, w: cardW * 2 + gap, h: cardH });
+    } else if (layout === "evidence-board") {
+      var count = Array.isArray(shot.items) && shot.items.length > 0 ? Math.min(4, shot.items.length) : 3;
+      var cols = 2;
+      var rows = Math.ceil(count / cols);
+      var gapX = 28, gapY = 28;
+      var cw = (safeW - 56 - gapX * (cols - 1)) / cols;
+      var ch = Math.min((bodyH - 24 - gapY * (rows - 1)) / rows, 360);
+      var startY = bodyTop + (bodyH - (rows * ch + gapY * (rows - 1))) / 2;
+      rects.push({ x: sz.minX + 28, y: startY, w: cols * cw + gapX * (cols - 1), h: rows * ch + gapY * (rows - 1) });
+    } else if (layout === "stat-callout") {
+      var scrapW = safeW - 56;
+      var scrapH = Math.min(bodyH - 28, isPortrait ? 620 : 440);
+      var sy = bodyTop + (bodyH - scrapH) / 2;
+      rects.push({ x: sz.minX + 28, y: sy, w: scrapW, h: scrapH });
+    } else if (layout === "timeline-strip") {
+      var stepsCount = Array.isArray(shot.items) && shot.items.length > 0 ? Math.min(3, shot.items.length) : 3;
+      var rowGap = 24;
+      var rowH = Math.min(195, (bodyH - rowGap * (stepsCount - 1) - 16) / stepsCount);
+      var totalH = stepsCount * rowH + rowGap * (stepsCount - 1);
+      var sy0 = bodyTop + (bodyH - totalH) / 2;
+      rects.push({ x: sz.minX + 28, y: sy0, w: safeW - 56, h: totalH });
+    } else {
+      var qw = safeW - 56;
+      var qh = Math.min(bodyH - 36, isPortrait ? 580 : 420);
+      var qy = bodyTop + (bodyH - qh) / 2;
+      rects.push({ x: sz.minX + 28, y: qy, w: qw, h: qh });
+    }
+
+    if (plaqueH > 0 && (shot.headline || shot.subheadline)) {
+      rects.push({ x: sz.minX + 24, y: bodyBottom + 16, w: safeW - 48, h: plaqueH });
+    }
+    return computeUnionBox(rects);
+  }
+
   GLOBAL_SCOPE.CollageLayouts = {
     LAYOUT_PRESETS: LAYOUT_PRESETS,
+    measureShotLayout: measureShotLayout,
     renderShotLayout: renderShotLayout
   };
 })();

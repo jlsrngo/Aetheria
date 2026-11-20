@@ -9,6 +9,8 @@
     "renderer": { "const": "2d-cutout-collage" },
     "title": { "type": "string", "minLength": 1 },
     "theme": { "type": "string", "enum": ["kraft", "newsprint", "corkboard", "charcoal", "scrapbook"] },
+    "seed": { "type": "integer" },
+    "cameraStyle": { "type": "string", "enum": ["calm", "kinetic", "editorial"] },
     "canvas": {
       "type": "object",
       "required": ["w", "h", "fps"],
@@ -71,6 +73,19 @@
             }
           },
           "transition": { "type": "string", "enum": ["tear-wipe", "cut"] },
+          "camera": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "style": { "type": "string", "enum": ["calm", "kinetic", "editorial"] },
+              "move": { "type": "string", "enum": ["hold", "push-in", "pull-out", "truck", "pan", "tilt", "orbit", "crane", "handheld", "whip-pan", "rack-focus-in"] },
+              "dir": { "type": "string", "enum": ["auto", "left", "right", "up", "down", "in", "out", "cw", "ccw", "none"] },
+              "intensity": { "type": "number", "minimum": 0, "maximum": 1 },
+              "moveDuration": { "oneOf": [{ "type": "number", "minimum": 0.1 }, { "type": "string", "enum": ["shot", "burst"] }] },
+              "curve": { "type": "string", "enum": ["linear", "ease-out", "ease-in-out", "whip-out", "whip-inout", "spring"] },
+              "seed": { "type": "integer" }
+            }
+          },
           "caption": { "type": "string" },
           "audio": { "$ref": "#/$defs/audioRef" },
           "custom": { "type": "string", "pattern": "^script/[A-Za-z0-9_.-]+\\.js$" }

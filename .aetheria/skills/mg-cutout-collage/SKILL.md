@@ -66,5 +66,6 @@ command: /mg-cutout-collage
 - **`cutout` (16):** `portrait` | `brain` | `globe` | `rocket` | `eye` | `hand-point` | `rose` | `clock` | `gear` | `megaphone` | `book` | `coin` | `chart` | `lightbulb` | `phone` | `camera` (or pass `"image": "img/..."` on `dossier-hero`)
 - **`accents` (max 2 per shot, 8 kinds):** `rose` | `manicule` | `gear` | `wax-seal` | `star` | `arrow` | `paperclip` | `scissors`
 - **`transition` (2):** `tear-wipe` (default) | `cut`
+- **Camera (opt-in `StoryCamera`):** Set root `"cameraStyle": "calm" | "kinetic" | "editorial"` (plus `"seed"` for deterministic variation); avoid numeric camera overrides unless a shot specifically needs `shots[].camera.move`.
 - **Timeline continuity:** `shots[0].start == 0`, `shots[k+1].start == shots[k].start + shots[k].duration`, and `duration >= wavDuration`.
 - **Captions:** Synced via `AM.drawSubtitles` to `/audio/*.words.json` (Zone 5 `Y: 1600`, lemon-yellow `#FFDE59` pop). Set `captions.enabled: false` in Microstock Mode `'M'` (zero text). Never call `AM.drawTopHeader`.

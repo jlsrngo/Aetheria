@@ -707,35 +707,39 @@
       }
     }
 
-    // Fallback to identity rig if even 0.7^4 exceeded safe zone
-    if (opts.allowAutoDollyOut && isProjectFn) {
-      var minDolly = 1.0;
-      for (var dStep = 1; dStep <= 10; dStep++) {
-        minDolly = 1.0 + dStep * 0.12;
+    // Fallback to subtle dolly-out pullback if even 0.7^4 exceeded safe zone (keeps moves animated inside safe zone)
+    if (opts.allowAutoDollyOut) {
+      var dollyMult = 1.0;
+      for (var dStep = 1; dStep <= 20; dStep++) {
+        dollyMult = 1.0 + dStep * 0.06;
         var fitsWithPullback = true;
         for (var j = 0; j < samples; j++) {
           var su = samples === 1 ? 0.5 : j / (samples - 1);
-          var r0 = evalRigAtU(su, 0.5);
+          var r0 = evalRigAtU(su, 0.55);
+          var nextDolly = r0.dolly * dollyMult;
           var rPull = Object.assign({}, r0, {
-            dolly: Math.max(r0.dolly, minDolly),
-            zoom: 1 / Math.max(r0.dolly, minDolly),
+            dolly: nextDolly,
+            zoom: 1 / Math.max(1e-4, nextDolly),
           });
-          if (!boxInsideSafe(focusBoxOrProjectFn(rPull, su), safe)) {
+          var pBox = isProjectFn
+            ? focusBoxOrProjectFn(rPull, su)
+            : projectBox2D(focusBoxOrProjectFn, rPull, W, H);
+          if (!boxInsideSafe(pBox, safe)) {
             fitsWithPullback = false;
             break;
           }
         }
         if (fitsWithPullback) {
           return {
-            intensityScale: 0.5,
-            minDolly: Math.round(minDolly * 1000) / 1000,
+            intensityScale: 0.55,
+            dollyMult: Math.round(dollyMult * 1000) / 1000,
             guard: 'clamped',
             steps: 4 + dStep,
           };
         }
       }
     }
-    return { intensityScale: 0, minDolly: 1, guard: 'clamped', steps: 4 };
+    return { intensityScale: 0, dollyMult: 1, guard: 'clamped', steps: 4 };
   }
 
   function resolve(story, shot, localTime, dur, options) {
@@ -787,9 +791,9 @@
       effectiveScale = gRes.intensityScale;
       guardState = gRes.guard;
       rig = evaluateMoveRig(plan, localTime, dur, W, H, effectiveScale);
-      if (gRes.minDolly && gRes.minDolly > rig.dolly) {
-        rig.dolly = gRes.minDolly;
-        rig.zoom = 1 / gRes.minDolly;
+      if (gRes.dollyMult && gRes.dollyMult > 1.0001) {
+        rig.dolly = rig.dolly * gRes.dollyMult;
+        rig.zoom = 1 / Math.max(1e-4, rig.dolly);
       }
       if (guardState === 'unmeasured' && limits) {
         rig = clampRigByLimits(rig, limits, W, H);

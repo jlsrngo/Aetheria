@@ -62,5 +62,6 @@ command: /mg-product-keynote
 - **`device` (6, for `hero-device`):** `laptop` | `phone` | `tablet` | `watch` | `chip` | `card`
 - **`icon` (12):** `spark` | `bolt` | `shield` | `cpu` | `layers` | `globe` | `wave` | `lock` | `camera` | `play` | `chart` | `check`
 - **`transition` (3):** `zoom-cross` (default) | `slide-push` | `cut`
+- **Camera (opt-in `StoryCamera`):** Set root `"cameraStyle": "calm" | "kinetic" | "editorial"` (plus `"seed"` for deterministic variation); avoid numeric camera overrides unless a shot specifically needs `shots[].camera.move`.
 - **Timeline continuity:** `shots[0].start == 0`, `shots[k+1].start == shots[k].start + shots[k].duration`, and `duration >= wavDuration`.
 - **Captions:** For silent music-driven product commercials, set `captions.enabled: false`; for narrated explainers, set `captions.enabled: true`. Never call `AM.drawTopHeader`.

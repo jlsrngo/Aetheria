@@ -378,8 +378,57 @@
     };
   }
 
+  function measureShotLayout(shot, state) {
+    var sz = state.safeZone;
+    var safeW = sz.maxX - sz.minX;
+    var safeH = sz.maxY - sz.minY;
+    var cx = sz.minX + safeW / 2;
+    var cy = sz.minY + safeH / 2;
+    var isPortrait = state.height > state.width;
+    var silent = !!state.silentMode;
+    var rects = [];
+    var layout = shot.layout || "brand-intro";
+
+    if (layout === "brand-intro") {
+      var cardW = Math.min(safeW - 40, isPortrait ? 840 : 1260);
+      var cardH = Math.min(safeH - 60, isPortrait ? 760 : 620);
+      rects.push({ x: cx - cardW / 2, y: cy - cardH / 2, w: cardW, h: cardH });
+    } else if (layout === "hero-device") {
+      var topH = silent ? 0 : isPortrait ? 240 : 190;
+      if (!silent) rects.push({ x: sz.minX + 20, y: sz.minY + 12, w: safeW - 40, h: topH - 12 });
+      rects.push({ x: sz.minX + 24, y: sz.minY + topH + 16, w: safeW - 48, h: safeH - topH - 32 });
+    } else if (layout === "bento-grid") {
+      var headerH = silent ? 0 : isPortrait ? 180 : 150;
+      if (!silent) rects.push({ x: sz.minX + 20, y: sz.minY + 8, w: safeW - 40, h: headerH - 8 });
+      rects.push({ x: sz.minX + 24, y: sz.minY + headerH + 16, w: safeW - 48, h: safeH - headerH - 28 });
+    } else if (layout === "spec-counter") {
+      var scW = Math.min(safeW - 40, isPortrait ? 840 : 1240);
+      var scH = Math.min(safeH - 60, isPortrait ? 820 : 620);
+      rects.push({ x: cx - scW / 2, y: cy - scH / 2, w: scW, h: scH });
+    } else if (layout === "feature-spotlight") {
+      var fw = Math.min(safeW - 40, isPortrait ? 840 : 1260);
+      var fh = Math.min(safeH - 60, isPortrait ? 820 : 620);
+      rects.push({ x: cx - fw / 2, y: cy - fh / 2, w: fw, h: fh });
+    } else if (layout === "ui-showcase") {
+      var uTopH = silent ? 0 : isPortrait ? 200 : 160;
+      if (!silent) rects.push({ x: sz.minX + 20, y: sz.minY + 8, w: safeW - 40, h: uTopH - 8 });
+      var uiW = Math.min(safeW - 48, isPortrait ? 820 : 1280);
+      rects.push({ x: cx - uiW / 2, y: sz.minY + uTopH + 16, w: uiW, h: safeH - uTopH - 32 });
+    } else if (layout === "split-compare") {
+      var sTopH = silent ? 0 : isPortrait ? 190 : 150;
+      if (!silent) rects.push({ x: sz.minX + 20, y: sz.minY + 8, w: safeW - 40, h: sTopH - 8 });
+      rects.push({ x: sz.minX + 24, y: sz.minY + sTopH + 16, w: safeW - 48, h: safeH - sTopH - 32 });
+    } else {
+      var ow = Math.min(safeW - 40, isPortrait ? 840 : 1200);
+      var oh = Math.min(safeH - 60, isPortrait ? 720 : 580);
+      rects.push({ x: cx - ow / 2, y: cy - oh / 2, w: ow, h: oh });
+    }
+    return unionBox(rects);
+  }
+
   GLOBAL_SCOPE.KeynoteLayouts = {
     LAYOUT_PRESETS: LAYOUT_PRESETS,
+    measureShotLayout: measureShotLayout,
     renderShotLayout: renderShotLayout
   };
 })();

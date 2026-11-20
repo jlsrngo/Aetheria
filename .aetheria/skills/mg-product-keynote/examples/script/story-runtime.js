@@ -180,6 +180,22 @@
           ? GLOBAL_SCOPE.AM.getSceneRenderer(shot.id, res.index)
           : null;
 
+      var hasCamOptIn = Boolean(storySpec.cameraStyle || (shot.camera && typeof shot.camera === "object"));
+      var camRes = null;
+      if (!customFn && hasCamOptIn && GLOBAL_SCOPE.StoryCamera && typeof GLOBAL_SCOPE.StoryCamera.resolve === "function") {
+        var focusBox = typeof layouts.measureShotLayout === "function"
+          ? layouts.measureShotLayout(shot, { width: W, height: H, safeZone: safeZone, silentMode: forceSilent })
+          : null;
+        camRes = GLOBAL_SCOPE.StoryCamera.resolve(storySpec, shot, localT, dur, {
+          W: W,
+          H: H,
+          safe: safeZone,
+          focusBox: focusBox,
+          allowAutoDollyOut: true,
+          limits: { maxZoom: 1.28, maxPan: 0.08, maxRollDeg: 2.8 }
+        });
+      }
+
       var layoutResult;
       if (customFn) {
         customFn(ctx, localT, dur, shot, GLOBAL_SCOPE.AM, { kit: kit, safeZone: safeZone, theme: theme }, globalT);
@@ -188,6 +204,9 @@
           overlapCount: 0
         };
       } else {
+        if (camRes && camRes.plan && camRes.plan.active && GLOBAL_SCOPE.StoryCamera) {
+          GLOBAL_SCOPE.StoryCamera.apply2D(ctx, camRes.rig, W, H);
+        }
         layoutResult = layouts.renderShotLayout(ctx, shot, {
           width: W,
           height: H,
@@ -200,6 +219,9 @@
           silentMode: forceSilent,
           heroImage: loadedImages[shot.id] || null
         });
+        if (camRes && camRes.plan && camRes.plan.active && layoutResult && layoutResult.bbox && GLOBAL_SCOPE.StoryCamera) {
+          layoutResult.bbox = GLOBAL_SCOPE.StoryCamera.projectBox2D(layoutResult.bbox, camRes.rig, W, H);
+        }
       }
       ctx.restore();
 

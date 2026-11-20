@@ -402,7 +402,7 @@
    * is guaranteed to remain strictly inside the portrait/landscape safeZone while tracking
    * moving actors smoothly without cancelling vertical walk bobbing or hop arcs.
    */
-  function frameCameraToFocus(camera, steadyFocusBox, actualFocusBox, preset, shotProgress, width, height, safeZone) {
+  function frameCameraToFocus(camera, steadyFocusBox, actualFocusBox, preset, shotProgress, width, height, safeZone, clayRig) {
     var p = clamp(shotProgress, 0, 1);
     var focusBox = steadyFocusBox;
     var liveBox = actualFocusBox || steadyFocusBox;
@@ -435,6 +435,12 @@
       az = lerp(-0.36, 0.36, p);
       el = 0.17;
       fill = 0.74;
+    }
+
+    if (clayRig) {
+      az = clamp(az + (clayRig.truckX || 0) * 2.2 + ((clayRig.orbitAz || 0) * Math.PI / 180) * 0.45, -0.58, 0.58);
+      el = clamp(el - (clayRig.truckY || 0) * 1.15 + ((clayRig.tiltEl || 0) * Math.PI / 180) * 0.45, 0.05, 0.44);
+      fill = clamp(fill * Math.pow(clayRig.zoom || 1, 0.72), 0.48, 0.88);
     }
 
     var safeW = safeZone.maxX - safeZone.minX;
@@ -513,6 +519,7 @@
     camera.position.copy(lookTarget).addScaledVector(dir, dist);
     camera.lookAt(lookTarget);
     var actualBbox = projectBoxToPixels(liveBox, camera, width, height);
+    var guardClamped = false;
     for (var guardIter = 0; guardIter < 8; guardIter++) {
       if (
         !actualBbox.behind &&
@@ -523,12 +530,14 @@
       ) {
         break;
       }
+      guardClamped = true;
       dist *= 1.08;
       camera.position.copy(lookTarget).addScaledVector(dir, dist);
       camera.lookAt(lookTarget);
       actualBbox = projectBoxToPixels(liveBox, camera, width, height);
     }
 
+    if (clayRig) actualBbox._guardClamped = guardClamped;
     return actualBbox;
   }
 
@@ -909,11 +918,60 @@
       }
 
       var preset = (shot.camera && shot.camera.preset) || "medium";
+      var clayCam = shot.camera && typeof shot.camera === "object" ? shot.camera : null;
+      var hasClayOptIn = Boolean(
+        storySpec.cameraStyle ||
+          (clayCam &&
+            (clayCam.move ||
+              clayCam.style ||
+              clayCam.dir ||
+              clayCam.intensity !== undefined ||
+              clayCam.moveDuration !== undefined ||
+              clayCam.curve ||
+              clayCam.seed !== undefined))
+      );
+      var clayCamRes = null;
+      if (hasClayOptIn && GLOBAL_SCOPE.StoryCamera && typeof GLOBAL_SCOPE.StoryCamera.resolve === "function") {
+        // Strip clay's `camera.preset` (e.g. "dolly-in") so StoryCamera never treats it as a 2D Cobalt legacy preset
+        var sanitizedShots = shots.map(function (sh) {
+          if (!sh || !sh.camera || typeof sh.camera !== "object" || sh.camera.preset === undefined) return sh;
+          var camCopy = Object.assign({}, sh.camera);
+          delete camCopy.preset;
+          return Object.assign({}, sh, { camera: camCopy });
+        });
+        var camStory = Object.assign({}, storySpec, { shots: sanitizedShots });
+        var camShot = sanitizedShots[res.index] || shot;
+        clayCamRes = GLOBAL_SCOPE.StoryCamera.resolve(camStory, camShot, localT, dur, {
+          W: W,
+          H: H,
+          safe: safeZone,
+          recordReport: false
+        });
+      }
+
       var bbox = null;
       var inSafe = false;
       if (!focusBox.isEmpty()) {
-        bbox = frameCameraToFocus(camera, steadyFocusBox, focusBox, preset, localT / dur, W, H, safeZone);
+        bbox = frameCameraToFocus(
+          camera,
+          steadyFocusBox,
+          focusBox,
+          preset,
+          localT / dur,
+          W,
+          H,
+          safeZone,
+          clayCamRes && clayCamRes.plan && clayCamRes.plan.active ? clayCamRes.rig : null
+        );
+        var wasClamped = Boolean(bbox && bbox._guardClamped);
+        if (bbox && bbox._guardClamped !== undefined) delete bbox._guardClamped;
         inSafe = isBoxInsideSafeZone(bbox, safeZone);
+        if (clayCamRes && clayCamRes.report) {
+          GLOBAL_SCOPE.__cameraReport = GLOBAL_SCOPE.__cameraReport || {};
+          GLOBAL_SCOPE.__cameraReport[shot.id] = Object.assign({}, clayCamRes.report, {
+            guard: wasClamped ? "clamped" : "measured"
+          });
+        }
         if (!inSafe) {
           errors.push("Focus bbox outside safeZone on shot " + shot.id);
         }

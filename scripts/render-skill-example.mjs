@@ -466,7 +466,7 @@ export async function renderSkillExample(opts, sharedBrowser = null) {
 
       const pngName = `frame_${String(i).padStart(2, "0")}_t${t.toFixed(2).replace(".", "_")}.png`;
       const pngPath = path.join(opts.outDir, pngName);
-      const pngBuf = await page.screenshot({ type: "png" });
+      const pngBuf = await page.screenshot({ type: "png", timeout: 90_000 });
       fs.writeFileSync(pngPath, pngBuf);
       const renderMs = Math.round((performance.now() - t0) * 10) / 10;
       const sha256 = crypto.createHash("sha256").update(pngBuf).digest("hex");

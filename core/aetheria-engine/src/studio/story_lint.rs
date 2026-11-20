@@ -657,6 +657,7 @@ pub fn render_story_index_html(
   </style>
   <script src="/script/three.min.js"></script>
   <script src="/script/aetheria-motion.js"></script>
+  <script src="/script/story-camera.js"></script>
   <script src="/script/clay-kit.js"></script>
   <script src="/script/clay-buildings.js"></script>
   <script src="/script/clay-people.js"></script>

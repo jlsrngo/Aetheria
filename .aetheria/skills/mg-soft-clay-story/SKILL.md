@@ -85,7 +85,7 @@ command: /mg-soft-clay-story
 - **`expression` (7, on cast/placements/actions):** `happy` (default) | `laugh` | `sad` | `surprised` | `angry` | `worried` | `sleepy`
 - **`emote` (8, floating 3D icon above `head` anchor):** `exclaim` | `question` | `idea` | `heart` | `sweat` | `anger` | `sleep` | `music`
 - **`actions[].anim` (14):** `idle` | `walk` | `run` | `hop` | `grow` | `pop-in` | `wave` | `talk` | `point` | `cheer` | `shock` | `work` | `nod` | `dance`. Optional locomotion on any action: `"from": [x,y,z], "to": [x,y,z]` (auto-faces travel direction and resumes `idle` on arrival).
-- **`camera.preset` (5, auto-framed inside 9:16 safe zone `X:49..960, Y:60..1440`):** `wide` | `medium` | `close` | `dolly-in` | `orbit`
+- **`camera.preset` (5, auto-framed inside 9:16 safe zone `X:49..960, Y:60..1440`):** `wide` | `medium` | `close` | `dolly-in` | `orbit`. Optional root `"cameraStyle": "calm" | "kinetic" | "editorial"` + `"seed"` adds deterministic `az`/`el`/`fill` offsets via `StoryCamera` without overriding presets; avoid hand-coding numeric camera values unless needed.
 - **`stage` (3):** `open-field` (terraced meadow/paddy) | `city-street` (pastel town street) | `indoor-room` (cozy pastel interior)
 - **`mood` (3, optional per shot):** `day` (default) | `sunset` | `night`
 - **Timeline continuity:** `shots[0].start == 0`, `shots[k+1].start == shots[k].start + shots[k].duration`, and `duration >= wavDuration`.

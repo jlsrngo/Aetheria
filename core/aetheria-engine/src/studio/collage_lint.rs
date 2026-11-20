@@ -212,6 +212,7 @@ pub fn render_collage_index_html(
     #stage canvas {{ position: absolute; inset: 0; width: {w}px; height: {h}px; display: block; }}
   </style>
   <script src="/script/aetheria-motion.js"></script>
+  <script src="/script/story-camera.js"></script>
   <script src="/script/collage-kit.js"></script>
   <script src="/script/collage-layouts.js"></script>
   <script src="/script/story-runtime.js"></script>
