@@ -226,6 +226,22 @@ async fn handle_antigravity_with_cred(
                 parts.push(json!({ "text": txt }));
             }
             if let Some(tcs) = m.get("tool_calls").and_then(|v| v.as_array()) {
+                let any_real_sig = tcs.iter().any(|tc| {
+                    let id = tc.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                    let name = tc
+                        .pointer("/function/name")
+                        .or_else(|| tc.get("name"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("tool");
+                    let cloaked_name = cloak_history_tool_name(name, &cloaked.orig_to_cloaked);
+                    tc.pointer("/extra_content/google/thought_signature")
+                        .and_then(|v| v.as_str())
+                        .is_some_and(|s| !s.is_empty())
+                        || lookup_signature(id).is_some()
+                        || lookup_signature(&format!("fn:{}", name)).is_some()
+                        || lookup_signature(&format!("fn:{}", cloaked_name)).is_some()
+                });
+                let mut attached_skip_validator = false;
                 for tc in tcs {
                     let id = tc.get("id").and_then(|v| v.as_str()).unwrap_or("");
                     let name = tc
@@ -241,18 +257,30 @@ async fn handle_antigravity_with_cred(
                         _ => json!({}),
                     };
                     let cloaked_name = cloak_history_tool_name(name, &cloaked.orig_to_cloaked);
-                    let sig = lookup_signature(id)
+                    let real_sig = tc
+                        .pointer("/extra_content/google/thought_signature")
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_string)
+                        .or_else(|| lookup_signature(id))
                         .or_else(|| lookup_signature(&format!("fn:{}", name)))
-                        .or_else(|| lookup_signature(&format!("fn:{}", cloaked_name)))
-                        .unwrap_or_else(|| "skip_thought_signature_validator".to_string());
-                    parts.push(json!({
+                        .or_else(|| lookup_signature(&format!("fn:{}", cloaked_name)));
+                    let mut fc_part = json!({
                         "functionCall": {
                             "id": id,
                             "name": cloaked_name,
                             "args": args_val
-                        },
-                        "thoughtSignature": sig
-                    }));
+                        }
+                    });
+                    if let Some(sig) = real_sig {
+                        fc_part["thoughtSignature"] = json!(sig);
+                    } else if !any_real_sig && !attached_skip_validator {
+                        // OpenCode `protocols/gemini.ts`: attach `skip_thought_signature_validator`
+                        // only on the first unsigned functionCall when no sibling carries a signature.
+                        fc_part["thoughtSignature"] = json!("skip_thought_signature_validator");
+                        attached_skip_validator = true;
+                    }
+                    parts.push(fc_part);
                 }
             }
             if !parts.is_empty() {
@@ -262,13 +290,15 @@ async fn handle_antigravity_with_cred(
         }
 
         let user_parts = build_gemini_user_parts(m.get("content"));
-        // Merge consecutive "user" turns (e.g. functionResponse followed by visual inspection frames)
-        // so upstream Gemini payloads strictly alternate between "user" and "model".
+        // Merge consecutive plain "user" turns, but NEVER mix plain user text/images into a
+        // `functionResponse` turn (Gemini requires `functionResponse` turns to contain only tool outputs).
         if let Some(last) = contents.last_mut() {
             if last.get("role").and_then(|v| v.as_str()) == Some("user") {
                 if let Some(existing_parts) = last.get_mut("parts").and_then(|v| v.as_array_mut()) {
-                    existing_parts.extend(user_parts);
-                    continue;
+                    if !existing_parts.iter().any(|p| p.get("functionResponse").is_some()) {
+                        existing_parts.extend(user_parts);
+                        continue;
+                    }
                 }
             }
         }
@@ -282,10 +312,16 @@ async fn handle_antigravity_with_cred(
         contents.push(json!({ "role": "user", "parts": [{ "text": "Hello" }] }));
     }
 
+    let max_output_tokens = body
+        .get("max_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(32768);
     let mut gen_cfg = json!({
-        "maxOutputTokens": body.get("max_tokens").and_then(|v| v.as_u64()).unwrap_or(16384),
-        "temperature": body.get("temperature").and_then(|v| v.as_f64()).unwrap_or(1.0)
+        "maxOutputTokens": max_output_tokens
     });
+    if let Some(temp) = body.get("temperature").and_then(|v| v.as_f64()) {
+        gen_cfg["temperature"] = json!(temp);
+    }
     let effort_override = body
         .get("reasoning_effort")
         .and_then(|v| v.as_str())
@@ -311,11 +347,32 @@ async fn handle_antigravity_with_cred(
                 "thinkingLevel": lvl
             });
         }
+    } else if upstream_model.contains("gemini-2.5") {
+        if let Some(ref effort) = effort_override {
+            let raw_budget: Option<u64> = match effort.as_str() {
+                "none" | "off" => Some(0),
+                "minimal" | "low" => Some(2048),
+                "medium" => Some(8192),
+                "high" => Some(24576),
+                _ => None,
+            };
+            if let Some(budget) = raw_budget {
+                let fitted = if budget == 0 {
+                    0
+                } else {
+                    budget.min((max_output_tokens / 2).max(512))
+                };
+                gen_cfg["thinkingConfig"] = json!({
+                    "includeThoughts": fitted > 0,
+                    "thinkingBudget": fitted
+                });
+            }
+        }
     } else if let Some(ref effort) = effort_override {
         crate::paths::log_engine(
             "bridge",
             &format!(
-                "Ignoring reasoning_effort='{}' for Antigravity model '{}' (only Gemini-3 supports thinkingConfig).",
+                "Ignoring reasoning_effort='{}' for Antigravity model '{}' (unsupported thinkingConfig).",
                 effort, upstream_model
             ),
         );
@@ -354,9 +411,14 @@ async fn handle_antigravity_with_cred(
     }
     if !cloaked.declarations.is_empty() {
         inner_req["tools"] = json!([{ "functionDeclarations": cloaked.declarations }]);
+        let fc_mode = match body.get("tool_choice").and_then(|v| v.as_str()) {
+            Some("none") => "NONE",
+            Some("required") => "ANY",
+            _ => "VALIDATED",
+        };
         inner_req["toolConfig"] = json!({
             "functionCallingConfig": {
-                "mode": "VALIDATED"
+                "mode": fc_mode
             }
         });
     }
@@ -502,14 +564,20 @@ async fn handle_antigravity_with_cred(
                             fc.get("args").unwrap_or(&json!({})),
                         )
                         .unwrap_or_else(|_| "{}".to_string());
-                        tool_calls.push(json!({
+                        let mut tc_val = json!({
                             "id": call_id,
                             "type": "function",
                             "function": {
                                 "name": name,
                                 "arguments": args_str
                             }
-                        }));
+                        });
+                        if !sig.is_empty() {
+                            tc_val["extra_content"] = json!({
+                                "google": { "thought_signature": sig }
+                            });
+                        }
+                        tool_calls.push(tc_val);
                     }
                 }
             }

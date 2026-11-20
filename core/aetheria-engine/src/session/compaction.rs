@@ -23,32 +23,47 @@ pub fn estimate_tokens(text: &str) -> usize {
     text.len().div_ceil(4)
 }
 
-/// Approximates token count of a JSON Value message.
+/// Estimated token weight of a single inline image (`image_url` / `inlineData`).
+pub const IMAGE_TOKEN_ESTIMATE: usize = 1_500;
+
+/// Approximates token count of a JSON Value message (accurately accounting for images & tool_calls).
 pub fn estimate_message_tokens(msg: &Value) -> usize {
+    let mut tokens = 0usize;
     if let Some(txt) = msg.get("text").and_then(|v| v.as_str()) {
-        return estimate_tokens(txt);
+        tokens += estimate_tokens(txt);
     }
     if let Some(content) = msg.get("content") {
         if let Some(s) = content.as_str() {
-            return estimate_tokens(s);
-        }
-        if let Some(arr) = content.as_array() {
-            let total_chars: usize = arr
-                .iter()
-                .map(|item| {
-                    if let Some(t) = item.get("text").and_then(|v| v.as_str()) {
-                        t.len()
-                    } else if let Some(tc) = item.pointer("/state/content/0/text").and_then(|v| v.as_str()) {
-                        tc.len()
-                    } else {
-                        40
-                    }
-                })
-                .sum();
-            return total_chars.div_ceil(4);
+            tokens += estimate_tokens(s);
+        } else if let Some(arr) = content.as_array() {
+            for item in arr {
+                let is_img = item.get("type").and_then(|v| v.as_str()) == Some("image_url")
+                    || item.get("image_url").is_some()
+                    || item.get("inlineData").is_some();
+                if is_img {
+                    tokens += IMAGE_TOKEN_ESTIMATE;
+                } else if let Some(t) = item.get("text").and_then(|v| v.as_str()) {
+                    tokens += estimate_tokens(t);
+                } else if let Some(tc) =
+                    item.pointer("/state/content/0/text").and_then(|v| v.as_str())
+                {
+                    tokens += estimate_tokens(tc);
+                } else {
+                    tokens += 10;
+                }
+            }
         }
     }
-    25
+    if let Some(tcs) = msg.get("tool_calls").and_then(|v| v.as_array()) {
+        for tc in tcs {
+            if let Some(args) = tc.pointer("/function/arguments").and_then(|v| v.as_str()) {
+                tokens += estimate_tokens(args) + 12;
+            } else {
+                tokens += 20;
+            }
+        }
+    }
+    if tokens == 0 { 25 } else { tokens }
 }
 
 /// Computes the total estimated tokens across all messages in history.

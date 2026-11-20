@@ -274,20 +274,32 @@ pub(crate) async fn execute_step_http_request(
 
 fn build_step_request_body(ctx: &StepHttpContext<'_>, tools_def: &[Value]) -> Value {
     let mut outbound_messages = ctx.chat_messages.clone();
+    super::history::bound_inline_images(&mut outbound_messages);
     if ctx.step_limit_reached {
         outbound_messages.push(json!({
             "role": "assistant",
             "content": crate::session::coordinator::MAX_STEPS_PROMPT
         }));
     }
+    let model_limit = crate::session::compaction_budget::resolve_model_context_limit(
+        ctx.cfg,
+        ctx.current_provider_id,
+        ctx.current_model_id,
+    );
+    let est_input_tokens = crate::session::compaction::total_history_tokens(&outbound_messages);
+    let max_tokens =
+        crate::session::compaction_budget::compute_output_limit(model_limit, est_input_tokens);
     let mut req_body = json!({
         "model": *ctx.current_model_id,
         "messages": outbound_messages,
+        "max_tokens": max_tokens,
         "stream": true,
         "stream_options": { "include_usage": true }
     });
     if !tools_def.is_empty() {
-        req_body["tools"] = Value::Array(tools_def.to_vec());
+        let normalized_tools =
+            crate::bridge::schema::normalize_tools_for_model(ctx.current_model_id, tools_def);
+        req_body["tools"] = Value::Array(normalized_tools);
         if ctx.step_limit_reached {
             req_body["tool_choice"] = json!("none");
         }
@@ -562,31 +574,29 @@ async fn recover_error_response(
 ) -> Result<reqwest::Response, StepHttpError> {
     let classified = classify_provider_failure(Some(status_code), err_txt);
 
-    if classified.kind == ProviderErrorKind::ContextOverflow && !ctx.chat_messages.is_empty() {
+    // HTTP 413 Payload Too Large: strip inline multimodal images first and retry before
+    // falling back to text compaction in `runner.rs`.
+    if status_code == 413 && sanitize_multimodal_messages_to_text(ctx.chat_messages) {
         crate::paths::log_engine(
             "ai",
-            "🩹 Context window overflow detected! Triggering compaction recovery...",
+            "📦 HTTP 413 payload too large: stripping inline images and retrying once...",
         );
-        crate::session::compaction_emergency::compact_overflow_with_model(
-            ctx.client,
-            ctx.base_url,
-            ctx.api_key,
-            ctx.current_model_id,
-            ctx.session_id,
-            ctx.workspace_dir,
-            ctx.chat_messages,
-        )
-        .await;
         req_body["messages"] = Value::Array(ctx.chat_messages.clone());
         return post_recovery_request(
             ctx.client,
             ctx.base_url,
             ctx.api_key,
             req_body,
-            "Error reaching AI provider during overflow retry",
-            true,
+            "Error reaching AI provider after 413 media strip",
+            false,
         )
         .await;
+    }
+
+    // Defer ContextOverflow to `runner.rs`'s unified `compact_with_budget_ladder` instead of
+    // hijacking with a destructive 24 KB emergency cut here.
+    if classified.kind == ProviderErrorKind::ContextOverflow {
+        return Err(StepHttpError::from_classified(classified));
     }
 
     if matches!(
@@ -650,15 +660,22 @@ async fn recover_error_response(
         return Err(StepHttpError::from_classified(classified));
     }
 
-    if err_txt.contains("upstream_rejected") && sanitize_multimodal_messages_to_text(ctx.chat_messages)
-    {
+    let err_lower = err_txt.to_ascii_lowercase();
+    let looks_like_multimodal_reject = err_lower.contains("upstream_rejected")
+        || (matches!(status_code, 400 | 415 | 422)
+            && (err_lower.contains("image")
+                || err_lower.contains("vision")
+                || err_lower.contains("multimodal")
+                || err_lower.contains("media")
+                || err_lower.contains("content_part")));
+    if looks_like_multimodal_reject && sanitize_multimodal_messages_to_text(ctx.chat_messages) {
         req_body["messages"] = Value::Array(ctx.chat_messages.clone());
         return post_recovery_request(
             ctx.client,
             ctx.base_url,
             ctx.api_key,
             req_body,
-            "Error reaching AI provider during retry",
+            "Error reaching AI provider during multimodal fallback retry",
             false,
         )
         .await;

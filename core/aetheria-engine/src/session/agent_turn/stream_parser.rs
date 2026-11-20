@@ -78,8 +78,10 @@ pub fn parse_completion_body(raw_body: &str) -> Result<(String, Vec<Value>, Stri
     // 2. Fallback: Parse SSE (`data: ...`) lines and accumulate deltas
     let mut accumulated_text = String::new();
     let mut finish_reason = String::from("stop");
-    let mut tool_calls_map: std::collections::BTreeMap<usize, (String, String, String)> =
-        std::collections::BTreeMap::new();
+    let mut tool_calls_map: std::collections::BTreeMap<
+        usize,
+        (String, String, String, Option<Value>),
+    > = std::collections::BTreeMap::new();
     let mut parsed_any_chunk = false;
 
     for raw_line in trimmed.lines() {
@@ -108,12 +110,17 @@ pub fn parse_completion_body(raw_body: &str) -> Result<(String, Vec<Value>, Stri
                 if let Some(tcs) = delta.get("tool_calls").and_then(|v| v.as_array()) {
                     for tc in tcs {
                         let idx = tc.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                        let entry = tool_calls_map
-                            .entry(idx)
-                            .or_insert_with(|| (String::new(), String::new(), String::new()));
+                        let entry = tool_calls_map.entry(idx).or_insert_with(|| {
+                            (String::new(), String::new(), String::new(), None)
+                        });
                         if let Some(id) = tc.get("id").and_then(|v| v.as_str()) {
                             if !id.is_empty() {
                                 entry.0 = id.to_string();
+                            }
+                        }
+                        if let Some(extra) = tc.get("extra_content") {
+                            if !extra.is_null() {
+                                entry.3 = Some(extra.clone());
                             }
                         }
                         if let Some(func) = tc.get("function") {
@@ -138,16 +145,20 @@ pub fn parse_completion_body(raw_body: &str) -> Result<(String, Vec<Value>, Stri
 
     if parsed_any_chunk {
         let mut tool_calls = Vec::new();
-        for (idx, (id, name, args)) in tool_calls_map {
+        for (idx, (id, name, args, extra)) in tool_calls_map {
             if !name.is_empty() {
-                tool_calls.push(json!({
+                let mut tc_obj = json!({
                     "id": if id.is_empty() { format!("call_sse_{}", idx) } else { id },
                     "type": "function",
                     "function": {
                         "name": name,
                         "arguments": args
                     }
-                }));
+                });
+                if let Some(ex) = extra {
+                    tc_obj["extra_content"] = ex;
+                }
+                tool_calls.push(tc_obj);
             }
         }
         return Ok((accumulated_text, tool_calls, finish_reason));

@@ -256,8 +256,83 @@ pub(crate) fn build_historical_turn_warning(msg: &Value, unresolved: &[String]) 
     }
 }
 
-/// Converts session history into formatted OpenAI-compatible chat messages
+/// Hysteresis image byte cap constants (mirrors OpenCode `model-request.ts:225-253`).
+pub const IMAGE_BUDGET_TRIGGER_BYTES: usize = 25 * 1024 * 1024; // 25 MiB
+pub const IMAGE_BUDGET_TARGET_BYTES: usize = 15 * 1024 * 1024;  // 15 MiB
+
+/// Bounds total inline base64 `image_url` bytes across `chat_messages` using hysteresis
+/// (`trigger_bytes` -> prune oldest images down to `target_bytes`) so prompt-cache prefixes remain
+/// stable between cuts while preventing multimodal payload blowups.
+pub fn bound_inline_images_with_limits(
+    chat_messages: &mut [Value],
+    trigger_bytes: usize,
+    target_bytes: usize,
+) -> usize {
+    let mut total_bytes: usize = 0;
+    for msg in chat_messages.iter() {
+        if let Some(arr) = msg.get("content").and_then(|v| v.as_array()) {
+            for part in arr {
+                if let Some(url) = part.pointer("/image_url/url").and_then(|v| v.as_str()) {
+                    if url.starts_with("data:image/") {
+                        total_bytes += url.len();
+                    }
+                }
+            }
+        }
+    }
+    if total_bytes <= trigger_bytes {
+        return 0;
+    }
+    let mut removed = 0usize;
+    for msg in chat_messages.iter_mut() {
+        if total_bytes <= target_bytes {
+            break;
+        }
+        if let Some(arr) = msg.get_mut("content").and_then(|v| v.as_array_mut()) {
+            for part in arr.iter_mut() {
+                if total_bytes <= target_bytes {
+                    break;
+                }
+                let img_len = part
+                    .pointer("/image_url/url")
+                    .and_then(|v| v.as_str())
+                    .filter(|u| u.starts_with("data:image/"))
+                    .map(|u| u.len())
+                    .unwrap_or(0);
+                if img_len > 0 {
+                    *part = json!({
+                        "type": "text",
+                        "text": "[This image was removed to keep the conversation within multimodal size limits.]"
+                    });
+                    total_bytes = total_bytes.saturating_sub(img_len);
+                    removed += 1;
+                }
+            }
+        }
+    }
+    removed
+}
+
+pub fn bound_inline_images(chat_messages: &mut [Value]) -> usize {
+    bound_inline_images_with_limits(
+        chat_messages,
+        IMAGE_BUDGET_TRIGGER_BYTES,
+        IMAGE_BUDGET_TARGET_BYTES,
+    )
+}
+
+/// Converts session history into formatted OpenAI-compatible chat messages (default vision enabled).
 pub fn build_chat_messages(effective_history: &[Value], sys_prompt: &str) -> Vec<Value> {
+    build_chat_messages_with_options(effective_history, sys_prompt, true)
+}
+
+/// Converts session history into formatted OpenAI-compatible chat messages, respecting
+/// `model_supports_vision` and preserving multi-step causal ordering and `extra_content`.
+pub fn build_chat_messages_with_options(
+    effective_history: &[Value],
+    sys_prompt: &str,
+    model_supports_vision: bool,
+) -> Vec<Value> {
     let mut chat_messages = vec![json!({ "role": "system", "content": sys_prompt })];
 
     // Pre-scan clean assistant turns so buckets resolved in a later turn j > i
@@ -333,7 +408,9 @@ pub fn build_chat_messages(effective_history: &[Value], sys_prompt: &str) -> Vec
         }
     }
 
+    let total_turns = effective_history.len();
     for (turn_idx, m) in effective_history.iter().enumerate() {
+        let is_recent_turn = turn_idx + 3 >= total_turns;
         let mtype = m.get("type").and_then(|v| v.as_str()).unwrap_or("");
         if mtype == "synthetic" {
             let txt = m.get("text").and_then(|v| v.as_str()).unwrap_or("");
@@ -344,6 +421,8 @@ pub fn build_chat_messages(effective_history: &[Value], sys_prompt: &str) -> Vec
             let txt = m.get("text").and_then(|v| v.as_str()).unwrap_or("");
             let mut enriched_txt = txt.to_string();
             let mut img_urls: Vec<String> = Vec::new();
+            let mut omitted_img_count = 0usize;
+            let text_att_cap = if is_recent_turn { 60_000usize } else { 24_000usize };
             if let Some(arr) = m.get("files").and_then(|v| v.as_array()) {
                 for f in arr {
                     let fname = f.get("name").and_then(|v| v.as_str()).unwrap_or("attached_file");
@@ -354,10 +433,14 @@ pub fn build_chat_messages(effective_history: &[Value], sys_prompt: &str) -> Vec
                         .unwrap_or("");
                     let mime = f.get("mime").and_then(|v| v.as_str()).unwrap_or("");
                     if uri.starts_with("data:image/") && !uri.starts_with("data:image/svg") {
-                        img_urls.push(uri.to_string());
+                        if model_supports_vision {
+                            img_urls.push(uri.to_string());
+                        } else {
+                            omitted_img_count += 1;
+                        }
                     } else if super::vision::is_text_or_code_attachment(fname, uri, mime) {
                         if let Some(decoded) = super::vision::decode_data_uri_text(uri) {
-                            let snippet: String = decoded.chars().take(120_000).collect();
+                            let snippet: String = decoded.chars().take(text_att_cap).collect();
                             enriched_txt.push_str(&format!(
                                 "\n\n[Attached File: '{}']:\n```\n{}\n```",
                                 fname, snippet
@@ -365,6 +448,12 @@ pub fn build_chat_messages(effective_history: &[Value], sys_prompt: &str) -> Vec
                         }
                     }
                 }
+            }
+            if omitted_img_count > 0 {
+                enriched_txt.push_str(&format!(
+                    "\n\n[{} historical image attachment(s) omitted for text-only model]",
+                    omitted_img_count
+                ));
             }
             if img_urls.is_empty() {
                 chat_messages.push(json!({ "role": "user", "content": enriched_txt }));
@@ -377,32 +466,74 @@ pub fn build_chat_messages(effective_history: &[Value], sys_prompt: &str) -> Vec
             }
         } else if mtype == "assistant" {
             let parts = m.get("content").and_then(|v| v.as_array());
-            let mut tool_calls = Vec::new();
-            let mut tool_results = Vec::new();
-            let mut text_parts = Vec::new();
+            let tool_out_cap = if is_recent_turn { 4_000usize } else { 800usize };
+            let tool_args_cap = if is_recent_turn { 2_400usize } else { 600usize };
+
+            // Preserve multi-step causal boundaries: walk `parts` in order so intervening text
+            // between tool batches emits separate (assistant -> tool -> assistant) steps instead
+            // of collapsing every step into one synthetic parallel batch.
+            let mut pending_text = String::new();
+            let mut pending_tool_calls: Vec<Value> = Vec::new();
+            let mut pending_tool_results: Vec<Value> = Vec::new();
+            let mut emitted_any_step = false;
+
+            let flush_tool_step = |msgs: &mut Vec<Value>,
+                                   pre_text: &mut String,
+                                   tcs: &mut Vec<Value>,
+                                   trs: &mut Vec<Value>,
+                                   emitted: &mut bool| {
+                if tcs.is_empty() {
+                    return;
+                }
+                let content_val = if pre_text.trim().is_empty() {
+                    Value::Null
+                } else {
+                    Value::String(std::mem::take(pre_text))
+                };
+                pre_text.clear();
+                msgs.push(json!({
+                    "role": "assistant",
+                    "content": content_val,
+                    "tool_calls": std::mem::take(tcs)
+                }));
+                for tr in trs.drain(..) {
+                    msgs.push(tr);
+                }
+                *emitted = true;
+            };
 
             if let Some(arr) = parts {
                 for p in arr {
                     let ptype = p.get("type").and_then(|t| t.as_str()).unwrap_or("");
                     if ptype == "text" {
+                        if !pending_tool_calls.is_empty() {
+                            flush_tool_step(
+                                &mut chat_messages,
+                                &mut pending_text,
+                                &mut pending_tool_calls,
+                                &mut pending_tool_results,
+                                &mut emitted_any_step,
+                            );
+                        }
                         if let Some(t) = p.get("text").and_then(|s| s.as_str()) {
-                            text_parts.push(t);
+                            pending_text.push_str(t);
                         }
                     } else if ptype == "tool" {
                         let cid = p.get("id").and_then(|v| v.as_str()).unwrap_or("call_0");
                         let fn_name = p.get("name").and_then(|v| v.as_str()).unwrap_or("tool");
                         let input_val = p.pointer("/state/input").cloned().unwrap_or_else(|| json!({}));
                         let out_str_raw = p
-                            .pointer("/state/content/0/text")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.to_string())
+                            .pointer("/state/structured")
+                            .map(|v| crate::tool::truncator::format_tool_result_for_model(fn_name, v))
+                            .filter(|s| !s.is_empty())
                             .or_else(|| {
-                                p.pointer("/state/structured")
-                                    .map(|v| serde_json::to_string(v).unwrap_or_default())
+                                p.pointer("/state/content/0/text")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.to_string())
                             })
                             .unwrap_or_else(|| "{}".to_string());
-                        let out_str: String = if out_str_raw.len() > 600 {
-                            let mut truncated: String = out_str_raw.chars().take(600).collect();
+                        let out_str: String = if out_str_raw.len() > tool_out_cap {
+                            let mut truncated: String = out_str_raw.chars().take(tool_out_cap).collect();
                             truncated.push_str("...[truncated historical output]");
                             truncated
                         } else {
@@ -410,7 +541,7 @@ pub fn build_chat_messages(effective_history: &[Value], sys_prompt: &str) -> Vec
                         };
 
                         let args_raw = serde_json::to_string(&input_val).unwrap_or_else(|_| "{}".to_string());
-                        let args_compact = if args_raw.len() > 600 {
+                        let args_compact = if args_raw.len() > tool_args_cap {
                             let fp = input_val
                                 .get("filePath")
                                 .or_else(|| input_val.get("path"))
@@ -436,16 +567,20 @@ pub fn build_chat_messages(effective_history: &[Value], sys_prompt: &str) -> Vec
                             args_raw
                         };
 
-                        tool_calls.push(json!({
+                        let mut tc_obj = json!({
                             "id": cid,
                             "type": "function",
                             "function": {
                                 "name": fn_name,
                                 "arguments": args_compact
                             }
-                        }));
+                        });
+                        if let Some(extra) = p.get("extra_content").filter(|v| !v.is_null()) {
+                            tc_obj["extra_content"] = extra.clone();
+                        }
+                        pending_tool_calls.push(tc_obj);
 
-                        tool_results.push(json!({
+                        pending_tool_results.push(json!({
                             "role": "tool",
                             "tool_call_id": cid,
                             "name": fn_name,
@@ -455,7 +590,17 @@ pub fn build_chat_messages(effective_history: &[Value], sys_prompt: &str) -> Vec
                 }
             }
 
-            let mut clean_txt = text_parts.join("");
+            if !pending_tool_calls.is_empty() {
+                flush_tool_step(
+                    &mut chat_messages,
+                    &mut pending_text,
+                    &mut pending_tool_calls,
+                    &mut pending_tool_results,
+                    &mut emitted_any_step,
+                );
+            }
+
+            let mut clean_txt = pending_text;
             if clean_txt.starts_with("[Tools executed in this past turn:") {
                 if let Some(pos) = clean_txt.find("]\n") {
                     clean_txt = clean_txt[pos + 2..].to_string();
@@ -488,27 +633,10 @@ pub fn build_chat_messages(effective_history: &[Value], sys_prompt: &str) -> Vec
                 }
             }
 
-            // Standard OpenCode / OpenAI Message Structure:
-            // 1. Assistant message with tool_calls (if any tools were invoked)
-            // 2. Tool response messages for each tool call
-            // 3. Final assistant text message AFTER tool outputs
-            if !tool_calls.is_empty() {
-                chat_messages.push(json!({
-                    "role": "assistant",
-                    "content": Value::Null,
-                    "tool_calls": tool_calls
-                }));
-                for tr in tool_results {
-                    chat_messages.push(tr);
-                }
+            if !clean_txt.is_empty() || !emitted_any_step {
                 if !clean_txt.is_empty() {
-                    chat_messages.push(json!({
-                        "role": "assistant",
-                        "content": clean_txt
-                    }));
+                    chat_messages.push(json!({ "role": "assistant", "content": clean_txt }));
                 }
-            } else if !clean_txt.is_empty() {
-                chat_messages.push(json!({ "role": "assistant", "content": clean_txt }));
             }
         }
     }
@@ -545,6 +673,67 @@ mod tests {
         let last = msgs.last().unwrap().get("content").and_then(Value::as_str).unwrap();
         assert!(last.contains("FAILED TURN (provider.auth: 401 invalid key)"));
         assert!(last.contains("UNRESOLVED TOOL ERRORS IN TURN"));
+    }
+
+    #[test]
+    fn replays_multi_step_boundaries_extra_content_and_bounds_images_with_hysteresis() {
+        let hist = vec![
+            json!({
+                "type": "user",
+                "text": "check img",
+                "files": [{ "name": "a.png", "uri": "data:image/png;base64,AAAA", "mime": "image/png" }]
+            }),
+            json!({
+                "type": "assistant",
+                "content": [
+                    { "type": "text", "text": "Step 1 reading." },
+                    {
+                        "type": "tool",
+                        "id": "c1",
+                        "name": "read",
+                        "extra_content": { "google": { "thought_signature": "sig_1" } },
+                        "state": { "status": "completed", "input": { "filePath": "a.js" }, "structured": { "content": "1: ok" } }
+                    },
+                    { "type": "text", "text": "Step 2 editing." },
+                    {
+                        "type": "tool",
+                        "id": "c2",
+                        "name": "edit",
+                        "state": { "status": "completed", "input": { "filePath": "a.js" }, "structured": { "ok": true, "output": "edited" } }
+                    },
+                    { "type": "text", "text": "All done." }
+                ]
+            }),
+        ];
+
+        // Non-vision model strips historical image_url
+        let msgs_txt = build_chat_messages_with_options(&hist, "sys", false);
+        assert!(msgs_txt[1]["content"].is_string());
+        assert!(msgs_txt[1]["content"].as_str().unwrap().contains("omitted for text-only"));
+
+        // Multi-step boundaries preserved (2 separate tool_calls assistant msgs, NOT collapsed into 1)
+        let tool_call_msgs: Vec<&Value> = msgs_txt
+            .iter()
+            .filter(|m| m.get("tool_calls").is_some())
+            .collect();
+        assert_eq!(tool_call_msgs.len(), 2);
+        assert_eq!(
+            tool_call_msgs[0].pointer("/tool_calls/0/extra_content/google/thought_signature"),
+            Some(&json!("sig_1"))
+        );
+
+        // Hysteresis image bounding replaces oldest image first
+        let mut img_msgs = vec![
+            json!({ "role": "user", "content": [{ "type": "image_url", "image_url": { "url": format!("data:image/png;base64,{}", "A".repeat(400)) } }] }),
+            json!({ "role": "user", "content": [{ "type": "image_url", "image_url": { "url": format!("data:image/png;base64,{}", "B".repeat(400)) } }] }),
+        ];
+        let removed = bound_inline_images_with_limits(&mut img_msgs, 500, 450);
+        assert_eq!(removed, 1);
+        assert!(img_msgs[0]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("image was removed"));
+        assert!(img_msgs[1]["content"][0].get("image_url").is_some());
     }
 
     #[test]

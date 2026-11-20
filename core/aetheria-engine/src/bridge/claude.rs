@@ -175,6 +175,16 @@ pub(crate) async fn handle_claude_request(body: Value, model: &str, is_stream: b
         }
 
         let user_blocks = build_claude_user_content(m.get("content"));
+        // Anthropic Messages API forbids two consecutive `user` turns (e.g. `tool_result` followed
+        // by tool vision frames). Merge into the previous `user` message's content array.
+        if let Some(last) = claude_msgs.last_mut() {
+            if last.get("role").and_then(|v| v.as_str()) == Some("user") {
+                if let Some(arr) = last.get_mut("content").and_then(|v| v.as_array_mut()) {
+                    arr.extend(user_blocks);
+                    continue;
+                }
+            }
+        }
         claude_msgs.push(json!({
             "role": "user",
             "content": user_blocks
@@ -183,12 +193,16 @@ pub(crate) async fn handle_claude_request(body: Value, model: &str, is_stream: b
 
     let mut payload = json!({
         "model": model,
-        "max_tokens": body.get("max_tokens").and_then(|v| v.as_u64()).unwrap_or(8192),
+        "max_tokens": body.get("max_tokens").and_then(|v| v.as_u64()).unwrap_or(16384),
         "messages": claude_msgs,
         "stream": false
     });
     if !sys_parts.is_empty() {
-        payload["system"] = Value::String(sys_parts.join("\n\n"));
+        payload["system"] = json!([{
+            "type": "text",
+            "text": sys_parts.join("\n\n"),
+            "cache_control": { "type": "ephemeral" }
+        }]);
     }
 
     if let Some(tools) = body.get("tools").and_then(|v| v.as_array()) {
@@ -212,7 +226,20 @@ pub(crate) async fn handle_claude_request(body: Value, model: &str, is_stream: b
             }
         }
         if !mapped_tools.is_empty() {
+            if let Some(last_tool) = mapped_tools.last_mut().and_then(|v| v.as_object_mut()) {
+                last_tool.insert(
+                    "cache_control".to_string(),
+                    json!({ "type": "ephemeral" }),
+                );
+            }
             payload["tools"] = Value::Array(mapped_tools);
+            if let Some(tc) = body.get("tool_choice").and_then(|v| v.as_str()) {
+                match tc {
+                    "none" => payload["tool_choice"] = json!({ "type": "none" }),
+                    "required" => payload["tool_choice"] = json!({ "type": "any" }),
+                    _ => {}
+                }
+            }
         }
     }
 

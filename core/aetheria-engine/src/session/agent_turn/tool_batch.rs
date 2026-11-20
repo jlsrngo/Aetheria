@@ -14,6 +14,7 @@ struct PreparedCall {
     fn_name: String,
     args_str: String,
     args_val: Value,
+    extra_content: Option<Value>,
     syntax_error: Option<String>,
     policy_error: Option<String>,
     loop_warning: Option<String>,
@@ -86,12 +87,14 @@ pub(crate) async fn execute_tool_batch(
                 serde_json::to_string(&args_val).unwrap_or_else(|_| args_str.clone());
             doom_loop_detector.check_and_record(&fn_name, &args_canonical)
         };
+        let extra_content = tc.get("extra_content").filter(|v| !v.is_null()).cloned();
         prepared_calls.push(PreparedCall {
             call_id,
             display_name,
             fn_name,
             args_str,
             args_val,
+            extra_content,
             syntax_error,
             policy_error,
             loop_warning,
@@ -265,7 +268,7 @@ pub(crate) async fn execute_tool_batch(
             );
         }
 
-        content_parts.push(json!({
+        let mut tool_part = json!({
             "type": "tool",
             "id": call_id,
             "name": display_name,
@@ -277,7 +280,11 @@ pub(crate) async fn execute_tool_batch(
                 "attachments": []
             },
             "time": { "created": tool_start, "completed": tool_end }
-        }));
+        });
+        if let Some(extra) = pc.extra_content {
+            tool_part["extra_content"] = extra;
+        }
+        content_parts.push(tool_part);
 
         let model_text = crate::tool::truncator::format_tool_result_for_model(&fn_name, &tool_out);
         let direction = crate::tool::truncator::preferred_direction_for_tool(&fn_name);

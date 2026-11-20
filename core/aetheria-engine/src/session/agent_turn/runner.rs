@@ -31,7 +31,6 @@ use super::context::{
     assemble_system_prompt_for_turn, resolve_mentioned_files, resolve_motioncraft_style_command,
     resolve_reference_report, resolve_voice_preset_command,
 };
-use super::history::build_chat_messages;
 use super::step_http::{execute_step_and_stream, StepHttpContext, StepStreamOutcome};
 use super::tool_batch::execute_tool_batch;
 use super::turn_finalize::{
@@ -192,9 +191,9 @@ pub async fn run_agent_turn(
         context_limit: model_limit.context,
     };
 
-    await_pending_precompute(session_id).await;
     let (mut cycle_start_tokens, hist_total_tokens) = measure_stored_history_tokens(history);
     if policy.auto_enabled && policy.ceiling != usize::MAX && hist_total_tokens >= policy.ceiling {
+        await_pending_precompute(session_id).await;
         let ep = TurnEndpoint {
             client: &client,
             base_url: &base_url,
@@ -737,7 +736,12 @@ async fn prepare_initial_chat_messages(
         );
     }
 
-    let mut chat_messages = build_chat_messages(&effective_history, &sys_prompt);
+    let history_supports_vision = model_supports_vision_from_config(Some(cfg), provider_id, model_id);
+    let mut chat_messages = super::history::build_chat_messages_with_options(
+        &effective_history,
+        &sys_prompt,
+        history_supports_vision,
+    );
     let ffmpeg_bin = find_ffmpeg_bin();
     let (social_transcriptions, social_images) =
         process_social_links(workspace_dir, prompt_text, ffmpeg_bin.as_deref()).await;
@@ -792,10 +796,14 @@ async fn prepare_initial_chat_messages(
                 extra_context.push(ref_report);
             }
         }
-        let already_injected_am_api = chat_messages.iter().any(|m| {
-            m.get("content")
-                .and_then(|v| v.as_str())
-                .is_some_and(|s| s.contains("<am_runtime_api_reference>"))
+        let already_injected_am_api = chat_messages.iter().any(|m| match m.get("content") {
+            Some(Value::String(s)) => s.contains("<am_runtime_api_reference>"),
+            Some(Value::Array(arr)) => arr.iter().any(|item| {
+                item.get("text")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|t| t.contains("<am_runtime_api_reference>"))
+            }),
+            _ => false,
         });
         if !already_injected_am_api
             && super::context::should_inject_am_api_reference(
@@ -824,6 +832,7 @@ async fn prepare_initial_chat_messages(
     )
     .await;
     chat_messages.push(user_msg);
+    super::history::bound_inline_images(&mut chat_messages);
 
     (chat_messages, is_greeting)
 }
@@ -1234,15 +1243,7 @@ async fn maybe_compact_in_turn(
     last_usage_slot: &mut Option<RecordedUsage>,
     cycle_start_tokens: &mut usize,
 ) -> bool {
-    let total_chars: usize = chat_messages
-        .iter()
-        .map(|m| {
-            m.get("content")
-                .and_then(|v| v.as_str())
-                .map(|s| s.len())
-                .unwrap_or(50)
-        })
-        .sum();
+    let est_tokens = crate::session::compaction::total_history_tokens(chat_messages);
     if step > 0
         && policy.auto_enabled
         && policy.ceiling != usize::MAX
@@ -1256,7 +1257,7 @@ async fn maybe_compact_in_turn(
         *last_usage_slot = None;
         *cycle_start_tokens = 0;
     } else if (step >= 28 && chat_messages.len() > 65)
-        || total_chars > 220_000
+        || est_tokens > policy.context_limit.saturating_mul(85) / 100
         || crate::session::compaction::should_compact(chat_messages, policy.context_limit)
     {
         *chat_messages = crate::session::compaction::emergency_compact_messages(chat_messages);

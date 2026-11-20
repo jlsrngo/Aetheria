@@ -174,6 +174,12 @@ fn process_sse_line<F: FnMut(&str, &str, Value)>(
             {
                 emitter.on_reasoning_delta(r_frag);
             }
+            if let Some(rd) = delta.get("reasoning_details") {
+                emitter.on_reasoning_details(rd);
+            }
+            if let Some(ro) = delta.get("reasoning_opaque").and_then(|v| v.as_str()) {
+                emitter.on_reasoning_opaque(ro);
+            }
             if let Some(t_frag) = delta.get("content").and_then(|v| v.as_str()) {
                 emitter.on_text_delta(t_frag);
             }
@@ -188,6 +194,9 @@ fn process_sse_line<F: FnMut(&str, &str, Value)>(
                     let name = tc.pointer("/function/name").and_then(|v| v.as_str());
                     let args = tc.pointer("/function/arguments").and_then(|v| v.as_str());
                     emitter.on_tool_call_delta(index, id, name, args);
+                    if let Some(extra) = tc.get("extra_content") {
+                        emitter.on_tool_call_extra_content(index, extra);
+                    }
                 }
             }
         }
@@ -251,12 +260,21 @@ fn parse_json_completion_into_emitter(
     if !msg_reasoning.is_empty() {
         emitter.on_reasoning_delta(&msg_reasoning);
     }
+    if let Some(rd) = msg.get("reasoning_details") {
+        emitter.on_reasoning_details(rd);
+    }
+    if let Some(ro) = msg.get("reasoning_opaque").and_then(|v| v.as_str()) {
+        emitter.on_reasoning_opaque(ro);
+    }
     if let Some(tc_arr) = msg.get("tool_calls").and_then(|v| v.as_array()) {
         for (idx, tc) in tc_arr.iter().enumerate() {
             let id = tc.get("id").and_then(|v| v.as_str());
             let name = tc.pointer("/function/name").and_then(|v| v.as_str());
             let args = tc.pointer("/function/arguments").and_then(|v| v.as_str());
             emitter.on_tool_call_delta(idx, id, name, args);
+            if let Some(extra) = tc.get("extra_content") {
+                emitter.on_tool_call_extra_content(idx, extra);
+            }
         }
     }
     if !msg_text.is_empty() {
@@ -306,5 +324,27 @@ mod tests {
         assert_eq!(out.text, "Hello world");
         assert_eq!(out.raw_finish.as_deref(), Some("stop"));
         assert_eq!(out.usage.unwrap()["prompt_tokens"], 10);
+    }
+
+    #[test]
+    fn test_process_sse_preserves_gemini_extra_content_and_null_tool_call_content() {
+        let mut em = StreamStepEmitter::with_emitter("ws", "s2", "m2", |_, _, _| {});
+        let mut saw_done = false;
+        process_sse_line(
+            r#"data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_g1","function":{"name":"read","arguments":"{\"filePath\":\"a.js\"}"},"extra_content":{"google":{"thought_signature":"sig_abc_123"}}}]},"finish_reason":"tool_calls"}]}"#,
+            &mut em,
+            &mut saw_done,
+        )
+        .unwrap();
+        process_sse_line("data: [DONE]", &mut em, &mut saw_done).unwrap();
+
+        let out = em.finish_all();
+        assert!(out.assistant_msg["content"].is_null());
+        assert_eq!(
+            out.tool_calls[0]
+                .pointer("/extra_content/google/thought_signature")
+                .and_then(|v| v.as_str()),
+            Some("sig_abc_123")
+        );
     }
 }

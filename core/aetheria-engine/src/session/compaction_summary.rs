@@ -300,25 +300,109 @@ fn parse_compaction_sse_line(raw: &str, acc: &mut String, saw_done: &mut bool) {
     }
 }
 
-/// Applies the compacted summary onto `chat_messages`, preserving `system` (if present) and
-/// the most recent user prompt.
+fn is_synthetic_tool_vision_message(msg: &Value) -> bool {
+    if msg.get("role").and_then(|v| v.as_str()) != Some("user") {
+        return false;
+    }
+    if let Some(arr) = msg.get("content").and_then(|v| v.as_array()) {
+        if let Some(first_txt) = arr.first().and_then(|p| p.get("text")).and_then(|v| v.as_str()) {
+            return first_txt.starts_with("[Visual Inspection Images");
+        }
+    }
+    false
+}
+
+/// Applies the compacted summary onto `chat_messages` (OpenCode pattern):
+/// 1. Keeps `system` at index 0.
+/// 2. Emits `<conversation-checkpoint>` as `role: "user"` (valid on Gemini, Anthropic & OpenAI).
+/// 3. Preserves a verbatim recent tail (up to ~15,000 tokens) starting on a clean non-`tool`
+///    message boundary so recent tool calls/edits are not forgotten; falls back to the latest
+///    non-synthetic user message if the tail would be empty.
 pub fn apply_compacted_messages(chat_messages: &mut Vec<Value>, summary_text: &str) {
+    const KEEP_TAIL_TOKENS: usize = 15_000;
+
     let sys_msg = chat_messages
         .first()
         .filter(|m| m.get("role").and_then(|v| v.as_str()) == Some("system"))
         .cloned();
-    let latest_user = chat_messages
-        .iter()
-        .rfind(|m| m.get("role").and_then(|v| v.as_str()) == Some("user"))
-        .cloned()
-        .unwrap_or_else(|| json!({ "role": "user", "content": "Continue." }));
+    let body_start = usize::from(sys_msg.is_some());
+    let body = if body_start < chat_messages.len() {
+        &chat_messages[body_start..]
+    } else {
+        &[]
+    };
 
-    let mut out = Vec::with_capacity(3);
+    // Walk backward from the newest message to keep up to KEEP_TAIL_TOKENS verbatim.
+    let mut tail_start = body.len();
+    let mut kept_tokens = 0usize;
+    for (idx, msg) in body.iter().enumerate().rev() {
+        let t = crate::session::compaction::estimate_message_tokens(msg);
+        if kept_tokens > 0 && kept_tokens + t > KEEP_TAIL_TOKENS {
+            break;
+        }
+        kept_tokens += t;
+        tail_start = idx;
+    }
+
+    // Never start the verbatim tail on a `tool` role or synthetic visual-inspection turn (would orphan
+    // tool_call_id or break alternation). Advance forward to a clean `user` or `assistant` boundary.
+    while tail_start < body.len() {
+        let role = body[tail_start]
+            .get("role")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if role == "tool" || is_synthetic_tool_vision_message(&body[tail_start]) {
+            tail_start += 1;
+        } else {
+            break;
+        }
+    }
+    // Only keep a tail if we actually compacted at least 1 earlier message.
+    let mut preserved_tail: Vec<Value> = if tail_start > 0 && tail_start < body.len() {
+        body[tail_start..].to_vec()
+    } else {
+        Vec::new()
+    };
+
+    if preserved_tail.is_empty() {
+        let latest_real_user = body
+            .iter()
+            .rfind(|m| {
+                m.get("role").and_then(|v| v.as_str()) == Some("user")
+                    && !is_synthetic_tool_vision_message(m)
+            })
+            .cloned()
+            .unwrap_or_else(|| json!({ "role": "user", "content": "Continue." }));
+        preserved_tail.push(latest_real_user);
+    }
+
+    let checkpoint_msg = json!({
+        "role": "user",
+        "content": format!(
+            "<conversation-checkpoint>\nEarlier conversation turns were compacted to preserve context window:\n\n{}\n</conversation-checkpoint>",
+            summary_text.trim()
+        )
+    });
+
+    let mut out = Vec::with_capacity(preserved_tail.len() + 3);
     if let Some(sys) = sys_msg {
         out.push(sys);
     }
-    out.push(json!({ "role": "assistant", "content": summary_text }));
-    out.push(latest_user);
+    out.push(checkpoint_msg);
+    // If the verbatim tail begins with a `user` message, insert a brief assistant ack so strict
+    // user/assistant alternating providers (Anthropic/Gemini) remain strictly alternating.
+    if preserved_tail
+        .first()
+        .and_then(|m| m.get("role"))
+        .and_then(|v| v.as_str())
+        == Some("user")
+    {
+        out.push(json!({
+            "role": "assistant",
+            "content": "Understood — I have the compacted checkpoint context and will continue seamlessly."
+        }));
+    }
+    out.extend(preserved_tail);
     *chat_messages = out;
 }
 
@@ -612,5 +696,30 @@ mod tests {
         let cap = (full.len() as f64 * SHRINK_STEPS[0]).floor() as usize;
         let shrunk = build_compaction_transcript(&msgs, Some(cap));
         assert!(shrunk.len() < full.len());
+    }
+
+    #[test]
+    fn apply_compacted_messages_uses_user_checkpoint_and_skips_synthetic_vision() {
+        let mut msgs = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "Real user request #1" }),
+            json!({ "role": "assistant", "content": "A".repeat(80_000) }),
+            json!({
+                "role": "user",
+                "content": [
+                    { "type": "text", "text": "[Visual Inspection Images attached from tool execution.]" },
+                    { "type": "image_url", "image_url": { "url": "data:image/png;base64,AAAA" } }
+                ]
+            }),
+        ];
+        apply_compacted_messages(&mut msgs, "Summary of work so far");
+        assert_eq!(msgs[0]["role"], "system");
+        assert_eq!(msgs[1]["role"], "user");
+        assert!(msgs[1]["content"]
+            .as_str()
+            .unwrap()
+            .contains("<conversation-checkpoint>"));
+        // Must NOT treat synthetic visual inspection message as the real user prompt
+        assert!(msgs.iter().any(|m| m["content"] == "Real user request #1"));
     }
 }

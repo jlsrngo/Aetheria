@@ -105,6 +105,120 @@ pub fn sanitize_gemini_schema(schema: &Value) -> Value {
     }
 }
 
+/// Surgical JSON Schema normalizer for Gemini OpenAI-compatible endpoints (`/v1beta/openai`,
+/// OpenRouter, gateways). Mirrors OpenCode `packages/ai/src/protocols/utils/gemini-json-schema.ts`:
+/// preserves `anyOf`/`oneOf`/`const`/`default`/`enum`, fixes Draft-04 boolean exclusive bounds,
+/// upgrades tuple `items`/`additionalItems`, prunes undeclared `required`, and ensures root object.
+pub fn normalize_gemini_openai_schema(schema: &Value) -> Value {
+    fn visit(node: &Value, depth: usize) -> Value {
+        if depth > 24 {
+            return serde_json::json!({});
+        }
+        match node {
+            Value::Array(arr) => Value::Array(arr.iter().map(|v| visit(v, depth + 1)).collect()),
+            Value::Object(map) => {
+                let mut out = serde_json::Map::new();
+                for (k, v) in map {
+                    if matches!(k.as_str(), "$schema" | "additionalProperties") {
+                        continue;
+                    }
+                    // Draft-04 boolean exclusiveMinimum/Maximum -> Draft-07+ numeric
+                    if k == "exclusiveMinimum" && v.is_boolean() {
+                        if v.as_bool() == Some(true) {
+                            if let Some(min_val) = map.get("minimum") {
+                                out.insert("exclusiveMinimum".to_string(), min_val.clone());
+                            }
+                        }
+                        continue;
+                    }
+                    if k == "exclusiveMaximum" && v.is_boolean() {
+                        if v.as_bool() == Some(true) {
+                            if let Some(max_val) = map.get("maximum") {
+                                out.insert("exclusiveMaximum".to_string(), max_val.clone());
+                            }
+                        }
+                        continue;
+                    }
+                    if k == "properties" {
+                        if let Some(props) = v.as_object() {
+                            let mut p_out = serde_json::Map::new();
+                            for (pk, pv) in props {
+                                p_out.insert(pk.clone(), visit(pv, depth + 1));
+                            }
+                            out.insert(k.clone(), Value::Object(p_out));
+                            continue;
+                        }
+                    }
+                    if k == "items" && v.is_array() {
+                        out.insert("prefixItems".to_string(), visit(v, depth + 1));
+                        continue;
+                    }
+                    if k == "additionalItems" {
+                        if map.get("items").is_some_and(Value::is_array) {
+                            out.insert("items".to_string(), visit(v, depth + 1));
+                        }
+                        continue;
+                    }
+                    out.insert(k.clone(), visit(v, depth + 1));
+                }
+                if out.contains_key("exclusiveMinimum") && map.get("exclusiveMinimum").is_some_and(Value::is_boolean) {
+                    out.remove("minimum");
+                }
+                if out.contains_key("exclusiveMaximum") && map.get("exclusiveMaximum").is_some_and(Value::is_boolean) {
+                    out.remove("maximum");
+                }
+                if let Some(Value::Array(req)) = out.get("required").cloned() {
+                    let props = out.get("properties").and_then(|p| p.as_object());
+                    let filtered: Vec<Value> = req
+                        .into_iter()
+                        .filter(|r| {
+                            r.as_str()
+                                .is_some_and(|name| props.is_some_and(|p| p.contains_key(name)))
+                        })
+                        .collect();
+                    if filtered.is_empty() {
+                        out.remove("required");
+                    } else {
+                        out.insert("required".to_string(), Value::Array(filtered));
+                    }
+                }
+                if out.contains_key("properties") && !out.contains_key("type") {
+                    out.insert("type".to_string(), Value::String("object".to_string()));
+                }
+                Value::Object(out)
+            }
+            _ => node.clone(),
+        }
+    }
+
+    let mut root = visit(schema, 0);
+    if let Some(obj) = root.as_object_mut() {
+        obj.entry("type".to_string())
+            .or_insert_with(|| Value::String("object".to_string()));
+    }
+    root
+}
+
+/// Normalizes tool definitions array for Gemini OpenAI-compatible endpoints.
+pub fn normalize_tools_for_model(model_id: &str, tools: &[Value]) -> Vec<Value> {
+    if !model_id.to_ascii_lowercase().contains("gemini") {
+        return tools.to_vec();
+    }
+    tools
+        .iter()
+        .map(|tool| {
+            let mut cloned = tool.clone();
+            if let Some(fn_obj) = cloned.get_mut("function").and_then(|v| v.as_object_mut()) {
+                if let Some(params) = fn_obj.get("parameters") {
+                    let norm = normalize_gemini_openai_schema(params);
+                    fn_obj.insert("parameters".to_string(), norm);
+                }
+            }
+            cloned
+        })
+        .collect()
+}
+
 /// Normalizes a JSON Schema for OpenAI / Codex Responses API.
 /// Ensures object type when properties exist, and prunes invalid required entries.
 pub fn normalize_openai_schema(schema: &Value) -> Value {

@@ -20,6 +20,7 @@ pub(crate) struct StreamToolCall {
     pub call_id: String,
     pub name: String,
     pub args: String,
+    pub extra_content: Option<Value>,
     pub started_emitted: bool,
 }
 
@@ -65,6 +66,8 @@ where
     text: Option<FragmentBlock>,
     reasoning: Option<FragmentBlock>,
     accumulated_reasoning: String,
+    reasoning_details: Option<Value>,
+    reasoning_opaque: Option<String>,
     tool_calls: BTreeMap<usize, StreamToolCall>,
     content_parts: Vec<Value>,
     flush_deadline: Option<Instant>,
@@ -96,6 +99,8 @@ where
             text: None,
             reasoning: None,
             accumulated_reasoning: String::new(),
+            reasoning_details: None,
+            reasoning_opaque: None,
             tool_calls: BTreeMap::new(),
             content_parts: Vec::new(),
             flush_deadline: None,
@@ -332,6 +337,7 @@ where
             call_id: gen_id("call"),
             name: String::new(),
             args: String::new(),
+            extra_content: None,
             started_emitted: false,
         });
         if let Some(cid) = id.filter(|s| !s.is_empty()) {
@@ -356,6 +362,32 @@ where
         }
         if let Some(frag) = args_frag {
             entry.args.push_str(frag);
+        }
+    }
+
+    pub fn on_tool_call_extra_content(&mut self, index: usize, extra: &Value) {
+        if extra.is_null() {
+            return;
+        }
+        let entry = self.tool_calls.entry(index).or_insert_with(|| StreamToolCall {
+            call_id: gen_id("call"),
+            name: String::new(),
+            args: String::new(),
+            extra_content: None,
+            started_emitted: false,
+        });
+        entry.extra_content = Some(extra.clone());
+    }
+
+    pub fn on_reasoning_details(&mut self, details: &Value) {
+        if !details.is_null() {
+            self.reasoning_details = Some(details.clone());
+        }
+    }
+
+    pub fn on_reasoning_opaque(&mut self, opaque: &str) {
+        if !opaque.is_empty() {
+            self.reasoning_opaque = Some(opaque.to_string());
         }
     }
 
@@ -416,22 +448,37 @@ where
                     "input": input,
                 }),
             );
-            tc_values.push(json!({
+            let mut tc_obj = json!({
                 "id": tc.call_id,
                 "type": "function",
                 "function": {
                     "name": final_name,
                     "arguments": tc.args,
                 }
-            }));
+            });
+            if let Some(ref extra) = tc.extra_content {
+                tc_obj["extra_content"] = extra.clone();
+            }
+            tc_values.push(tc_obj);
         }
 
+        let content_val = if text.is_empty() && !tc_values.is_empty() {
+            Value::Null
+        } else {
+            Value::String(text.clone())
+        };
         let mut assistant_msg = json!({
             "role": "assistant",
-            "content": text,
+            "content": content_val,
         });
         if !reasoning.is_empty() {
             assistant_msg["reasoning_content"] = Value::String(reasoning.clone());
+        }
+        if let Some(rd) = self.reasoning_details.take() {
+            assistant_msg["reasoning_details"] = rd;
+        }
+        if let Some(ro) = self.reasoning_opaque.take() {
+            assistant_msg["reasoning_opaque"] = Value::String(ro);
         }
         if !tc_values.is_empty() {
             assistant_msg["tool_calls"] = Value::Array(tc_values.clone());

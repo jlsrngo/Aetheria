@@ -78,6 +78,22 @@ pub fn calculate_ceiling(context_window: usize) -> usize {
     context_window.saturating_sub(reserve)
 }
 
+/// Computes a context-fitted `max_tokens` output cap (mirrors OpenCode `outputLimit()`).
+/// Prevents providers from rejecting requests when `input_tokens + max_tokens > context_window`,
+/// while letting high-output models (e.g. Gemini 65k) use their full output capacity when headroom allows.
+pub fn compute_output_limit(model_limit: ModelContextLimit, estimated_input_tokens: usize) -> u64 {
+    const MAX_CAP: usize = 65_536;
+    const MIN_FLOOR: usize = 1_024;
+    let model_out = model_limit.output.clamp(MIN_FLOOR, MAX_CAP);
+    if model_limit.context == 0 {
+        return model_out as u64;
+    }
+    let usable_window = ((model_limit.context as f64) * 0.98).floor() as usize;
+    let buffered_input = ((estimated_input_tokens as f64) * 1.12).ceil() as usize;
+    let headroom = usable_window.saturating_sub(buffered_input);
+    headroom.min(model_out).max(MIN_FLOOR) as u64
+}
+
 /// Extracts total measured tokens (`input + cache.read + cache.write + output + reasoning`)
 /// from a persisted or recorded usage block, returning `None` when zero/missing.
 pub fn total_tokens_from_usage_json(tokens: &Value) -> Option<usize> {
