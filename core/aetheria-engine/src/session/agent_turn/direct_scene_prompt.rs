@@ -108,14 +108,22 @@ pub(crate) fn build_scene_hard_facts_prompt(
         .unwrap_or(2.0);
     let end = start + dur;
 
+    let bpm_label = match style_scene
+        .and_then(|s| s.get("bpmSource"))
+        .and_then(Value::as_str)
+    {
+        Some("fallback") => "BPM tak terukur".to_string(),
+        _ => format!("BPM={:.1}", bpm),
+    };
+
     let mut lines = vec![
         format!(
             "TARGET SCENE {}/{}: id=\"{}\", script=\"script/scene{}.js\"",
             scene_num, total_scenes, scene_id, scene_num
         ),
         format!(
-            "CANVAS & TIMING: {}x{} @ {}fps | BPM={:.1} | global {:.3}s -> {:.3}s | local t = 0.000s .. {:.3}s",
-            width, height, fps, bpm, start, end, dur
+            "CANVAS & TIMING: {}x{} @ {}fps | {} | global {:.3}s -> {:.3}s | local t = 0.000s .. {:.3}s",
+            width, height, fps, bpm_label, start, end, dur
         ),
         format!(
             "IMPORTANT TIME MAPPING: The timestamp labels printed on `ref_scene_{:02}_beats.jpg` are GLOBAL seconds (`global_t`). Inside `AM.registerScene(\"{}\", function(ctx, t, dur, scene, AM))`, `t` is LOCAL seconds (`t = global_t - {:.3}`). For example, global {:.2}s = local t={:.2}s (early), global {:.2}s = local t={:.2}s (mid), global {:.2}s = local t={:.2}s (late).",
@@ -199,6 +207,41 @@ pub(crate) fn build_scene_hard_facts_prompt(
                     light,
                     dark,
                 ));
+            }
+        }
+        if let Some(cm) = sc.get("cameraMotion").or_else(|| sc.pointer("/layout/cameraMotion")) {
+            if let Some(segs) = cm.get("segments").and_then(Value::as_array) {
+                let parts: Vec<String> = segs
+                    .iter()
+                    .filter(|seg| seg.get("confidence").and_then(Value::as_str) != Some("low"))
+                    .map(|seg| {
+                        format!(
+                            "local {:.2}s->{:.2}s scale={:.3}->{:.3} rot={:+.2}->{:+.2}deg pan=({:+.1},{:+.1})->({:+.1},{:+.1})px ease={} conf={}",
+                            seg.get("t0").and_then(Value::as_f64).unwrap_or(0.0),
+                            seg.get("t1").and_then(Value::as_f64).unwrap_or(dur),
+                            seg.get("scaleFrom").and_then(Value::as_f64).unwrap_or(1.0),
+                            seg.get("scaleTo").and_then(Value::as_f64).unwrap_or(1.0),
+                            seg.get("rotDegFrom").and_then(Value::as_f64).unwrap_or(0.0),
+                            seg.get("rotDegTo").and_then(Value::as_f64).unwrap_or(0.0),
+                            seg.get("txFrom").and_then(Value::as_f64).unwrap_or(0.0),
+                            seg.get("tyFrom").and_then(Value::as_f64).unwrap_or(0.0),
+                            seg.get("txTo").and_then(Value::as_f64).unwrap_or(0.0),
+                            seg.get("tyTo").and_then(Value::as_f64).unwrap_or(0.0),
+                            seg.get("ease").and_then(Value::as_str).unwrap_or("linear"),
+                            seg.get("confidence").and_then(Value::as_str).unwrap_or("medium"),
+                        )
+                    })
+                    .collect();
+                if !parts.is_empty() {
+                    let px = cm.pointer("/pivot/x").and_then(Value::as_f64).unwrap_or(0.5);
+                    let py = cm.pointer("/pivot/y").and_then(Value::as_f64).unwrap_or(0.5);
+                    lines.push(format!(
+                        "MEASURED GLOBAL CAMERA MOTION (apply via `AM.applyCamera(ctx, {{ s, cx, cy, rot }}, W, H)`): {} | pivot=({:.3}, {:.3})",
+                        parts.join(" ; "),
+                        px,
+                        py,
+                    ));
+                }
             }
         }
         if let Some(mc) = sc.get("motionClues") {
@@ -506,6 +549,16 @@ mod tests {
             "motionClues": {
                 "containerClip": { "kind": "centered-container", "outerBox": [297, 175, 439, 220] },
                 "saturatedAccents": [{ "hex": "#884BF9", "timestamp": 4.667 }]
+            },
+            "cameraMotion": {
+                "segments": [{
+                    "t0": 2.13, "t1": 2.43,
+                    "scaleFrom": 1.0, "scaleTo": 1.48,
+                    "rotDegFrom": 0.0, "rotDegTo": 2.2,
+                    "txFrom": 0.0, "tyFrom": 0.0, "txTo": 0.0, "tyTo": 0.0,
+                    "ease": "inCubic", "confidence": "high"
+                }],
+                "pivot": { "x": 0.5, "y": 0.5 }
             }
         });
         let film_sc = json!({ "id": "scene2_problem_or_context", "start": 3.167, "duration": 2.43 });
@@ -524,8 +577,34 @@ mod tests {
         assert!(prompt.contains("PRIMARY FOREGROUND BOUNDING BOX"));
         assert!(!prompt.contains("MUST ctx.clip()"));
         assert!(prompt.contains("#884BF9@local_t=1.50s"));
+        assert!(prompt.contains("MEASURED GLOBAL CAMERA MOTION"));
+        assert!(prompt.contains("AM.applyCamera"));
+        assert!(prompt.contains("scale=1.000->1.480"));
         assert!(!prompt.contains("Showrea"));
         assert!(!prompt.contains("Ertem"));
+    }
+
+    #[test]
+    fn hard_facts_prompt_marks_fallback_bpm_as_unmeasured() {
+        let style_sc = json!({
+            "start": 0.0,
+            "duration": 2.0,
+            "bpmSource": "fallback"
+        });
+        let film_sc = json!({ "id": "scene1_hook", "start": 0.0, "duration": 2.0 });
+        let prompt = build_scene_hard_facts_prompt(
+            Some(&style_sc),
+            &film_sc,
+            1,
+            2,
+            1024,
+            576,
+            30,
+            120.0,
+            "Test fallback BPM prompt.",
+        );
+        assert!(prompt.contains("BPM tak terukur"));
+        assert!(!prompt.contains("BPM=120.0"));
     }
 
     #[test]

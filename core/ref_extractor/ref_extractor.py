@@ -604,6 +604,15 @@ def compile_scene_am_skeleton(ast_scene: Dict[str, Any], width: int, height: int
             "    ctx.fillRect(0, 0, W, H);",
         ])
 
+    cam_motion = ast_scene.get("cameraMotion")
+    if cam_motion:
+        try:
+            from ref_camera_motion import compile_camera_motion_am_js
+
+            lines.extend(compile_camera_motion_am_js(cam_motion, width, height))
+        except Exception:
+            pass
+
     for idx, layer in enumerate(layers[:8]):
         kind = layer.get("kind", "card")
         box = layer.get("box") or {"x": 0.15, "y": 0.25, "w": 0.7, "h": 0.2}
@@ -1248,11 +1257,13 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
         sheet_timestamps.append(round(cur_sheet_t, 3))
         cur_sheet_t += sheet_step
 
-    scene_specs: List[Tuple[int, float, float, float, str, float, float, float, List[float]]] = []
+    scene_specs: List[Tuple[int, float, float, float, str, float, float, float, List[float], List[int]]] = []
     roles = ["hook", "problem_or_context", "proof_or_demo", "cta"]
     needed_indices = set()
     for ts in thumb_timestamps + sheet_timestamps:
         needed_indices.add(min(max(0, total_frames - 1), max(0, int(round(ts * fps)))))
+
+    from ref_camera_motion import plan_scene_camera_sample_frames
 
     sub_sample_ratios = [0.05, 0.16, 0.28, 0.42, 0.56, 0.70, 0.84, 0.95]
     for i, start in enumerate(cut_timestamps):
@@ -1266,9 +1277,14 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
             round(min(max(0.0, duration - 0.03), start + dur * r), 3)
             for r in sub_sample_ratios
         ]
-        scene_specs.append((i, start, end, dur, role, ts_start, ts_mid, ts_end, sub_ts_list))
+        cam_indices = plan_scene_camera_sample_frames(
+            start, end, fps, total_frames, temporal.get("frameDiffs")
+        )
+        scene_specs.append((i, start, end, dur, role, ts_start, ts_mid, ts_end, sub_ts_list, cam_indices))
         for ts in [ts_start, ts_mid, ts_end] + sub_ts_list:
             needed_indices.add(min(max(0, total_frames - 1), max(0, int(round(ts * fps)))))
+        for c_idx in cam_indices:
+            needed_indices.add(c_idx)
 
     cached_frames: Dict[int, np.ndarray] = {}
     if needed_indices:
@@ -1313,7 +1329,9 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
                 "or rapidocr-onnxruntime to extract reference text strings."
             )
 
-    for i, start, end, dur, role, ts_start, ts_mid, ts_end, sub_ts_list in scene_specs:
+    from ref_camera_motion import estimate_scene_camera_motion
+
+    for i, start, end, dur, role, ts_start, ts_mid, ts_end, sub_ts_list, cam_indices in scene_specs:
         fr_start = _frame_at(ts_start)
         fr_mid = _frame_at(ts_mid)
         fr_end = _frame_at(ts_end)
@@ -1475,6 +1493,11 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
         except Exception:
             motion_clues = {}
         layout_info["motionClues"] = motion_clues
+        camera_motion = estimate_scene_camera_motion(
+            cached_frames.get, cam_indices, start, fps, width, height
+        )
+        if camera_motion is not None:
+            layout_info["cameraMotion"] = camera_motion
         scene_id = f"scene{i + 1}_{role}"
         scene_palettes.append(pal)
         scenes.append({
@@ -1495,6 +1518,7 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
             "subBeats": sub_beats,
             "gridTiltDeg": grid_tilt_deg,
             "cleanPlate": clean_plate,
+            "cameraMotion": camera_motion,
             "motionClues": motion_clues,
             "layout": layout_info,
         })
@@ -1511,6 +1535,7 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
             "gridTiltDeg": grid_tilt_deg,
             "contrastTiles": contrast_tiles,
             "cleanPlate": clean_plate,
+            "cameraMotion": camera_motion,
             "motionClues": motion_clues,
             "layers": ast_layers,
         }
@@ -1714,6 +1739,19 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
             tilt_val = float(s["gridTiltDeg"])
             tilt_rad = round(math.radians(tilt_val), 4)
             md += f"- **Detected Grid/Layout Tilt:** `{tilt_val:+.1f} deg` (rotate scene grid by `ctx.rotate({tilt_rad})` around canvas center — check top-left cell polarity vs `ref_scene_XX.jpg`)\n"
+        cm = s.get("cameraMotion")
+        if cm and cm.get("segments"):
+            seg_parts = []
+            for seg in cm["segments"]:
+                seg_parts.append(
+                    f"local {seg['t0']:.2f}s->{seg['t1']:.2f}s "
+                    f"scale={seg['scaleFrom']:.3f}->{seg['scaleTo']:.3f} "
+                    f"rot={seg['rotDegFrom']:+.2f}->{seg['rotDegTo']:+.2f}deg "
+                    f"pan=({seg['txFrom']:+.1f},{seg['tyFrom']:+.1f})->({seg['txTo']:+.1f},{seg['tyTo']:+.1f})px "
+                    f"ease={seg['ease']} conf={seg['confidence']}"
+                )
+            piv = cm.get("pivot") or {"x": 0.5, "y": 0.5}
+            md += f"- **Global Camera Motion (`AM.applyCamera`):** `{' ; '.join(seg_parts)}` | pivot=({piv.get('x', 0.5):.3f}, {piv.get('y', 0.5):.3f})\n"
         ct = ly.get("contrastTiles")
         if ct and ct.get("grid"):
             grid = ct["grid"]

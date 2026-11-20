@@ -274,8 +274,8 @@ def evaluate_synthetic_suite(suite: str) -> Dict[str, Any]:
                                 scale_sq_errs.append(((rel_s_pred - rel_s_truth) / max(1e-4, rel_s_truth) * 100.0) ** 2)
                                 rot_sq_errs.append((rel_r_pred - rel_r_truth) ** 2)
                                 pan_sq_errs.append(0.5 * ((rel_tx_pred - rel_tx_truth) ** 2 + (rel_ty_pred - rel_ty_truth) ** 2))
-                elif ts["kind"] in ("textured", "moving-object-static-bg", "dark-featureless"):
-                    # Control scene (no camera motion)
+                elif ts["kind"] in ("textured", "moving-object-static-bg", "dark-featureless") and ts.get("transitionFromPrev") != "crossfade":
+                    # Control scene (no camera motion, not merged with a crossfaded moving neighbor)
                     control_total += 1
                     segs = (cam_motion or {}).get("segments") or []
                     has_high_conf_move = any(
