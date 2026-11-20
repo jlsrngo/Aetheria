@@ -10,6 +10,7 @@ pub mod command_resolvers;
 pub mod context;
 pub(crate) mod direct_scene_prompt;
 pub(crate) mod direct_scene_remake;
+pub(crate) mod direct_scene_tools;
 pub mod dynamic_context;
 pub mod history;
 pub mod kiro_standby;

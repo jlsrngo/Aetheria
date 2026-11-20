@@ -23,6 +23,7 @@ pub mod profiles;
 pub mod question;
 pub mod read;
 pub mod ref_extractor;
+pub mod ref_probe;
 pub mod render;
 pub mod render_command;
 pub mod sfx;
@@ -250,6 +251,12 @@ async fn execute_tool_call_inner(
         }
         "extract_video_reference" | "extract_reference" | "ref_extract" => {
             ref_extractor::execute_ref_extractor(workspace_dir, arguments).await
+        }
+        "inspect_ref_frame" | "probe_ref_frame" => {
+            ref_probe::execute_inspect_ref_frame(workspace_dir, arguments).await
+        }
+        "sample_ref_region" | "sample_ref_pixels" => {
+            ref_probe::execute_sample_ref_region(workspace_dir, arguments).await
         }
         "plugin_install" | "install_agent_skill" | "install_skill" | "install_plugin" => {
             skill_manager::execute_install_plugin(workspace_dir, arguments).await

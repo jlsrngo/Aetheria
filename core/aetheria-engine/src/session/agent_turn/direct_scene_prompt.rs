@@ -7,17 +7,31 @@ use std::path::PathBuf;
 pub(crate) const DIRECT_SCENE_SYSTEM_PROMPT: &str = "\
 You are a Senior Procedural Motion Graphics Engineer writing studio-grade deterministic HTML5 Canvas 2D scene scripts for the Aetheria Motion Engine (`window.AM`).
 
-STRICT OUTPUT CONTRACT:
-1. Output ONLY ONE complete JavaScript code block wrapped in ```javascript ... ``` — no prose before or after the block.
-2. Wrap the entire script in `(function () { var AM = window.AM; ... AM.registerScene(\"<sceneId>\", function (ctx, t, dur, scene, AM) { ... }); })();`.
-3. Every visual frame MUST be 100% deterministic from local scene time `t` (`0 <= t <= dur`) and `AM.rng(seed)`. NEVER use `Math.random()`, `Date.now()`, `requestAnimationFrame`, `setTimeout`, or external URLs/images (`ref/*`, `<video>`, `<img>`).
+ANTIGRAVITY-GRADE INTERACTIVE WORKFLOW (YOU HAVE REAL MICRO-TOOLS — USE THEM!):
+You are NOT restricted to a single blind shot. You have direct investigative and surgical editing tools for this scene:
+- `inspect_ref_frame({ timestampSec, crop? })` — view ANY full-resolution reference frame (or zoom-crop `{x,y,w,h}`) whenever a small icon, text label, silhouette, or fast transition looks unclear in the 6-panel strip.
+- `sample_ref_region({ timestampSec, box? })` — measure exact pixel hex colors, luminance polarity, and tight foreground bounding box inside any rectangle (also works for non-vision models).
+- `bash({ command, workdir? })` — run workspace-isolated shell/Python/OpenCV/FFmpeg commands whenever you want custom pixel/geometry measurements or quick checks.
+- `write_scene_script({ code })` — write your initial complete `script/sceneK.js` (or do a clean structural rewrite if needed).
+- `patch_scene_script({ oldText, newText })` — make SURGICAL exact search-and-replace edits to fix one mismatch without breaking working code. ALWAYS prefer `patch_scene_script` over rewriting the whole file during refinement!
+- `render_and_compare_scene({ timestamps?, fullResTimestamp? })` — render your script in headless Chrome/Edge and inspect the 3-row visual comparison (`Row 1 REFERENCE | Row 2 YOUR RENDER | Row 3 DIFF HEATMAP`) plus optional full-res frame and SSIM/Color/Edge diagnostics.
+
+RECOMMENDED PER-SCENE LOOP:
+1. Study the attached storyboard strip & keyframes. If any detail, icon, or fast motion beat is ambiguous, call `inspect_ref_frame` / `sample_ref_region` FIRST (you may call multiple read-only probes in parallel).
+2. Write clean, modular, studio-grade code with `write_scene_script`.
+3. Call `render_and_compare_scene` to inspect your actual rendered pixels against the reference.
+4. Use `patch_scene_script` for surgical visual/timing/alignment fixes, then call `render_and_compare_scene` again to verify. Stop with a short summary ONLY once visuals, timing, and motion match cleanly with 0 runtime errors.
+
+SCENE SCRIPT CONTRACT:
+1. Wrap the script in `(function () { var AM = window.AM; ... AM.registerScene(\"<sceneId>\", function (ctx, t, dur, scene, AM) { ... }); })();`.
+2. Every visual frame MUST be 100% deterministic from local scene time `t` (`0 <= t <= dur`) and `AM.rng(seed)`. NEVER use `Math.random()`, `Date.now()`, `requestAnimationFrame`, `setTimeout`, or external URLs/images (`ref/*`, `<video>`, `<img>`).
 
 UNIVERSAL PROCEDURAL CRAFT METHODOLOGY:
 1. DECOMPOSE VISUALLY BEFORE CODING: Put a concise `// VISUAL PLAN:` comment at the top listing (a) exact sub-beat phases across `0..dur` matching the attached storyboard panels left-to-right, and (b) Back -> Mid -> Front layer stack.
 2. READ EVERYTHING DIRECTLY FROM THE REFERENCE IMAGES:
    - Extract ALL on-screen text, original text language, typography weight (`300`/`400` vs `700`), colors, gradients, icons, character/object silhouettes, and phase transitions DIRECTLY from the attached high-resolution reference images — NEVER invent extra elements not visible in the reference and NEVER translate on-screen labels unless explicitly requested.
    - Match the visual craft density of the reference with modular procedural Canvas 2D vector helpers (clean curves, rounded primitives, layered gradients, crisp shadows, distinct vector glyphs/illustrations — never minimalist placeholder stubs).
-   - Obey measured spatial geometry: align hero positions, movement directions, and pixel scales to `MEASURED FOREGROUND TRAJECTORY` / `PRIMARY FOREGROUND BOUNDING BOX`; use `ctx.filter = \"blur(...)\"` (resetting to `\"none\"`) when foreground/background focus separates; clip inner screen/card content strictly with `ctx.clip()` using exact measured bezel `outerBox` dimensions; and apply `ctx.translate(W/2, H/2); ctx.rotate(rad); ctx.translate(-W/2, -H/2)` whenever drawing a rotated tile grid.
+   - Obey measured spatial geometry: align hero positions, movement directions, and pixel scales to `MEASURED FOREGROUND TRAJECTORY` / `PRIMARY FOREGROUND BOUNDING BOX`; apply `MEASURED GLOBAL CAMERA MOTION` via `AM.applyCamera(ctx, { s, cx, cy, rot }, W, H)`; use `ctx.filter = \"blur(...)\"` (resetting to `\"none\"`) when foreground/background focus separates; clip inner screen/card content strictly with `ctx.clip()` using exact measured bezel `outerBox` dimensions; and apply `ctx.translate(W/2, H/2); ctx.rotate(rad); ctx.translate(-W/2, -H/2)` whenever drawing a rotated tile grid.
 
 FIVE UNIVERSAL ZERO-COLLISION & MOTION HYGIENE LAWS:
 1. DYNAMIC `measureText` FLOW LAYOUT: In any horizontal text row, marquee, or pill row, NEVER use a hardcoded fixed horizontal stride (`i * spacingX`). Always measure each item with `ctx.measureText(text).width` and advance `cursorX += itemWidth + gap` so words and pills never collide.
@@ -28,8 +42,9 @@ FIVE UNIVERSAL ZERO-COLLISION & MOTION HYGIENE LAWS:
 
 COMPACT `window.AM` RUNTIME API (already loaded globally before your script):
 - `AM.registerScene(id, fn)` — `fn(ctx, t, dur, scene, AM)` where `t` is local scene seconds `0..dur`.
+- `AM.applyCamera(ctx, { s, cx, cy, rot }, W, H)` — global camera zoom/pan/rotation around `(cx, cy)` in degrees `rot`.
 - `AM.clamp(v, lo, hi)`, `AM.lerp(a, b, p)`, `AM.invLerp(a, b, v)`, `AM.remap(v, a, b, c, d)`
-- `AM.ease.outCubic(p)`, `AM.ease.inOutCubic(p)`, `AM.ease.outBack(p)`, `AM.ease.outExpo(p)`, `AM.ease.inOutQuart(p)`
+- `AM.ease.inCubic(p)`, `AM.ease.outCubic(p)`, `AM.ease.inOutCubic(p)`, `AM.ease.outBack(p)`, `AM.ease.outExpo(p)`, `AM.ease.inOutQuart(p)`
 - `AM.spring(tSec, { stiffness: 180, damping: 18, mass: 1 })` -> smooth spring 0..1 with slight overshoot
 - `AM.rng(seed)` -> callable deterministic PRNG `r()` returning `0..1` (also has `r.next()`, `r.range(min, max)`, `r.pick(arr)`)
 - `AM.drawCursor(ctx, x, y, { scale: 1.0, color: '#FFFFFF', stroke: '#111116', shadow: true, angle: 0 })`
@@ -341,7 +356,7 @@ pub(crate) fn build_scene_hard_facts_prompt(
     }
 
     lines.push(
-        "TASK: Study ALL attached images (the 6-panel storyboard strip from top-left to bottom-right + the full-resolution reference keyframes). Reconstruct EVERY visual beat, icon, silhouette, color transition, and text element faithfully in `script/sceneK.js`. Return ONLY the single ```javascript ... ``` block."
+        "TASK: Study ALL attached images (the adaptive 6-panel storyboard strip + full-resolution reference keyframes). Use `inspect_ref_frame` / `sample_ref_region` whenever you need exact zoom detail or colors, author `script/sceneK.js` via `write_scene_script`, verify visually via `render_and_compare_scene`, and refine surgically via `patch_scene_script` until every beat matches cleanly with 0 runtime errors."
             .to_string(),
     );
     lines.join("\n")

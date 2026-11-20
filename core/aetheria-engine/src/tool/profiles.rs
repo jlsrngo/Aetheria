@@ -83,6 +83,7 @@ pub fn check_tool_allowed_runtime(profile: ToolProfile, tool_name: &str) -> Resu
 
 pub fn is_tool_allowed_in_role(role: &str, name: &str, include_render: bool) -> bool {
     match role {
+        // OpenCode/Antigravity-style full-access studio builder: direct file, terminal, and reference-probe freedom.
         "director" => {
             matches!(
                 name,
@@ -90,12 +91,21 @@ pub fn is_tool_allowed_in_role(role: &str, name: &str, include_render: bool) -> 
                     | "film_audio"
                     | "capture_film_preview"
                     | "read"
+                    | "write"
+                    | "edit"
+                    | "apply_patch"
                     | "glob"
                     | "grep"
+                    | "bash"
+                    | "codemode"
                     | "question"
                     | "task"
                     | "extract_video_reference"
+                    | "inspect_ref_frame"
+                    | "sample_ref_region"
                     | "fetch_web_image"
+                    | "websearch"
+                    | "webfetch"
             ) || (include_render && name == "render_video")
         }
         "motion-designer" => matches!(
@@ -104,8 +114,14 @@ pub fn is_tool_allowed_in_role(role: &str, name: &str, include_render: bool) -> 
                 | "read"
                 | "write"
                 | "edit"
+                | "apply_patch"
                 | "glob"
                 | "grep"
+                | "bash"
+                | "codemode"
+                | "extract_video_reference"
+                | "inspect_ref_frame"
+                | "sample_ref_region"
                 | "fetch_web_image"
                 | "capture_film_preview"
         ),
@@ -114,14 +130,19 @@ pub fn is_tool_allowed_in_role(role: &str, name: &str, include_render: bool) -> 
             "read"
                 | "glob"
                 | "grep"
+                | "bash"
+                | "codemode"
                 | "capture_film_preview"
+                | "inspect_ref_frame"
+                | "sample_ref_region"
                 | "edit"
                 | "write"
+                | "apply_patch"
                 | "film_scaffold"
         ),
         "audio-director" => matches!(
             name,
-            "voicebox_speak" | "generate_smart_sfx" | "read" | "write" | "glob"
+            "voicebox_speak" | "generate_smart_sfx" | "read" | "write" | "glob" | "bash"
         ),
         "explore" => matches!(name, "read" | "glob" | "grep" | "websearch" | "webfetch"),
         "general-chat" => matches!(
@@ -421,16 +442,25 @@ mod tests {
                 catalog.clone()
             )),
             vec![
+                "apply_patch",
+                "bash",
                 "capture_film_preview",
+                "codemode",
+                "edit",
                 "extract_video_reference",
                 "fetch_web_image",
                 "film_audio",
                 "film_scaffold",
                 "glob",
                 "grep",
+                "inspect_ref_frame",
                 "question",
                 "read",
+                "sample_ref_region",
                 "task",
+                "webfetch",
+                "websearch",
+                "write",
             ]
         );
 
@@ -442,17 +472,26 @@ mod tests {
                 catalog.clone()
             )),
             vec![
+                "apply_patch",
+                "bash",
                 "capture_film_preview",
+                "codemode",
+                "edit",
                 "extract_video_reference",
                 "fetch_web_image",
                 "film_audio",
                 "film_scaffold",
                 "glob",
                 "grep",
+                "inspect_ref_frame",
                 "question",
                 "read",
                 "render_video",
+                "sample_ref_region",
                 "task",
+                "webfetch",
+                "websearch",
+                "write",
             ]
         );
 
@@ -462,13 +501,19 @@ mod tests {
                 catalog.clone()
             )),
             vec![
+                "apply_patch",
+                "bash",
                 "capture_film_preview",
+                "codemode",
                 "edit",
+                "extract_video_reference",
                 "fetch_web_image",
                 "film_scaffold",
                 "glob",
                 "grep",
+                "inspect_ref_frame",
                 "read",
+                "sample_ref_region",
                 "write",
             ]
         );
@@ -479,12 +524,17 @@ mod tests {
                 catalog.clone()
             )),
             vec![
+                "apply_patch",
+                "bash",
                 "capture_film_preview",
+                "codemode",
                 "edit",
                 "film_scaffold",
                 "glob",
                 "grep",
+                "inspect_ref_frame",
                 "read",
+                "sample_ref_region",
                 "write",
             ]
         );
@@ -495,6 +545,7 @@ mod tests {
                 catalog.clone()
             )),
             vec![
+                "bash",
                 "generate_smart_sfx",
                 "glob",
                 "read",
@@ -587,6 +638,20 @@ mod tests {
                 include_render: false
             },
             "write"
+        )
+        .is_ok());
+        assert!(check_tool_allowed_runtime(
+            ToolProfile::Director {
+                include_render: false
+            },
+            "edit"
+        )
+        .is_ok());
+        assert!(check_tool_allowed_runtime(
+            ToolProfile::Director {
+                include_render: false
+            },
+            "render_video"
         )
         .is_err());
         assert!(check_tool_allowed_runtime(ToolProfile::GeneralChat, "bash").is_err());

@@ -24,10 +24,13 @@ use crate::paths::now_ms;
 use crate::session::message::emit_event;
 
 use super::direct_scene_prompt::{
-    build_scene_hard_facts_prompt, detect_scene_collision_hazards, format_comparison_feedback,
-    DIRECT_SCENE_SYSTEM_PROMPT,
+    build_scene_hard_facts_prompt, detect_scene_collision_hazards, DIRECT_SCENE_SYSTEM_PROMPT,
+};
+use super::direct_scene_tools::{
+    build_scene_tool_definitions, execute_scene_micro_tool, SceneToolContext,
 };
 use super::resilience::send_resilient_chat_completion_with_options;
+use crate::tool::json_repair::parse_or_repair_tool_args;
 
 #[derive(Debug, Clone)]
 pub(crate) struct DirectSceneOutcome {
@@ -332,14 +335,20 @@ pub(crate) async fn run_direct_per_scene_remake(
         0.35
     };
     let max_tokens = 16_384u64;
+    let max_scene_steps: usize = std::env::var("AETHERIA_SCENE_MAX_STEPS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .map(|n| n.clamp(3, 14))
+        .unwrap_or(8);
+    let scene_tools = build_scene_tool_definitions();
     let total_scenes = film_scenes.len();
     let mut outcomes = Vec::with_capacity(total_scenes);
 
     crate::paths::log_engine(
         "direct_remake",
         &format!(
-            "🚀 Starting Direct Per-Scene Vision-First Remake (ZERO subagents): {} scenes on model={}",
-            total_scenes, model_id
+            "🚀 Starting Smart Per-Scene Agentic Remake (ZERO subagents, 5 micro-tools, max {} steps/scene): {} scenes on model={}",
+            max_scene_steps, total_scenes, model_id
         ),
     );
 
@@ -400,150 +409,46 @@ pub(crate) async fn run_direct_per_scene_remake(
         );
 
         let mut best_code = std::fs::read_to_string(&script_path).unwrap_or_default();
+        let mut best_score = -1.0f64;
+        let mut best_errs: Vec<String> = Vec::new();
+        let mut best_hazards = usize::MAX;
+        let mut latest_score = 0.0f64;
+        let mut latest_errs: Vec<String> = Vec::new();
+        let mut has_written = false;
+        let mut dirty_since_render = false;
         let mut rolled_back = false;
         let mut passes_run = 0usize;
 
-        // Pass 1: Direct Draft
-        let mut pass1_msgs = vec![
+        let tool_ctx = SceneToolContext {
+            session_id,
+            workspace_dir,
+            ws_root: &ws_root,
+            film_root: &film_root,
+            script_path: &script_path,
+            script_rel: &script_rel,
+            scene_num,
+            scene_start: sc_start,
+            scene_dur: sc_dur,
+            film_duration: total_dur,
+            width,
+            height,
+            default_scene_ts: &scene_ts,
+        };
+
+        let mut scene_msgs = vec![
             json!({ "role": "system", "content": DIRECT_SCENE_SYSTEM_PROMPT }),
             build_vision_user_message(hard_facts.clone(), &pass1_images),
         ];
-        if let Ok(comp1) = send_resilient_chat_completion_with_options(
-            client,
-            base_url,
-            api_key,
-            model_id,
-            &mut pass1_msgs,
-            &[],
-            temperature,
-            max_tokens,
-            None,
-        )
-        .await
-        {
-            passes_run += 1;
-            if let Some(code1) = extract_js_code_block(&comp1.assistant_text) {
-                let _ = tokio::fs::write(&script_path, &code1).await;
-                best_code = code1;
-            }
-        }
 
-        // Capture Pass 1 visual comparison on Scene K's keyframes
-        let (p1_score, mut cur_feedback, mut cur_strip, p1_errs) =
-            match crate::studio::preview_capture::capture_film_preview_with_options(
-                workspace_dir,
-                scene_ts.clone(),
-                Some(true),
-                Some(0.65),
-            )
-            .await
-            {
-                Ok(res) => {
-                    let (sc, fb, sp) = format_comparison_feedback(
-                        res.reference_comparison.as_ref(),
-                        sc_start,
-                        &res.runtime_errors,
-                        None,
-                    );
-                    (sc, fb, sp, res.runtime_errors)
-                }
-                Err(err) => {
-                    let (sc, fb, sp) = format_comparison_feedback(None, sc_start, &[], Some(&err));
-                    (sc, fb, sp, vec![err])
-                }
-            };
-        let mut best_score = p1_score;
-        let mut best_errs = p1_errs;
-        let mut rollback_note = String::new();
-
-        crate::paths::log_engine(
-            "direct_remake",
-            &format!(
-                "Scene {}/{} ({}) Pass 1 -> score={:.3}, errors={}",
-                scene_num,
-                total_scenes,
-                scene_id,
-                best_score,
-                best_errs.len()
-            ),
-        );
-
-        // Pass 2 (Visual Self-Correction) + optional Pass 3 (Recovery/Polish if runtime error, collision hazard, or < 0.72)
-        for refine_pass in 2..=3 {
-            let code_hazards = detect_scene_collision_hazards(&best_code);
-            let needs_pass = if refine_pass == 2 {
-                !best_errs.is_empty() || !code_hazards.is_empty() || best_score < 0.86
-            } else {
-                !best_errs.is_empty() || !code_hazards.is_empty() || best_score < 0.72
-            };
-            if !needs_pass {
-                break;
-            }
-
-            let mut refine_imgs = Vec::new();
-            if let Some(ref sp) = cur_strip {
-                if let Some(url) = encode_jpeg_data_url(sp) {
-                    refine_imgs.push(url);
-                }
-            }
-            if let Some(beats_url) = encode_jpeg_data_url(
-                &ws_root
-                    .join("ref")
-                    .join("extracted")
-                    .join("frames")
-                    .join(format!("ref_scene_{scene_num:02}_beats.jpg")),
-            ) {
-                refine_imgs.push(beats_url);
-            }
-            if refine_imgs.is_empty() {
-                refine_imgs = pass1_images.clone();
-            }
-
-            let hazard_block = if code_hazards.is_empty() {
-                String::new()
-            } else {
-                format!(
-                    "AUTOMATIC COLLISION / MOTION BUGS DETECTED IN YOUR CODE (MUST FIX ALL):\n- {}\n\n",
-                    code_hazards.join("\n- ")
-                )
-            };
-
-            let refine_prompt = format!(
-                "VISUAL SELF-CORRECTION PASS {} FOR SCENE {}/{} (\"{}\", local t = 0..{:.3}s):\n\
-                 Inspect the attached 3-row visual comparison strip (`Row 1 = REFERENCE | Row 2 = YOUR CURRENT RENDER | Row 3 = DIFF HEATMAP`) panel by panel from left to right.\n\n\
-                 {}{}\
-                 MEASURED DIAGNOSTICS:\n{}\n\n\
-                 HARD FACTS:\n{}\n\n\
-                 YOUR CURRENT `{}` CODE:\n```javascript\n{}\n```\n\n\
-                 VISUAL SELF-AUDIT CHECKLIST (SCAN EVERY PANEL OF ROW 2 BEFORE CODING):\n\
-                 1. ZERO COLLISIONS & OVERLAPS: Replace any fixed `i * spacing` text loop with `ctx.measureText` flow layout; cross-fade outgoing elements out cleanly (`1 - p`) before incoming elements occupy the same `(x, y)`.\n\
-                 2. SMOOTH MONOTONIC MOTION: Keep reels/lists/trajectories continuous and monotonic across `0..dur` matching every panel's timestamp, with no backwards jumps or blank black boundary frames at `t = 0` or `t = dur`.\n\
-                 3. EXACT GEOMETRY & CONTRAST: Match Row 1's `refFgBox` scale/position, bezel `outerBox` + `ctx.clip()`, rotated grid origin/polarity, surface brightness/gradients, and contrasting ink inside both light and dark cards/tiles.\n\
-                 4. EXACT VISUAL FIDELITY: Match Row 1's style, typography weight, icons, and on-screen language directly from the images without inventing unrequested overlays. Output ONLY the complete corrected ```javascript ... ``` block.",
-                refine_pass,
-                scene_num,
-                total_scenes,
-                scene_id,
-                sc_dur,
-                rollback_note,
-                hazard_block,
-                cur_feedback,
-                hard_facts,
-                script_rel,
-                best_code
-            );
-
-            let mut refine_msgs = vec![
-                json!({ "role": "system", "content": DIRECT_SCENE_SYSTEM_PROMPT }),
-                build_vision_user_message(refine_prompt, &refine_imgs),
-            ];
-            let Ok(comp_ref) = send_resilient_chat_completion_with_options(
+        // Interactive Antigravity-grade per-scene tool loop (inspect -> sample -> write -> render -> surgical patch)
+        for step_idx in 0..max_scene_steps {
+            let Ok(comp) = send_resilient_chat_completion_with_options(
                 client,
                 base_url,
                 api_key,
                 model_id,
-                &mut refine_msgs,
-                &[],
+                &mut scene_msgs,
+                &scene_tools,
                 temperature,
                 max_tokens,
                 None,
@@ -553,104 +458,242 @@ pub(crate) async fn run_direct_per_scene_remake(
                 break;
             };
             passes_run += 1;
-            let Some(next_code) = extract_js_code_block(&comp_ref.assistant_text) else {
-                break;
-            };
-            let _ = tokio::fs::write(&script_path, &next_code).await;
 
-            let (next_score, next_fb, next_strip, next_errs) =
-                match crate::studio::preview_capture::capture_film_preview_with_options(
-                    workspace_dir,
-                    scene_ts.clone(),
-                    Some(true),
-                    Some(0.65),
-                )
-                .await
-                {
-                    Ok(res) => {
-                        let (sc, fb, sp) = format_comparison_feedback(
-                            res.reference_comparison.as_ref(),
-                            sc_start,
-                            &res.runtime_errors,
-                            None,
+            if !comp.tool_calls.is_empty() {
+                scene_msgs.push(json!({
+                    "role": "assistant",
+                    "content": if comp.assistant_text.trim().is_empty() { Value::Null } else { json!(comp.assistant_text) },
+                    "tool_calls": comp.tool_calls,
+                }));
+
+                let mut step_images: Vec<String> = Vec::new();
+                let mut step_captions: Vec<String> = Vec::new();
+
+                for (tc_idx, tc) in comp.tool_calls.iter().enumerate() {
+                    let cid = tc
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                        .unwrap_or_else(|| format!("sc{}_{}_{}", scene_num, step_idx, tc_idx));
+                    let fn_name = tc
+                        .pointer("/function/name")
+                        .or_else(|| tc.get("name"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
+                    let raw_args = tc
+                        .pointer("/function/arguments")
+                        .or_else(|| tc.get("arguments"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("{}");
+
+                    let (parsed_args, arg_err) = match parse_or_repair_tool_args(raw_args) {
+                        Ok(v) => (v, None),
+                        Err(e) => (json!({}), Some(e)),
+                    };
+
+                    let outcome = if let Some(err) = arg_err {
+                        super::direct_scene_tools::SceneToolOutcome {
+                            result_json: json!({ "ok": false, "error": format!("Malformed JSON tool args: {}", err) }),
+                            vision_images: Vec::new(),
+                            vision_caption: None,
+                            script_modified: false,
+                            rendered_score: None,
+                            rendered_errors: None,
+                        }
+                    } else {
+                        emit_event(
+                            workspace_dir,
+                            "session.tool.called",
+                            json!({
+                                "sessionID": session_id,
+                                "tool": fn_name,
+                                "label": format!("Scene {}/{}: {}", scene_num, total_scenes, fn_name),
+                                "timestamp": now_ms()
+                            }),
                         );
-                        (sc, fb, sp, res.runtime_errors)
-                    }
-                    Err(err) => {
-                        let (sc, fb, sp) =
-                            format_comparison_feedback(None, sc_start, &[], Some(&err));
-                        (sc, fb, sp, vec![err])
-                    }
-                };
+                        execute_scene_micro_tool(&tool_ctx, fn_name, &parsed_args).await
+                    };
 
-            let next_hazards = detect_scene_collision_hazards(&next_code);
-            let fixed_collision_hazard =
-                !code_hazards.is_empty() && next_hazards.len() < code_hazards.len();
-            let improved = if !best_errs.is_empty() && next_errs.is_empty() {
-                true
-            } else if best_errs.is_empty() && !next_errs.is_empty() {
-                false
-            } else if fixed_collision_hazard && next_score >= best_score - 0.04 {
-                true
-            } else {
-                next_score >= best_score - 0.004
-            };
+                    if outcome.script_modified {
+                        has_written = true;
+                        dirty_since_render = true;
+                    }
+                    if let Some(sc_val) = outcome.rendered_score {
+                        dirty_since_render = false;
+                        let errs = outcome.rendered_errors.clone().unwrap_or_default();
+                        latest_score = sc_val;
+                        latest_errs = errs.clone();
+                        let cur_code = tokio::fs::read_to_string(&script_path)
+                            .await
+                            .unwrap_or_default();
+                        let cur_haz = detect_scene_collision_hazards(&cur_code).len();
+                        // Non-destructive best-checkpoint tracking: NEVER overwrites working file mid-loop!
+                        let better_checkpoint = best_score < 0.0
+                            || (!best_errs.is_empty() && errs.is_empty())
+                            || (best_errs.is_empty()
+                                && errs.is_empty()
+                                && (sc_val >= best_score - 0.002
+                                    || (cur_haz < best_hazards && sc_val >= best_score - 0.04)));
+                        if better_checkpoint {
+                            best_code = cur_code;
+                            best_score = sc_val;
+                            best_errs = errs;
+                            best_hazards = cur_haz;
+                        }
+                        crate::paths::log_engine(
+                            "direct_remake",
+                            &format!(
+                                "Scene {}/{} ({}) step {} render -> score={:.3} (best={:.3}), errs={}",
+                                scene_num,
+                                total_scenes,
+                                scene_id,
+                                step_idx + 1,
+                                sc_val,
+                                best_score.max(0.0),
+                                latest_errs.len()
+                            ),
+                        );
+                    }
 
-            if improved {
-                best_code = next_code;
-                best_score = next_score;
-                best_errs = next_errs;
-                cur_feedback = next_fb;
-                cur_strip = next_strip;
-                rollback_note.clear();
-                crate::paths::log_engine(
-                    "direct_remake",
-                    &format!(
-                        "Scene {}/{} ({}) Pass {} KEPT -> score={:.3}, errors={}",
-                        scene_num,
-                        total_scenes,
-                        scene_id,
-                        refine_pass,
-                        best_score,
-                        best_errs.len()
-                    ),
-                );
-            } else {
-                rolled_back = true;
-                let _ = tokio::fs::write(&script_path, &best_code).await;
-                crate::paths::log_engine(
-                    "direct_remake",
-                    &format!(
-                        "Scene {}/{} ({}) Pass {} ROLLED BACK ({:.3} < {:.3}, errs={})",
-                        scene_num,
-                        total_scenes,
-                        scene_id,
-                        refine_pass,
-                        next_score,
-                        best_score,
-                        next_errs.len()
-                    ),
-                );
-                // If Pass 2 regressed while score is still < 0.72, let Pass 3 retry surgically
-                // from the restored `best_code` instead of giving up early!
-                if refine_pass == 2 && (!best_errs.is_empty() || best_score < 0.72) {
-                    rollback_note = format!(
-                        "PREVIOUS EDIT REGRESSED ({:.3} < {:.3}) AND WAS ROLLED BACK! Keep ALL working structure from the restored code below and make ONLY surgical fixes to the biggest visual mismatch in Row 1 vs Row 2 (do NOT invert polarity, shrink elements, or shift working timing).\n\n",
-                        next_score, best_score
-                    );
-                } else {
+                    step_images.extend(outcome.vision_images);
+                    if let Some(cap) = outcome.vision_caption {
+                        step_captions.push(cap);
+                    }
+
+                    scene_msgs.push(json!({
+                        "role": "tool",
+                        "tool_call_id": cid,
+                        "name": fn_name,
+                        "content": serde_json::to_string(&outcome.result_json).unwrap_or_else(|_| "{}".to_string()),
+                    }));
+                }
+
+                if !step_images.is_empty() {
+                    let caption = if step_captions.is_empty() {
+                        "Visual tool output attached above. Inspect closely and patch surgically if anything mismatches.".to_string()
+                    } else {
+                        step_captions.join("\n")
+                    };
+                    scene_msgs.push(build_vision_user_message(caption, &step_images));
+                }
+                continue;
+            }
+
+            // Graceful fallback for models that return a raw ```javascript``` block without tool calls
+            if let Some(code_block) = extract_js_code_block(&comp.assistant_text) {
+                let _ = tokio::fs::write(&script_path, &code_block).await;
+                has_written = true;
+                dirty_since_render = false;
+                scene_msgs.push(json!({ "role": "assistant", "content": comp.assistant_text }));
+
+                let render_out = execute_scene_micro_tool(
+                    &tool_ctx,
+                    "render_and_compare_scene",
+                    &json!({}),
+                )
+                .await;
+                let sc_val = render_out.rendered_score.unwrap_or(0.0);
+                let errs = render_out.rendered_errors.unwrap_or_default();
+                latest_score = sc_val;
+                latest_errs = errs.clone();
+                let cur_haz = detect_scene_collision_hazards(&code_block).len();
+                let better = best_score < 0.0
+                    || (!best_errs.is_empty() && errs.is_empty())
+                    || (best_errs.is_empty() && errs.is_empty() && sc_val >= best_score - 0.002);
+                if better {
+                    best_code = code_block;
+                    best_score = sc_val;
+                    best_errs = errs;
+                    best_hazards = cur_haz;
+                }
+                if latest_errs.is_empty() && latest_score >= 0.86 && cur_haz == 0 {
                     break;
                 }
+                if step_idx + 1 < max_scene_steps {
+                    let diag = render_out
+                        .result_json
+                        .get("diagnostics")
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
+                    let follow_txt = format!(
+                        "Auto-rendered your script for Scene {}/{} (overall={:.3}, errors={}).\n{}\nInspect the comparison strip above; use `patch_scene_script` (or `inspect_ref_frame` / `sample_ref_region`) to fix any remaining mismatch, then call `render_and_compare_scene`, or reply briefly if done.",
+                        scene_num,
+                        total_scenes,
+                        latest_score,
+                        latest_errs.len(),
+                        diag
+                    );
+                    scene_msgs.push(build_vision_user_message(follow_txt, &render_out.vision_images));
+                    continue;
+                }
+                break;
+            }
+
+            // Model finished cleanly with text response (no tool calls)
+            if has_written {
+                break;
+            }
+            // If model answered with prose before writing any code, nudge once to write the scene script
+            if step_idx + 1 < max_scene_steps {
+                scene_msgs.push(json!({ "role": "assistant", "content": comp.assistant_text }));
+                scene_msgs.push(json!({
+                    "role": "user",
+                    "content": format!("Please call `write_scene_script` now to author `{}` and verify it with `render_and_compare_scene`.", script_rel)
+                }));
+                continue;
+            }
+            break;
+        }
+
+        // If the model edited the script on its last step without rendering, run one final verification capture
+        if has_written && dirty_since_render {
+            let final_out =
+                execute_scene_micro_tool(&tool_ctx, "render_and_compare_scene", &json!({})).await;
+            latest_score = final_out.rendered_score.unwrap_or(0.0);
+            latest_errs = final_out.rendered_errors.unwrap_or_default();
+            if best_score < 0.0 {
+                best_code = tokio::fs::read_to_string(&script_path)
+                    .await
+                    .unwrap_or_default();
+                best_score = latest_score;
+                best_errs = latest_errs.clone();
             }
         }
+
+        // End-of-scene safety net ONLY (never rolls back mid-investigation!):
+        // Restore best checkpoint only if final script has runtime errors or regressed significantly (> 0.03).
+        let final_code_now = tokio::fs::read_to_string(&script_path)
+            .await
+            .unwrap_or_default();
+        let final_haz = detect_scene_collision_hazards(&final_code_now).len();
+        let should_restore_best = best_score >= 0.0
+            && !best_code.is_empty()
+            && ((best_errs.is_empty() && !latest_errs.is_empty())
+                || (latest_score + 0.03 < best_score && final_haz >= best_hazards));
+        let (final_score, final_errs) = if should_restore_best {
+            let _ = tokio::fs::write(&script_path, &best_code).await;
+            rolled_back = true;
+            crate::paths::log_engine(
+                "direct_remake",
+                &format!(
+                    "Scene {}/{} ({}) end-of-scene safety restore ({:.3} -> best {:.3})",
+                    scene_num, total_scenes, scene_id, latest_score, best_score
+                ),
+            );
+            (best_score, best_errs)
+        } else if has_written {
+            (latest_score.max(0.0), latest_errs)
+        } else {
+            (best_score.max(0.0), best_errs)
+        };
 
         outcomes.push(DirectSceneOutcome {
             scene_id,
             script_rel,
             passes_run,
-            best_score,
+            best_score: final_score,
             rolled_back,
-            runtime_errors: best_errs,
+            runtime_errors: final_errs,
         });
     }
 
