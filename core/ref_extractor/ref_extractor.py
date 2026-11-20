@@ -58,6 +58,8 @@ def extract_audio_bpm_beats_and_profile(
         "speechLikelihood": 0.0,
         "voiceBandRatio": 0.0,
         "beatRegularity": 0.0,
+        "bpmSource": "fallback",
+        "bpmConfidence": 0.0,
     }
     wav_path = temp_dir / "ref_audio.wav"
     ff_bin = _resolve_ffmpeg_bin()
@@ -149,22 +151,31 @@ def extract_audio_bpm_beats_and_profile(
                     beat_times.append(t_sec)
 
         beat_regularity = 0.0
+        bpm_source = "fallback"
+        bpm_confidence = 0.0
         if len(beat_times) >= 3:
             intervals = [
                 beat_times[k + 1] - beat_times[k]
                 for k in range(len(beat_times) - 1)
                 if 0.25 <= (beat_times[k + 1] - beat_times[k]) <= 1.2
             ]
-            if intervals:
+            if len(intervals) >= 2:
                 median_ioi = float(np.median(intervals))
                 mad_ioi = float(np.median(np.abs(np.asarray(intervals) - median_ioi)))
                 beat_regularity = round(float(np.clip(1.0 - (mad_ioi / max(0.05, median_ioi)) * 2.0, 0.0, 1.0)), 3)
-                raw_bpm = 60.0 / max(0.25, median_ioi)
-                while raw_bpm < 75.0:
-                    raw_bpm *= 2.0
-                while raw_bpm > 175.0:
-                    raw_bpm *= 0.5
-                bpm = round(raw_bpm, 1)
+                if beat_regularity >= 0.25:
+                    raw_bpm = 60.0 / max(0.25, median_ioi)
+                    while raw_bpm < 75.0:
+                        raw_bpm *= 2.0
+                    while raw_bpm > 175.0:
+                        raw_bpm *= 0.5
+                    bpm = round(raw_bpm, 1)
+                    bpm_source = "measured"
+                    bpm_confidence = beat_regularity
+                else:
+                    bpm = 120.0
+                    bpm_source = "fallback"
+                    bpm_confidence = beat_regularity
             else:
                 bpm = 120.0
         else:
@@ -188,6 +199,8 @@ def extract_audio_bpm_beats_and_profile(
             "voiceBandRatio": voice_ratio,
             "subBassRatio": sub_ratio,
             "beatRegularity": beat_regularity,
+            "bpmSource": bpm_source,
+            "bpmConfidence": bpm_confidence,
         }
         return bpm, beat_times, profile
     except Exception:
@@ -1165,150 +1178,10 @@ def scan_motion_timeline(
     fps: float,
     duration: float,
 ) -> Dict[str, Any]:
-    """
-    MotionClone-inspired full-timeline temporal scanner.
-    Reads frames sequentially in one linear pass (grab/retrieve on strided indices,
-    avoiding O(N*GOP) random keyframe seeks) to detect both hard color cuts and
-    dark-on-dark / fade-through structural motion shot transitions.
-    """
-    safe_total = max(1, total_frames)
-    target_step = max(1, int(round(max(fps, 1.0) / 10.0)))
-    stride = max(target_step, (safe_total + 179) // 180)
-    samples: List[Tuple[int, float, np.ndarray, np.ndarray, np.ndarray]] = []
-    deltas: List[Dict[str, Any]] = []
-    hard_jumps: List[int] = []
-    structural_jumps: List[Tuple[int, float]] = []
+    """Delegates full-timeline frame-accurate cut scanning to `ref_temporal_cuts.py`."""
+    from ref_temporal_cuts import scan_motion_timeline_accurate
 
-    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-    f_idx = 0
-    while f_idx < safe_total:
-        if f_idx % stride != 0:
-            if not cap.grab():
-                break
-            f_idx += 1
-            continue
-
-        ret, frame = cap.read()
-        if not ret or frame is None:
-            break
-
-        h, w, _ = frame.shape
-        target_w = 160
-        target_h = max(16, int(round(h * (target_w / max(1, w)))))
-        small_u8 = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
-        small = small_u8.astype(np.float32)
-        gray = cv2.cvtColor(small_u8, cv2.COLOR_BGR2GRAY)
-        edges = cv2.Canny(cv2.GaussianBlur(gray, (3, 3), 0), 30, 100) > 0
-
-        ts = round(f_idx / max(fps, 1.0), 3)
-        samples.append((f_idx, ts, small, gray, edges))
-        if len(samples) >= 2:
-            prev_small = samples[-2][2]
-            diff = np.abs(small - prev_small) / 255.0
-            score = float(diff.mean())
-            changed_ratio = float((diff.mean(axis=2) > 0.12).mean())
-            deltas.append({
-                "frame": f_idx,
-                "t": ts,
-                "score": round(score, 4),
-                "changedRatio": round(changed_ratio, 4),
-            })
-            # Hard visual cut (supports high-contrast dark bento/overlay jumps as well as full-frame flips)
-            if (score > 0.17 and changed_ratio > 0.42) or (score > 0.13 and changed_ratio > 0.55):
-                hard_jumps.append(f_idx)
-        f_idx += 1
-
-    # Detect dark-on-dark structural layout shifts and cross-fade / fade-to-black transitions
-    if len(samples) >= 7:
-        win = min(3, max(1, len(samples) // 8))
-        morph_k = np.ones((5, 5), np.uint8)
-        for i in range(win, len(samples) - win):
-            cur_f, cur_t, _, _, _ = samples[i]
-            _, _, a_small, a_gray, a_edges = samples[i - win]
-            _, _, b_small, b_gray, b_edges = samples[i + win]
-
-            ea_sum = int(np.sum(a_edges))
-            eb_sum = int(np.sum(b_edges))
-            if max(ea_sum, eb_sum) < 35:
-                continue
-
-            ea_d = cv2.dilate(a_edges.astype(np.uint8), morph_k) > 0
-            eb_d = cv2.dilate(b_edges.astype(np.uint8), morph_k) > 0
-            denom = float(ea_sum + eb_sum)
-            edge_overlap = float(np.sum(a_edges & eb_d) + np.sum(b_edges & ea_d)) / denom
-
-            ga = a_gray.astype(np.float32)
-            gb = b_gray.astype(np.float32)
-            fg_a = np.abs(ga - np.median(ga)) > 14.0
-            fg_b = np.abs(gb - np.median(gb)) > 14.0
-            fg_union = int(np.sum(fg_a | fg_b))
-            fg_iou = (float(np.sum(fg_a & fg_b)) / fg_union) if fg_union >= 15 else 1.0
-
-            win_delta = float(np.abs(a_small - b_small).mean() / 255.0)
-            local_step = float(deltas[i - 1]["score"]) if (i - 1) < len(deltas) else 0.0
-            # Trigger on sharp structural swap OR clean fade-out/blank pause into a brand-new composition
-            is_fade_pause = (ea_sum >= 80 and eb_sum == 0) or (ea_sum == 0 and eb_sum >= 80)
-            if edge_overlap < 0.22 and fg_iou < 0.18 and (
-                local_step > 0.032 or win_delta > 0.035 or is_fade_pause
-            ):
-                strength = (1.0 - edge_overlap) * 0.5 + (1.0 - fg_iou) * 0.3 + max(local_step, win_delta)
-                structural_jumps.append((cur_f, round(strength, 4)))
-
-    # Fallback softer cut threshold if neither hard nor structural cuts fired
-    if not hard_jumps and not structural_jumps and deltas:
-        for d in deltas:
-            if d["score"] > 0.13 and d["changedRatio"] > 0.40:
-                hard_jumps.append(int(d["frame"]))
-
-    # Combine hard cuts first (0.65s spacing), then add well-separated structural cuts (1.15s spacing)
-    min_hard_gap = max(2, int(round(0.65 * max(fps, 1.0))))
-    min_struct_gap = max(3, int(round(1.15 * max(fps, 1.0))))
-    filtered_jumps: List[int] = []
-    for j in hard_jumps:
-        if not filtered_jumps or (j - filtered_jumps[-1]) >= min_hard_gap:
-            filtered_jumps.append(j)
-
-    jump_scores: Dict[int, float] = {d["frame"]: float(d["score"]) + 0.5 for d in deltas if d["frame"] in filtered_jumps}
-    for jf, strength in sorted(structural_jumps, key=lambda x: x[1], reverse=True):
-        if any(abs(jf - prev_j) < min_struct_gap for prev_j in filtered_jumps):
-            continue
-        filtered_jumps.append(jf)
-        jump_scores[jf] = strength
-    filtered_jumps.sort()
-
-    min_struct_edge = max(0.75, 0.35)
-    hard_set = set(hard_jumps)
-    jump_timestamps = [
-        round(j / max(fps, 1.0), 3)
-        for j in filtered_jumps
-        if (0.35 if j in hard_set else min_struct_edge) < (j / max(fps, 1.0)) < max(0.5, duration - 0.35)
-    ]
-    cut_timestamps = [0.0] + jump_timestamps
-
-    # If video has <= 1 detected cut and duration >= 4s, divide into balanced beats snapped near local motion peaks
-    if len(cut_timestamps) < 2 and duration >= 4.0:
-        beat_count = 4 if duration >= 10.0 else 3
-        cut_timestamps = [round((duration * i) / beat_count, 3) for i in range(beat_count)]
-    elif len(cut_timestamps) > 8:
-        # Keep the 7 strongest cuts by delta/structural score while respecting chronological order
-        valid_jumps = [j for j in filtered_jumps if 0.35 < (j / max(fps, 1.0)) < max(0.5, duration - 0.35)]
-        top_jumps = sorted(valid_jumps, key=lambda j: jump_scores.get(j, 0.0), reverse=True)[:7]
-        top_jumps.sort()
-        cut_timestamps = [0.0] + [round(j / max(fps, 1.0), 3) for j in top_jumps]
-
-    # Deduplicate & sort cut timestamps
-    clean_cuts = [0.0]
-    for t in sorted(cut_timestamps):
-        if t - clean_cuts[-1] >= 0.45 and t < duration - 0.25:
-            clean_cuts.append(round(t, 3))
-
-    return {
-        "stride": stride,
-        "scannedFrames": len(deltas) + 1,
-        "deltas": deltas,
-        "visualJumpTimestamps": jump_timestamps,
-        "cutTimestamps": clean_cuts,
-    }
+    return scan_motion_timeline_accurate(cap, total_frames, fps, duration)
 
 
 def _classify_motion_cadence(energy: float) -> str:
@@ -1346,10 +1219,18 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
     # 1. MotionClone-style full temporal scan + audio beat/BPM decompilation + voice/BGM classification
     with tempfile.TemporaryDirectory(prefix="aetheria_ref_audio_") as tmp_audio_dir:
         bpm, beat_timestamps, audio_profile = extract_audio_bpm_beats_and_profile(v_path, Path(tmp_audio_dir))
+    bpm_source = str(audio_profile.get("bpmSource") or "fallback")
+    bpm_confidence = float(audio_profile.get("bpmConfidence") or 0.0)
     temporal = scan_motion_timeline(cap, total_frames, fps, duration)
-    cut_timestamps = snap_cuts_to_beats(temporal["cutTimestamps"], beat_timestamps, duration)
+    from ref_temporal_cuts import align_cuts_with_beats
+
+    aligned_cuts = align_cuts_with_beats(temporal.get("cuts") or [], beat_timestamps, duration)
+    cut_timestamps = [float(c["cutSec"]) for c in aligned_cuts]
+    temporal["cuts"] = aligned_cuts
     temporal["cutTimestamps"] = cut_timestamps
     temporal["bpm"] = bpm
+    temporal["bpmSource"] = bpm_source
+    temporal["bpmConfidence"] = bpm_confidence
     temporal["beatTimestamps"] = beat_timestamps
     temporal["audioProfile"] = audio_profile
 
@@ -1662,9 +1543,12 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
         "totalFrames": total_frames,
         "scannedFrames": temporal["scannedFrames"],
         "bpm": bpm,
+        "bpmSource": bpm_source,
+        "bpmConfidence": bpm_confidence,
         "beatTimestamps": beat_timestamps[:64],
         "visualJumpTimestamps": temporal["visualJumpTimestamps"],
         "cutTimestamps": cut_timestamps,
+        "cuts": aligned_cuts,
         "thumbTimestamps": thumb_timestamps,
     }
     temporal_json_path = out_dir / "temporal.json"
@@ -1679,9 +1563,12 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
         "height": height,
         "aspectRatio": aspect_ratio,
         "bpm": bpm,
+        "bpmSource": bpm_source,
+        "bpmConfidence": bpm_confidence,
         "audioProfile": audio_profile,
         "contactSheets": contact_sheets,
         "beatTimestamps": beat_timestamps[:64],
+        "cuts": aligned_cuts,
         "scenes": ast_scenes,
     }
     ast_json_path = out_dir / "style_ast.json"
@@ -1696,7 +1583,10 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
         "totalDuration": round(duration, 3),
         "fps": int(round(fps)),
         "bpm": bpm,
+        "bpmSource": bpm_source,
+        "bpmConfidence": bpm_confidence,
         "audioProfile": audio_profile,
+        "cuts": aligned_cuts,
         "contactSheets": contact_sheets,
         "aspectRatio": aspect_ratio,
         "width": width,
@@ -1745,14 +1635,20 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
     )
 
     audio_mode_line = f"{audio_profile.get('mode', 'bgm-sfx-only')} (speechLikelihood={audio_profile.get('speechLikelihood', 0.0):.2f})"
+    bpm_display = f"{bpm:.1f} (measured, conf={bpm_confidence:.2f})" if bpm_source == "measured" else f"BPM tak terukur (fallback={bpm:.1f})"
+    cuts_display = ", ".join(
+        f"{c['cutSec']:.3f}s[{c.get('evidence', 'hard')}]"
+        + (f"(onset={c['nearestOnsetSec']:.3f}s)" if c.get("nearestOnsetSec") is not None and c.get("cutSec", 0.0) > 0.0 else "")
+        for c in aligned_cuts
+    )
     sheets_line = ", ".join(f"ref/extracted/{cs}" for cs in contact_sheets) if contact_sheets else "none"
     md = f"""# Reference Video Analysis Report (MotionClone Blueprint)
 **Source:** `{v_path.name}`
-**Duration:** {duration:.2f}s | **FPS:** {int(round(fps))} | **BPM:** {bpm:.1f} | **Resolution:** {width}x{height} ({aspect_ratio})
+**Duration:** {duration:.2f}s | **FPS:** {int(round(fps))} | **BPM:** {bpm_display} | **Resolution:** {width}x{height} ({aspect_ratio})
 **Audio Profile:** `{audio_mode_line}`
 **Dense Contact Sheets:** `{sheets_line}`
 **Detected Tone:** {theme_label} (Mean Luma: {avg_luma:.1f})
-**Detected Scene Cuts:** {len(cut_timestamps)} scenes (`{", ".join(f"{t:.2f}s" for t in cut_timestamps)}`)
+**Detected Scene Cuts:** {len(cut_timestamps)} scenes (`{cuts_display}`)
 **Extractor Backend:** `{style_spec['extractorBackend']}` (`ocrAvailable={ocr_available}`)
 **Decompiled Motion AST:** `ref/extracted/style_ast.json` (version 3)
 {ocr_banner}
