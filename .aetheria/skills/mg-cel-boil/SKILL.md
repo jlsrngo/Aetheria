@@ -48,3 +48,6 @@ Only author `story.json` (validated against `examples/story.schema.json`). Do no
 - Deterministic render & contact sheet:
   `node scripts/render-skill-example.mjs --dir ".aetheria/skills/mg-cel-boil/examples" --out "<outDir>"`
 - Microstock clean-plate mode (`?microstock=1` or key `'M'`): Suppresses all text titles, exposure slates, and drawing numbers while keeping the full hand-drawn cel animation intact.
+
+## Camera (`StoryCamera`, opt-in)
+- Set root `"cameraStyle": "calm" | "kinetic" | "editorial"` + `"seed"` for deterministic variation; avoid raw camera numbers unless needed.

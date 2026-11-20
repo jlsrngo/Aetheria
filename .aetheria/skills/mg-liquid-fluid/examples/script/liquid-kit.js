@@ -1948,14 +1948,36 @@ void main(){
     }
   }
 
-  function renderShot(ctx2d, W, H, safe, shot, localTime, microstockMode) {
+  function measureShot(W, H, safe, shot, microstockMode) {
+    const isPortrait = H > W;
+    const cx = safe.x + safe.w * 0.5;
+    const cy = safe.y + safe.h * 0.48;
+    const halfW = Math.min(safe.w * 0.42, isPortrait ? 340 : 480);
+    const halfH = Math.min(safe.h * 0.36, isPortrait ? 380 : 300);
+    const minX = Math.max(safe.x + 28, cx - halfW);
+    const maxX = Math.min(safe.x + safe.w - 28, cx + halfW);
+    const minY = Math.max(safe.y + 36, cy - halfH);
+    const maxY = Math.min(safe.y + safe.h - 36, cy + halfH);
+    return {
+      behind: false,
+      minX: Math.round(minX),
+      minY: Math.round(minY),
+      maxX: Math.round(maxX),
+      maxY: Math.round(maxY),
+      width: Math.round(maxX - minX),
+      height: Math.round(maxY - minY),
+    };
+  }
+
+  function renderShot(ctx2d, W, H, safe, shot, localTime, microstockMode, cameraRig) {
     const dur = Math.max(0.01, shot.duration || 7.5);
     const localU = clamp(localTime / dur);
     const wordStr = microstockMode ? 'oooo' : (shot.wordmark || 'drop');
     ensureEngine(W, H, wordStr);
 
     const filmT = mapShotToFilmTime(shot, localU);
-    const S = cachedFilm(filmT);
+    const rawS = cachedFilm(filmT);
+    const S = cameraRig ? Object.assign({}, rawS, { cam: Object.assign({}, rawS.cam) }) : rawS;
 
     // Adapt camera zoom for 9:16 portrait so the 1920px-wide 07-liquid world fits cleanly inside the 1080px portrait canvas
     if (H > W) {
@@ -1963,6 +1985,15 @@ void main(){
       S.cam.zoom *= portraitZoomScale;
       // Keep the action vertically centered in the portrait safe zone
       S.cam.py = lerp(S.cam.py, 595, 0.35);
+    }
+
+    // Native SDF WebGL2 camera integration (stays 100% full-bleed with zero border artifacts)
+    if (cameraRig) {
+      const zMul = clamp(cameraRig.zoom || 1, 0.78, 1.24);
+      S.cam.zoom *= zMul;
+      const invZ = 1 / Math.max(0.25, S.cam.zoom);
+      S.cam.px -= (cameraRig.panX || 0) * invZ;
+      S.cam.py -= (cameraRig.panY || 0) * invZ;
     }
 
     // In microstockMode, suppress the jelly letter SDFs on the finale shot and replace with pure 3D liquid spheres & drip
@@ -1992,6 +2023,7 @@ void main(){
   window.LiquidKit = {
     buildLetterSDF,
     mapShotToFilmTime,
+    measureShot,
     renderShot
   };
 })();

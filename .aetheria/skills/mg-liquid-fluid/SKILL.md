@@ -43,3 +43,6 @@ Only author `story.json` (validated against `examples/story.schema.json`). Do no
 - Deterministic render & contact sheet:
   `node scripts/render-skill-example.mjs --dir ".aetheria/skills/mg-liquid-fluid/examples" --html "story.html" --times "1,5,10,16,22,27" --out-dir "<outDir>"`
 - Microstock clean-plate mode (`?microstock=1` or key `'M'`): Suppresses all front typography and replaces the wordmark SDF glyphs with pure 3D glossy liquid spheres and drips.
+
+## Camera (`StoryCamera`, opt-in)
+- Set root `"cameraStyle": "calm" | "kinetic" | "editorial"` + `"seed"` for deterministic variation; avoid raw camera numbers unless needed.

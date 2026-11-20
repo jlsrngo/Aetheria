@@ -1121,8 +1121,36 @@
     c.restore();
   }
 
+  function measureShot(W, H, safe, shot, microstockMode) {
+    const isPortrait = H > W;
+    const sc = isPortrait ? safe.w / 896 : safe.h / 908;
+    const cx = safe.x + safe.w * 0.5;
+    const layout = (shot && shot.layout) || 'strike-smear';
+    let minX, maxX, minY, maxY;
+    if (layout === 'badge-riffle') {
+      minX = Math.max(safe.x + 24, cx - 360 * sc);
+      maxX = Math.min(safe.x + safe.w - 24, cx + 360 * sc);
+      minY = Math.max(safe.y + 36, safe.y + 44 * sc);
+      maxY = Math.min(safe.y + safe.h - 36, safe.y + safe.h - 44 * sc);
+    } else {
+      minX = Math.max(safe.x + 36, cx - 330 * sc);
+      maxX = Math.min(safe.x + safe.w - 36, cx + 330 * sc);
+      minY = microstockMode ? Math.max(safe.y + 80, safe.y + safe.h * 0.16) : Math.max(safe.y + 44, safe.y + 52 * sc);
+      maxY = Math.min(safe.y + safe.h - 48, safe.y + safe.h - 110 * sc);
+    }
+    return {
+      behind: false,
+      minX: Math.round(minX),
+      minY: Math.round(minY),
+      maxX: Math.round(maxX),
+      maxY: Math.round(maxY),
+      width: Math.round(maxX - minX),
+      height: Math.round(maxY - minY),
+    };
+  }
+
   // 9. Complete Shot Renderer (4 Distinct Narrative Cel Animation Stages)
-  function renderShot(c, W, H, safe, shot, localTime, microstockMode) {
+  function renderShot(c, W, H, safe, shot, localTime, microstockMode, cameraRig) {
     const u = clamp(localTime / Math.max(0.01, shot.duration));
     const D = getDrawingState(localTime, shot.exposure || 'on-2s', shot.drawingNumber || 12);
     const cx = safe.x + safe.w * 0.5;
@@ -1132,11 +1160,16 @@
 
     // Layout 4 ('badge-riffle') pulls back onto the animator's light-table desk!
     if (shot.layout === 'badge-riffle') {
-      renderLightTableFinale(c, W, H, safe, shot, u, D, sc, microstockMode);
+      renderLightTableFinale(c, W, H, safe, shot, u, D, sc, microstockMode, cameraRig);
       return;
     }
 
     drawPaperSheet(c, W, H, D);
+
+    c.save();
+    if (cameraRig && window.StoryCamera && typeof window.StoryCamera.apply2D === 'function') {
+      window.StoryCamera.apply2D(c, cameraRig, W, H, { skipBlur: true });
+    }
 
     if (shot.layout === 'strike-smear') {
       // SHOT 1: Matchbox on table + Matchstick striking across with smear multiples & ignition burst
@@ -1407,16 +1440,22 @@
       c.restore();
     }
     drawExposureSlate(c, safe, shot, D, microstockMode);
+    c.restore();
   }
 
   // 10. Shot 4 Finale: Animator's Light-Table Desk Pull-Back + Stacked Sheets + Blue Onion-Skin + Corner Riffle + Reborn Tiny Spirit
-  function renderLightTableFinale(c, W, H, safe, shot, u, D, sc, microstockMode) {
+  function renderLightTableFinale(c, W, H, safe, shot, u, D, sc, microstockMode, cameraRig) {
     const v = D.bv;
     const isPortrait = H > W;
 
-    // 1. Dark wooden animation desk background
+    // 1. Dark wooden animation desk background (stays full-bleed untransformed)
     c.fillStyle = PAL.desk;
     c.fillRect(0, 0, W, H);
+
+    c.save();
+    if (cameraRig && window.StoryCamera && typeof window.StoryCamera.apply2D === 'function') {
+      window.StoryCamera.apply2D(c, cameraRig, W, H, { skipBlur: true });
+    }
 
     // Scaled cel sheet sitting on the light table
     const sheetS = 0.84;
@@ -1603,6 +1642,7 @@
       c.fillText(shot.tagline || '146 DRAWINGS · ON TWOS', noteX, noteY);
       c.restore();
     }
+    c.restore();
   }
 
   window.CelBoilKit = {
@@ -1616,6 +1656,7 @@
     drawSpirit,
     drawScallopedBadge,
     drawBoiledWord,
+    measureShot,
     renderShot
   };
 })();

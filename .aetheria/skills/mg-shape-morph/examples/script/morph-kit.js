@@ -560,7 +560,28 @@
   const WINDOWS = { 'morning-cup': [0.55, 2.25], 'sun-to-sea': [2.65, 4.72], 'flight-loop': [5.35, 6.95], 'heart-wordmark': [7.45, 9.65] };
   function filmTime(layout, u) { const w = WINDOWS[layout] || WINDOWS['heart-wordmark']; return lerp(w[0], w[1], clamp(u)); }
 
-  function renderShot(ctx, CW, CH, safe, shot, localTime, micro) {
+  function measureShot(CW, CH, safe, shot, micro) {
+    const portrait = CH > CW;
+    const cx = CW * 0.5;
+    const cy = portrait ? safe.y + safe.h * 0.47 : CH * 0.5;
+    const halfW = Math.min(safe.w * 0.40, portrait ? 320 : 420);
+    const halfH = Math.min(safe.h * 0.34, portrait ? 340 : 280);
+    const minX = Math.max(safe.x + 24, cx - halfW);
+    const maxX = Math.min(safe.x + safe.w - 24, cx + halfW);
+    const minY = Math.max(safe.y + 32, cy - halfH);
+    const maxY = Math.min(safe.y + safe.h - 32, cy + halfH);
+    return {
+      behind: false,
+      minX: Math.round(minX),
+      minY: Math.round(minY),
+      maxX: Math.round(maxX),
+      maxY: Math.round(maxY),
+      width: Math.round(maxX - minX),
+      height: Math.round(maxY - minY),
+    };
+  }
+
+  function renderShot(ctx, CW, CH, safe, shot, localTime, micro, cameraRig) {
     build();
     const u = clamp(localTime / Math.max(0.01, shot.duration || 7.5));
     const t = Math.round(filmTime(shot.layout, u) * FPS) / FPS;
@@ -569,15 +590,31 @@
     const s = portrait ? (CW / W) * 1.38 : CW / W;
     const ox = CW / 2 - 960 * s, oy = portrait ? safe.y + safe.h * 0.47 - 560 * s : CH / 2 - 540 * s;
     const cam = camAt(t);
-    ctx.save();
-    ctx.setTransform(s, 0, 0, s, ox, oy); ctx.transform(...cam);
-    drawFields(ctx, t);
-    // Once 'm' letter takes over at t >= 8.55, hide the circular hero placeholder (unless in microstock mode where the geometric disc stays visible!)
-    if (t < 8.55 || micro) drawHero(ctx, t);
-    drawWordmark(ctx, t, micro);
-    ctx.restore();
+    if (cameraRig && window.StoryCamera && typeof window.StoryCamera.apply2D === 'function') {
+      // Keep full-bleed color fields untransformed so pull-out/pan never exposes edges
+      ctx.save();
+      ctx.setTransform(s, 0, 0, s, ox, oy); ctx.transform(...cam);
+      drawFields(ctx, t);
+      ctx.restore();
+
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      window.StoryCamera.apply2D(ctx, cameraRig, CW, CH);
+      ctx.transform(s, 0, 0, s, ox, oy); ctx.transform(...cam);
+      if (t < 8.55 || micro) drawHero(ctx, t);
+      drawWordmark(ctx, t, micro);
+      ctx.restore();
+    } else {
+      ctx.save();
+      ctx.setTransform(s, 0, 0, s, ox, oy); ctx.transform(...cam);
+      drawFields(ctx, t);
+      // Once 'm' letter takes over at t >= 8.55, hide the circular hero placeholder (unless in microstock mode where the geometric disc stays visible!)
+      if (t < 8.55 || micro) drawHero(ctx, t);
+      drawWordmark(ctx, t, micro);
+      ctx.restore();
+    }
     if (!micro) { drawUI(ctx, CW, CH, safe, inkAt(t), t, shot); drawTagline(ctx, safe, t, shot); }
   }
 
-  window.MorphKit = { renderShot, filmTime, COLORS: C };
+  window.MorphKit = { renderShot, measureShot, filmTime, COLORS: C };
 })();

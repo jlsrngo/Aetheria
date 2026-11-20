@@ -13,6 +13,24 @@
       "spirit-jump",
       "box-dance",
       "badge-riffle"
+    ],
+    "cameraStyle": [
+      "calm",
+      "kinetic",
+      "editorial"
+    ],
+    "move": [
+      "hold",
+      "push-in",
+      "pull-out",
+      "truck",
+      "pan",
+      "tilt",
+      "orbit",
+      "crane",
+      "handheld",
+      "whip-pan",
+      "rack-focus-in"
     ]
   },
   "limits": {
@@ -55,5 +73,11 @@
       "h": 908
     }
   },
-  "core": 1
+  "core": 1,
+  "camera": {
+    "version": 1,
+    "maxZoom": 1.26,
+    "maxPan": 0.07,
+    "maxRollDeg": 2.5
+  }
 }
