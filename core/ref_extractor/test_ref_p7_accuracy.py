@@ -278,6 +278,73 @@ class RefExtractorP7AccuracyTests(unittest.TestCase):
             self.assertIn("scene-end", reasons)
             self.assertTrue("camera-peak" in reasons or "camera-climax" in reasons, f"expected camera reason in {reasons}")
 
+    def test_r4_tile_wall_clean_plate_dark_and_light_gaps_and_polarity_guard(self) -> None:
+        # 1. Both dark-gap (no reveal intro — seams only!) and light-gap (no reveal intro — seams only!)
+        spec = {
+            "name": "unit_r4_tiles",
+            "width": 1024,
+            "height": 576,
+            "fps": 24,
+            "hasAudio": False,
+            "scenes": [
+                {
+                    "id": "dark_tile_full",
+                    "kind": "tile-wall",
+                    "durationSec": 1.6,
+                    "bgBgr": (14, 11, 12),  # #0C0B0E
+                    "lightTileBgr": (236, 238, 240),
+                    "darkTileBgr": (30, 28, 26),
+                    "tiltDeg": -2.8,
+                    "revealIntro": False,
+                },
+                {
+                    "id": "light_tile_full",
+                    "kind": "tile-wall",
+                    "durationSec": 1.6,
+                    "transitionFromPrev": "hard",
+                    "bgBgr": (240, 236, 232),  # #E8ECF0
+                    "lightTileBgr": (250, 248, 246),
+                    "darkTileBgr": (28, 26, 24),
+                    "tiltDeg": 2.4,
+                    "revealIntro": False,
+                },
+            ],
+        }
+        with tempfile.TemporaryDirectory(prefix="p7_u_r4_") as tmp:
+            td = Path(tmp)
+            mp4 = td / "r4.mp4"
+            synth_reference.generate_synthetic_clip(spec, mp4)
+            res = ref_extractor.extract_reference_blueprint(str(mp4), str(td / "out"))
+            self.assertTrue(res.get("success"), res)
+            sc_dark, sc_light = res["motionAst"]["scenes"][0], res["motionAst"]["scenes"][1]
+            cp_dark = sc_dark["cleanPlate"]
+            cp_light = sc_light["cleanPlate"]
+
+            self.assertEqual(cp_dark.get("kind"), "tile-wall")
+            self.assertEqual(cp_light.get("kind"), "tile-wall")
+
+            def _rgb(hx: str):
+                s = hx.lstrip("#")
+                return (int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16))
+
+            dr = _rgb(cp_dark["fillHex"])
+            lr = _rgb(cp_light["fillHex"])
+            self.assertLessEqual(max(abs(dr[0] - 12), abs(dr[1] - 11), abs(dr[2] - 14)), 12, f"dark tile fill wrong: {cp_dark}")
+            self.assertLessEqual(max(abs(lr[0] - 232), abs(lr[1] - 236), abs(lr[2] - 240)), 12, f"light tile fill wrong: {cp_light}")
+
+        # 2. Polarity guard: reconcile_palette_with_clean_plate must NOT overwrite dark bgHex on tile-wall or low confidence
+        dark_pal = {"bgHex": "#0C0B0E", "textHex": "#F4F4F6", "accentHex": "#7D56EF", "isDark": True}
+        reconciled_low = ref_extractor.reconcile_palette_with_clean_plate(
+            dark_pal, {"fillHex": "#DCDAD6", "kind": "tile-wall", "confidence": "low"}
+        )
+        self.assertEqual(reconciled_low["bgHex"], "#0C0B0E")
+        self.assertTrue(reconciled_low["isDark"])
+        reconciled_tw_light = ref_extractor.reconcile_palette_with_clean_plate(
+            dark_pal, {"fillHex": "#EAECEF", "kind": "tile-wall", "confidence": "high"}
+        )
+        self.assertEqual(reconciled_tw_light["bgHex"], "#0C0B0E")
+        self.assertTrue(reconciled_tw_light["isDark"])
+
 
 if __name__ == "__main__":
     unittest.main()

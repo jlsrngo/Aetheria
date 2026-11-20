@@ -282,12 +282,29 @@ def _hex_to_bgr(hex_str: str) -> Tuple[float, float, float]:
 def reconcile_palette_with_clean_plate(
     palette: Dict[str, Any], clean_plate: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """Aligns scene palette bgHex/isDark to cleanPlate when border shadows skewed K-means dark."""
+    """Aligns scene palette bgHex/isDark to cleanPlate while protecting tile-wall & low-confidence polarity."""
     pal = dict(palette or {})
-    cp_hex = str((clean_plate or {}).get("fillHex") or pal.get("bgHex") or "#141418")
+    cp = clean_plate or {}
+    if cp.get("confidence") == "low":
+        return pal
+
+    cp_hex = str(cp.get("fillHex") or pal.get("bgHex") or "#141418")
     bg_hex = str(pal.get("bgHex") or cp_hex)
     cp_luma = _luma_from_bgr(np.array(_hex_to_bgr(cp_hex)))
     bg_luma = _luma_from_bgr(np.array(_hex_to_bgr(bg_hex)))
+
+    if cp.get("kind") == "tile-wall":
+        # Never overwrite a dark bgHex with a light color on tile-wall scenes (R4 polarity guard)
+        if cp_luma < 120.0:
+            pal["bgHex"] = cp_hex
+            pal["isDark"] = True
+            txt_luma = _luma_from_bgr(np.array(_hex_to_bgr(str(pal.get("textHex") or ""))))
+            if abs(txt_luma - cp_luma) < 60.0:
+                pal["textHex"] = "#F8FAFC"
+                pal["accentHex"] = pal.get("accentHex") or pal["textHex"]
+        elif not pal.get("isDark") and bg_luma >= 120.0:
+            pal["bgHex"] = cp_hex
+        return pal
 
     if (cp_luma >= 145.0 and bg_luma < 125.0) or (cp_luma >= 135.0 and abs(cp_luma - bg_luma) >= 55.0):
         pal["bgHex"] = cp_hex
@@ -1345,6 +1362,7 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
 
     from ref_beat_strip import select_adaptive_beat_strip_panels
     from ref_camera_motion import estimate_scene_camera_motion
+    from ref_clean_plate import extract_tile_wall_clean_plate
 
     for i, start, end, dur, role, ts_start, ts_mid, ts_end, sub_ts_list, cam_indices in scene_specs:
         fr_start = _frame_at(ts_start)
@@ -1426,8 +1444,24 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
         )
         beats_strip_rel = f"frames/{beats_strip_name}" if beats_strip_name else None
 
+        grid_tilt_deg = detect_grid_tilt_deg(fr_mid)
+        contrast_tiles = detect_bimodal_contrast_tiles(fr_mid)
+        if grid_tilt_deg is not None:
+            layout_info["gridTiltDeg"] = grid_tilt_deg
+        if contrast_tiles is not None:
+            tile_grid = measure_contrast_tile_grid(fr_mid, grid_tilt_deg)
+            if tile_grid is not None:
+                contrast_tiles["grid"] = tile_grid
+            layout_info["contrastTiles"] = contrast_tiles
+
         pal = layout_info["palette"]
-        clean_plate = extract_clean_plate_background(scene_sub_frames, pal["bgHex"])
+        if contrast_tiles is not None:
+            fr_early_cut = _frame_at(beat_strip_ts[0]) if beat_strip_ts else fr_start
+            clean_plate = extract_tile_wall_clean_plate(
+                fr_early_cut, fr_mid, contrast_tiles, grid_tilt_deg, pal["bgHex"]
+            )
+        else:
+            clean_plate = extract_clean_plate_background(scene_sub_frames, pal["bgHex"])
         pal = reconcile_palette_with_clean_plate(pal, clean_plate)
         layout_info["palette"] = pal
         layout_info["bg_hex"] = pal["bgHex"]
@@ -1496,15 +1530,6 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
         sub_beats = extract_scene_sub_beats(
             fr_start, fr_mid, fr_end, ts_start, ts_mid, ts_end, dur, mid_words, ocr_engine
         )
-        grid_tilt_deg = detect_grid_tilt_deg(fr_mid)
-        contrast_tiles = detect_bimodal_contrast_tiles(fr_mid)
-        if grid_tilt_deg is not None:
-            layout_info["gridTiltDeg"] = grid_tilt_deg
-        if contrast_tiles is not None:
-            tile_grid = measure_contrast_tile_grid(fr_mid, grid_tilt_deg)
-            if tile_grid is not None:
-                contrast_tiles["grid"] = tile_grid
-            layout_info["contrastTiles"] = contrast_tiles
         layout_info["cleanPlate"] = clean_plate
         motion_clues: Dict[str, Any] = {}
         try:
@@ -1732,7 +1757,12 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
         md += f"\n### Scene {s['index']}: `{s['id']}` ({s['start']:.2f}s - {s['end']:.2f}s, {s['duration']:.2f}s)\n"
         if s.get("beatsStrip"):
             md += f"- **High-Res Beat Strip:** `ref/extracted/{s['beatsStrip']}`\n"
-        md += f"- **Clean Plate Background:** fill=`{cp.get('fillHex')}`, hasGradient=`{cp.get('hasGradient')}`\n"
+        cp_extra = ""
+        if cp.get("kind"):
+            cp_extra += f", kind=`{cp.get('kind')}`"
+        if cp.get("confidence"):
+            cp_extra += f", confidence=`{cp.get('confidence')}`"
+        md += f"- **Clean Plate Background:** fill=`{cp.get('fillHex')}`, hasGradient=`{cp.get('hasGradient')}`{cp_extra}\n"
         md += f"- **Measured Palette:** bg=`{pal['bgHex']}`, surface=`{pal['surfaceHex']}`, text=`{pal['textHex']}`, accent=`{pal['accentHex']}`\n"
         md += f"- **Visual Archetype:** `{ly.get('visual_archetype')}`\n"
         md += f"- **Density:** `{ly.get('card_count', 0)}` cards, `{ly.get('pill_count', 0)}` pills, `{ly.get('scatter_count', 0)}` scatter elements | **Motion Energy:** `{s['motionEnergy']:.3f}` (`{s['motion']}`)\n"
