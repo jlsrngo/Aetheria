@@ -158,6 +158,152 @@
         height: boxH,
       };
     }
+    if (layout === 'radial-wheel-list') {
+      var anchorWord = String((shot && shot.anchor) || 'Aetheria');
+      var items = Array.isArray(shot && shot.items) && shot.items.length ? shot.items : ['18 Skill Deklaratif', 'Mesin Motion Lokal'];
+      var itemFs = isPortrait ? 38 : 34;
+      var dotX = isPortrait ? cx - 65 : cx - 30;
+      var listX = isPortrait ? cx - 30 : cx + 6;
+      ctx.save();
+      ctx.font = '600 ' + itemFs + 'px "Inter", "Segoe UI", sans-serif';
+      var leftW = micro ? 16 : ctx.measureText(anchorWord).width + 32;
+      var maxItemW = micro ? 270 : 0;
+      if (!micro) {
+        for (var rwi = 0; rwi < items.length; rwi++) {
+          maxItemW = Math.max(maxItemW, ctx.measureText(String(items[rwi])).width);
+        }
+        maxItemW = Math.min(maxItemW, W - listX - 40);
+      }
+      ctx.restore();
+      var rMinX = Math.max(safe.x, dotX - leftW);
+      var rMaxX = Math.min(safe.x + safe.w, listX + maxItemW);
+      var rHalfH = isPortrait ? 240 : 200;
+      return {
+        minX: rMinX,
+        maxX: rMaxX,
+        minY: Math.max(safe.y, cy - rHalfH),
+        maxY: Math.min(safe.y + safe.h, cy + rHalfH),
+        width: Math.max(10, rMaxX - rMinX),
+        height: Math.min(safe.h, rHalfH * 2),
+      };
+    }
+    if (layout === 'coverflow-carousel' || layout === 'orbit-carousel') {
+      var cylRadius = isPortrait ? safe.w * 0.38 : Math.min(390, W * 0.305);
+      var baseW = isPortrait ? 250 : 235;
+      var baseH = isPortrait ? 335 : 290;
+      var halfCW = Math.min(safe.w * 0.48, cylRadius + baseW * 0.42);
+      var halfCH = Math.min(safe.h * 0.46, baseH * 0.52);
+      return {
+        minX: cx - halfCW,
+        maxX: cx + halfCW,
+        minY: cy - halfCH,
+        maxY: cy + halfCH,
+        width: halfCW * 2,
+        height: halfCH * 2,
+      };
+    }
+    if (layout === 'logo-assemble') {
+      var markSize = (isPortrait ? 190 : 145) * 1.1;
+      return {
+        minX: cx - markSize * 0.5,
+        maxX: cx + markSize * 0.5,
+        minY: cy - markSize * 0.5,
+        maxY: cy + markSize * 0.5,
+        width: markSize,
+        height: markSize,
+      };
+    }
+    if (layout === 'brand-lockup-resolve') {
+      var brand = String((shot && shot.brand) || 'Aetheria');
+      var markSz = isPortrait ? 128 : 96;
+      var brandFs = isPortrait ? 92 : 74;
+      ctx.save();
+      ctx.font = '700 ' + brandFs + 'px "Inter", "Segoe UI", sans-serif';
+      var brandW = micro ? 0 : ctx.measureText(brand).width;
+      ctx.restore();
+      var lockupW = Math.min(safe.w * 0.9, markSz + (micro ? 0 : markSz * 0.24 + brandW));
+      var topY = cy - Math.max(markSz, brandFs) * 0.55 - 10;
+      var botY = cy + (micro ? markSz * 0.55 : (isPortrait ? 96 : 74));
+      return {
+        minX: cx - lockupW * 0.5,
+        maxX: cx + lockupW * 0.5,
+        minY: topY,
+        maxY: botY,
+        width: lockupW,
+        height: botY - topY,
+      };
+    }
+    if (layout === 'tilted-chart-dolly') {
+      var cardW = isPortrait ? 720 : 780;
+      var cardH = isPortrait ? 860 : 820;
+      var dispW = Math.min(safe.w * 0.92, isPortrait ? safe.w * 0.90 : Math.min(820, safe.w * 0.74));
+      var dispH = Math.min(safe.h * 0.86, dispW * (cardH / cardW));
+      return {
+        minX: cx - dispW * 0.5,
+        maxX: cx + dispW * 0.5,
+        minY: cy - dispH * 0.5,
+        maxY: cy + dispH * 0.5,
+        width: dispW,
+        height: dispH,
+      };
+    }
+    if (layout === 'metric-pills-tree') {
+      var pills = Array.isArray(shot && shot.pills) && shot.pills.length ? shot.pills : [1, 2, 3];
+      var pillW = isPortrait ? 208 : 186;
+      var pillH = 76;
+      var pillGap = isPortrait ? 24 : 38;
+      var rowW = Math.min(safe.w * 0.92, pills.length * pillW + (pills.length - 1) * pillGap);
+      var mTop = Math.max(safe.y, cy - 170);
+      var mBot = Math.min(safe.y + safe.h, cy + 86 + pillH * 0.5 + 36);
+      return {
+        minX: cx - rowW * 0.5,
+        maxX: cx + rowW * 0.5,
+        minY: mTop,
+        maxY: mBot,
+        width: rowW,
+        height: mBot - mTop,
+      };
+    }
+    if (layout === 'neon-score-ring') {
+      var ringR = isPortrait ? 130 : 108;
+      var halfRW = Math.max(ringR + 24, 180);
+      var rTop = cy - 18 - ringR - (micro ? 20 : 62);
+      var rBot = cy - 18 + ringR + (micro ? 20 : 54);
+      return {
+        minX: cx - halfRW,
+        maxX: cx + halfRW,
+        minY: rTop,
+        maxY: rBot,
+        width: halfRW * 2,
+        height: rBot - rTop,
+      };
+    }
+    if (layout === 'macro-ui-prompt' || layout === 'prompt-type-send') {
+      var boxW = isPortrait ? safe.w * 0.90 : Math.min(760, safe.w * 0.72);
+      var boxH = 152;
+      var pTop = cy - boxH * 0.5 - (micro ? 12 : 66);
+      var pBot = cy + boxH * 0.5 + 64;
+      return {
+        minX: cx - boxW * 0.5,
+        maxX: cx + boxW * 0.5,
+        minY: pTop,
+        maxY: pBot,
+        width: boxW,
+        height: pBot - pTop,
+      };
+    }
+    if (layout === 'whip-cta-morph') {
+      var ctaW = isPortrait ? 580 : 500;
+      var ctaH = 128;
+      return {
+        minX: cx - ctaW * 0.5,
+        maxX: cx + ctaW * 0.5,
+        minY: cy - ctaH * 0.5,
+        maxY: cy + ctaH * 0.5,
+        width: ctaW,
+        height: ctaH,
+      };
+    }
     return null;
   }
 
@@ -173,6 +319,7 @@
           H: H || 720,
           safe: safe || null,
           focusBox: focusBox || null,
+          allowAutoDollyOut: true,
           limits: COBALT_CAMERA_LIMITS,
         }
       );
