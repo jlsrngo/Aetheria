@@ -270,6 +270,7 @@
       var caption = micro ? null : findCaption(story, currentTime);
       var errors = [];
       var bbox = null;
+      var camRes = null;
 
       try {
         if (typeof cfg.renderShot === 'function') {
@@ -289,10 +290,54 @@
             micro: micro,
             caption: caption,
             state: customState,
+            camera: null,
           };
-          bbox = cfg.renderShot(env) || null;
+
+          var camCfg = cfg.camera && typeof cfg.camera === 'object' ? cfg.camera : null;
+          var hasCamOptIn = Boolean(
+            camCfg &&
+              global.StoryCamera &&
+              typeof global.StoryCamera.resolve === 'function' &&
+              (story.cameraStyle || (resolved.shot && resolved.shot.camera && typeof resolved.shot.camera === 'object'))
+          );
+          if (hasCamOptIn) {
+            var focusBox = typeof cfg.measureShot === 'function' ? cfg.measureShot(env) : null;
+            camRes = global.StoryCamera.resolve(story, resolved.shot, resolved.localTime, resolved.duration, {
+              W: W,
+              H: H,
+              safe: safe,
+              focusBox: focusBox || null,
+              allowAutoDollyOut: camCfg.allowAutoDollyOut !== false,
+              limits: camCfg.limits || { maxZoom: 1.32, maxPan: 0.08, maxRollDeg: 3.0 },
+            });
+            env.camera = camRes;
+          }
+
+          if (camRes && camRes.plan && camRes.plan.active && camCfg && camCfg.applyToContext && ctx) {
+            if (camCfg.backdrop) {
+              ctx.fillStyle = typeof camCfg.backdrop === 'function' ? camCfg.backdrop(env) : camCfg.backdrop;
+              ctx.fillRect(0, 0, W, H);
+            }
+            ctx.save();
+            global.StoryCamera.apply2D(ctx, camRes.rig, W, H);
+            bbox = cfg.renderShot(env) || null;
+            ctx.restore();
+          } else {
+            bbox = cfg.renderShot(env) || null;
+          }
           if (!bbox && typeof cfg.measureShot === 'function') {
             bbox = cfg.measureShot(env) || null;
+          }
+          if (
+            bbox &&
+            camRes &&
+            camRes.plan &&
+            camRes.plan.active &&
+            !(camCfg && camCfg.skipBboxProject) &&
+            global.StoryCamera &&
+            typeof global.StoryCamera.projectBox2D === 'function'
+          ) {
+            bbox = global.StoryCamera.projectBox2D(bbox, camRes.rig, W, H);
           }
         }
       } catch (err) {

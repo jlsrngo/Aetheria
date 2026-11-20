@@ -246,7 +246,29 @@
     'atelier-medallion': ['ring', 'arch', 1.55, 0.52]
   };
 
-  function renderShot(ctx, CW, CH, safe, shot, localTime, micro) {
+  function measureShot(CW, CH, safe, shot, micro) {
+    const sc = Math.min(1, safe.w / 896);
+    const layout = (shot && shot.layout) || 'atelier-medallion';
+    const [, , , camYFrac] = RANGES[layout] || RANGES['atelier-medallion'];
+    const focusY = safe.y + safe.h * camYFrac;
+    const halfW = layout === 'atelier-medallion' ? Math.min(safe.w * 0.42, 320 * sc) : safe.w * 0.44;
+    const minX = Math.max(safe.x + 24, CW * 0.5 - halfW);
+    const maxX = Math.min(safe.x + safe.w - 24, CW * 0.5 + halfW);
+    const minY = Math.max(safe.y + 32, focusY - (layout === 'atelier-medallion' ? 240 * sc : 220 * sc));
+    const textBottom = layout === 'atelier-medallion' ? safe.y + safe.h * 0.72 + 56 * sc : safe.y + safe.h - 54 * sc;
+    const maxY = micro ? Math.min(safe.y + safe.h - 32, focusY + 240 * sc) : Math.min(safe.y + safe.h - 24, Math.max(focusY + 200 * sc, textBottom));
+    return {
+      behind: false,
+      minX: Math.round(minX),
+      minY: Math.round(minY),
+      maxX: Math.round(maxX),
+      maxY: Math.round(maxY),
+      width: Math.round(maxX - minX),
+      height: Math.round(maxY - minY),
+    };
+  }
+
+  function renderShot(ctx, CW, CH, safe, shot, localTime, micro, cameraRig) {
     buildPath();
     const u = clamp(localTime / Math.max(0.01, shot.duration || 7.5));
     const [pStart, pEnd, zoomTarget, camYFrac] = RANGES[shot.layout] || RANGES['atelier-medallion'];
@@ -268,6 +290,9 @@
 
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (cameraRig && window.StoryCamera && typeof window.StoryCamera.apply2D === 'function') {
+      window.StoryCamera.apply2D(ctx, cameraRig, CW, CH);
+    }
     ctx.translate(CW * 0.5, safe.y + safe.h * camYFrac);
     ctx.scale(baseScale, baseScale);
     ctx.translate(-cx, -cy);
@@ -296,7 +321,11 @@
     }
     ctx.restore();
 
-    // Hot glowing pen tip in screen space
+    // Hot glowing pen tip & typography under the same camera transform
+    ctx.save();
+    if (cameraRig && window.StoryCamera && typeof window.StoryCamera.apply2D === 'function') {
+      window.StoryCamera.apply2D(ctx, cameraRig, CW, CH);
+    }
     const sx = CW * 0.5 + (tip[0] - cx) * baseScale;
     const sy = safe.y + safe.h * camYFrac + (tip[1] - cy) * baseScale;
     const tipVis = shot.layout === 'atelier-medallion' ? 1 - smooth(0.4, 0.55, u) : 1;
@@ -309,7 +338,8 @@
     }
 
     drawTypography(ctx, CW, CH, safe, shot, u, micro);
+    ctx.restore();
   }
 
-  window.LineArtKit = { renderShot };
+  window.LineArtKit = { renderShot, measureShot };
 })();

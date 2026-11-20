@@ -221,7 +221,29 @@
     ctx.restore();
   }
 
-  function renderShot(ctx, W, H, safe, shot, localTime, micro) {
+  function measureShot(W, H, safe, shot, micro) {
+    const isPortrait = H > W;
+    const sc = isPortrait ? safe.w / 896 : safe.h / 908;
+    const cx = safe.x + safe.w * 0.5;
+    const cy = safe.y + safe.h * 0.46;
+    const minX = Math.max(safe.x + 16, cx - 280 * sc);
+    const maxX = Math.min(safe.x + safe.w - 16, cx + 300 * sc);
+    const minY = Math.max(safe.y + 16, cy - 260 * sc);
+    const maxY = !micro && shot && shot.tagline
+      ? Math.min(safe.y + safe.h - 20, safe.y + safe.h - 26 * sc)
+      : Math.min(safe.y + safe.h - 20, cy + 290 * sc);
+    return {
+      behind: false,
+      minX: Math.round(minX),
+      minY: Math.round(minY),
+      maxX: Math.round(maxX),
+      maxY: Math.round(maxY),
+      width: Math.round(maxX - minX),
+      height: Math.round(maxY - minY),
+    };
+  }
+
+  function renderShot(ctx, W, H, safe, shot, localTime, micro, cameraRig) {
     const dur = Math.max(0.01, shot.duration || 7.5);
     const u = clamp(localTime / dur);
     const isPortrait = H > W;
@@ -230,6 +252,11 @@
     const cy = safe.y + safe.h * 0.46;
 
     drawXuanPaper(ctx, W, H);
+
+    ctx.save();
+    if (cameraRig && window.StoryCamera && typeof window.StoryCamera.apply2D === 'function') {
+      window.StoryCamera.apply2D(ctx, cameraRig, W, H);
+    }
 
     if (shot.layout === 'focus-burst' || shot.layout === 'ink-cascade') {
       drawFocusRays(ctx, cx, cy, W, H, sc, smooth(0.05, 0.35, u));
@@ -255,7 +282,8 @@
         ctx.restore();
       }
     }
+    ctx.restore();
   }
 
-  window.CalligraphyKit = { renderShot, PAL };
+  window.CalligraphyKit = { renderShot, measureShot, PAL };
 })();

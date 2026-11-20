@@ -30,9 +30,44 @@
     ctx.restore();
   }
 
+  function measureBauhausShot(env) {
+    var safe = env.safe;
+    var shot = env.shot || {};
+    var layout = shot.layout || 'bauhaus-poster';
+    var scx = safe.x + safe.w * 0.5;
+    var scy = safe.y + safe.h * 0.5;
+    var mod = env.H > env.W ? 148 : 136;
+    var minX = safe.x + 48;
+    var maxX = safe.x + safe.w - 48;
+    var minY = safe.y + 64;
+    var maxY = safe.y + safe.h - 64;
+    if (layout === 'kandinsky-assembly' || layout === 'escapement-pivot') {
+      minX = Math.max(safe.x + 48, scx - mod * 2.4);
+      maxX = Math.min(safe.x + safe.w - 48, scx + mod * 2.4);
+      minY = env.micro ? Math.max(safe.y + 64, scy + 40 - mod * 2.2) : safe.y + 64;
+      maxY = Math.min(safe.y + safe.h - 64, scy + 40 + mod * 2.2);
+    } else if (layout === 'constructivist-stat') {
+      minX = safe.x + 52;
+      maxX = Math.min(safe.x + safe.w - 48, scx + 70 + mod * 2.1);
+      minY = safe.y + 84;
+      maxY = Math.min(safe.y + safe.h - 64, scy + 70 + mod * 2.1);
+    }
+    return {
+      behind: false,
+      minX: Math.round(minX),
+      minY: Math.round(minY),
+      maxX: Math.round(maxX),
+      maxY: Math.round(maxY),
+      width: Math.round(maxX - minX),
+      height: Math.round(maxY - minY)
+    };
+  }
+
   window.StoryCore.boot({
     id: 'mg-bauhaus-swiss',
     defaultTitle: '09-Bauhaus Konstruktion',
+    camera: { limits: { maxZoom: 1.32, maxPan: 0.08, maxRollDeg: 3.0 } },
+    measureShot: measureBauhausShot,
     init: function (env) {
       story = env.story;
       ctx = env.ctx;
@@ -64,6 +99,9 @@
     ctx.beginPath();
     ctx.rect(safe.x, safe.y, safe.w, safe.h);
     ctx.clip();
+    if (env.camera && env.camera.plan && env.camera.plan.active && window.StoryCamera) {
+      window.StoryCamera.apply2D(ctx, env.camera.rig, W, H);
+    }
 
     var mod = isPortrait ? 148 : 136;
 
@@ -122,17 +160,7 @@
 
     ctx.restore();
     drawSwissCaption(env.caption, theme, safe);
-
-    var bbox = {
-      behind: false,
-      minX: safe.x,
-      minY: safe.y,
-      maxX: safe.x + safe.w,
-      maxY: safe.y + safe.h,
-      width: safe.w,
-      height: safe.h
-    };
-      return bbox;
+    return measureBauhausShot(env);
     }
   });
 })();

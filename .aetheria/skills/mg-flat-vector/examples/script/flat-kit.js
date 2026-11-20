@@ -159,7 +159,41 @@
     ctx.fillRect(0, groundY, W, H - groundY);
   }
 
-  function renderShot(ctx, W, H, safe, shot, localTime, micro) {
+  function measureShot(W, H, safe, shot, micro) {
+    const isPortrait = H > W;
+    const sc = isPortrait ? safe.w / 896 : safe.h / 908;
+    const cx = safe.x + safe.w * 0.5;
+    const cy = safe.y + safe.h * 0.45;
+    const layout = (shot && shot.layout) || 'sky-dot-bounce';
+    let minX, maxX, minY, maxY;
+    if (layout === 'sky-dot-bounce') {
+      minX = cx - 260 * sc;
+      maxX = cx + 260 * sc;
+      minY = micro ? cy - 220 * sc : safe.y + 44 * sc;
+      maxY = cy + 250 * sc;
+    } else if (layout === 'popwise-wordmark') {
+      minX = cx - 310 * sc;
+      maxX = cx + 310 * sc;
+      minY = cy - 120 * sc;
+      maxY = !micro && shot && shot.tagline ? safe.y + safe.h - 28 * sc : cy + 110 * sc;
+    } else {
+      minX = safe.x + 28 * sc;
+      maxX = safe.x + safe.w - 28 * sc;
+      minY = micro ? safe.y + safe.h * 0.14 : safe.y + 44 * sc;
+      maxY = safe.y + safe.h - 28 * sc;
+    }
+    return {
+      behind: false,
+      minX: Math.round(minX),
+      minY: Math.round(minY),
+      maxX: Math.round(maxX),
+      maxY: Math.round(maxY),
+      width: Math.round(maxX - minX),
+      height: Math.round(maxY - minY),
+    };
+  }
+
+  function renderShot(ctx, W, H, safe, shot, localTime, micro, cameraRig) {
     const dur = Math.max(0.01, shot.duration || 7.5);
     const u = clamp(localTime / dur);
     const isPortrait = H > W;
@@ -167,18 +201,32 @@
     const cx = safe.x + safe.w * 0.5;
     const cy = safe.y + safe.h * 0.45;
 
+    // 1. Full-bleed sky backdrop stays untransformed so pull-out/pan never exposes edges
     if (shot.layout === 'sky-dot-bounce') {
       drawSkyShapes(ctx, W, H, sc, u);
+    } else if (shot.layout === 'city-pop-rise' || shot.layout === 'character-ping') {
+      drawSkyShapes(ctx, W, H, sc, 1);
+    } else {
+      ctx.fillStyle = C.U;
+      ctx.fillRect(0, 0, W, H);
+      drawSkyShapes(ctx, W, H, sc, 1);
+    }
+
+    // 2. Foreground subject + kinetic type under optional StoryCamera transform
+    ctx.save();
+    if (cameraRig && window.StoryCamera && typeof window.StoryCamera.apply2D === 'function') {
+      window.StoryCamera.apply2D(ctx, cameraRig, W, H);
+    }
+
+    if (shot.layout === 'sky-dot-bounce') {
       const bounceY = cy + 160 * sc - Math.abs(Math.sin(u * Math.PI * 2.5)) * 280 * sc * (1 - u * 0.5);
       drawSunAndRays(ctx, cx, bounceY, 68 * sc, sc, smooth(0.5, 0.9, u));
     } else if (shot.layout === 'city-pop-rise') {
-      drawSkyShapes(ctx, W, H, sc, 1);
       drawSunAndRays(ctx, safe.x + safe.w * 0.76, safe.y + safe.h * 0.25, 74 * sc, sc, 1);
       drawCloud(ctx, safe.x + safe.w * 0.24 + u * 30 * sc, safe.y + safe.h * 0.22, sc * 0.9);
       drawCloud(ctx, safe.x + safe.w * 0.72 - u * 24 * sc, safe.y + safe.h * 0.38, sc * 0.7);
       drawSkyline(ctx, W, H, safe, sc, u);
     } else if (shot.layout === 'character-ping') {
-      drawSkyShapes(ctx, W, H, sc, 1);
       drawSunAndRays(ctx, safe.x + safe.w * 0.76, safe.y + safe.h * 0.25, 74 * sc, sc, 1);
       drawSkyline(ctx, W, H, safe, sc, 1);
 
@@ -204,11 +252,6 @@
         ctx.restore();
       }
     } else {
-      // popwise-wordmark finale
-      ctx.fillStyle = C.U;
-      ctx.fillRect(0, 0, W, H);
-      drawSkyShapes(ctx, W, H, sc, 1);
-
       // Bouncing Coral Dot next to wordmark
       const dotS = spring(u * 2.2);
       const dotY = cy - Math.abs(Math.sin(clamp((u - 0.3) * 2.5) * Math.PI)) * 60 * sc;
@@ -234,7 +277,8 @@
       }
       ctx.restore();
     }
+    ctx.restore();
   }
 
-  window.FlatKit = { renderShot, C };
+  window.FlatKit = { renderShot, measureShot, C };
 })();

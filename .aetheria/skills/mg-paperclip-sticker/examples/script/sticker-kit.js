@@ -162,7 +162,45 @@
     });
   }
 
-  function renderShot(ctx, W, H, safe, shot, localTime, micro) {
+  function measureShot(W, H, safe, shot, micro) {
+    const isPortrait = H > W;
+    const sc = isPortrait ? safe.w / 896 : safe.h / 908;
+    const cx = safe.x + safe.w * 0.5;
+    const cy = safe.y + safe.h * 0.5;
+    const layout = (shot && shot.layout) || 'sticker-slap';
+    let minX, maxX, minY, maxY;
+    if (layout === 'chip-matrix') {
+      minX = cx - 230 * sc;
+      maxX = cx + 230 * sc;
+      minY = micro ? cy - 230 * sc : safe.y + 44 * sc;
+      maxY = !micro && shot && shot.tagline ? safe.y + safe.h - 32 * sc : cy + 230 * sc;
+    } else if (layout === 'supply-chain') {
+      minX = cx - 310 * sc;
+      maxX = cx + 300 * sc;
+      minY = micro ? cy - 260 * sc : safe.y + 44 * sc;
+      maxY = !micro && shot && shot.tagline ? safe.y + safe.h - 32 * sc : cy + 330 * sc;
+    } else {
+      minX = cx - 295 * sc;
+      maxX = cx + 295 * sc;
+      minY = micro ? cy - 280 * sc : safe.y + 44 * sc;
+      maxY = !micro && shot && shot.tagline ? safe.y + safe.h - 32 * sc : cy + 290 * sc;
+    }
+    minX = Math.max(safe.x + 16, minX);
+    maxX = Math.min(safe.x + safe.w - 16, maxX);
+    minY = Math.max(safe.y + 16, minY);
+    maxY = Math.min(safe.y + safe.h - 16, maxY);
+    return {
+      behind: false,
+      minX: Math.round(minX),
+      minY: Math.round(minY),
+      maxX: Math.round(maxX),
+      maxY: Math.round(maxY),
+      width: Math.round(maxX - minX),
+      height: Math.round(maxY - minY),
+    };
+  }
+
+  function renderShot(ctx, W, H, safe, shot, localTime, micro, cameraRig) {
     const dur = Math.max(0.01, shot.duration || 7.5);
     const u = clamp(localTime / dur);
     const isPortrait = H > W;
@@ -194,6 +232,11 @@
       drawDotBoard(ctx, bx, by, bw, bh, 40 * sc);
     } else {
       drawDotBoard(ctx, 0, 0, W, H);
+    }
+
+    ctx.save();
+    if (cameraRig && window.StoryCamera && typeof window.StoryCamera.apply2D === 'function') {
+      window.StoryCamera.apply2D(ctx, cameraRig, W, H);
     }
 
     // Stickers & Editorial Elements
@@ -255,7 +298,8 @@
       }
       ctx.restore();
     }
+    ctx.restore();
   }
 
-  window.StickerKit = { renderShot, PAL };
+  window.StickerKit = { renderShot, measureShot, PAL };
 })();

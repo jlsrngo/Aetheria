@@ -8,9 +8,15 @@
   window.StoryCore.boot({
     id: 'mg-flat-vector',
     defaultTitle: '01-Flat-Vector — Popwise One Dot',
+    camera: { limits: { maxZoom: 1.32, maxPan: 0.08, maxRollDeg: 3.0 } },
+    measureShot: function (env) {
+      if (!window.FlatKit || typeof window.FlatKit.measureShot !== 'function') return null;
+      return window.FlatKit.measureShot(env.W, env.H, env.safe, env.shot, env.micro);
+    },
     renderShot: function (env) {
       if (!env.ctx || !window.FlatKit) return null;
       env.ctx.save();
+      var camRig = env.camera && env.camera.plan && env.camera.plan.active ? env.camera.rig : null;
       window.FlatKit.renderShot(
         env.ctx,
         env.W,
@@ -18,7 +24,8 @@
         env.safe,
         Object.assign({}, env.shot, { start: env.start, duration: env.duration }),
         env.localTime,
-        env.micro
+        env.micro,
+        camRig
       );
       env.ctx.restore();
       return null;

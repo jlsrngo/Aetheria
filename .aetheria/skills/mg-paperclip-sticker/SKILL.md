@@ -22,3 +22,6 @@ Only author `story.json` (validated against `examples/story.schema.json`). Do no
 - Deterministic render & contact sheet:
   `node scripts/render-skill-example.mjs --dir ".aetheria/skills/mg-paperclip-sticker/examples" --html "story.html" --times "1,5,10,16,22,27" --out-dir "<outDir>"`
 - Microstock clean-plate mode (`?microstock=1` or key `'M'`): Suppresses all text headlines, taglines, and element symbols while keeping the die-cut stickers and dot-grid board.
+
+## Camera (`StoryCamera`, opt-in)
+- Set root `"cameraStyle": "calm" | "kinetic" | "editorial"` (plus integer `"seed"`) for deterministic framing variation; avoid raw numeric camera overrides unless a shot explicitly needs `shots[].camera.move`.

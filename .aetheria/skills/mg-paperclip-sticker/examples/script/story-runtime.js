@@ -8,9 +8,15 @@
   window.StoryCore.boot({
     id: 'mg-paperclip-sticker',
     defaultTitle: '03-Paperclip-Sticker — Slap Pack',
+    camera: { limits: { maxZoom: 1.32, maxPan: 0.08, maxRollDeg: 3.0 } },
+    measureShot: function (env) {
+      if (!window.StickerKit || typeof window.StickerKit.measureShot !== 'function') return null;
+      return window.StickerKit.measureShot(env.W, env.H, env.safe, env.shot, env.micro);
+    },
     renderShot: function (env) {
       if (!env.ctx || !window.StickerKit) return null;
       env.ctx.save();
+      var camRig = env.camera && env.camera.plan && env.camera.plan.active ? env.camera.rig : null;
       window.StickerKit.renderShot(
         env.ctx,
         env.W,
@@ -18,7 +24,8 @@
         env.safe,
         Object.assign({}, env.shot, { start: env.start, duration: env.duration }),
         env.localTime,
-        env.micro
+        env.micro,
+        camRig
       );
       env.ctx.restore();
       return null;

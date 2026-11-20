@@ -29,3 +29,6 @@ Do **not** write custom canvas JS. Author only `story.json` matching `examples/k
 ## Limits & Safe-Zone Contract
 - `headline` <= 36 chars; `subtext` <= 84 chars.
 - Pure deterministic function of `t`: 12-detent escapement teeth and 120 BPM tile flips derive strictly from `t`.
+
+## Camera (`StoryCamera`, opt-in)
+- Set root `"cameraStyle": "calm" | "kinetic" | "editorial"` (plus integer `"seed"`) for deterministic framing variation; avoid raw numeric camera overrides unless a shot explicitly needs `shots[].camera.move`.
