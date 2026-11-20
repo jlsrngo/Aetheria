@@ -38,7 +38,7 @@ All package files must use relative paths inside the skill folder (`<slug>` in l
         └── story-runtime.js        # MUST be named `story-runtime.js` (exports window.StoryRuntime)
 ```
 
-> **Security & Offline Constraints:** Allowed upload extensions are `.md`, `.json`, `.js`, `.html`, `.css`, `.svg`. Path traversal (`..`) and external CDN/network URLs are forbidden — every script must run **100% offline**. The engine already serves `/script/aetheria-motion.js`, `/script/story-core.js` (Core API v1), and Three.js r128 at `/script/three.min.js`.
+> **Security & Offline Constraints:** Allowed upload extensions are `.md`, `.json`, `.js`, `.html`, `.css`, `.svg`. Path traversal (`..`) and external CDN/network URLs are forbidden — every script must run **100% offline**. The engine already serves `/script/aetheria-motion.js`, `/script/story-core.js` (Core API v1), `/script/story-camera.js` (Camera API v1), and Three.js r128 at `/script/three.min.js`.
 
 ---
 
@@ -124,6 +124,25 @@ The headless previewer and renderer rely on the following global contract:
    - When `opts.isMicrostock === true`, draw **zero text** (`fillText`, `strokeText`, and `AM.drawSubtitles` disabled) — render pure graphics/icons/motion only.
 6. **Custom Escape Hatch (`shots[].custom`):**
    - When `shot.custom` is set (e.g. `"script/scene3.js"`), invoke `window.AM?.getSceneRenderer?.(shot.id, index)` if registered, and count it in `window.__storyStats.customShots`.
+
+---
+
+## 4.5 Shared Declarative Camera Rig (`/script/story-camera.js`, Camera API v1)
+
+Declarative skills can keep one visual identity while varying camera motion deterministically across shots and across videos by opting into `/script/story-camera.js` (`window.StoryCamera`):
+
+1. **Manifest (`examples/kit.json`):** Add `"camera": { "version": 1, "maxZoom": 1.35, "maxPan": 0.08, "maxRollDeg": 3.5 }` (or `"camera": 1`). The engine automatically injects `<script src="/script/story-camera.js"></script>` into managed `index.html` and validates `cameraStyle` / `shots[].camera` via `STORY_CAMERA_INVALID` (`studio/story_camera_lint.rs`).
+2. **Opt-in `story.json` Contract:**
+   - Root: `"cameraStyle"?: "calm" | "kinetic" | "editorial"` plus integer `"seed"` (never alters existing kit jitter semantics of `seed`). When both `cameraStyle` and `shot.camera` / `shot.cameraPreset` are omitted, `StoryCamera.resolve` returns the exact identity rig so existing examples remain pixel-identical.
+   - Shot: `"camera"?: { "move"?, "intensity"?: 0..1, "dir"?: "auto|left|right|up|down|in|out", "seed"?: int, "moveDuration"?: number >= 0.1 | "shot", "curve"?: "ease-out|ease-in-out|linear|whip" }`.
+   - Built-in move table (`StoryCamera.MOVES`, 11 moves): `hold`, `push-in`, `pull-out`, `pan`, `tilt`, `truck`, `orbit`, `crane`, `handheld`, `whip`, `rack-focus-in`.
+   - Legacy compatibility (`StoryCamera.LEGACY_PRESETS`): Cobalt's 7 `cameraPreset` entries and numeric overrides remain bit-accurate (`<= 1e-6`).
+3. **Determinism & Move Director:**
+   - RNG is pure mulberry32 seeded via FNV-1a `hashSeed(story.seed|0, shot.id, "camera", camera.seed|0)` — never uses wall-clock or nondeterministic state.
+   - When `camera.move` is omitted under `cameraStyle`, `StoryCamera.planStoryMoves(story)` avoids repeating the previous shot's move or direction (`repeatOfPrevious === false`).
+4. **Framing Guard (`measured` / `clamped` / `unmeasured`):**
+   - Provide a real projected focus bbox (`focusBox` in 2D via `measureShot`, or `projectFocus(rig, sampleU)` in 3D via `THREE.Box3`) so `StoryCamera.guard` verifies 12 samples across the shot and reduces intensity (up to 4 steps × `0.7`) until focus fits inside `safeZone`.
+   - If a layout cannot provide a real bbox, pass `focusBox: null` — `StoryCamera` enforces conservative `kit.json` `camera` bounds and reports `guard: "unmeasured"` in `window.__cameraReport[shot.id]`. **Never report a skill without a real bbox as "in safe zone".**
 
 ---
 

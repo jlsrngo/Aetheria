@@ -9,6 +9,7 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+use super::story_camera_lint::{self, KitCameraConfig};
 use super::story_checks::{
     self, is_safe_script_rel, push_issue, KitLimits,
 };
@@ -58,6 +59,19 @@ pub fn lint_generic_kit_story_value(
     story_path_label: &str,
     mut issues: Vec<StoryLintIssue>,
 ) -> StoryLintReport {
+    let camera_cfg = KitCameraConfig::from_manifest_value(kit.camera.as_ref());
+    let canvas_w = root
+        .get("canvas")
+        .and_then(|c| c.get("w"))
+        .and_then(Value::as_f64)
+        .unwrap_or(1080.0);
+    let canvas_h = root
+        .get("canvas")
+        .and_then(|c| c.get("h"))
+        .and_then(Value::as_f64)
+        .unwrap_or(1920.0);
+    story_camera_lint::validate_root_camera_style(root, &mut issues);
+
     // Check root-level enum fields declared in kit.enums (e.g. `theme`)
     for (field, allowed) in &kit.enums {
         if allowed.is_empty() {
@@ -143,6 +157,15 @@ pub fn lint_generic_kit_story_value(
                     }
                 }
             }
+
+            story_camera_lint::validate_shot_camera(
+                shot,
+                &sp,
+                canvas_w,
+                canvas_h,
+                &camera_cfg,
+                &mut issues,
+            );
 
             story_checks::check_custom_script_path(shot, &sp, &mut custom_shots, &mut issues);
         }
@@ -287,6 +310,7 @@ mod tests {
         let kit = KitManifest {
             renderer: "2d-custom-neon".to_string(),
             core: Some(1),
+            camera: None,
             use_three: false,
             background: "#0B0F1A".to_string(),
             scripts: vec!["script/neon-kit.js".to_string(), "script/story-runtime.js".to_string()],
