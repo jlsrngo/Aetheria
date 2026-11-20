@@ -10,6 +10,9 @@ pub const AETHERIA_MOTION_JS: &str = include_str!("../../../../apps/public/scrip
 /// Embedded Declarative Story Core runtime (`window.StoryCore`) fallback when disk `apps/public` is absent.
 pub const STORY_CORE_JS: &str = include_str!("../../../../apps/public/script/story-core.js");
 
+/// Embedded Shared Declarative Camera Rig (`window.StoryCamera`) fallback when disk `apps/public` is absent.
+pub const STORY_CAMERA_JS: &str = include_str!("../../../../apps/public/script/story-camera.js");
+
 /// Returns true when the requested relative path refers to the bundled Three.js runtime.
 pub fn is_builtin_three_path(rel: &str) -> bool {
     let trimmed = rel.trim().trim_start_matches('/').replace('\\', "/");
@@ -51,11 +54,29 @@ pub fn resolve_story_core_code(project_root: &std::path::Path) -> String {
     std::fs::read_to_string(disk_path).unwrap_or_else(|_| STORY_CORE_JS.to_string())
 }
 
+/// Returns true when the requested relative path refers to the built-in `story-camera.js` runtime.
+pub fn is_builtin_story_camera_path(rel: &str) -> bool {
+    let trimmed = rel.trim().trim_start_matches('/').replace('\\', "/");
+    trimmed.eq_ignore_ascii_case("script/story-camera.js")
+        || trimmed.eq_ignore_ascii_case("story-camera.js")
+}
+
+/// Resolves `story-camera.js` from repo `apps/public/script/` when present, falling back to embedded bytes.
+pub fn resolve_story_camera_code(project_root: &std::path::Path) -> String {
+    let disk_path = project_root
+        .join("apps")
+        .join("public")
+        .join("script")
+        .join("story-camera.js");
+    std::fs::read_to_string(disk_path).unwrap_or_else(|_| STORY_CAMERA_JS.to_string())
+}
+
 /// Returns true for third-party / engine runtime bundles that should never be linted as user scene scripts.
 pub fn is_vendor_script_name(name: &str) -> bool {
     let base = name.trim();
     base.eq_ignore_ascii_case("aetheria-motion.js")
         || base.eq_ignore_ascii_case("story-core.js")
+        || base.eq_ignore_ascii_case("story-camera.js")
         || base.eq_ignore_ascii_case("three.min.js")
         || base.eq_ignore_ascii_case("three.js")
 }

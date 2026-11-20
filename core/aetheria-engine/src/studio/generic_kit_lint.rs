@@ -22,6 +22,8 @@ pub struct KitManifest {
     #[serde(default)]
     pub core: Option<u32>,
     #[serde(default)]
+    pub camera: Option<Value>,
+    #[serde(default)]
     pub use_three: bool,
     #[serde(default = "default_bg")]
     pub background: String,
@@ -178,6 +180,11 @@ pub fn render_generic_kit_index_html(
         .replace('"', "&quot;");
     let bg = if kit.background.trim().is_empty() { "#0F1115" } else { kit.background.trim() };
     let uses_story_core = kit.core == Some(1);
+    let uses_story_camera = kit.camera.as_ref().is_some_and(|v| {
+        v.as_u64() == Some(1)
+            || v.as_bool() == Some(true)
+            || v.is_object()
+    });
     let mut script_tags = String::new();
     let mut body_runtime_tags = String::new();
     if kit.use_three {
@@ -186,6 +193,9 @@ pub fn render_generic_kit_index_html(
     script_tags.push_str("  <script src=\"/script/aetheria-motion.js\"></script>\n");
     if uses_story_core {
         script_tags.push_str("  <script src=\"/script/story-core.js\"></script>\n");
+    }
+    if uses_story_camera {
+        script_tags.push_str("  <script src=\"/script/story-camera.js\"></script>\n");
     }
     let mut has_runtime = false;
     for sc in &kit.scripts {

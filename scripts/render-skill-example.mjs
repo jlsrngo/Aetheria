@@ -42,6 +42,13 @@ const BUILTIN_SCRIPT_MAP = {
     "script",
     "story-core.js",
   ),
+  "/script/story-camera.js": path.join(
+    REPO_ROOT,
+    "apps",
+    "public",
+    "script",
+    "story-camera.js",
+  ),
 };
 
 const MIME_TYPES = {

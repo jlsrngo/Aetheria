@@ -114,6 +114,15 @@ async fn serve_static_film_file(film_root: &Path, _ws_root: &Path, rel_raw: &str
             .into_response();
     }
 
+    if super::builtin_runtime::is_builtin_story_camera_path(target_rel) {
+        let code = super::builtin_runtime::resolve_story_camera_code(&project_root());
+        return (
+            [(header::CONTENT_TYPE, "application/javascript; charset=utf-8")],
+            code,
+        )
+            .into_response();
+    }
+
     if target_rel.starts_with("sfx/") {
         let engine_pub = project_root().join("apps").join("public");
         let fallback = engine_pub.join(target_rel);
@@ -209,6 +218,13 @@ mod tests {
         assert_eq!(resp.status(), reqwest::StatusCode::OK);
         let body = resp.text().await.unwrap();
         assert!(body.contains("aetheria-motion.js"));
+
+        let cam_resp = reqwest::get(format!("http://127.0.0.1:{}/script/story-camera.js", port))
+            .await
+            .unwrap();
+        assert_eq!(cam_resp.status(), reqwest::StatusCode::OK);
+        let cam_body = cam_resp.text().await.unwrap();
+        assert!(cam_body.contains("StoryCamera"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
