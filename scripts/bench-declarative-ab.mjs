@@ -82,6 +82,40 @@ async function checkPrereqs() {
   }
 }
 
+function inspectStoryCameraChoices(storyPath) {
+  if (!fs.existsSync(storyPath)) return null;
+  try {
+    const doc = JSON.parse(fs.readFileSync(storyPath, "utf8"));
+    const shots = Array.isArray(doc.shots) ? doc.shots : [];
+    const shotCameras = shots.map((sh) => {
+      const c = sh && typeof sh.camera === "object" && sh.camera ? sh.camera : null;
+      return {
+        id: sh?.id || null,
+        move: (c && (c.move || c.preset)) || sh?.cameraPreset || null,
+        intensity: c && c.intensity !== undefined ? c.intensity : null,
+        dir: c && c.dir !== undefined ? c.dir : null,
+      };
+    });
+    let repeatOfPrevious = 0;
+    for (let i = 1; i < shotCameras.length; i++) {
+      const prev = shotCameras[i - 1];
+      const cur = shotCameras[i];
+      if (cur.move && prev.move && cur.move !== "hold" && cur.move !== "static" && cur.move === prev.move) {
+        repeatOfPrevious++;
+      }
+    }
+    return {
+      cameraStyle: doc.cameraStyle || null,
+      seed: doc.seed ?? null,
+      shotCount: shots.length,
+      shotCameras,
+      repeatOfPrevious,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function runTrial(cond, trialIdx, headers) {
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), `aetheria-ab-${cond.id}-t${trialIdx}-`));
   const t0 = Date.now();
@@ -109,12 +143,15 @@ async function runTrial(cond, trialIdx, headers) {
       }),
     });
     const ok = msgRes.ok;
-    const hasStoryJson = fs.existsSync(path.join(workDir, "story.json"));
+    const storyPath = path.join(workDir, "story.json");
+    const hasStoryJson = fs.existsSync(storyPath);
+    const cameraChoices = hasStoryJson ? inspectStoryCameraChoices(storyPath) : null;
     return {
       condition: cond.id,
       trial: trialIdx,
       ok,
       hasStoryJson,
+      cameraChoices,
       elapsedMs: Date.now() - t0,
     };
   } finally {
