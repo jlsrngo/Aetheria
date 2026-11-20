@@ -96,6 +96,8 @@ Agen hanya menghasilkan animasi entrance teks; grid/carousel diam. Ini menjelask
 
 Catatan: `gridTiltDeg = -2,8°` memang berhasil diekstrak (`style.json` scene2, `ref_report.md:52`) dan agen v6 memakainya (`ctx.rotate(-0.0489)`), membuktikan bahwa **field yang masuk laporan dipakai, field yang tidak masuk laporan diabaikan**.
 
+> **Status pembaruan (Prompt 7 R1–R5):** F2, F3, dan akurasi batas scene telah ditangani pada lapisan ekstraktor referensi: `ref_temporal_cuts.py` mengekstrak hard cut tepat-frame tanpa menggeser cut `hard` ke audio onset (D1) serta melaporkan `bpmSource`/`bpmConfidence`; `ref_camera_motion.py` mengekstrak `cameraMotion` global (zoom, rotasi, pan, easing, pivot) ke `style_ast.json`, `ref_report.md`, `direct_scene_prompt.rs`, dan skeleton `AM.applyCamera`; `ref_beat_strip.py` memilih strip 6-panel adaptif mencakup batas cut dan puncak gerak kamera; `ref_clean_plate.py` mengukur warna celah/latar dinding ubin secara simetris (`kind: "tile-wall"`) dan melindungi `reconcile_palette_with_clean_plate` dari pembalikan polaritas. Verifikasi A/B end-to-end dengan model LLM (R6) masih menunggu kredensial provider.
+
 ### F4 — Drift timing scene5–scene8 (1,83 detik)
 
 | Scene | Reference / manual (start + dur) | Agen v6 | Selisih start |

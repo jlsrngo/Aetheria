@@ -277,6 +277,11 @@ pub(crate) async fn run_direct_per_scene_remake(
     let height = film_val.get("height").and_then(Value::as_u64).unwrap_or(576) as u32;
     let fps = film_val.get("fps").and_then(Value::as_u64).unwrap_or(30) as u32;
     let bpm = style_val.get("bpm").and_then(Value::as_f64).unwrap_or(120.0);
+    let root_bpm_source = style_val
+        .get("bpmSource")
+        .or_else(|| style_val.pointer("/audioProfile/bpmSource"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
     let film_scenes = film_val
         .get("scenes")
         .and_then(Value::as_array)
@@ -353,7 +358,14 @@ pub(crate) async fn run_direct_per_scene_remake(
         let script_path = film_root.join(&script_rel);
         let sc_start = film_sc.get("start").and_then(Value::as_f64).unwrap_or(0.0);
         let sc_dur = film_sc.get("duration").and_then(Value::as_f64).unwrap_or(2.0);
-        let style_sc = style_scenes.get(idx);
+        let style_sc_owned = style_scenes.get(idx).cloned().map(|mut sc_val| {
+            if let (Some(obj), Some(src)) = (sc_val.as_object_mut(), root_bpm_source.as_ref()) {
+                obj.entry("bpmSource".to_string())
+                    .or_insert_with(|| Value::String(src.clone()));
+            }
+            sc_val
+        });
+        let style_sc = style_sc_owned.as_ref();
 
         emit_event(
             workspace_dir,

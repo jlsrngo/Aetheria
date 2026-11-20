@@ -143,7 +143,19 @@ pub(crate) fn build_scene_hard_facts_prompt(
         if let Some(cp) = sc.get("cleanPlate") {
             let fill = cp.get("fillHex").and_then(Value::as_str).unwrap_or("#0C0B0E");
             let grad = cp.get("hasGradient").and_then(Value::as_bool).unwrap_or(false);
-            lines.push(format!("CLEAN PLATE BACKGROUND: fillHex={} hasGradient={}", fill, grad));
+            let kind = cp.get("kind").and_then(Value::as_str);
+            let conf = cp.get("confidence").and_then(Value::as_str);
+            let mut extra = String::new();
+            if let Some(k) = kind {
+                extra.push_str(&format!(" kind={}", k));
+            }
+            if let Some(c) = conf {
+                extra.push_str(&format!(" confidence={}", c));
+            }
+            lines.push(format!(
+                "CLEAN PLATE BACKGROUND: fillHex={} hasGradient={}{}",
+                fill, grad, extra
+            ));
         }
         if let Some(pal) = sc.pointer("/layout/palette") {
             lines.push(format!(
