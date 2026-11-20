@@ -13,6 +13,24 @@
       "city-ignition",
       "traffic-flow",
       "isopolis-overview"
+    ],
+    "cameraStyle": [
+      "calm",
+      "kinetic",
+      "editorial"
+    ],
+    "move": [
+      "hold",
+      "push-in",
+      "pull-out",
+      "truck",
+      "pan",
+      "tilt",
+      "orbit",
+      "crane",
+      "handheld",
+      "whip-pan",
+      "rack-focus-in"
     ]
   },
   "limits": {
@@ -54,5 +72,11 @@
       "h": 908
     }
   },
-  "core": 1
+  "core": 1,
+  "camera": {
+    "version": 1,
+    "maxZoom": 1.32,
+    "maxPan": 0.08,
+    "maxRollDeg": 3
+  }
 }

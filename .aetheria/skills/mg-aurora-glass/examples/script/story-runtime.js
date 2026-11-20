@@ -32,9 +32,42 @@
     ctx.restore();
   }
 
+  function measureAuroraShot(env) {
+    var safe = env.safe;
+    var shot = env.shot || {};
+    var isPortrait = env.H > env.W;
+    var scx = safe.x + safe.w * 0.5;
+    var layout = shot.layout || 'glass-cluster';
+    var minX, maxX, minY, maxY;
+    if (layout === 'aurora-title' || layout === 'metric-ring') {
+      var r = isPortrait ? 245 : 225;
+      var ry = safe.y + safe.h * (layout === 'aurora-title' ? 0.48 : 0.46);
+      minX = Math.max(safe.x + 20, scx - r - 30);
+      maxX = Math.min(safe.x + safe.w - 20, scx + r + 30);
+      minY = Math.max(safe.y + 20, ry - r - 20);
+      maxY = Math.min(safe.y + safe.h - 20, ry + r + 40);
+    } else {
+      minX = safe.x + 12;
+      maxX = safe.x + safe.w - 10;
+      minY = safe.y + 60;
+      maxY = Math.min(safe.y + safe.h - 24, safe.y + (isPortrait ? 1170 : 870));
+    }
+    return {
+      behind: false,
+      minX: Math.round(minX),
+      minY: Math.round(minY),
+      maxX: Math.round(maxX),
+      maxY: Math.round(maxY),
+      width: Math.round(maxX - minX),
+      height: Math.round(maxY - minY)
+    };
+  }
+
   window.StoryCore.boot({
     id: 'mg-aurora-glass',
     defaultTitle: 'Aurora — Think in Light',
+    camera: { limits: { maxZoom: 1.32, maxPan: 0.08, maxRollDeg: 3.0 } },
+    measureShot: measureAuroraShot,
     init: function (env) {
       story = env.story;
       ctx = env.ctx;
@@ -65,6 +98,9 @@
     var floatY = Math.sin(t * 1.3) * 10;
 
     ctx.save();
+    if (env.camera && env.camera.plan && env.camera.plan.active && window.StoryCamera) {
+      window.StoryCamera.apply2D(ctx, env.camera.rig, W, H, { skipBlur: true });
+    }
     ctx.globalAlpha = Math.min(1, enter * 1.15);
 
     if (layout === 'aurora-title') {
@@ -185,17 +221,7 @@
 
     ctx.restore();
     drawGlassCaption(env.caption, theme, safe);
-
-    var bbox = {
-      behind: false,
-      minX: safe.x,
-      minY: safe.y,
-      maxX: safe.x + safe.w,
-      maxY: safe.y + safe.h,
-      width: safe.w,
-      height: safe.h
-    };
-      return bbox;
+    return measureAuroraShot(env);
     }
   });
 })();

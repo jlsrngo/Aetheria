@@ -12,9 +12,28 @@
 
   
 
+  function measureHudShot(env) {
+    var safe = env.safe;
+    var minX = safe.x + 20;
+    var maxX = safe.x + safe.w - 20;
+    var minY = safe.y + 18;
+    var maxY = safe.y + safe.h - 18;
+    return {
+      behind: false,
+      minX: Math.round(minX),
+      minY: Math.round(minY),
+      maxX: Math.round(maxX),
+      maxY: Math.round(maxY),
+      width: Math.round(maxX - minX),
+      height: Math.round(maxY - minY)
+    };
+  }
+
   window.StoryCore.boot({
     id: 'mg-sci-fi-hud',
     defaultTitle: 'KESTREL-9 FUI HUD',
+    camera: { limits: { maxZoom: 1.30, maxPan: 0.08, maxRollDeg: 2.5 } },
+    measureShot: measureHudShot,
     init: function (env) {
       story = env.story;
       ctx = env.ctx;
@@ -41,6 +60,11 @@
 
     // 1. Full-bleed technical hex/coordinate backdrop + outer frame corner brackets
     HudKit.drawHexGridBackdrop(ctx, W, H, safe, theme, t);
+
+    ctx.save();
+    if (env.camera && env.camera.plan && env.camera.plan.active && window.StoryCamera) {
+      window.StoryCamera.apply2D(ctx, env.camera.rig, W, H, { skipBlur: true });
+    }
 
     // 2. Top KESTREL-9 FUI Header bar
     HudKit.drawTopBar(ctx, safe, theme, t, shot.badge || (locked ? 'TARGET LOCKED' : 'SEARCH MODE'), micro);
@@ -86,6 +110,7 @@
     var deckH = 225;
     var deckY = safe.y + safe.h - deckH - 18;
     HudKit.drawTelemetryDeck(ctx, safe.x + 20, deckY, safe.w - 40, deckH, theme, t, shot, micro);
+    ctx.restore();
 
     // 6. Bottom FUI Caption bar
     var cap = env.caption;
@@ -108,16 +133,7 @@
       ctx.restore();
     }
 
-    var bbox = {
-      behind: false,
-      minX: safe.x,
-      minY: safe.y,
-      maxX: safe.x + safe.w,
-      maxY: safe.y + safe.h,
-      width: safe.w,
-      height: safe.h
-    };
-      return bbox;
+    return measureHudShot(env);
     }
   });
 })();

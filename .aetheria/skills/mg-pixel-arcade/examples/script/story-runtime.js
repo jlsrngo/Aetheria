@@ -31,9 +31,33 @@
     return lines;
   }
 
+  function measurePixelShot(env) {
+    var safe = env.safe;
+    var isPortrait = env.H > env.W;
+    var sx = env.W / (isPortrait ? 180 : 320);
+    var sy = env.H / (isPortrait ? 320 : 180);
+    var minX = Math.max(safe.x + 12, Math.round((isPortrait ? 12 : 18) * sx));
+    var maxX = Math.min(safe.x + safe.w - 12, Math.round((isPortrait ? 166 : 300) * sx));
+    var minY = env.micro
+      ? Math.max(safe.y + 40, Math.round((isPortrait ? 130 : 62) * sy))
+      : Math.max(safe.y + 12, Math.round((isPortrait ? 20 : 10) * sy));
+    var maxY = Math.min(safe.y + safe.h - 24, Math.round((isPortrait ? 236 : 156) * sy));
+    return {
+      behind: false,
+      minX: minX,
+      minY: minY,
+      maxX: maxX,
+      maxY: maxY,
+      width: Math.max(10, maxX - minX),
+      height: Math.max(10, maxY - minY)
+    };
+  }
+
   window.StoryCore.boot({
     id: 'mg-pixel-arcade',
     defaultTitle: 'Pixel Quest 16-Bit',
+    camera: { limits: { maxZoom: 1.28, maxPan: 0.08, maxRollDeg: 2.5 } },
+    measureShot: measurePixelShot,
     init: function (env) {
       story = env.story;
       ctx = env.ctx;
@@ -200,18 +224,19 @@
     }
 
     // 4. Flush integer-scaled pixel buffer + CRT scanlines onto output canvas!
-    buf.flushToCanvas(ctx, W, H, lut);
+    var camActive = Boolean(env.camera && env.camera.plan && env.camera.plan.active && window.StoryCamera);
+    if (camActive) {
+      ctx.fillStyle = '#0B1021';
+      ctx.fillRect(0, 0, W, H);
+      ctx.save();
+      window.StoryCamera.apply2D(ctx, env.camera.rig, W, H);
+      buf.flushToCanvas(ctx, W, H, lut);
+      ctx.restore();
+    } else {
+      buf.flushToCanvas(ctx, W, H, lut);
+    }
 
-    var bbox = {
-      behind: false,
-      minX: safe.x,
-      minY: safe.y,
-      maxX: safe.x + safe.w,
-      maxY: safe.y + safe.h,
-      width: safe.w,
-      height: safe.h
-    };
-      return bbox;
+    return measurePixelShot(env);
     }
   });
 })();

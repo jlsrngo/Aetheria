@@ -30,3 +30,6 @@ Do **not** write custom canvas JS. Author only `story.json` matching `examples/k
 ## Limits & Safe-Zone Contract
 - `headline` <= 32 chars; `subtext` <= 72 chars.
 - Pure deterministic function of `t`: grid travel, sun slit scroll, palm rush, star twinkle, and glint sweep derive strictly from `t`.
+
+## Camera (`StoryCamera`, opt-in)
+- Set root `"cameraStyle": "calm" | "kinetic" | "editorial"` (plus integer `"seed"`) for deterministic framing variation; avoid raw numeric camera overrides unless a shot explicitly needs `shots[].camera.move`.

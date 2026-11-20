@@ -67,6 +67,84 @@
           },
           "metric": {
             "type": "string"
+          },
+          "camera": {
+            "type": "object",
+            "properties": {
+              "style": {
+                "type": "string",
+                "enum": [
+                  "calm",
+                  "kinetic",
+                  "editorial"
+                ]
+              },
+              "move": {
+                "type": "string",
+                "enum": [
+                  "hold",
+                  "push-in",
+                  "pull-out",
+                  "truck",
+                  "pan",
+                  "tilt",
+                  "orbit",
+                  "crane",
+                  "handheld",
+                  "whip-pan",
+                  "rack-focus-in"
+                ]
+              },
+              "dir": {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "left",
+                  "right",
+                  "up",
+                  "down",
+                  "in",
+                  "out",
+                  "cw",
+                  "ccw",
+                  "none"
+                ]
+              },
+              "intensity": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "moveDuration": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0.1
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "shot",
+                      "burst"
+                    ]
+                  }
+                ]
+              },
+              "curve": {
+                "type": "string",
+                "enum": [
+                  "linear",
+                  "ease-out",
+                  "ease-in-out",
+                  "whip-out",
+                  "whip-inout",
+                  "spring"
+                ]
+              },
+              "seed": {
+                "type": "integer"
+              }
+            }
           }
         }
       }
@@ -133,6 +211,14 @@
           }
         }
       }
+    },
+    "cameraStyle": {
+      "type": "string",
+      "enum": [
+        "calm",
+        "kinetic",
+        "editorial"
+      ]
     }
   }
 }

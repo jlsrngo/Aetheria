@@ -205,7 +205,7 @@ export async function renderCameraVariants({
 
         const pngName = `${v.name}_t${lt.toFixed(2).replace(".", "_")}.png`;
         const pngPath = path.join(out, pngName);
-        const pngBuf = await page.screenshot({ type: "png" });
+        const pngBuf = await page.screenshot({ type: "png", timeout: 90_000 });
         fs.writeFileSync(pngPath, pngBuf);
         const sha256 = crypto.createHash("sha256").update(pngBuf).digest("hex");
 

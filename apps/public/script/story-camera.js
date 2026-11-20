@@ -827,20 +827,21 @@
     return { rig: rig, plan: plan, report: reportEntry };
   }
 
-  function apply2D(ctx, rig, W, H) {
+  function apply2D(ctx, rig, W, H, opts) {
     if (!ctx || !rig) return;
+    var allowBlur = !(opts && opts.skipBlur);
     if (
       Math.abs(rig.zoom - 1) < 1e-6 &&
       Math.abs(rig.panX) < 1e-6 &&
       Math.abs(rig.panY) < 1e-6 &&
       Math.abs(rig.rollRad) < 1e-6 &&
-      rig.blur <= 0.2
+      (!allowBlur || rig.blur <= 0.2)
     ) {
       return;
     }
     var pvx = W * rig.pivotX;
     var pvy = H * rig.pivotY;
-    if (rig.blur > 0.2) {
+    if (allowBlur && rig.blur > 0.2) {
       ctx.filter = 'blur(' + rig.blur.toFixed(1) + 'px)';
     }
     ctx.translate(pvx + rig.panX, pvy + rig.panY);

@@ -12,9 +12,32 @@
 
   
 
+  function measureSynthwaveShot(env) {
+    var safe = env.safe;
+    var isPortrait = env.H > env.W;
+    var scx = safe.x + safe.w * 0.5;
+    var sunR = Math.round(Math.min(env.W, env.H) * (isPortrait ? 0.25 : 0.22));
+    var halfW = Math.min(safe.w * 0.46, Math.max(sunR + 60, isPortrait ? 380 : 460));
+    var minX = Math.max(safe.x + 20, scx - halfW);
+    var maxX = Math.min(safe.x + safe.w - 20, scx + halfW);
+    var minY = env.micro ? Math.max(safe.y + 40, safe.y + safe.h * 0.16) : Math.max(safe.y + 24, isPortrait ? 180 : 120);
+    var maxY = Math.min(safe.y + safe.h - 24, isPortrait ? 1310 : env.H - 120);
+    return {
+      behind: false,
+      minX: Math.round(minX),
+      minY: Math.round(minY),
+      maxX: Math.round(maxX),
+      maxY: Math.round(maxY),
+      width: Math.round(maxX - minX),
+      height: Math.round(maxY - minY)
+    };
+  }
+
   window.StoryCore.boot({
     id: 'mg-synthwave-retro',
     defaultTitle: 'Outrun 1986 Synthwave',
+    camera: { limits: { maxZoom: 1.32, maxPan: 0.08, maxRollDeg: 3.0 } },
+    measureShot: measureSynthwaveShot,
     init: function (env) {
       story = env.story;
       ctx = env.ctx;
@@ -40,13 +63,20 @@
 
     var horizonY = Math.round(H * (isPortrait ? 0.56 : 0.58));
 
-    // 1. Full-bleed twilight sky gradient
+    var camActive = Boolean(env.camera && env.camera.plan && env.camera.plan.active && window.StoryCamera);
+    // 1. Full-bleed twilight sky gradient (+ dark horizon ground when camera active so pull-out has zero edge gaps)
     var skyG = ctx.createLinearGradient(0, 0, 0, horizonY);
     skyG.addColorStop(0, theme.skyTop);
     skyG.addColorStop(0.55, theme.skyMid);
     skyG.addColorStop(1, theme.skyBot);
     ctx.fillStyle = skyG;
     ctx.fillRect(0, 0, W, horizonY);
+    if (camActive) {
+      ctx.fillStyle = theme.ground || '#0B041A';
+      ctx.fillRect(0, horizonY, W, H - horizonY);
+      ctx.save();
+      window.StoryCamera.apply2D(ctx, env.camera.rig, W, H, { skipBlur: true });
+    }
 
     // 2. Starfield + shooting star
     SynthwaveKit.drawStarfield(ctx, W, horizonY, t);
@@ -145,6 +175,10 @@
       }
     }
 
+    if (camActive) {
+      ctx.restore();
+    }
+
     // 9. Authentic subtle VHS scanlines + vignette
     ctx.save();
     ctx.fillStyle = 'rgba(0, 0, 0, 0.14)';
@@ -158,16 +192,7 @@
     ctx.fillRect(0, 0, W, H);
     ctx.restore();
 
-    var bbox = {
-      behind: false,
-      minX: safe.x,
-      minY: safe.y,
-      maxX: safe.x + safe.w,
-      maxY: safe.y + safe.h,
-      width: safe.w,
-      height: safe.h
-    };
-      return bbox;
+    return measureSynthwaveShot(env);
     }
   });
 })();

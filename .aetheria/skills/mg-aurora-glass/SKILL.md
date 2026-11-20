@@ -29,3 +29,6 @@ Do **not** write custom canvas JS. Author only `story.json` matching `examples/k
 ## Limits & Safe-Zone Contract
 - `headline` <= 44 chars; `subtext` <= 96 chars.
 - Pure deterministic function of `t`: aurora plume drift, specular catch-light sweeps, lens orbit, and waveform bars derive strictly from `t`.
+
+## Camera (`StoryCamera`, opt-in)
+- Set root `"cameraStyle": "calm" | "kinetic" | "editorial"` (plus integer `"seed"`) for deterministic framing variation; avoid raw numeric camera overrides unless a shot explicitly needs `shots[].camera.move`.

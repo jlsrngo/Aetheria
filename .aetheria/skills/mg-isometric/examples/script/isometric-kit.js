@@ -197,7 +197,29 @@
     ctx.restore();
   }
 
-  function renderShot(ctx, W, H, safe, shot, localTime, micro) {
+  function measureShot(W, H, safe, shot, micro) {
+    const isPortrait = H > W;
+    const tw = isPortrait ? (safe.w / 13.8) : (safe.h / 8.2);
+    const th = tw * 0.54;
+    const cx = safe.x + safe.w * 0.5;
+    const cy = safe.y + safe.h * (isPortrait ? 0.50 : 0.46);
+    const halfW = Math.min(safe.w * 0.46, 6.2 * tw);
+    const minX = Math.max(safe.x + 12, cx - halfW);
+    const maxX = Math.min(safe.x + safe.w - 12, cx + halfW);
+    const minY = micro ? Math.max(safe.y + 16, cy - 6.0 * th - 2.6 * tw * 0.55) : safe.y + 12;
+    const maxY = Math.min(safe.y + safe.h - 24, cy + 6.4 * th + 28);
+    return {
+      behind: false,
+      minX: Math.round(minX),
+      minY: Math.round(minY),
+      maxX: Math.round(maxX),
+      maxY: Math.round(maxY),
+      width: Math.round(maxX - minX),
+      height: Math.round(maxY - minY),
+    };
+  }
+
+  function renderShot(ctx, W, H, safe, shot, localTime, micro, cameraRig) {
     const dur = Math.max(0.01, shot.duration || 7.5);
     const u = clamp(localTime / dur);
     const isPortrait = H > W;
@@ -234,6 +256,10 @@
     }
 
     drawBackground(ctx, W, H, u);
+    ctx.save();
+    if (cameraRig && window.StoryCamera && typeof window.StoryCamera.apply2D === 'function') {
+      window.StoryCamera.apply2D(ctx, cameraRig, W, H, { skipBlur: true });
+    }
     drawIslandBase(ctx, cx, cy, tw, th);
 
     // Depth-sorted 12x12 tiles & buildings (painter's order: i + j ascending)
@@ -347,7 +373,8 @@
       }
       ctx.restore();
     }
+    ctx.restore();
   }
 
-  window.IsometricKit = { renderShot, PAL };
+  window.IsometricKit = { renderShot, measureShot, PAL };
 })();

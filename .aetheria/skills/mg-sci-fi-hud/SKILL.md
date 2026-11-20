@@ -29,3 +29,6 @@ Do **not** write custom canvas JS. Author only `story.json` matching `examples/k
 ## Limits & Safe-Zone Contract
 - `headline` <= 38 chars; `subtext` <= 88 chars.
 - Pure deterministic function of `t`: 3D globe rotation, radar sweep angle, sparkline waveform, and spectrum bars derive strictly from `t`.
+
+## Camera (`StoryCamera`, opt-in)
+- Set root `"cameraStyle": "calm" | "kinetic" | "editorial"` (plus integer `"seed"`) for deterministic framing variation; avoid raw numeric camera overrides unless a shot explicitly needs `shots[].camera.move`.
