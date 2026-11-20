@@ -225,6 +225,59 @@ class RefExtractorP7AccuracyTests(unittest.TestCase):
                     for seg in cm.get("segments") or []:
                         self.assertEqual(seg.get("confidence"), "low", f"Control falsely flagged active camera: {sc['id']} -> {cm}")
 
+    def test_r3_adaptive_beat_strip_captures_cut_bounds_and_late_camera_climax(self) -> None:
+        spec = {
+            "name": "unit_r3_strip",
+            "width": 640,
+            "height": 360,
+            "fps": 30,
+            "hasAudio": False,
+            "scenes": [
+                {"id": "intro", "kind": "textured", "seed": 91, "durationSec": 1.2, "bgBgr": [230, 228, 224]},
+                {
+                    "id": "late_zoom_scene",
+                    "kind": "textured",
+                    "seed": 92,
+                    "durationSec": 2.2,
+                    "bgBgr": [18, 20, 26],
+                    "transitionFromPrev": "hard",
+                    "camera": {
+                        "t0": 1.75,
+                        "t1": 2.15,
+                        "scaleFrom": 1.0,
+                        "scaleTo": 1.65,
+                        "rotDegFrom": 0.0,
+                        "rotDegTo": 2.1,
+                        "txFrom": 0.0,
+                        "txTo": 0.0,
+                        "tyFrom": 0.0,
+                        "tyTo": 0.0,
+                        "ease": "inCubic",
+                    },
+                },
+            ],
+        }
+        with tempfile.TemporaryDirectory(prefix="p7_u_r3_") as tmp:
+            td = Path(tmp)
+            mp4 = td / "r3.mp4"
+            synth_reference.generate_synthetic_clip(spec, mp4)
+            res = ref_extractor.extract_reference_blueprint(str(mp4), str(td / "out"))
+            self.assertTrue(res.get("success"), res)
+            sc2 = res["motionAst"]["scenes"][1]
+            panels = sc2.get("beatStripPanels") or []
+            ts_list = sc2.get("beatStripTimestamps") or []
+            self.assertGreaterEqual(len(panels), 4)
+            self.assertLessEqual(len(panels), 6)
+            self.assertEqual(ts_list, sorted(ts_list), "beatStripTimestamps must be chronological")
+            # First panel within <= 0.15s after exact cut
+            self.assertLessEqual(ts_list[0] - sc2["start"], 0.15)
+            # Last panel near scene end capturing late zoom climax (t >= start + 2.05s)
+            self.assertGreaterEqual(ts_list[-1], sc2["start"] + 2.05)
+            reasons = {p["reason"] for p in panels}
+            self.assertIn("scene-start", reasons)
+            self.assertIn("scene-end", reasons)
+            self.assertTrue("camera-peak" in reasons or "camera-climax" in reasons, f"expected camera reason in {reasons}")
+
 
 if __name__ == "__main__":
     unittest.main()

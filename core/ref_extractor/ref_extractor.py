@@ -1283,6 +1283,11 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
         scene_specs.append((i, start, end, dur, role, ts_start, ts_mid, ts_end, sub_ts_list, cam_indices))
         for ts in [ts_start, ts_mid, ts_end] + sub_ts_list:
             needed_indices.add(min(max(0, total_frames - 1), max(0, int(round(ts * fps)))))
+        # Pre-cache exact post-cut start and pre-cut end frames for adaptive beat strip (R3)
+        f_cut_lo = min(max(0, total_frames - 1), max(0, int(round(start * fps)) + 1))
+        f_cut_hi = min(max(0, total_frames - 1), max(f_cut_lo, int(round(end * fps)) - 1))
+        needed_indices.add(f_cut_lo)
+        needed_indices.add(f_cut_hi)
         for c_idx in cam_indices:
             needed_indices.add(c_idx)
 
@@ -1305,7 +1310,16 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
 
     def _frame_at(ts_sec: float) -> Optional[np.ndarray]:
         f_idx = min(max(0, total_frames - 1), max(0, int(round(ts_sec * fps))))
-        return cached_frames.get(f_idx)
+        cached = cached_frames.get(f_idx)
+        if cached is not None:
+            return cached
+        if cap.isOpened():
+            cap.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
+            ok, fr = cap.read()
+            if ok and fr is not None:
+                cached_frames[f_idx] = fr
+                return fr
+        return None
 
     for idx, ts in enumerate(thumb_timestamps):
         frame = _frame_at(ts)
@@ -1329,6 +1343,7 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
                 "or rapidocr-onnxruntime to extract reference text strings."
             )
 
+    from ref_beat_strip import select_adaptive_beat_strip_panels
     from ref_camera_motion import estimate_scene_camera_motion
 
     for i, start, end, dur, role, ts_start, ts_mid, ts_end, sub_ts_list, cam_indices in scene_specs:
@@ -1387,7 +1402,21 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
             sub_keyframes.append({"t": ts_end, "path": f"frames/{end_name}"})
         sub_keyframes.sort(key=lambda item: float(item.get("t", 0.0)))
 
-        beat_strip_ts = sub_ts_list[1:7] if dur >= 1.8 and len(sub_ts_list) >= 7 else [sub_ts_list[0], sub_ts_list[2], sub_ts_list[5], sub_ts_list[-1]]
+        camera_motion = estimate_scene_camera_motion(
+            cached_frames.get, cam_indices, start, fps, width, height
+        )
+        beat_strip_panels = select_adaptive_beat_strip_panels(
+            start,
+            end,
+            fps,
+            total_frames,
+            frame_diffs=temporal.get("frameDiffs"),
+            camera_motion=camera_motion,
+            max_panels=6,
+            cached_frame_indices=set(cached_frames.keys()),
+        )
+        beat_strip_ts = [float(p["t"]) for p in beat_strip_panels]
+        beat_strip_meta = [{"t": round(float(p["t"]), 3), "reason": str(p["reason"])} for p in beat_strip_panels]
         beats_strip_name = build_scene_beats_strip(
             _frame_at,
             beat_strip_ts,
@@ -1493,9 +1522,6 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
         except Exception:
             motion_clues = {}
         layout_info["motionClues"] = motion_clues
-        camera_motion = estimate_scene_camera_motion(
-            cached_frames.get, cam_indices, start, fps, width, height
-        )
         if camera_motion is not None:
             layout_info["cameraMotion"] = camera_motion
         scene_id = f"scene{i + 1}_{role}"
@@ -1514,6 +1540,7 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
             "keyframe": f"frames/{scene_kf_name}",
             "beatsStrip": beats_strip_rel,
             "beatStripTimestamps": [round(float(t), 3) for t in beat_strip_ts],
+            "beatStripPanels": beat_strip_meta,
             "keyframes": sub_keyframes,
             "subBeats": sub_beats,
             "gridTiltDeg": grid_tilt_deg,
@@ -1531,6 +1558,7 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
             "duration": dur,
             "beatsStrip": beats_strip_rel,
             "beatStripTimestamps": [round(float(t), 3) for t in beat_strip_ts],
+            "beatStripPanels": beat_strip_meta,
             "subBeats": sub_beats,
             "gridTiltDeg": grid_tilt_deg,
             "contrastTiles": contrast_tiles,
