@@ -11,20 +11,22 @@ ANTIGRAVITY-GRADE INTERACTIVE WORKFLOW (YOU HAVE REAL MICRO-TOOLS — USE THEM!)
 You are NOT restricted to a single blind shot. You have direct investigative and surgical editing tools for this scene:
 - `inspect_ref_frame({ timestampSec, crop? })` — view ANY full-resolution reference frame (or zoom-crop `{x,y,w,h}`) whenever a small icon, text label, silhouette, or fast transition looks unclear in the 6-panel strip.
 - `sample_ref_region({ timestampSec, box? })` — measure exact pixel hex colors, luminance polarity, and tight foreground bounding box inside any rectangle (also works for non-vision models).
+- `fetch_web_image({ query, outputPath, removeBackground? })` — search & download real internet photos, realistic 3D renders, portraits, or icons into `img/<name>.png` (set `removeBackground: true` to cut out solid white/uniform corners into transparent PNG!). Preload once at top of your script via `var myImg = AM.loadImage('/img/<name>.png');` and draw via `AM.drawImageFit(ctx, myImg, x, y, w, h)`. Use this whenever the reference shows a realistic 3D object/photo (e.g. realistic brain, dartboard, portrait, product) that flat Canvas ovals cannot match!
 - `bash({ command, workdir? })` — run workspace-isolated shell/Python/OpenCV/FFmpeg commands whenever you want custom pixel/geometry measurements or quick checks.
 - `write_scene_script({ code })` — write your initial complete `script/sceneK.js` (or do a clean structural rewrite if needed).
 - `patch_scene_script({ oldText, newText })` — make SURGICAL exact search-and-replace edits to fix one mismatch without breaking working code. ALWAYS prefer `patch_scene_script` over rewriting the whole file during refinement!
-- `render_and_compare_scene({ timestamps?, fullResTimestamp? })` — render your script in headless Chrome/Edge and inspect the 3-row visual comparison (`Row 1 REFERENCE | Row 2 YOUR RENDER | Row 3 DIFF HEATMAP`) plus optional full-res frame and SSIM/Color/Edge diagnostics.
+- `render_and_compare_scene({ timestamps?, fullResTimestamp? })` — render your script in headless Chrome/Edge and inspect the 3-row visual comparison (`Row 1 REFERENCE | Row 2 YOUR RENDER | Row 3 DIFF HEATMAP`) + full-res preview of the worst frame + SSIM/Color/Edge diagnostics.
 
 RECOMMENDED PER-SCENE LOOP (PACED SO YOU ALWAYS WRITE, RENDER & POLISH):
-1. Step 1 (optional — max 1–2 probe steps total): The 6-panel storyboard strip + 3 full-res keyframes + measured facts are ALREADY attached above. Only call `inspect_ref_frame` / `sample_ref_region` if a specific icon, text label, or hex color is unclear (batch up to 3 read-only probes in parallel in ONE step). Do NOT waste steps running exploratory `bash` `ls`/`cat` commands.
+1. Step 1 (optional — max 1–2 probe steps total): The 6-panel storyboard strip + 3 full-res keyframes + measured facts are ALREADY attached above. Call `inspect_ref_frame` / `sample_ref_region` for unclear details, AND call `fetch_web_image({ query, outputPath: 'img/...png', removeBackground: true })` right away if this scene contains a photographic or realistic 3D object (you may batch up to 3 calls in parallel in ONE step). Do NOT waste steps running exploratory `bash` `ls`/`cat` commands.
 2. Step 2 (write code early!): Call `write_scene_script` with your complete, modular, studio-grade Canvas 2D implementation for this scene.
-3. Step 3: Call `render_and_compare_scene` to inspect your actual rendered pixels against Row 1 (REFERENCE) and Row 3 (DIFF).
-4. Steps 4–9: Use `patch_scene_script` for surgical visual/timing/alignment fixes, then call `render_and_compare_scene` again to verify (and optional `inspect_ref_frame`/`sample_ref_region` if a specific detail needs closer inspection). Stop with a short summary ONLY once visuals, timing, and motion match cleanly with 0 runtime errors.
+3. Step 3: Call `render_and_compare_scene` to inspect your actual rendered pixels against Row 1 (REFERENCE) and Row 3 (DIFF) plus the attached full-res frame.
+4. Steps 4–11: Do NOT stop early just because SSIM looks like `0.70+` — plain white/light backgrounds inflate SSIM even when typography, timing, or icons look wrong! Compare EVERY panel left-to-right (including opening frame `t=0`, font sizes/weights, element exit timing, dashed selection boxes vs solid pills, and motion blur). Use `patch_scene_script` + `render_and_compare_scene` (typically 2–4 polish rounds) until visuals, proportions, timing, and motion closely match Row 1 with 0 runtime errors, then reply briefly.
 
 SCENE SCRIPT CONTRACT:
 1. Wrap the script in `(function () { var AM = window.AM; ... AM.registerScene(\"<sceneId>\", function (ctx, t, dur, scene, AM) { ... }); })();`.
-2. Every visual frame MUST be 100% deterministic from local scene time `t` (`0 <= t <= dur`) and `AM.rng(seed)`. NEVER use `Math.random()`, `Date.now()`, `requestAnimationFrame`, `setTimeout`, or external URLs/images (`ref/*`, `<video>`, `<img>`).
+2. Every visual frame MUST be 100% deterministic from local scene time `t` (`0 <= t <= dur`) and `AM.rng(seed)`. NEVER use `Math.random()`, `Date.now()`, `requestAnimationFrame`, `setTimeout`, `<video>`, or reference video paths (`ref/*`, `ref/extracted/*`). Local project images downloaded by `fetch_web_image` into `/img/*.png` ARE allowed and encouraged via `AM.loadImage('/img/...')` + `AM.drawImageFit(...)`.
+3. EDITORIAL GOOGLE FONTS PRELOADED IN `index.html`: `'Playfair Display'` (italic & regular editorial serif), `'Anton'` (ultra-bold condensed display), `'Inter'` (400/600/700/800/900 geometric sans), and `'Montserrat'` (600/700/800) are preloaded automatically — use them to match serif/condensed/bold typographic contrast!
 
 UNIVERSAL PROCEDURAL CRAFT METHODOLOGY:
 1. DECOMPOSE VISUALLY BEFORE CODING: Put a concise `// VISUAL PLAN:` comment at the top listing (a) exact sub-beat phases across `0..dur` matching the attached storyboard panels left-to-right, and (b) Back -> Mid -> Front layer stack.
@@ -52,6 +54,7 @@ COMPACT `window.AM` RUNTIME API (already loaded globally before your script):
 - `AM.drawLaptopFrame(ctx, { x, y, w, h, bezelColor, baseColor }, function(c, scr) { /* draw clipped inside scr.x, scr.y, scr.w, scr.h */ })`
 - `AM.drawWordWheel(ctx, { words, activeFloat, cx, cy, spacing, activeFont, dimFont, activeColor, dimColor })`
 - `AM.drawSVGPath(ctx, d, { x, y, scale, fill, stroke, lineWidth })`
+- `AM.loadImage('/img/asset.png')` -> preloaded `HTMLImageElement` (automatically awaited before Frame 0); `AM.drawImageFit(ctx, img, x, y, w, h, 'contain')`
 - Safe Canvas 2D: keep `ctx.save()`/`ctx.restore()` balanced and never reference undeclared variables.";
 
 /// Converts `t=6.72s:box=[64,292,423x272] -> ...` from global timestamps into explicit
@@ -293,7 +296,10 @@ pub(crate) fn build_scene_hard_facts_prompt(
                     .get("blurredBackdrop")
                     .and_then(Value::as_str)
                     .unwrap_or("blurred carousel backdrop");
-                lines.push(format!("CENTERED HERO CARD BOX: {} over {}", hb, bd));
+                lines.push(format!(
+                    "POSSIBLE CENTERED CARD HINT (VERIFY AGAINST ATTACHED IMAGES — ONLY draw if visibly present in the reference frames!): {} over {}",
+                    hb, bd
+                ));
             }
             if let Some(cc) = mc.get("containerClip") {
                 let kind = cc.get("kind").and_then(Value::as_str).unwrap_or("");

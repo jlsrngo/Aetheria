@@ -66,3 +66,8 @@ Do NOT call `Math.random()`, `Date.now()`, `performance.now()`, `requestAnimatio
 - `AM.drawExtrudedArrow3D(ctx, cx, cy, scale?, opts?)` — 3D perspective extruded arrow prism (`scale` defaults to `90` px radius; multiplier `<= 8` auto-scales by `90px`; opts: `{ rx, ry, rz, depth=0.24, topLight, topMid, sideColor, strokeColor, alpha }`)
 - `AM.drawLaptopFrame(ctx, opts?, drawScreenFn)` — sleek minimalist laptop frame + auto-clipped screen viewport; calls `drawScreenFn(ctx, { x, y, w, h, cx, cy })` (or `drawScreenFn(ctx, w, h)` with origin at `(0,0)`)
 - `AM.drawWordWheel(ctx, opts)` — overlapping stacked typography focus wheel (`{ words, centerIndex, cx, cy, stepY, slideOffset, activeFont, dimFont, activeColor, dimColor }`)
+
+## Local Image Asset Preloading (`/img/*`)
+- `AM.loadImage(url)` — preloads and caches a local project image (e.g. `"/img/brain.png"` downloaded by `fetch_web_image`), registering it so managed `index.html` waits before `window.__ready = true`.
+- `AM.whenImagesReady()` — returns a Promise resolving once all `AM.loadImage(...)` assets have settled.
+- `AM.drawImageFit(ctx, img, x, y, w, h, mode = "contain")` — draws a loaded `HTMLImageElement` cleanly centered/scaled (`"contain"` or `"cover"`); returns `false` if not loaded.

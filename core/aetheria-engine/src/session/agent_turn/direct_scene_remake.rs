@@ -340,8 +340,8 @@ pub(crate) async fn run_direct_per_scene_remake(
     let max_scene_steps: usize = std::env::var("AETHERIA_SCENE_MAX_STEPS")
         .ok()
         .and_then(|v| v.trim().parse::<usize>().ok())
-        .map(|n| n.clamp(3, 16))
-        .unwrap_or(10);
+        .map(|n| n.clamp(3, 18))
+        .unwrap_or(12);
     let scene_tools = build_scene_tool_definitions();
     let write_only_tools: Vec<Value> = scene_tools
         .iter()

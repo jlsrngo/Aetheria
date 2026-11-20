@@ -1587,6 +1587,72 @@
     ctx.restore();
   }
 
+  // ============================================================================
+  // 10. Deterministic Local Image Asset Preloader (`/img/*`)
+  // ============================================================================
+
+  const IMAGE_CACHE = Object.create(null);
+  const IMAGE_PROMISES = [];
+
+  function normalizeImageUrl(url) {
+    const raw = String(url || "").trim().replace(/\\/g, "/");
+    if (!raw) return "";
+    if (/^(https?:|data:|blob:|\/)/i.test(raw)) return raw;
+    return "/" + raw.replace(/^\.?\//, "");
+  }
+
+  /**
+   * Preloads a project image (e.g. downloaded via `fetch_web_image` to `/img/brain.png`)
+   * and registers its load promise so `AM.whenImagesReady()` settles before `window.__ready = true`.
+   */
+  function loadImage(url) {
+    const src = normalizeImageUrl(url);
+    if (!src) return null;
+    if (IMAGE_CACHE[src]) return IMAGE_CACHE[src];
+    if (typeof Image === "undefined") return null;
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    const readyPromise = new Promise((resolve) => {
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(img);
+    });
+    img.src = src;
+    IMAGE_CACHE[src] = img;
+    IMAGE_PROMISES.push(readyPromise);
+    return img;
+  }
+
+  function whenImagesReady() {
+    if (!IMAGE_PROMISES.length) return Promise.resolve([]);
+    return Promise.all(IMAGE_PROMISES);
+  }
+
+  /**
+   * Draws a loaded HTMLImageElement cleanly inside `{x, y, w, h}` using `"contain"` or `"cover"`.
+   */
+  function drawImageFit(ctx, img, x, y, w, h, mode = "contain") {
+    if (!img || !img.complete || !(img.naturalWidth > 0) || !(img.naturalHeight > 0)) {
+      return false;
+    }
+    const iw = img.naturalWidth;
+    const ih = img.naturalHeight;
+    const scale =
+      mode === "cover" ? Math.max(w / iw, h / ih) : Math.min(w / iw, h / ih);
+    const dw = iw * scale;
+    const dh = ih * scale;
+    const dx = x + (w - dw) * 0.5;
+    const dy = y + (h - dh) * 0.5;
+    ctx.save();
+    if (mode === "cover") {
+      ctx.beginPath();
+      ctx.rect(x, y, w, h);
+      ctx.clip();
+    }
+    ctx.drawImage(img, dx, dy, dw, dh);
+    ctx.restore();
+    return true;
+  }
+
   const API = {
     TAU,
     clamp,
@@ -1643,6 +1709,9 @@
     drawExtrudedArrow3D,
     drawLaptopFrame,
     drawWordWheel,
+    loadImage,
+    whenImagesReady,
+    drawImageFit,
   };
 
   global.AetheriaMotion = API;

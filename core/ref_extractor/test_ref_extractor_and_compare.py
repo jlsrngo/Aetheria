@@ -344,6 +344,15 @@ class RefExtractorAndCompareTests(unittest.TestCase):
         self.assertAlmostEqual(hw, 312, delta=36)
         self.assertGreaterEqual(hh, 440)
 
+        # 1b. Portrait 9:16 graph-paper frame with centered text must NOT trigger a fake heroCardBox
+        portrait_grid = np.full((1280, 720, 3), 220, dtype=np.uint8)
+        for gx in range(0, 720, 40):
+            cv2.line(portrait_grid, (gx, 0), (gx, 1280), (200, 200, 200), 1)
+        for gy in range(0, 1280, 40):
+            cv2.line(portrait_grid, (0, gy), (720, gy), (200, 200, 200), 1)
+        cv2.putText(portrait_grid, "Smart decisions", (170, 620), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (60, 40, 70), 3)
+        self.assertIsNone(rmc.detect_centered_hero_card_over_bright_backdrop(portrait_grid))
+
         # 2. Scene 1 inline glyph morph clue (v13 #3)
         s1_fr = np.full((576, 1024, 3), 12, dtype=np.uint8)
         accents = [

@@ -184,6 +184,10 @@ def detect_centered_hero_card_over_bright_backdrop(
     h, w = frame_bgr.shape[:2]
     if w < 160 or h < 120:
         return None
+    # A 3-card side-by-side carousel backdrop only applies to landscape/square stages;
+    # on portrait (9:16) canvases, centered text over graph paper falsely triggers vertical Sobel peaks.
+    if h > int(w * 1.15):
+        return None
     gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
     mean_luma = float(np.mean(gray))
     dark_frac = float(np.mean(gray < 80))
@@ -204,6 +208,8 @@ def detect_centered_hero_card_over_bright_backdrop(
         bx, by, bw, bh = cv2.boundingRect(approx)
         if not (int(w * 0.18) <= bw <= int(w * 0.48) and int(h * 0.52) <= bh <= int(h * 0.96)):
             continue
+        if bh > 0 and (float(bw) / float(bh)) < 0.35:
+            continue
         center_offset = abs((bx + bw * 0.5) - (w * 0.5)) / float(w)
         if center_offset > 0.12:
             continue
@@ -217,6 +223,7 @@ def detect_centered_hero_card_over_bright_backdrop(
         sobel_x = np.abs(cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3))
         y_band = sobel_x[int(h * 0.12) : int(h * 0.88), :]
         col_profile = np.mean(y_band, axis=0)
+        col_median = float(np.median(col_profile))
         l_min, l_max = int(w * 0.24), int(w * 0.42)
         r_min, r_max = int(w * 0.58), int(w * 0.76)
         if l_max > l_min and r_max > r_min:
@@ -224,6 +231,9 @@ def detect_centered_hero_card_over_bright_backdrop(
             rx = r_min + int(np.argmax(col_profile[r_min:r_max]))
             cw = rx - lx
             sym_err = abs(((lx + rx) * 0.5) - (w * 0.5)) / float(w)
+            # Check vertical edge continuity (rejects graph-paper / isolated text fragments)
+            l_cont = float(np.mean(y_band[:, lx] > 12.0))
+            r_cont = float(np.mean(y_band[:, rx] > 12.0))
             # Check center sharpness vs blurred side flanks
             center_roi = gray[int(h * 0.15) : int(h * 0.85), lx:rx]
             left_flank = gray[int(h * 0.15) : int(h * 0.85), int(w * 0.05) : max(int(w * 0.06), lx - 8)]
@@ -234,15 +244,20 @@ def detect_centered_hero_card_over_bright_backdrop(
                 + (float(cv2.Laplacian(right_flank, cv2.CV_64F).var()) if right_flank.size else 0.0)
             )
             peak_strength = float(col_profile[lx] + col_profile[rx]) * 0.5
+            top_y = int(round(h * 0.06))
+            bot_y = int(round(h * 0.94))
+            ch = max(1, bot_y - top_y)
             if (
                 int(w * 0.22) <= cw <= int(w * 0.44)
+                and (float(cw) / float(ch)) >= 0.35
                 and sym_err <= 0.09
                 and peak_strength >= 14.0
+                and peak_strength >= max(col_median * 2.5, 14.0)
+                and l_cont >= 0.50
+                and r_cont >= 0.50
                 and c_sharp >= f_sharp * 1.15
             ):
-                top_y = int(round(h * 0.06))
-                bot_y = int(round(h * 0.94))
-                best_box = [int(lx), top_y, int(cw), int(bot_y - top_y)]
+                best_box = [int(lx), top_y, int(cw), int(ch)]
 
     if best_box is None:
         return None

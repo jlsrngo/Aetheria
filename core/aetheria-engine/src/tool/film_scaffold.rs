@@ -226,6 +226,9 @@ pub(crate) fn render_managed_index_html(
   <meta charset="UTF-8" />
   <meta name="viewport" content="width={w}, initial-scale=1.0" />
   <title>{title}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600;700;800;900&family=Montserrat:wght@600;700;800&family=Playfair+Display:ital,wght@0,400..700;1,400..700&display=swap" />
   <style>
     *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
     html, body {{
@@ -267,6 +270,9 @@ pub(crate) fn render_managed_index_html(
     var SCENES = {scenes};
     var totalDuration = 0;
     for (var i = 0; i < SCENES.length; i++) {{
+      SCENES[i].width = W;
+      SCENES[i].height = H;
+      SCENES[i].fps = FPS;
       totalDuration += Number(SCENES[i].duration || 0);
     }}
 
@@ -344,11 +350,24 @@ pub(crate) fn render_managed_index_html(
       }})(SCENES[j]);
     }}
 
-    if (wordPromises.length === 0) {{
+    var readyWaiters = wordPromises.slice();
+    if (window.AM && typeof window.AM.whenImagesReady === "function") {{
+      readyWaiters.push(window.AM.whenImagesReady().catch(function () {{}}));
+    }}
+    if (typeof document !== "undefined" && document.fonts && document.fonts.ready) {{
+      readyWaiters.push(
+        Promise.race([
+          document.fonts.ready.catch(function () {{}}),
+          new Promise(function (resolve) {{ setTimeout(resolve, 1800); }})
+        ])
+      );
+    }}
+
+    if (readyWaiters.length === 0) {{
       window.renderAt(0);
       window.__ready = true;
     }} else {{
-      Promise.all(wordPromises).then(function () {{
+      Promise.all(readyWaiters).then(function () {{
         window.renderAt(0);
         window.__ready = true;
       }});

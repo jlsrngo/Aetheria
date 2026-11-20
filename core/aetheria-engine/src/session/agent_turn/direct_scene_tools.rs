@@ -4,9 +4,11 @@
 //! capabilities on a single scene (zero subagent bureaucracy):
 //!   1. `inspect_ref_frame`       — extract full-res or zoom-cropped reference frame at any timestamp
 //!   2. `sample_ref_region`       — measure exact pixel hexes, dominant clusters, and foreground bbox
-//!   3. `write_scene_script`      — write complete `script/sceneK.js` with instant hazard lint
-//!   4. `patch_scene_script`      — surgical exact search-and-replace edit on `script/sceneK.js`
-//!   5. `render_and_compare_scene`— render Scene K via headless CDP and return visual strip + metrics
+//!   3. `fetch_web_image`         — download real internet images/3D objects/icons into `img/` (with optional bg cutout)
+//!   4. `bash`                    — workspace-isolated shell/Python/OpenCV measurements
+//!   5. `write_scene_script`      — write complete `script/sceneK.js` with instant hazard lint
+//!   6. `patch_scene_script`      — surgical exact search-and-replace edit on `script/sceneK.js`
+//!   7. `render_and_compare_scene`— render Scene K via headless CDP and return visual strip + full-res worst frame + metrics
 
 use base64::prelude::*;
 use serde_json::{json, Value};
@@ -93,6 +95,7 @@ pub(crate) fn build_scene_tool_definitions() -> Vec<Value> {
                 }
             }
         }),
+        crate::tool::fetch_web_image::fetch_web_image_tool_definition(),
         json!({
             "type": "function",
             "function": {
@@ -338,6 +341,54 @@ pub(crate) async fn execute_scene_micro_tool(
                 },
             }
         }
+        "fetch_web_image" => {
+            let res =
+                crate::tool::fetch_web_image::execute_fetch_web_image(ctx.workspace_dir, args)
+                    .await;
+            let mut imgs = Vec::new();
+            let mut caption = None;
+            if res.get("success").and_then(Value::as_bool) == Some(true)
+                && res.get("fallback").and_then(Value::as_bool) != Some(true)
+            {
+                if let Some(out_str) = res.get("outputPath").and_then(Value::as_str) {
+                    let p = Path::new(out_str);
+                    if let Ok(bytes) = tokio::fs::read(p).await {
+                        if !bytes.is_empty() && bytes.len() <= 1_500_000 {
+                            let ext = p
+                                .extension()
+                                .and_then(|e| e.to_str())
+                                .unwrap_or("png")
+                                .to_ascii_lowercase();
+                            let mime = match ext.as_str() {
+                                "png" => Some("image/png"),
+                                "jpg" | "jpeg" => Some("image/jpeg"),
+                                "webp" => Some("image/webp"),
+                                _ => None,
+                            };
+                            if let Some(m) = mime {
+                                imgs.push(format!("data:{};base64,{}", m, BASE64_STANDARD.encode(&bytes)));
+                                let asset_url = res
+                                    .get("assetUrl")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("/img/web_image.png");
+                                caption = Some(format!(
+                                    "Downloaded internet image `{}` attached above. Verify it matches the reference object cleanly (if not, try a more specific `query` or `removeBackground: true`); preload via `AM.loadImage('{}')` and draw via `AM.drawImageFit(...)`.",
+                                    asset_url, asset_url
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+            SceneToolOutcome {
+                result_json: res,
+                vision_images: imgs,
+                vision_caption: caption,
+                script_modified: false,
+                rendered_score: None,
+                rendered_errors: None,
+            }
+        }
         "bash" | "shell" | "terminal" => {
             let before = tokio::fs::read_to_string(ctx.script_path).await.ok();
             let res =
@@ -364,7 +415,9 @@ pub(crate) async fn execute_scene_micro_tool(
                 rendered_errors: None,
             }
         }
-        "write_scene_script" | "write" | "write_to_file" => {
+        name if matches!(name, "write_scene_script" | "write" | "write_to_file")
+            || name.starts_with("write_scene_script") =>
+        {
             let Some(code) = args
                 .get("code")
                 .or_else(|| args.get("content"))
@@ -432,7 +485,9 @@ pub(crate) async fn execute_scene_micro_tool(
                 rendered_errors: None,
             }
         }
-        "patch_scene_script" | "edit" | "replace_file_content" => {
+        name if matches!(name, "patch_scene_script" | "edit" | "replace_file_content")
+            || name.starts_with("patch_scene_script") =>
+        {
             let old_text = args
                 .get("oldText")
                 .or_else(|| args.get("oldString"))
@@ -562,8 +617,34 @@ pub(crate) async fn execute_scene_micro_tool(
                             imgs.push(url);
                         }
                     }
-                    // Optionally attach a full-resolution rendered frame at `fullResTimestamp`
-                    if let Some(ft) = full_res_t {
+                    // Attach a full-resolution rendered frame: explicit `fullResTimestamp` if requested,
+                    // otherwise automatically attach the worst-scoring rendered frame so fine typography,
+                    // borders, and icons stay 1:1 readable instead of tiny strip thumbnails!
+                    let auto_worst_t = if full_res_t.is_some() {
+                        full_res_t
+                    } else {
+                        res.reference_comparison
+                            .as_ref()
+                            .and_then(|c| c.get("perFrame"))
+                            .and_then(Value::as_array)
+                            .and_then(|arr| {
+                                arr.iter()
+                                    .min_by(|a, b| {
+                                        let sa = a
+                                            .get("combinedScore")
+                                            .and_then(Value::as_f64)
+                                            .unwrap_or(1.0);
+                                        let sb = b
+                                            .get("combinedScore")
+                                            .and_then(Value::as_f64)
+                                            .unwrap_or(1.0);
+                                        sa.partial_cmp(&sb).unwrap_or(std::cmp::Ordering::Equal)
+                                    })
+                                    .and_then(|f| f.get("timestamp"))
+                                    .and_then(Value::as_f64)
+                            })
+                    };
+                    if let Some(ft) = auto_worst_t {
                         if let Some(best_fr) = res.frames.iter().min_by(|a, b| {
                             (a.timestamp - ft)
                                 .abs()
@@ -646,7 +727,7 @@ mod tests {
     }
 
     #[test]
-    fn scene_tool_definitions_expose_all_six_antigravity_micro_tools() {
+    fn scene_tool_definitions_expose_all_seven_antigravity_micro_tools() {
         let defs = build_scene_tool_definitions();
         let names: Vec<&str> = defs
             .iter()
@@ -657,6 +738,7 @@ mod tests {
             vec![
                 "inspect_ref_frame",
                 "sample_ref_region",
+                "fetch_web_image",
                 "bash",
                 "write_scene_script",
                 "patch_scene_script",
