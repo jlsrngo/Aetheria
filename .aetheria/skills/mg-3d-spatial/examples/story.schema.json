@@ -23,6 +23,14 @@
       "type": "integer",
       "default": 404
     },
+    "cameraStyle": {
+      "type": "string",
+      "enum": [
+        "calm",
+        "kinetic",
+        "editorial"
+      ]
+    },
     "microstockMode": {
       "type": "boolean",
       "default": false
@@ -64,6 +72,43 @@
           },
           "tagline": {
             "type": "string"
+          },
+          "camera": {
+            "type": "object",
+            "properties": {
+              "move": {
+                "enum": [
+                  "hold",
+                  "push-in",
+                  "pull-out",
+                  "pan",
+                  "tilt",
+                  "truck",
+                  "orbit",
+                  "crane",
+                  "handheld",
+                  "whip",
+                  "rack-focus-in"
+                ]
+              },
+              "intensity": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "dir": {
+                "enum": ["auto", "left", "right", "up", "down", "in", "out"]
+              },
+              "seed": {
+                "type": "integer"
+              },
+              "moveDuration": {
+                "type": ["number", "string"]
+              },
+              "curve": {
+                "enum": ["ease-out", "ease-in-out", "linear", "whip"]
+              }
+            }
           }
         }
       }

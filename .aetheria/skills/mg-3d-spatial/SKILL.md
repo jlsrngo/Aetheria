@@ -16,7 +16,8 @@ description: Soft 3D PBR spatial render engine using Three.js with instanced hex
 4. `soft-finale`: Wide 3D `SOFT.` overview with gentle breathing motion.
 
 ## 3. Declarative Contract (`story.json`)
-Only author `story.json` (validated against `examples/story.schema.json`). Do not edit `examples/script/spatial-kit.js` or `examples/script/story-runtime.js`.
+- Only author `story.json` (validated against `examples/story.schema.json`). Do not edit `examples/script/spatial-kit.js` or `examples/script/story-runtime.js`.
+- **Shared Camera Rig (`/script/story-camera.js`)**: Set `"cameraStyle": "calm"` (or `"editorial"` | `"kinetic"`) at root with an integer `"seed"` so 3D camera orbits, cranes, trucks, and push-ins vary deterministically across shots while keeping the projected `THREE.Box3` of active letters + sphere inside the safe zone (`guard: "measured"` / `"clamped"`). Do not author raw numeric camera offsets unless a shot explicitly needs custom framing.
 
 ## 4. Verification & Mode `'M'`
 - Deterministic render & contact sheet:

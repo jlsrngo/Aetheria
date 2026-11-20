@@ -166,20 +166,93 @@
     dummy = new THREE.Object3D();
   }
 
-  function renderShot(webglCanvas, hudCanvas, W, H, safe, shot, localTime, micro) {
+  const SPATIAL_CAMERA_LIMITS = { maxZoom: 1.35, maxPan: 0.08, maxRollDeg: 3.5 };
+
+  function computeBaseCamera(layout, u, isPortrait) {
+    if (layout === 'capsule-bed-drop') {
+      return {
+        camPos: [lerp(-1.6, -0.6, u), lerp(3.4, 4.0, u), isPortrait ? 9.6 : 6.8],
+        lookAt: [-1.4, 0.3, 0],
+      };
+    }
+    if (layout === 'letter-cascade') {
+      return {
+        camPos: [lerp(-0.4, 0.5, u), 4.4, isPortrait ? 10.6 : 7.4],
+        lookAt: [0.1, 0.35, 0],
+      };
+    }
+    if (layout === 'sphere-shockwave') {
+      return {
+        camPos: [lerp(0.8, 0.2, u), lerp(4.5, 5.2, u), isPortrait ? 11.4 : 8.0],
+        lookAt: [0.4, 0.3, 0],
+      };
+    }
+    return {
+      camPos: [lerp(0.4, 0.0, u), lerp(5.0, 4.6, u), isPortrait ? 11.8 : 8.2],
+      lookAt: [0.2, 0.35, 0],
+    };
+  }
+
+  function computeFocusWorldBox() {
+    const box = new THREE.Box3();
+    for (let i = 0; i < letters.length; i++) {
+      if (letters[i].mesh.visible) {
+        letters[i].mesh.updateWorldMatrix(true, true);
+        box.expandByObject(letters[i].mesh);
+      }
+    }
+    if (sphereMesh && sphereMesh.visible) {
+      sphereMesh.updateWorldMatrix(true, true);
+      box.expandByObject(sphereMesh);
+    }
+    return box;
+  }
+
+  function projectWorldBoxToPixels(worldBox, cam, W, H) {
+    if (!worldBox || worldBox.isEmpty() || !cam) return null;
+    cam.updateMatrixWorld(true);
+    cam.updateProjectionMatrix();
+    const xs = [worldBox.min.x, worldBox.max.x];
+    const ys = [worldBox.min.y, worldBox.max.y];
+    const zs = [worldBox.min.z, worldBox.max.z];
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    const v = new THREE.Vector3();
+    for (const x of xs) {
+      for (const y of ys) {
+        for (const z of zs) {
+          v.set(x, y, z).project(cam);
+          const sx = (v.x * 0.5 + 0.5) * W;
+          const sy = (-v.y * 0.5 + 0.5) * H;
+          if (sx < minX) minX = sx;
+          if (sx > maxX) maxX = sx;
+          if (sy < minY) minY = sy;
+          if (sy > maxY) maxY = sy;
+        }
+      }
+    }
+    return {
+      minX: Math.round(minX * 10) / 10,
+      minY: Math.round(minY * 10) / 10,
+      maxX: Math.round(maxX * 10) / 10,
+      maxY: Math.round(maxY * 10) / 10,
+      width: Math.round((maxX - minX) * 10) / 10,
+      height: Math.round((maxY - minY) * 10) / 10,
+    };
+  }
+
+  function renderShot(webglCanvas, hudCanvas, W, H, safe, shot, localTime, micro, story) {
     initThree(webglCanvas, W, H);
     const dur = Math.max(0.01, shot.duration || 7.5);
     const u = clamp(localTime / dur);
     const isPortrait = H > W;
 
-    // Camera choreography per layout
-    let camPos = [0, 4.2, isPortrait ? 11.2 : 7.8];
-    let lookAt = [0, 0.25, 0];
+    // Base camera framing per layout
+    const baseCam = computeBaseCamera(shot.layout, u, isPortrait);
+    const camPos = baseCam.camPos;
+    const lookAt = baseCam.lookAt;
     let impactCenter = [0, 0], impactU = -1;
 
     if (shot.layout === 'capsule-bed-drop') {
-      camPos = [lerp(-1.6, -0.6, u), lerp(3.4, 4.0, u), isPortrait ? 9.6 : 6.8];
-      lookAt = [-1.4, 0.3, 0];
       impactCenter = [-1.95, 0];
       impactU = u;
       letters.forEach((l, i) => {
@@ -193,8 +266,6 @@
       });
       sphereMesh.visible = false;
     } else if (shot.layout === 'letter-cascade') {
-      camPos = [lerp(-0.4, 0.5, u), 4.4, isPortrait ? 10.6 : 7.4];
-      lookAt = [0.1, 0.35, 0];
       impactCenter = [0.42, 0];
       impactU = u;
       letters.forEach((l, i) => {
@@ -206,8 +277,6 @@
       });
       sphereMesh.visible = false;
     } else if (shot.layout === 'sphere-shockwave') {
-      camPos = [lerp(0.8, 0.2, u), lerp(4.5, 5.2, u), isPortrait ? 11.4 : 8.0];
-      lookAt = [0.4, 0.3, 0];
       impactCenter = [2.45, 0];
       impactU = clamp((u - 0.3) / 0.7);
       letters.forEach((l) => {
@@ -220,8 +289,6 @@
       sphereMesh.position.set(2.45, sy, 0);
     } else {
       // soft-finale
-      camPos = [lerp(0.4, 0.0, u), lerp(5.0, 4.6, u), isPortrait ? 11.8 : 8.2];
-      lookAt = [0.2, 0.35, 0];
       impactCenter = [0.2, 0];
       impactU = u * 0.5;
       letters.forEach((l, i) => {
@@ -233,8 +300,39 @@
       sphereMesh.position.set(2.45, 0.42 + Math.sin(u * Math.PI * 2 + 2.4) * 0.06, 0);
     }
 
-    camera.position.set(camPos[0], camPos[1], camPos[2]);
-    camera.lookAt(lookAt[0], lookAt[1], lookAt[2]);
+    const focusWorldBox = computeFocusWorldBox();
+    if (window.StoryCamera) {
+      const probeCam = camera.clone();
+      const camRes = window.StoryCamera.resolve(
+        story || { shots: [shot] },
+        shot,
+        localTime,
+        dur,
+        {
+          W,
+          H,
+          safe,
+          limits: SPATIAL_CAMERA_LIMITS,
+          allowAutoDollyOut: true,
+          projectFocus: (rig, sampleU) => {
+            const sb = computeBaseCamera(shot.layout, sampleU, isPortrait);
+            window.StoryCamera.applyTo3D(probeCam, sb.camPos, sb.lookAt, rig);
+            return projectWorldBoxToPixels(focusWorldBox, probeCam, W, H);
+          },
+        }
+      );
+      if (camRes.plan.active && camRes.rig.dolly > 1.2 && scene && scene.fog) {
+        scene.fog.near = 12 * camRes.rig.dolly;
+        scene.fog.far = 26 * camRes.rig.dolly;
+      } else if (scene && scene.fog) {
+        scene.fog.near = 12;
+        scene.fog.far = 26;
+      }
+      window.StoryCamera.applyTo3D(camera, camPos, lookAt, camRes.rig);
+    } else {
+      camera.position.set(camPos[0], camPos[1], camPos[2]);
+      camera.lookAt(lookAt[0], lookAt[1], lookAt[2]);
+    }
 
     // Update Instanced Hexagonal Capsule Bed with radial ripple & sink
     capsules.forEach((c, i) => {
@@ -283,7 +381,9 @@
       }
       hctx.restore();
     }
+
+    return projectWorldBoxToPixels(focusWorldBox, camera, W, H);
   }
 
-  window.SpatialKit = { renderShot, PAL };
+  window.SpatialKit = { renderShot, computeBaseCamera, projectWorldBoxToPixels, PAL };
 })();

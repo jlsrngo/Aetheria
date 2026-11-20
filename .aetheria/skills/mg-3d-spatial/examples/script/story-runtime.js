@@ -18,7 +18,7 @@
     },
     renderShot: function (env) {
       if (!env.state || !env.state.webglCanvas || !env.state.hudCanvas || !window.SpatialKit) return null;
-      window.SpatialKit.renderShot(
+      return window.SpatialKit.renderShot(
         env.state.webglCanvas,
         env.state.hudCanvas,
         env.W,
@@ -26,9 +26,9 @@
         env.safe,
         Object.assign({}, env.shot, { start: env.start, duration: env.duration }),
         env.localTime,
-        env.micro
-      );
-      return null;
+        env.micro,
+        env.story
+      ) || null;
     }
   });
 })();

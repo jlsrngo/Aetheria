@@ -708,7 +708,34 @@
     }
 
     // Fallback to identity rig if even 0.7^4 exceeded safe zone
-    return { intensityScale: 0, guard: 'clamped', steps: 4 };
+    if (opts.allowAutoDollyOut && isProjectFn) {
+      var minDolly = 1.0;
+      for (var dStep = 1; dStep <= 10; dStep++) {
+        minDolly = 1.0 + dStep * 0.12;
+        var fitsWithPullback = true;
+        for (var j = 0; j < samples; j++) {
+          var su = samples === 1 ? 0.5 : j / (samples - 1);
+          var r0 = evalRigAtU(su, 0.5);
+          var rPull = Object.assign({}, r0, {
+            dolly: Math.max(r0.dolly, minDolly),
+            zoom: 1 / Math.max(r0.dolly, minDolly),
+          });
+          if (!boxInsideSafe(focusBoxOrProjectFn(rPull, su), safe)) {
+            fitsWithPullback = false;
+            break;
+          }
+        }
+        if (fitsWithPullback) {
+          return {
+            intensityScale: 0.5,
+            minDolly: Math.round(minDolly * 1000) / 1000,
+            guard: 'clamped',
+            steps: 4 + dStep,
+          };
+        }
+      }
+    }
+    return { intensityScale: 0, minDolly: 1, guard: 'clamped', steps: 4 };
   }
 
   function resolve(story, shot, localTime, dur, options) {
@@ -750,11 +777,20 @@
         },
         focusTarget,
         safe,
-        { samples: opts.samples || 12, W: W, H: H }
+        {
+          samples: opts.samples || 12,
+          W: W,
+          H: H,
+          allowAutoDollyOut: Boolean(opts.allowAutoDollyOut),
+        }
       );
       effectiveScale = gRes.intensityScale;
       guardState = gRes.guard;
       rig = evaluateMoveRig(plan, localTime, dur, W, H, effectiveScale);
+      if (gRes.minDolly && gRes.minDolly > rig.dolly) {
+        rig.dolly = gRes.minDolly;
+        rig.zoom = 1 / gRes.minDolly;
+      }
       if (guardState === 'unmeasured' && limits) {
         rig = clampRigByLimits(rig, limits, W, H);
       }

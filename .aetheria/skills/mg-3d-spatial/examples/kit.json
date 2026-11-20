@@ -13,6 +13,11 @@
       "letter-cascade",
       "sphere-shockwave",
       "soft-finale"
+    ],
+    "cameraStyle": [
+      "calm",
+      "kinetic",
+      "editorial"
     ]
   },
   "limits": {
@@ -53,5 +58,11 @@
       "h": 908
     }
   },
-  "core": 1
+  "core": 1,
+  "camera": {
+    "version": 1,
+    "maxZoom": 1.35,
+    "maxPan": 0.08,
+    "maxRollDeg": 3.5
+  }
 }
