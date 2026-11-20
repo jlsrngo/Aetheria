@@ -151,11 +151,21 @@ pub(crate) async fn execute_tool_batch(
 
     let serialize_heavy_calls = prepared_calls
         .iter()
-        .filter(|pc| {
-            matches!(
-                pc.fn_name.as_str(),
-                "task" | "subagent" | "capture_film_preview" | "film_render"
-            )
+        .filter(|pc| match pc.fn_name.as_str() {
+            "capture_film_preview" | "film_render" => true,
+            // Allow concurrent background `task` launches; only serialize blocking sync subagents
+            // (including `motion-designer`, which always runs synchronously).
+            "task" | "subagent" => {
+                let st = pc
+                    .args_val
+                    .get("subagent_type")
+                    .or_else(|| pc.args_val.get("agent"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                st.eq_ignore_ascii_case("motion-designer")
+                    || pc.args_val.get("background").and_then(Value::as_bool) == Some(false)
+            }
+            _ => false,
         })
         .count()
         > 1;
@@ -269,14 +279,26 @@ pub(crate) async fn execute_tool_batch(
             "time": { "created": tool_start, "completed": tool_end }
         }));
 
-        let (bounded_tool_out_str, was_truncated) =
-            crate::tool::truncator::bound_tool_output(&fn_name, &tool_out_str);
+        let model_text = crate::tool::truncator::format_tool_result_for_model(&fn_name, &tool_out);
+        let direction = crate::tool::truncator::preferred_direction_for_tool(&fn_name);
+        let (bounded_tool_out_str, was_truncated, spill_rel) =
+            crate::tool::truncator::bound_tool_output_with_spill(
+                &fn_name,
+                &model_text,
+                Some(workspace_dir),
+                Some(&call_id),
+                direction,
+            );
         if was_truncated {
             crate::paths::log_engine(
                 "tool",
                 &format!(
-                    "✂️ Tool '{}' output bounded by harness to prevent context exhaustion",
-                    fn_name
+                    "✂️ Tool '{}' output bounded by harness{}",
+                    fn_name,
+                    spill_rel
+                        .as_deref()
+                        .map(|p| format!(" (spilled to {})", p))
+                        .unwrap_or_default()
                 ),
             );
         }

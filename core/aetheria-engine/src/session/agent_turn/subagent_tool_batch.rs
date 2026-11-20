@@ -9,7 +9,9 @@ use crate::session::doom_loop::DoomLoopDetector;
 use crate::session::message::emit_event;
 use crate::session::tool_label_formatter::format_tool_step_label;
 use crate::tool::json_repair::{canonicalize_tool_name, parse_or_repair_tool_args};
-use crate::tool::truncator::bound_tool_output;
+use crate::tool::truncator::{
+    bound_tool_output_with_spill, format_tool_result_for_model, preferred_direction_for_tool,
+};
 
 struct PreparedSubagentCall {
     call_id: String,
@@ -250,8 +252,15 @@ pub(crate) async fn execute_subagent_tool_calls(
                 "structured": tool_result
             }
         }));
-        let serialized = serde_json::to_string(&tool_result).unwrap_or_else(|_| "{}".to_string());
-        let (bounded_content, _) = bound_tool_output(&pc.fn_name, &serialized);
+        let model_text = format_tool_result_for_model(&pc.fn_name, &tool_result);
+        let direction = preferred_direction_for_tool(&pc.fn_name);
+        let (bounded_content, _, _) = bound_tool_output_with_spill(
+            &pc.fn_name,
+            &model_text,
+            Some(workspace_dir),
+            Some(&pc.call_id),
+            direction,
+        );
         chat_messages.push(json!({
             "role": "tool",
             "tool_call_id": pc.call_id,

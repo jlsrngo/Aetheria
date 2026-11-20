@@ -100,6 +100,7 @@ pub fn execute_subagent<'a>(
             .map(str::to_string);
         let requested_session_id = arguments
             .get("sessionID")
+            .or_else(|| arguments.get("task_id"))
             .or_else(|| arguments.get("child_session_id"))
             .or_else(|| arguments.get("session_id"))
             .and_then(|v| v.as_str());

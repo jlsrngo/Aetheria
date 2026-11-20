@@ -40,6 +40,7 @@ dependencies = [
  "crc32fast",
  "futures-util",
  "mime_guess",
+ "regex",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

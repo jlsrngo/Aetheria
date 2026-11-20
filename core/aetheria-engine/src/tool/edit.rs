@@ -277,12 +277,17 @@ pub fn replace_content(
         }
     }
 
+    let already_applied_note = if !new_string.trim().is_empty() && content.contains(new_string) {
+        " Note: newString is already present in the file, so this edit may already have been applied."
+    } else {
+        ""
+    };
     let hint = find_closest_snippet(content, old_string)
         .map(|s| format!("\n{}", s))
         .unwrap_or_default();
     Err(format!(
-        "Could not find oldString in the file. Use the exact lines below (or pass startLine/endLine) without re-reading the whole file.{}",
-        hint
+        "Could not find oldString in the file.{} Use the exact lines below (or pass startLine/endLine) without re-reading the whole file.{}",
+        already_applied_note, hint
     ))
 }
 

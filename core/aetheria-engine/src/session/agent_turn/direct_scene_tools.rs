@@ -186,7 +186,9 @@ pub(crate) fn normalize_scene_timestamp(
     global_t.clamp(0.0, max_t)
 }
 
-/// Applies an exact unique search-and-replace patch to `source`.
+/// Applies a surgical search-and-replace patch to `source` using `edit::replace_content`'s
+/// 6-tier cascading fuzzy matchers (exact, line-trimmed, block-anchor, whitespace-normalized,
+/// indentation-flexible, trimmed-boundary) plus closest-line diagnostics and CRLF preservation.
 pub(crate) fn apply_surgical_patch(
     source: &str,
     old_text: &str,
@@ -195,26 +197,27 @@ pub(crate) fn apply_surgical_patch(
     if old_text.is_empty() {
         return Err("`oldText` must not be empty.".to_string());
     }
-    let matches: Vec<usize> = source.match_indices(old_text).map(|(idx, _)| idx).collect();
-    if matches.is_empty() {
-        return Err(
-            "`oldText` was not found in the current scene script. Match exact whitespace/indentation or use `write_scene_script`."
-                .to_string(),
-        );
-    }
-    if matches.len() > 1 {
-        return Err(format!(
-            "`oldText` matched {} locations; include more surrounding context lines so the patch target is unique.",
-            matches.len()
-        ));
-    }
-    let pos = matches[0];
-    let line_num = source[..pos].bytes().filter(|&b| b == b'\n').count() + 1;
-    let mut updated = String::with_capacity(source.len() + new_text.len());
-    updated.push_str(&source[..pos]);
-    updated.push_str(new_text);
-    updated.push_str(&source[pos + old_text.len()..]);
-    Ok((updated, line_num))
+    let uses_crlf = source.contains("\r\n");
+    let norm_src = source.replace("\r\n", "\n");
+    let norm_old = old_text.replace("\r\n", "\n");
+    let norm_new = new_text.replace("\r\n", "\n");
+
+    let (updated_lf, _) = crate::tool::edit::replace_content(&norm_src, &norm_old, &norm_new, false)?;
+
+    // Compute 1-based line number of the first differing line.
+    let line_num = norm_src
+        .lines()
+        .zip(updated_lf.lines())
+        .position(|(a, b)| a != b)
+        .map(|i| i + 1)
+        .unwrap_or(1);
+
+    let final_text = if uses_crlf {
+        updated_lf.replace('\n', "\r\n")
+    } else {
+        updated_lf
+    };
+    Ok((final_text, line_num))
 }
 
 fn encode_file_jpeg_data_url(path: &Path) -> Option<String> {

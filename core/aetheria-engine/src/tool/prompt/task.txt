@@ -1,19 +1,14 @@
-Launch a new agent to handle complex, multistep tasks autonomously.
+Launch a specialized subagent to handle complex, multistep tasks autonomously.
 
-When using the Task tool, you must specify a subagent_type parameter to select which agent type to use.
+When using the `task` tool, specify `subagent_type` to select the agent role (`general`, `explore`, `motion-designer`, `audio-director`, `qa-verifier`).
 
-When NOT to use the Task tool:
-- If you want to read a specific file path, use the Read or Glob tool instead of the Task tool, to find the match more quickly
-- If you are searching for a specific class definition like "class Foo", use the Grep tool instead, to find the match more quickly
-- If you are searching for code within a specific file or set of 2-3 files, use the Read tool instead of the Task tool, to find the match more quickly
-- If no available agent is a good fit for the task, use other tools directly
-
+When NOT to use `task`:
+- Reading a specific file or directory -> use `read` or `glob` directly.
+- Searching for a symbol or pattern -> use `grep` directly.
+- Editing 1-2 known files -> use `read` + `edit`/`write` directly.
 
 Usage notes:
-1. Launch multiple agents concurrently whenever possible, to maximize performance; to do that, use a single message with multiple tool uses
-2. All `task` subagents run asynchronously in the background by default (`background: true`): calls return immediately with `state: "running"` so you can briefly tell the user what is running and END YOUR RESPONSE cleanly in standby (do NOT sleep, poll for status, or write overlapping files). You remain responsive if the user sends a message, and will automatically receive `<subagent-notification>` as each subagent finishes. (Pass `background: false` only if a strict synchronous blocking wait is required.)
-3. Across ALL connected models/providers, queued subagents automatically run cleanly one-by-one in standby so API requests never collide. When each subagent finishes, its summary returns to you immediately — share a concise report (e.g. `Laporan <role> (selesai)`) and return cleanly to standby while any remaining sibling subagents complete.
-4. Each agent invocation starts with a fresh context unless you provide task_id to resume the same subagent session (which continues with its previous messages and tool outputs). When starting fresh, your prompt should contain a highly detailed task description for the agent to perform autonomously and you should specify exactly what information the agent should return back to you in its final and only message to you.
-5. The agent's outputs should generally be trusted
-6. Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, web fetches, etc.), since it is not aware of the user's intent. Tell it how to verify its work if possible (e.g., relevant test commands).
-7. If the agent description mentions that it should be used proactively, then you should try your best to use it without the user having to ask for it first. Use your judgement.
+1. Launch independent subagents in parallel in one message when helpful.
+2. Non-motion subagents run asynchronously in the background by default (`background: true`), returning immediately with `state: "running"` and delivering `<subagent-notification>` when complete. Pass `background: false` if you need a synchronous blocking wait. `motion-designer` always runs synchronously so scene renders never collide.
+3. Each invocation starts fresh unless you pass `sessionID` (or `task_id`) from a prior `task` result to resume that child session.
+4. Give clear, self-contained instructions including exact file paths and verification criteria.

@@ -1,6 +1,7 @@
-//! Multi-File Patch Application Tool — mirrors `packages/core/src/tool/patch.ts`.
-//! Parses `*** Begin Patch`, `*** Add File:`, `*** Update File:`, and `*** Delete File:`
-//! blocks and applies them atomically inside the isolated workspace with baseline tracking.
+//! Multi-File Patch Application Tool — mirrors `packages/core/src/tool/plugin/patch.ts`.
+//! Parses `*** Begin Patch`, `*** Add File:`, `*** Update File:` (including `*** Move to:`),
+//! and `*** Delete File:` blocks and applies them atomically inside the isolated workspace
+//! using `edit::replace_content`'s 6-tier cascading fuzzy matchers and full rollback.
 
 use serde_json::{json, Value};
 
@@ -18,7 +19,7 @@ pub fn apply_patch_tool_definition() -> Value {
                 "properties": {
                     "patchText": {
                         "type": "string",
-                        "description": "The full patch text describing all files to add, update, or delete."
+                        "description": "The full patch text describing all files to add, update, move, or delete."
                     }
                 },
                 "required": ["patchText"]
@@ -42,6 +43,7 @@ pub fn execute_apply_patch(session_id: &str, workspace_dir: &str, arguments: &Va
     let mut touched_paths: Vec<std::path::PathBuf> = Vec::new();
     let mut rollback_log: Vec<(std::path::PathBuf, Option<Vec<u8>>)> = Vec::new();
     let mut current_op: Option<(&str, String)> = None;
+    let mut current_move_to: Option<String> = None;
     let mut current_lines: Vec<&str> = Vec::new();
 
     let rollback_all = |log: &[(std::path::PathBuf, Option<Vec<u8>>)]| {
@@ -61,6 +63,7 @@ pub fn execute_apply_patch(session_id: &str, workspace_dir: &str, arguments: &Va
     };
 
     let flush_op = |op: Option<(&str, String)>,
+                    move_to: Option<String>,
                     lines: &[&str],
                     touched: &mut Vec<String>,
                     written: &mut Vec<std::path::PathBuf>,
@@ -106,17 +109,48 @@ pub fn execute_apply_patch(session_id: &str, workspace_dir: &str, arguments: &Va
                 let existing = std::fs::read_to_string(&target).map_err(|e| {
                     format!("Cannot read '{}' for update patch: {}", rel_path, e)
                 })?;
-                let updated = apply_unified_lines_to_content(&existing, lines)?;
-                log.push((target.clone(), Some(existing.as_bytes().to_vec())));
-                std::fs::write(&target, &updated).map_err(|e| e.to_string())?;
-                crate::files::record_document_change(
-                    workspace_dir,
-                    &rel_path,
-                    &existing,
-                    &updated,
-                );
-                touched.push(format!("M {}", rel_path));
-                written.push(target);
+                let updated = if lines.is_empty() {
+                    existing.clone()
+                } else {
+                    apply_unified_lines_to_content(&existing, lines)?
+                };
+                if let Some(dest_rel) = move_to {
+                    let dest_target = resolve_isolated_path(workspace_dir, &dest_rel)?;
+                    validate_writable_runtime_path(&dest_target)?;
+                    if let Some(parent) = dest_target.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    let dest_prev = if dest_target.exists() {
+                        Some(std::fs::read(&dest_target).map_err(|e| e.to_string())?)
+                    } else {
+                        None
+                    };
+                    log.push((dest_target.clone(), dest_prev));
+                    std::fs::write(&dest_target, &updated).map_err(|e| e.to_string())?;
+                    if dest_target != target {
+                        log.push((target.clone(), Some(existing.as_bytes().to_vec())));
+                        std::fs::remove_file(&target).map_err(|e| e.to_string())?;
+                    }
+                    crate::files::record_document_change(
+                        workspace_dir,
+                        &dest_rel,
+                        &existing,
+                        &updated,
+                    );
+                    touched.push(format!("R {} -> {}", rel_path, dest_rel));
+                    written.push(dest_target);
+                } else {
+                    log.push((target.clone(), Some(existing.as_bytes().to_vec())));
+                    std::fs::write(&target, &updated).map_err(|e| e.to_string())?;
+                    crate::files::record_document_change(
+                        workspace_dir,
+                        &rel_path,
+                        &existing,
+                        &updated,
+                    );
+                    touched.push(format!("M {}", rel_path));
+                    written.push(target);
+                }
             }
             _ => {}
         }
@@ -131,6 +165,7 @@ pub fn execute_apply_patch(session_id: &str, workspace_dir: &str, arguments: &Va
         if let Some(path) = trimmed.strip_prefix("*** Add File:") {
             if let Err(e) = flush_op(
                 current_op.take(),
+                current_move_to.take(),
                 &current_lines,
                 &mut touched_files,
                 &mut touched_paths,
@@ -144,6 +179,7 @@ pub fn execute_apply_patch(session_id: &str, workspace_dir: &str, arguments: &Va
         } else if let Some(path) = trimmed.strip_prefix("*** Update File:") {
             if let Err(e) = flush_op(
                 current_op.take(),
+                current_move_to.take(),
                 &current_lines,
                 &mut touched_files,
                 &mut touched_paths,
@@ -154,9 +190,15 @@ pub fn execute_apply_patch(session_id: &str, workspace_dir: &str, arguments: &Va
             }
             current_lines.clear();
             current_op = Some(("update", path.trim().to_string()));
+        } else if let Some(dest) = trimmed.strip_prefix("*** Move to:") {
+            let dest_trimmed = dest.trim();
+            if !dest_trimmed.is_empty() {
+                current_move_to = Some(dest_trimmed.to_string());
+            }
         } else if let Some(path) = trimmed.strip_prefix("*** Delete File:") {
             if let Err(e) = flush_op(
                 current_op.take(),
+                current_move_to.take(),
                 &current_lines,
                 &mut touched_files,
                 &mut touched_paths,
@@ -174,6 +216,7 @@ pub fn execute_apply_patch(session_id: &str, workspace_dir: &str, arguments: &Va
 
     if let Err(e) = flush_op(
         current_op.take(),
+        current_move_to.take(),
         &current_lines,
         &mut touched_files,
         &mut touched_paths,
@@ -201,6 +244,7 @@ pub fn execute_apply_patch(session_id: &str, workspace_dir: &str, arguments: &Va
 }
 
 fn apply_unified_lines_to_content(original: &str, patch_lines: &[&str]) -> Result<String, String> {
+    let uses_crlf = original.contains("\r\n");
     let mut content = original.replace("\r\n", "\n");
     let mut old_block = Vec::new();
     let mut new_block = Vec::new();
@@ -211,6 +255,9 @@ fn apply_unified_lines_to_content(original: &str, patch_lines: &[&str]) -> Resul
         }
         let old_str = old_b.join("\n");
         let new_str = new_b.join("\n");
+        if old_str == new_str {
+            return Ok(());
+        }
         if old_str.is_empty() {
             if !src.ends_with('\n') && !src.is_empty() {
                 src.push('\n');
@@ -222,10 +269,9 @@ fn apply_unified_lines_to_content(original: &str, patch_lines: &[&str]) -> Resul
             src.replace_range(pos..pos + old_str.len(), &new_str);
             Ok(())
         } else {
-            Err(format!(
-                "Could not locate patch context block:\n{}",
-                old_str.lines().take(3).collect::<Vec<_>>().join("\n")
-            ))
+            let (updated, _) = super::edit::replace_content(src, &old_str, &new_str, false)?;
+            *src = updated;
+            Ok(())
         }
     };
 
@@ -247,7 +293,11 @@ fn apply_unified_lines_to_content(original: &str, patch_lines: &[&str]) -> Resul
         }
     }
     apply_hunk(&mut content, &old_block, &new_block)?;
-    Ok(content)
+    if uses_crlf {
+        Ok(content.replace('\n', "\r\n"))
+    } else {
+        Ok(content)
+    }
 }
 
 #[cfg(test)]
@@ -256,7 +306,11 @@ mod tests {
 
     #[test]
     fn apply_patch_rolls_back_earlier_edits_on_failure() {
-        let tmp = std::env::temp_dir().join(format!("aetheria_patch_rb_{}", crate::paths::now_ms()));
+        let tmp = std::env::temp_dir().join(format!(
+            "aetheria_patch_rb_{}_{}",
+            std::process::id(),
+            crate::paths::now_ms()
+        ));
         std::fs::create_dir_all(&tmp).expect("mkdir");
         let file_a = tmp.join("a.txt");
         std::fs::write(&file_a, "line1\nold\nline3\n").expect("write a");
@@ -280,5 +334,36 @@ mod tests {
         assert_eq!(after_a, "line1\nold\nline3\n");
         let _ = std::fs::remove_dir_all(&tmp);
     }
-}
 
+    #[test]
+    fn apply_patch_supports_fuzzy_hunk_matching_and_move_to() {
+        let tmp = std::env::temp_dir().join(format!(
+            "aetheria_patch_mv_{}_{}",
+            std::process::id(),
+            crate::paths::now_ms()
+        ));
+        std::fs::create_dir_all(&tmp).expect("mkdir");
+        let src_file = tmp.join("old_name.js");
+        std::fs::write(&src_file, "function demo() {   \n  const x = 1;  \n}\n").expect("write");
+        let ws = tmp.to_string_lossy().to_string();
+
+        // Intentionally omit trailing spaces so exact find misses and 6-tier fuzzy matcher kicks in.
+        let patch = concat!(
+            "*** Begin Patch\n",
+            "*** Update File: old_name.js\n",
+            "*** Move to: nested/new_name.js\n",
+            " function demo() {\n",
+            "-  const x = 1;\n",
+            "+  const x = 42;\n",
+            " }\n",
+            "*** End Patch\n",
+        );
+
+        let res = execute_apply_patch("sess2", &ws, &json!({ "patchText": patch }));
+        assert_eq!(res.get("ok").and_then(Value::as_bool), Some(true), "res={}", res);
+        assert!(!src_file.exists(), "source file should be removed after Move to");
+        let dest = std::fs::read_to_string(tmp.join("nested/new_name.js")).expect("read dest");
+        assert!(dest.contains("const x = 42;"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
