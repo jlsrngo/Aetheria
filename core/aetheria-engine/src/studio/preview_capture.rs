@@ -2,17 +2,21 @@
 //! Reuses the Edge/Chrome CDP pipeline from `html_renderer` without requiring FFmpeg,
 //! allowing the agent to visually inspect rendered frames and compare them against references.
 
-use super::film_inspector::inspect_workspace_film;
+use super::cdp_ws::CdpWebSocket;
+use super::film_inspector::{inspect_workspace_film, FilmMeta};
 use super::film_static_server::start_ephemeral_film_server;
-use super::html_renderer::{launch_headless_browser_with_cdp, wait_for_film_ready};
+use super::html_renderer::wait_for_film_ready;
 use super::motion::resolve_active_html_film_path;
+use super::preview_browser::{
+    acquire_fresh_preview_browser, acquire_warm_preview_browser, release_warm_preview_browser,
+};
 use crate::paths::detect_browser_executable;
 use crate::tool::path_guard::resolve_isolated_path;
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 const MAX_PREVIEW_FRAMES: usize = 16;
@@ -61,6 +65,80 @@ pub(crate) fn record_and_check_preview_changed(
     changed
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct PreviewCaptureOptions {
+    pub compare_to_reference: Option<bool>,
+    pub pass_threshold: Option<f64>,
+    pub visual_inspect_only: Option<bool>,
+    pub include_full_res_frames: Option<bool>,
+}
+
+/// Returns `true` when the active film uses `stageMode: "hybrid"` or is a self-contained HTML
+/// film without external modular `script/*.js` scene files.
+pub(crate) fn is_hybrid_or_standalone_html_film(film_root: &Path) -> bool {
+    let manifest_path = film_root.join("film.json");
+    if manifest_path.is_file() {
+        if let Ok(raw) = std::fs::read_to_string(&manifest_path) {
+            if let Ok(manifest) = serde_json::from_str::<crate::tool::film_scaffold::FilmManifestJson>(&raw) {
+                if manifest
+                    .stage_mode
+                    .as_deref()
+                    .is_some_and(|m| m.eq_ignore_ascii_case("hybrid"))
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    let index_path = film_root.join("index.html");
+    if index_path.is_file() {
+        if let Ok(html) = std::fs::read_to_string(&index_path) {
+            let local_scripts: Vec<String> = crate::tool::film_feedback::extract_local_script_srcs(&html)
+                .into_iter()
+                .filter(|rel| {
+                    !rel.eq_ignore_ascii_case("script/aetheria-motion.js")
+                        && !super::builtin_runtime::is_builtin_three_path(rel)
+                })
+                .collect();
+            return local_scripts.is_empty();
+        }
+    }
+    if manifest_path.is_file() {
+        if let Ok(raw) = std::fs::read_to_string(&manifest_path) {
+            if let Ok(manifest) = serde_json::from_str::<crate::tool::film_scaffold::FilmManifestJson>(&raw) {
+                if !manifest.scenes.is_empty() {
+                    return false;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Resolves whether visual inspection mode applies: honors explicit override first, otherwise
+/// defaults to `true` for standalone/hybrid HTML films when `compareToReference` is omitted.
+pub(crate) fn resolve_effective_visual_inspect_only(
+    explicit_visual_inspect: Option<bool>,
+    compare_to_reference: Option<bool>,
+    is_hybrid_or_standalone: bool,
+) -> bool {
+    if let Some(explicit) = explicit_visual_inspect {
+        return explicit;
+    }
+    compare_to_reference.is_none() && is_hybrid_or_standalone
+}
+
+pub(crate) fn resolve_effective_reference_policy(
+    has_reference: bool,
+    compare_to_reference: Option<bool>,
+    effective_visual_inspect_only: bool,
+) -> (bool, bool) {
+    if effective_visual_inspect_only {
+        return (false, false);
+    }
+    resolve_reference_comparison_policy(has_reference, compare_to_reference)
+}
+
 #[derive(Clone, Debug)]
 pub struct PreviewFrameCapture {
     pub timestamp: f64,
@@ -84,6 +162,10 @@ pub struct FilmPreviewCaptureResult {
     pub anti_cheat: super::fidelity_guard::AntiCheatReport,
     pub story_qa: Option<Value>,
     pub story_contact_sheet_data_url: Option<String>,
+    pub reused_warm_browser: bool,
+    pub visual_inspect_only: bool,
+    pub is_hybrid_or_standalone: bool,
+    pub identical_frames_warning: Option<String>,
 }
 
 pub(crate) fn compute_relative_ratio(timestamp: f64, duration: f64) -> f64 {
@@ -184,45 +266,88 @@ pub async fn capture_film_preview_with_options(
     compare_to_reference: Option<bool>,
     pass_threshold: Option<f64>,
 ) -> Result<FilmPreviewCaptureResult, String> {
-    let _capture_guard = preview_capture_mutex().lock().await;
-    let html_path = resolve_active_html_film_path(Some(workspace_dir))
-        .ok_or_else(|| "No index.html found in active project folder".to_string())?;
-    let film_root = html_path
-        .parent()
-        .ok_or_else(|| "Invalid index.html parent path".to_string())?
-        .to_path_buf();
-    let ws_root = if workspace_dir.trim().is_empty() {
-        film_root.clone()
+    capture_film_preview_with_full_options(
+        workspace_dir,
+        requested_timestamps,
+        PreviewCaptureOptions {
+            compare_to_reference,
+            pass_threshold,
+            visual_inspect_only: Some(false),
+            include_full_res_frames: Some(false),
+        },
+    )
+    .await
+}
+
+struct CdpRawCapture {
+    meta: FilmMeta,
+    ref_root: PathBuf,
+    should_compare: bool,
+    compare_to_reference_overridden: bool,
+    timestamps: Vec<f64>,
+    frames: Vec<PreviewFrameCapture>,
+    frame_digests: Vec<String>,
+    runtime_errors: Vec<String>,
+    shot_state: Option<Value>,
+    shot_report_val: Value,
+    failed_shots: Vec<String>,
+    sheet_data_url: Option<String>,
+    contact_sheet_rel: Option<String>,
+}
+
+enum CdpAttemptError {
+    WarmTransport(String),
+    FilmFailure(String),
+}
+
+fn classify_film_ready_error(err: String) -> CdpAttemptError {
+    if err.starts_with("HTML film ") {
+        CdpAttemptError::FilmFailure(err)
     } else {
-        PathBuf::from(workspace_dir)
-    };
-
-    let browser_exe = detect_browser_executable().ok_or_else(|| {
-        "No Microsoft Edge or Google Chrome executable found for headless preview capture".to_string()
-    })?;
-
-    let mut meta = inspect_workspace_film(&html_path);
-    if !meta.exists {
-        return Err(format!("HTML film not found at {}", html_path.display()));
+        CdpAttemptError::WarmTransport(err)
     }
+}
 
-    let film_root_str = film_root.to_string_lossy().to_string();
-    let (http_port, _server_guard) =
-        start_ephemeral_film_server(film_root.clone(), ws_root.clone()).await?;
-    let (_chrome_guard, mut cdp) =
-        launch_headless_browser_with_cdp(&browser_exe, meta.width, meta.height).await?;
-    let _ = cdp.call("Page.enable", json!({})).await?;
-    let _ = cdp.call("Runtime.enable", json!({})).await?;
-    let _ = cdp
-        .call(
-            "Page.addScriptToEvaluateOnNewDocument",
-            json!({
-                "source": "window.__aetheriaErrors = []; window.addEventListener('error', e => window.__aetheriaErrors.push(String(e.message || e.error || 'Script error'))); window.addEventListener('unhandledrejection', e => window.__aetheriaErrors.push(String(e.reason || 'Unhandled promise rejection')));"
-            }),
-        )
-        .await;
-    let _ = cdp
-        .call(
+struct CdpCaptureArgs<'a> {
+    http_port: u16,
+    ws_root: &'a Path,
+    film_root: &'a Path,
+    preview_dir: &'a Path,
+    requested_timestamps: &'a [f64],
+    options: &'a PreviewCaptureOptions,
+    effective_visual_inspect_only: bool,
+    has_story_json: bool,
+    story_midpoints: &'a [(String, f64)],
+}
+
+async fn run_cdp_preview_capture(
+    cdp: &mut CdpWebSocket,
+    mut meta: FilmMeta,
+    args: &CdpCaptureArgs<'_>,
+) -> Result<CdpRawCapture, CdpAttemptError> {
+    let initial_width = meta.width;
+    let initial_height = meta.height;
+    cdp.call(
+        "Emulation.setDeviceMetricsOverride",
+        json!({
+            "width": meta.width,
+            "height": meta.height,
+            "deviceScaleFactor": 1,
+            "mobile": false
+        }),
+    )
+    .await
+    .map_err(CdpAttemptError::WarmTransport)?;
+
+    let target_url = format!("http://127.0.0.1:{}/index.html", args.http_port);
+    cdp.call("Page.navigate", json!({ "url": target_url }))
+        .await
+        .map_err(CdpAttemptError::WarmTransport)?;
+    wait_for_film_ready(cdp, &mut meta)
+        .await
+        .map_err(classify_film_ready_error)?;
+    if meta.width != initial_width || meta.height != initial_height {
+        cdp.call(
             "Emulation.setDeviceMetricsOverride",
             json!({
                 "width": meta.width,
@@ -231,57 +356,56 @@ pub async fn capture_film_preview_with_options(
                 "mobile": false
             }),
         )
-        .await?;
+        .await
+        .map_err(CdpAttemptError::WarmTransport)?;
+    }
 
-    let target_url = format!("http://127.0.0.1:{}/index.html", http_port);
-    let _ = cdp.call("Page.navigate", json!({ "url": target_url })).await?;
-    wait_for_film_ready(&mut cdp, &mut meta).await?;
-
-    let ref_root = if super::reference_compare::discover_reference_keyframes(&ws_root, meta.duration).is_empty()
-        && film_root != ws_root
+    let ref_root = if super::reference_compare::discover_reference_keyframes(args.ws_root, meta.duration)
+        .is_empty()
+        && args.film_root != args.ws_root
     {
-        film_root.clone()
+        args.film_root.to_path_buf()
     } else {
-        ws_root.clone()
+        args.ws_root.to_path_buf()
     };
-    let has_reference = !super::reference_compare::discover_reference_keyframes(&ref_root, meta.duration).is_empty();
-    let (should_compare, compare_to_reference_overridden) =
-        resolve_reference_comparison_policy(has_reference, compare_to_reference);
+    let has_reference =
+        !super::reference_compare::discover_reference_keyframes(&ref_root, meta.duration).is_empty();
+    let (should_compare, compare_to_reference_overridden) = resolve_effective_reference_policy(
+        has_reference,
+        args.options.compare_to_reference,
+        args.effective_visual_inspect_only,
+    );
 
-    let story_json_path = film_root.join("story.json");
-    let has_story_json = story_json_path.is_file();
-    let story_midpoints = if has_story_json {
-        super::story_lint::story_shot_midpoints(&story_json_path)
-    } else {
-        Vec::new()
-    };
-
-    let effective_requested = if requested_timestamps.is_empty() && should_compare {
+    let effective_requested: Vec<f64> = if args.requested_timestamps.is_empty() && should_compare {
         let aligned = super::reference_compare::recommended_reference_timestamps_for_film(
             &ref_root,
-            &film_root,
+            args.film_root,
             meta.duration,
             MAX_PREVIEW_FRAMES,
         );
         if aligned.is_empty() {
-            requested_timestamps
+            args.requested_timestamps.to_vec()
         } else {
             aligned
         }
-    } else if requested_timestamps.is_empty() && !story_midpoints.is_empty() {
-        story_midpoints
+    } else if args.requested_timestamps.is_empty() && !args.story_midpoints.is_empty() {
+        args.story_midpoints
             .iter()
             .map(|(_, t)| *t)
             .take(MAX_PREVIEW_FRAMES)
             .collect()
+    } else if args.requested_timestamps.is_empty() && meta.scenes.len() >= 2 {
+        meta.scenes
+            .iter()
+            .take(MAX_PREVIEW_FRAMES)
+            .map(|sc| (sc.start + sc.duration * 0.5).clamp(0.0, meta.duration.max(0.1)))
+            .collect()
     } else {
-        requested_timestamps
+        args.requested_timestamps.to_vec()
     };
 
     let timestamps = normalize_preview_timestamps(&effective_requested, meta.duration);
-    let preview_dir = resolve_isolated_path(&film_root_str, ".aetheria/preview")
-        .unwrap_or_else(|_| film_root.join(".aetheria").join("preview"));
-    let _ = tokio::fs::create_dir_all(&preview_dir).await;
+    let _ = tokio::fs::create_dir_all(args.preview_dir).await;
 
     let mut frames = Vec::with_capacity(timestamps.len());
     let mut frame_digests = Vec::with_capacity(timestamps.len());
@@ -295,28 +419,43 @@ pub async fn capture_film_preview_with_options(
                 "Runtime.evaluate",
                 json!({ "expression": eval_expr, "awaitPromise": true, "returnByValue": true }),
             )
-            .await?;
-        validate_render_at_eval_response(&eval_resp, *ts)?;
+            .await
+            .map_err(CdpAttemptError::WarmTransport)?;
+        validate_render_at_eval_response(&eval_resp, *ts).map_err(CdpAttemptError::FilmFailure)?;
 
         let shot = cdp
             .call(
                 "Page.captureScreenshot",
-                json!({ "format": "jpeg", "quality": 82, "optimizeForSpeed": true }),
+                json!({ "format": "jpeg", "quality": 88, "optimizeForSpeed": true }),
             )
-            .await?;
+            .await
+            .map_err(CdpAttemptError::WarmTransport)?;
         let b64 = shot
             .get("data")
             .and_then(Value::as_str)
-            .ok_or_else(|| format!("CDP screenshot missing base64 payload at t={:.2}s", ts))?;
-        let jpeg_bytes = B64
-            .decode(b64)
-            .map_err(|e| format!("Failed decoding CDP screenshot at t={:.2}s: {}", ts, e))?;
+            .ok_or_else(|| {
+                CdpAttemptError::WarmTransport(format!(
+                    "CDP screenshot missing base64 payload at t={:.2}s",
+                    ts
+                ))
+            })?;
+        let jpeg_bytes = B64.decode(b64).map_err(|e| {
+            CdpAttemptError::FilmFailure(format!(
+                "Failed decoding CDP screenshot at t={:.2}s: {}",
+                ts, e
+            ))
+        })?;
 
         let rel_path = format!(".aetheria/preview/preview_{}.jpg", idx);
-        let file_path = preview_dir.join(format!("preview_{}.jpg", idx));
+        let file_path = args.preview_dir.join(format!("preview_{}.jpg", idx));
         tokio::fs::write(&file_path, &jpeg_bytes)
             .await
-            .map_err(|e| format!("Failed writing preview screenshot {}: {}", rel_path, e))?;
+            .map_err(|e| {
+                CdpAttemptError::FilmFailure(format!(
+                    "Failed writing preview screenshot {}: {}",
+                    rel_path, e
+                ))
+            })?;
 
         frame_digests.push(compute_frame_digest(*ts, &jpeg_bytes));
         frames.push(PreviewFrameCapture {
@@ -347,7 +486,298 @@ pub async fn capture_film_preview_with_options(
         }
     }
 
-    validate_non_identical_frames(&frames)?;
+    let (shot_state, shot_report_val, failed_shots, sheet_data_url, contact_sheet_rel) =
+        if args.has_story_json {
+            let shot_state = cdp
+                .call(
+                    "Runtime.evaluate",
+                    json!({
+                        "expression": "(() => ({ shotReport: window.__shotReport || {}, storyStats: window.__storyStats || null }))()",
+                        "returnByValue": true
+                    }),
+                )
+                .await
+                .ok()
+                .and_then(|v| v.pointer("/result/value").cloned())
+                .unwrap_or_else(|| json!({ "shotReport": {}, "storyStats": null }));
+
+            let shot_report_val = shot_state
+                .get("shotReport")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            let mut failed_shots: Vec<String> = Vec::new();
+            if let Some(map) = shot_report_val.as_object() {
+                for (sid, srep) in map {
+                    let in_safe = srep
+                        .get("focusBboxInSafeZone")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    let has_errs = srep
+                        .get("errors")
+                        .and_then(Value::as_array)
+                        .is_some_and(|a| !a.is_empty());
+                    if !in_safe || has_errs {
+                        failed_shots.push(sid.clone());
+                    }
+                }
+                failed_shots.sort();
+            }
+
+            let mut sheet_items = Vec::with_capacity(frames.len());
+            for (i, fr) in frames.iter().enumerate() {
+                let sid = args
+                    .story_midpoints
+                    .get(i)
+                    .map(|(id, _)| id.clone())
+                    .unwrap_or_else(|| format!("shot{}", i + 1));
+                let srep = shot_report_val.get(&sid).cloned().unwrap_or(Value::Null);
+                sheet_items.push(json!({
+                    "shotId": sid,
+                    "t": fr.timestamp,
+                    "dataUrl": fr.data_url,
+                    "report": srep
+                }));
+            }
+            let items_json =
+                serde_json::to_string(&sheet_items).unwrap_or_else(|_| "[]".to_string());
+            let stitch_expr = format!(
+                r#"((items, W, H) => new Promise(async (resolve) => {{
+                    try {{
+                        const cols = Math.min(3, Math.max(1, items.length));
+                        const rows = Math.ceil(items.length / cols);
+                        const tw = 270;
+                        const th = Math.round((H / Math.max(1, W)) * tw);
+                        const pad = 12;
+                        const hdr = 30;
+                        const c = document.createElement('canvas');
+                        c.width = cols * tw + (cols + 1) * pad;
+                        c.height = rows * (th + hdr) + (rows + 1) * pad;
+                        const ctx = c.getContext('2d');
+                        ctx.fillStyle = '#0f172a';
+                        ctx.fillRect(0, 0, c.width, c.height);
+                        const sx = tw / Math.max(1, W);
+                        const sy = th / Math.max(1, H);
+                        for (let i = 0; i < items.length; i++) {{
+                            const it = items[i];
+                            const col = i % cols;
+                            const row = Math.floor(i / cols);
+                            const x = pad + col * (tw + pad);
+                            const y = pad + row * (th + hdr + pad);
+                            const rep = it.report || {{}};
+                            const ok = rep.focusBboxInSafeZone !== false && (!Array.isArray(rep.errors) || rep.errors.length === 0);
+                            ctx.fillStyle = '#1e293b';
+                            ctx.fillRect(x, y, tw, hdr);
+                            ctx.fillStyle = ok ? '#4ade80' : '#f87171';
+                            ctx.font = 'bold 12px monospace';
+                            ctx.fillText(it.shotId + ' t=' + Number(it.t || 0).toFixed(1) + 's [' + (ok ? 'SAFE' : 'FAIL') + ']', x + 6, y + 19);
+                            const img = new Image();
+                            await new Promise((r) => {{ img.onload = r; img.onerror = r; img.src = it.dataUrl; }});
+                            ctx.drawImage(img, x, y + hdr, tw, th);
+                            if (rep.safeZone) {{
+                                ctx.save();
+                                ctx.strokeStyle = 'rgba(56,189,248,0.85)';
+                                ctx.setLineDash([4, 3]);
+                                ctx.strokeRect(x + rep.safeZone.minX * sx, y + hdr + rep.safeZone.minY * sy, (rep.safeZone.maxX - rep.safeZone.minX) * sx, (rep.safeZone.maxY - rep.safeZone.minY) * sy);
+                                ctx.restore();
+                            }}
+                            if (rep.bbox) {{
+                                ctx.save();
+                                ctx.strokeStyle = ok ? '#22c55e' : '#ef4444';
+                                ctx.lineWidth = 2;
+                                ctx.strokeRect(x + rep.bbox.minX * sx, y + hdr + rep.bbox.minY * sy, rep.bbox.width * sx, rep.bbox.height * sy);
+                                ctx.restore();
+                            }}
+                        }}
+                        resolve(c.toDataURL('image/jpeg', 0.88));
+                    }} catch (e) {{
+                        resolve('');
+                    }}
+                }}))({items_json}, {w}, {h})"#,
+                items_json = items_json,
+                w = meta.width,
+                h = meta.height
+            );
+
+            let sheet_data_url = cdp
+                .call(
+                    "Runtime.evaluate",
+                    json!({ "expression": stitch_expr, "awaitPromise": true, "returnByValue": true }),
+                )
+                .await
+                .ok()
+                .and_then(|v| {
+                    v.pointer("/result/value")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
+                .filter(|s| s.starts_with("data:image/jpeg;base64,"));
+
+            let mut contact_sheet_rel: Option<String> = None;
+            if let Some(ref url) = sheet_data_url {
+                if let Some(b64_part) = url.strip_prefix("data:image/jpeg;base64,") {
+                    if let Ok(bytes) = B64.decode(b64_part) {
+                        let sheet_path = args.preview_dir.join("contact_sheet.jpg");
+                        if tokio::fs::write(&sheet_path, &bytes).await.is_ok() {
+                            contact_sheet_rel =
+                                Some(".aetheria/preview/contact_sheet.jpg".to_string());
+                        }
+                    }
+                }
+            }
+
+            (
+                Some(shot_state),
+                shot_report_val,
+                failed_shots,
+                sheet_data_url,
+                contact_sheet_rel,
+            )
+        } else {
+            (None, json!({}), Vec::new(), None, None)
+        };
+
+    Ok(CdpRawCapture {
+        meta,
+        ref_root,
+        should_compare,
+        compare_to_reference_overridden,
+        timestamps,
+        frames,
+        frame_digests,
+        runtime_errors,
+        shot_state,
+        shot_report_val,
+        failed_shots,
+        sheet_data_url,
+        contact_sheet_rel,
+    })
+}
+
+/// Captures preview frames with full options (including Playwright-parity `visual_inspect_only`,
+/// full-resolution frame attachment, and persistent warm headless browser reuse).
+pub async fn capture_film_preview_with_full_options(
+    workspace_dir: &str,
+    requested_timestamps: Vec<f64>,
+    options: PreviewCaptureOptions,
+) -> Result<FilmPreviewCaptureResult, String> {
+    let _capture_guard = preview_capture_mutex().lock().await;
+    let html_path = resolve_active_html_film_path(Some(workspace_dir))
+        .ok_or_else(|| "No index.html found in active project folder".to_string())?;
+    let film_root = html_path
+        .parent()
+        .ok_or_else(|| "Invalid index.html parent path".to_string())?
+        .to_path_buf();
+    let ws_root = if workspace_dir.trim().is_empty() {
+        film_root.clone()
+    } else {
+        PathBuf::from(workspace_dir)
+    };
+
+    let browser_exe = detect_browser_executable().ok_or_else(|| {
+        "No Microsoft Edge or Google Chrome executable found for headless preview capture".to_string()
+    })?;
+
+    let initial_meta = inspect_workspace_film(&html_path);
+    if !initial_meta.exists {
+        return Err(format!("HTML film not found at {}", html_path.display()));
+    }
+
+    let film_root_str = film_root.to_string_lossy().to_string();
+    let preview_dir = resolve_isolated_path(&film_root_str, ".aetheria/preview")
+        .unwrap_or_else(|_| film_root.join(".aetheria").join("preview"));
+    let story_json_path = film_root.join("story.json");
+    let has_story_json = story_json_path.is_file();
+    let story_midpoints = if has_story_json {
+        super::story_lint::story_shot_midpoints(&story_json_path)
+    } else {
+        Vec::new()
+    };
+
+    let (http_port, _server_guard) =
+        start_ephemeral_film_server(film_root.clone(), ws_root.clone()).await?;
+
+    let (mut warm, mut reused_warm_browser) =
+        acquire_warm_preview_browser(&browser_exe, initial_meta.width, initial_meta.height).await?;
+
+    let is_hybrid_or_standalone = is_hybrid_or_standalone_html_film(&film_root);
+    let effective_visual_inspect_only = resolve_effective_visual_inspect_only(
+        options.visual_inspect_only,
+        options.compare_to_reference,
+        is_hybrid_or_standalone,
+    );
+
+    let cdp_args = CdpCaptureArgs {
+        http_port,
+        ws_root: &ws_root,
+        film_root: &film_root,
+        preview_dir: &preview_dir,
+        requested_timestamps: &requested_timestamps,
+        options: &options,
+        effective_visual_inspect_only,
+        has_story_json,
+        story_midpoints: &story_midpoints,
+    };
+
+    let raw = match run_cdp_preview_capture(&mut warm.cdp, initial_meta.clone(), &cdp_args).await {
+        Ok(raw) => {
+            release_warm_preview_browser(warm).await;
+            raw
+        }
+        Err(CdpAttemptError::WarmTransport(first_err)) if reused_warm_browser => {
+            drop(warm);
+            reused_warm_browser = false;
+            let mut fresh = acquire_fresh_preview_browser(
+                &browser_exe,
+                initial_meta.width,
+                initial_meta.height,
+            )
+            .await?;
+            match run_cdp_preview_capture(&mut fresh.cdp, initial_meta, &cdp_args).await {
+                Ok(raw) => {
+                    release_warm_preview_browser(fresh).await;
+                    raw
+                }
+                Err(CdpAttemptError::WarmTransport(err) | CdpAttemptError::FilmFailure(err)) => {
+                    drop(fresh);
+                    return Err(format!(
+                        "Warm preview failed ({}) and fresh retry failed: {}",
+                        first_err, err
+                    ));
+                }
+            }
+        }
+        Err(CdpAttemptError::FilmFailure(err)) => {
+            release_warm_preview_browser(warm).await;
+            return Err(err);
+        }
+        Err(CdpAttemptError::WarmTransport(err)) => {
+            drop(warm);
+            return Err(err);
+        }
+    };
+
+    let CdpRawCapture {
+        meta,
+        ref_root,
+        should_compare,
+        compare_to_reference_overridden,
+        timestamps,
+        frames,
+        frame_digests,
+        runtime_errors,
+        shot_state,
+        shot_report_val,
+        failed_shots,
+        sheet_data_url,
+        contact_sheet_rel,
+    } = raw;
+
+    let identical_frames_warning = if effective_visual_inspect_only {
+        validate_non_identical_frames(&frames).err()
+    } else {
+        validate_non_identical_frames(&frames)?;
+        None
+    };
 
     let base_project_key = normalize_preview_project_key(&film_root);
     let ts_scope_sig = format!(
@@ -372,7 +802,7 @@ pub async fn capture_film_preview_with_options(
             &film_root,
             meta.duration,
             &frames,
-            pass_threshold.unwrap_or(DEFAULT_REFERENCE_PASS_THRESHOLD),
+            options.pass_threshold.unwrap_or(DEFAULT_REFERENCE_PASS_THRESHOLD),
         )
         .await
         {
@@ -424,137 +854,6 @@ pub async fn capture_film_preview_with_options(
 
     let (story_qa, story_contact_sheet_data_url) = if has_story_json {
         let story_lint = super::story_lint::lint_story_file(&story_json_path);
-        let shot_state = cdp
-            .call(
-                "Runtime.evaluate",
-                json!({
-                    "expression": "(() => ({ shotReport: window.__shotReport || {}, storyStats: window.__storyStats || null }))()",
-                    "returnByValue": true
-                }),
-            )
-            .await
-            .ok()
-            .and_then(|v| v.pointer("/result/value").cloned())
-            .unwrap_or_else(|| json!({ "shotReport": {}, "storyStats": null }));
-
-        let shot_report_val = shot_state
-            .get("shotReport")
-            .cloned()
-            .unwrap_or_else(|| json!({}));
-        let mut failed_shots: Vec<String> = Vec::new();
-        if let Some(map) = shot_report_val.as_object() {
-            for (sid, srep) in map {
-                let in_safe = srep
-                    .get("focusBboxInSafeZone")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-                let has_errs = srep
-                    .get("errors")
-                    .and_then(Value::as_array)
-                    .is_some_and(|a| !a.is_empty());
-                if !in_safe || has_errs {
-                    failed_shots.push(sid.clone());
-                }
-            }
-            failed_shots.sort();
-        }
-
-        // Stitch one contact_sheet.jpg (1 mid-frame per shot + safeZone + focus bbox) inside the active CDP page
-        let mut sheet_items = Vec::with_capacity(frames.len());
-        for (i, fr) in frames.iter().enumerate() {
-            let sid = story_midpoints
-                .get(i)
-                .map(|(id, _)| id.clone())
-                .unwrap_or_else(|| format!("shot{}", i + 1));
-            let srep = shot_report_val.get(&sid).cloned().unwrap_or(Value::Null);
-            sheet_items.push(json!({
-                "shotId": sid,
-                "t": fr.timestamp,
-                "dataUrl": fr.data_url,
-                "report": srep
-            }));
-        }
-        let items_json = serde_json::to_string(&sheet_items).unwrap_or_else(|_| "[]".to_string());
-        let stitch_expr = format!(
-            r#"((items, W, H) => new Promise(async (resolve) => {{
-                try {{
-                    const cols = Math.min(3, Math.max(1, items.length));
-                    const rows = Math.ceil(items.length / cols);
-                    const tw = 270;
-                    const th = Math.round((H / Math.max(1, W)) * tw);
-                    const pad = 12;
-                    const hdr = 30;
-                    const c = document.createElement('canvas');
-                    c.width = cols * tw + (cols + 1) * pad;
-                    c.height = rows * (th + hdr) + (rows + 1) * pad;
-                    const ctx = c.getContext('2d');
-                    ctx.fillStyle = '#0f172a';
-                    ctx.fillRect(0, 0, c.width, c.height);
-                    const sx = tw / Math.max(1, W);
-                    const sy = th / Math.max(1, H);
-                    for (let i = 0; i < items.length; i++) {{
-                        const it = items[i];
-                        const col = i % cols;
-                        const row = Math.floor(i / cols);
-                        const x = pad + col * (tw + pad);
-                        const y = pad + row * (th + hdr + pad);
-                        const rep = it.report || {{}};
-                        const ok = rep.focusBboxInSafeZone !== false && (!Array.isArray(rep.errors) || rep.errors.length === 0);
-                        ctx.fillStyle = '#1e293b';
-                        ctx.fillRect(x, y, tw, hdr);
-                        ctx.fillStyle = ok ? '#4ade80' : '#f87171';
-                        ctx.font = 'bold 12px monospace';
-                        ctx.fillText(it.shotId + ' t=' + Number(it.t || 0).toFixed(1) + 's [' + (ok ? 'SAFE' : 'FAIL') + ']', x + 6, y + 19);
-                        const img = new Image();
-                        await new Promise((r) => {{ img.onload = r; img.onerror = r; img.src = it.dataUrl; }});
-                        ctx.drawImage(img, x, y + hdr, tw, th);
-                        if (rep.safeZone) {{
-                            ctx.save();
-                            ctx.strokeStyle = 'rgba(56,189,248,0.85)';
-                            ctx.setLineDash([4, 3]);
-                            ctx.strokeRect(x + rep.safeZone.minX * sx, y + hdr + rep.safeZone.minY * sy, (rep.safeZone.maxX - rep.safeZone.minX) * sx, (rep.safeZone.maxY - rep.safeZone.minY) * sy);
-                            ctx.restore();
-                        }}
-                        if (rep.bbox) {{
-                            ctx.save();
-                            ctx.strokeStyle = ok ? '#22c55e' : '#ef4444';
-                            ctx.lineWidth = 2;
-                            ctx.strokeRect(x + rep.bbox.minX * sx, y + hdr + rep.bbox.minY * sy, rep.bbox.width * sx, rep.bbox.height * sy);
-                            ctx.restore();
-                        }}
-                    }}
-                    resolve(c.toDataURL('image/jpeg', 0.85));
-                }} catch (e) {{
-                    resolve('');
-                }}
-            }}))({items_json}, {w}, {h})"#,
-            items_json = items_json,
-            w = meta.width,
-            h = meta.height
-        );
-
-        let sheet_data_url = cdp
-            .call(
-                "Runtime.evaluate",
-                json!({ "expression": stitch_expr, "awaitPromise": true, "returnByValue": true }),
-            )
-            .await
-            .ok()
-            .and_then(|v| v.pointer("/result/value").and_then(Value::as_str).map(str::to_string))
-            .filter(|s| s.starts_with("data:image/jpeg;base64,"));
-
-        let mut contact_sheet_rel: Option<String> = None;
-        if let Some(ref url) = sheet_data_url {
-            if let Some(b64_part) = url.strip_prefix("data:image/jpeg;base64,") {
-                if let Ok(bytes) = B64.decode(b64_part) {
-                    let sheet_path = preview_dir.join("contact_sheet.jpg");
-                    if tokio::fs::write(&sheet_path, &bytes).await.is_ok() {
-                        contact_sheet_rel = Some(".aetheria/preview/contact_sheet.jpg".to_string());
-                    }
-                }
-            }
-        }
-
         let rolled_back = super::story_lint::reconcile_story_snapshot_and_rollback(
             &film_root,
             story_lint.valid,
@@ -569,7 +868,7 @@ pub async fn capture_film_preview_with_options(
             "customShots": story_lint.custom_shots,
             "failedShots": failed_shots,
             "shotReport": shot_report_val,
-            "storyStats": shot_state.get("storyStats").cloned().unwrap_or(Value::Null),
+            "storyStats": shot_state.as_ref().and_then(|s| s.get("storyStats")).cloned().unwrap_or(Value::Null),
             "contactSheetRelPath": contact_sheet_rel,
             "autoRolledBack": rolled_back,
             "maxCorrectionPasses": 1
@@ -595,6 +894,10 @@ pub async fn capture_film_preview_with_options(
         anti_cheat,
         story_qa,
         story_contact_sheet_data_url,
+        reused_warm_browser,
+        visual_inspect_only: effective_visual_inspect_only,
+        is_hybrid_or_standalone,
+        identical_frames_warning,
     })
 }
 
@@ -702,5 +1005,85 @@ mod tests {
             record_and_check_preview_changed(&mut store, "/proj", d2),
             Some(true)
         );
+    }
+
+    #[test]
+    fn visual_inspect_only_policy_and_standalone_defaults_work() {
+        assert_eq!(
+            resolve_effective_visual_inspect_only(None, None, true),
+            true
+        );
+        assert_eq!(
+            resolve_effective_visual_inspect_only(None, Some(true), true),
+            false
+        );
+        assert_eq!(
+            resolve_effective_visual_inspect_only(None, None, false),
+            false
+        );
+        assert_eq!(
+            resolve_effective_visual_inspect_only(Some(true), Some(true), false),
+            true
+        );
+
+        assert_eq!(
+            resolve_effective_reference_policy(true, Some(true), true),
+            (false, false)
+        );
+        assert_eq!(
+            resolve_effective_reference_policy(true, Some(false), false),
+            (true, true)
+        );
+
+        let dir = std::env::temp_dir().join(format!("aetheria_standalone_det_{}", crate::paths::now_ms()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("index.html"),
+            "<!doctype html><body><div id='stage'></div><script>window.renderAt=function(){};window.__ready=true;</script></body>",
+        )
+        .unwrap();
+        assert!(is_hybrid_or_standalone_html_film(&dir));
+
+        // Standalone index.html remains standalone even when film.json also defines scenes (e.g. from film_audio).
+        std::fs::write(
+            dir.join("film.json"),
+            r#"{"title":"t","width":1280,"height":720,"fps":30,"scenes":[{"id":"scene1","title":"S1","start":0,"duration":3}]}"#,
+        )
+        .unwrap();
+        assert!(is_hybrid_or_standalone_html_film(&dir));
+
+        std::fs::write(
+            dir.join("index.html"),
+            "<!doctype html><script src=\"/script/aetheria-motion.js\"></script><script src=\"/script/scene1.js\"></script>",
+        )
+        .unwrap();
+        assert!(!is_hybrid_or_standalone_html_film(&dir));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn classifies_html_film_errors_vs_cdp_transport_errors() {
+        assert!(matches!(
+            classify_film_ready_error(
+                "HTML film startup script error (window.renderAt / window.__ready not initialized): ReferenceError: foo is not defined (line 42:7)".to_string()
+            ),
+            CdpAttemptError::FilmFailure(_)
+        ));
+        assert!(matches!(
+            classify_film_ready_error(
+                "HTML film did not expose window.renderAt / window.__ready within 15s".to_string()
+            ),
+            CdpAttemptError::FilmFailure(_)
+        ));
+        assert!(matches!(
+            classify_film_ready_error("CDP socket closed unexpectedly".to_string()),
+            CdpAttemptError::WarmTransport(_)
+        ));
+        assert!(matches!(
+            classify_film_ready_error("CDP navigation did not leave about:blank within 15s".to_string()),
+            CdpAttemptError::WarmTransport(_)
+        ));
     }
 }

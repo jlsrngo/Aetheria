@@ -350,7 +350,7 @@ pub fn ref_extractor_tool_definition() -> Value {
         "type": "function",
         "function": {
             "name": "extract_video_reference",
-            "description": "Decompiles a reference video file into a complete visual, temporal, and Motion AST blueprint (`style_ast.json`, `style.json`, `temporal.json`, `ref_report.md`, and per-scene `skeletons/scene*.js`): extracts clean plate backgrounds, scene cut timestamps snapped to audio beats/BPM, color palettes, OCR text/layout bounding boxes, Farneback dense optical-flow motion vectors (`direction`, `velocity`), and regressed `AM.spring` / `AM.ease.outCubic` easing curves.",
+            "description": "Extracts scene cuts, color palettes, BPM/audio cadence, keyframes, contact sheets, and `ref_report.md`/`style.json` metadata from a reference video file. Defaults to `mode: \"fast\"` (~2-3s via OpenCV/FFmpeg without CPU OCR; ideal for vision models).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -360,7 +360,12 @@ pub fn ref_extractor_tool_definition() -> Value {
                     },
                     "outputDir": {
                         "type": "string",
-                        "description": "Optional output folder to save extracted blueprints, Motion AST (`style_ast.json`), frames, and palette. Defaults to 'ref/extracted'."
+                        "description": "Optional output folder to save extracted blueprints, frames, and palette. Defaults to 'ref/extracted'."
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["fast", "deep"],
+                        "description": "Extraction mode: 'fast' (default, ~2-3s: scene cuts, keyframes, contact sheets, palette, BPM, no CPU OCR) or 'deep' (~60-90s: adds CPU RapidOCR text boxes, sub-beat motion clues, and scene AST)."
                     }
                 },
                 "required": ["videoPath"]
@@ -369,7 +374,7 @@ pub fn ref_extractor_tool_definition() -> Value {
     })
 }
 
-fn probe_video_dimensions_sync(ffmpeg_bin: &Path, video_path: &Path) -> Option<(u32, u32)> {
+pub(crate) fn probe_video_dimensions_sync(ffmpeg_bin: &Path, video_path: &Path) -> Option<(u32, u32)> {
     let ffprobe_name = if cfg!(windows) { "ffprobe.exe" } else { "ffprobe" };
     let ffprobe_path = ffmpeg_bin
         .parent()
@@ -551,7 +556,14 @@ pub async fn execute_ref_extractor(workspace_dir: &str, arguments: &Value) -> Va
         if let Some(ff_bin) = crate::paths::locate_ffmpeg_binary() {
             cmd.env("AETHERIA_FFMPEG", ff_bin);
         }
+        let deep_mode = arguments
+            .get("mode")
+            .and_then(|v| v.as_str())
+            .is_some_and(|m| m.trim().eq_ignore_ascii_case("deep"));
         cmd.arg(&script_path).arg(&video_path).arg(&out_dir);
+        if !deep_mode {
+            cmd.arg("--fast");
+        }
 
         if let Ok(res) = cmd.output().await {
             let stdout = String::from_utf8_lossy(&res.stdout).to_string();

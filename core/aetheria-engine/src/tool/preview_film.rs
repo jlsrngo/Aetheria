@@ -9,7 +9,7 @@ pub fn capture_film_preview_tool_definition() -> Value {
         "type": "function",
         "function": {
             "name": "capture_film_preview",
-            "description": "Captures visual screenshots of the active project's index.html film at specified timestamps (or reference-aligned keyframes) using headless Edge/Chrome, attaches them to vision context, and when reference frames exist in ref/ (or compareToReference=true), computes quantitative RGB SSIM + color/edge similarity and generates a side-by-side comparison_strip.jpg.",
+            "description": "Captures visual screenshots of the active project's index.html film at specified timestamps using headless Edge/Chrome and attaches them to vision context. Standalone/hybrid HTML films default to attaching full-resolution frames directly without SSIM gating when compareToReference is omitted; passing compareToReference=true on standalone/hybrid films attaches an advisory comparison_strip.jpg without hard-failing unless passThreshold is explicitly set.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -20,16 +20,67 @@ pub fn capture_film_preview_tool_definition() -> Value {
                     },
                     "compareToReference": {
                         "type": "boolean",
-                        "description": "Whether to compute RGB SSIM, color/edge similarity, and side-by-side comparison strip against extracted ref/ keyframes. Auto-enabled and mandatory whenever ref/ frames exist (false is overridden when ref/ frames are present)."
+                        "description": "Set true to compute RGB SSIM, color/edge similarity, and side-by-side comparison strip against extracted ref/ keyframes. Auto-enabled on modular scene scripts when ref/ frames exist; advisory/non-blocking on standalone/hybrid HTML films unless passThreshold is also passed."
                     },
                     "passThreshold": {
                         "type": "number",
                         "description": "Optional fidelity score pass threshold (0.0..1.0). Use default 0.85 for exact 1:1 clones, or 0.65 when adapting a reference style/motion to a new brand or custom copy."
+                    },
+                    "visualInspectOnly": {
+                        "type": "boolean",
+                        "description": "Optional override for Playwright-parity visual frame inspection without quantitative SSIM failure or auto-rollback (automatically true on standalone/hybrid index.html when compareToReference is omitted)."
+                    },
+                    "includeFullResFrames": {
+                        "type": "boolean",
+                        "description": "Optional flag to attach every captured full-resolution .aetheria/preview/preview_*.jpg image to vision context even when a comparison strip is also produced (defaults to true in visual inspection mode)."
                     }
                 }
             }
         }
     })
+}
+
+fn build_preview_vision_images(
+    frames: &[crate::studio::preview_capture::PreviewFrameCapture],
+    comparison_strip_data_url: Option<String>,
+    reference_comparison: Option<&Value>,
+    story_contact_sheet_data_url: Option<String>,
+    include_full_res_frames: bool,
+) -> Vec<Value> {
+    let mut vision_images: Vec<Value> = Vec::new();
+    let mut attached_full_res = false;
+    if let Some(strip_url) = comparison_strip_data_url {
+        // Attach the unified side-by-side comparison strip (Ref | Preview | Diff Heatmap)
+        // by default without duplicating raw frames unless `includeFullResFrames` is enabled.
+        vision_images.push(Value::String(strip_url));
+        if let Some(beat_strip_path) = reference_comparison
+            .and_then(|c| c.get("primarySceneBeatStripPath"))
+            .and_then(Value::as_str)
+        {
+            if let Ok(bytes) = std::fs::read(beat_strip_path) {
+                if !bytes.is_empty() {
+                    use base64::prelude::*;
+                    vision_images.push(Value::String(format!(
+                        "data:image/jpeg;base64,{}",
+                        BASE64_STANDARD.encode(&bytes)
+                    )));
+                }
+            }
+        }
+    } else if let Some(sheet_url) = story_contact_sheet_data_url {
+        vision_images.push(Value::String(sheet_url));
+    } else {
+        for f in frames {
+            vision_images.push(Value::String(f.data_url.clone()));
+        }
+        attached_full_res = true;
+    }
+    if include_full_res_frames && !attached_full_res {
+        for f in frames {
+            vision_images.push(Value::String(f.data_url.clone()));
+        }
+    }
+    vision_images
 }
 
 pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value) -> Value {
@@ -76,16 +127,27 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
         .get("passThreshold")
         .and_then(|v| v.as_f64())
         .map(|t| t.clamp(0.65, 0.99));
+    let visual_inspect_only = arguments
+        .get("visualInspectOnly")
+        .and_then(|v| v.as_bool());
+    let include_full_res_frames = arguments
+        .get("includeFullResFrames")
+        .and_then(|v| v.as_bool());
 
-    match crate::studio::preview_capture::capture_film_preview_with_options(
+    match crate::studio::preview_capture::capture_film_preview_with_full_options(
         workspace_dir,
         timestamps,
-        compare_to_reference,
-        pass_threshold,
+        crate::studio::preview_capture::PreviewCaptureOptions {
+            compare_to_reference,
+            pass_threshold,
+            visual_inspect_only,
+            include_full_res_frames,
+        },
     )
     .await
     {
         Ok(res) => {
+            let attach_full_res = include_full_res_frames.unwrap_or(res.visual_inspect_only);
             let captured: Vec<Value> = res
                 .frames
                 .iter()
@@ -97,34 +159,13 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
                     })
                 })
                 .collect();
-            let mut vision_images: Vec<Value> = Vec::new();
-            if let Some(strip_url) = res.comparison_strip_data_url {
-                // Attach ONLY the unified side-by-side comparison strip (Ref | Preview | Diff Heatmap)
-                // instead of duplicating 12 raw preview frames that flood vision context on multi-pass polish.
-                vision_images.push(Value::String(strip_url));
-                if let Some(beat_strip_path) = res
-                    .reference_comparison
-                    .as_ref()
-                    .and_then(|c| c.get("primarySceneBeatStripPath"))
-                    .and_then(Value::as_str)
-                {
-                    if let Ok(bytes) = std::fs::read(beat_strip_path) {
-                        if !bytes.is_empty() {
-                            use base64::prelude::*;
-                            vision_images.push(Value::String(format!(
-                                "data:image/jpeg;base64,{}",
-                                BASE64_STANDARD.encode(&bytes)
-                            )));
-                        }
-                    }
-                }
-            } else if let Some(sheet_url) = res.story_contact_sheet_data_url {
-                vision_images.push(Value::String(sheet_url));
-            } else {
-                for f in &res.frames {
-                    vision_images.push(Value::String(f.data_url.clone()));
-                }
-            }
+            let vision_images = build_preview_vision_images(
+                &res.frames,
+                res.comparison_strip_data_url.clone(),
+                res.reference_comparison.as_ref(),
+                res.story_contact_sheet_data_url.clone(),
+                attach_full_res,
+            );
             let unchanged_warning = if res.changed_since_last_capture == Some(false) {
                 Some("WARNING: Captured frames are byte-identical to the previous preview capture. No code/visual change took effect — check whether recent edit calls failed or target different elements.")
             } else {
@@ -203,27 +244,38 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
                 }
                 _ => String::new(),
             };
-            let extra_notices: String = [unchanged_warning, ref_override_note]
+            let extra_notices: String = [
+                unchanged_warning,
+                ref_override_note,
+                res.identical_frames_warning.as_deref(),
+            ]
                 .into_iter()
                 .flatten()
                 .map(|s| format!(" {}", s))
                 .collect();
             let has_runtime_errors = !res.runtime_errors.is_empty();
-            let ref_exec_failed = res
-                .reference_comparison
-                .as_ref()
-                .and_then(|c| c.get("ok").and_then(Value::as_bool))
-                == Some(false);
-            let ref_threshold_failed = res
-                .reference_comparison
-                .as_ref()
-                .and_then(|c| c.get("passed").and_then(Value::as_bool))
-                == Some(false);
-            let ref_ar_mismatch = res
-                .reference_comparison
-                .as_ref()
-                .and_then(|c| c.get("aspectRatioMismatch").and_then(Value::as_bool))
-                == Some(true);
+            // Standalone/hybrid HTML films (e.g. re-themed showreels) treat `compareToReference: true`
+            // as advisory visual diagnostics unless the caller explicitly sets `passThreshold`.
+            let enforce_ref = !res.visual_inspect_only
+                && (!res.is_hybrid_or_standalone || pass_threshold.is_some());
+            let ref_exec_failed = enforce_ref
+                && res
+                    .reference_comparison
+                    .as_ref()
+                    .and_then(|c| c.get("ok").and_then(Value::as_bool))
+                    == Some(false);
+            let ref_threshold_failed = enforce_ref
+                && res
+                    .reference_comparison
+                    .as_ref()
+                    .and_then(|c| c.get("passed").and_then(Value::as_bool))
+                    == Some(false);
+            let ref_ar_mismatch = enforce_ref
+                && res
+                    .reference_comparison
+                    .as_ref()
+                    .and_then(|c| c.get("aspectRatioMismatch").and_then(Value::as_bool))
+                    == Some(true);
             let anti_cheat_failed = !res.anti_cheat.passed;
             let story_lint_failed = res
                 .story_qa
@@ -319,6 +371,8 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
             };
             let mut result = json!({
                 "ok": preview_ok,
+                "visualInspectOnly": res.visual_inspect_only,
+                "reusedWarmBrowser": res.reused_warm_browser,
                 "fidelityFailed": ref_threshold_failed || ref_ar_mismatch,
                 "antiCheat": res.anti_cheat,
                 "width": res.width,
@@ -328,6 +382,7 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
                 "changedSinceLastCapture": res.changed_since_last_capture,
                 "compareToReferenceOverridden": res.compare_to_reference_overridden,
                 "unchangedWarning": unchanged_warning,
+                "identicalFramesWarning": res.identical_frames_warning,
                 "compareToReferenceNote": ref_override_note,
                 "captured": captured,
                 "runtimeErrors": res.runtime_errors,
@@ -390,5 +445,57 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
             "ok": false,
             "error": err
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::studio::preview_capture::PreviewFrameCapture;
+
+    #[test]
+    fn build_preview_vision_images_respects_include_full_res_frames() {
+        let frames = vec![
+            PreviewFrameCapture {
+                timestamp: 0.5,
+                relative_ratio: 0.25,
+                saved_rel_path: ".aetheria/preview/preview_0.jpg".to_string(),
+                data_url: "data:image/jpeg;base64,FRAME0".to_string(),
+            },
+            PreviewFrameCapture {
+                timestamp: 1.5,
+                relative_ratio: 0.75,
+                saved_rel_path: ".aetheria/preview/preview_1.jpg".to_string(),
+                data_url: "data:image/jpeg;base64,FRAME1".to_string(),
+            },
+        ];
+
+        // Default comparison mode attaches only the comparison strip.
+        let strip_only = build_preview_vision_images(
+            &frames,
+            Some("data:image/jpeg;base64,STRIP".to_string()),
+            None,
+            None,
+            false,
+        );
+        assert_eq!(strip_only.len(), 1);
+        assert_eq!(strip_only[0], "data:image/jpeg;base64,STRIP");
+
+        // `includeFullResFrames: true` keeps the strip AND appends all full-res frames.
+        let with_full = build_preview_vision_images(
+            &frames,
+            Some("data:image/jpeg;base64,STRIP".to_string()),
+            None,
+            None,
+            true,
+        );
+        assert_eq!(with_full.len(), 3);
+        assert_eq!(with_full[1], "data:image/jpeg;base64,FRAME0");
+        assert_eq!(with_full[2], "data:image/jpeg;base64,FRAME1");
+
+        // Visual inspect mode without strip attaches every frame without duplicating.
+        let direct_frames = build_preview_vision_images(&frames, None, None, None, true);
+        assert_eq!(direct_frames.len(), 2);
+        assert_eq!(direct_frames[0], "data:image/jpeg;base64,FRAME0");
     }
 }

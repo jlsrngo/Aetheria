@@ -895,9 +895,12 @@ pub fn attach_post_write_feedback(result: &mut Value, workspace_dir: &str, targe
             }
         }
         if let Some(film_dir) = super::film_state::resolve_film_dir_from_target(workspace_dir, target) {
+            let is_hybrid_project = load_film_json(&film_dir)
+                .and_then(|m| m.stage_mode)
+                .is_some_and(|s| s.eq_ignore_ascii_case("hybrid"));
             let script_dir = film_dir.join("script");
             let index_path = film_dir.join("index.html");
-            if index_path.is_file() && script_dir.is_dir() {
+            if !is_hybrid_project && index_path.is_file() && script_dir.is_dir() {
                 if let (Ok(html_raw), Ok(entries)) =
                     (std::fs::read_to_string(&index_path), std::fs::read_dir(&script_dir))
                 {

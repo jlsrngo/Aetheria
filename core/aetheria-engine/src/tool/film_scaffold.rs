@@ -40,6 +40,8 @@ pub struct ScaffoldSceneInput {
 pub struct FilmManifestJson {
     pub schema_version: u32,
     pub manage_index_html: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage_mode: Option<String>,
     pub title: String,
     pub width: u32,
     pub height: u32,
@@ -72,7 +74,7 @@ pub fn film_scaffold_tool_definition() -> Value {
         "type": "function",
         "function": {
             "name": "film_scaffold",
-            "description": "Scaffolds the active motion film project (`film.json`, `index.html` boilerplate, and idempotent `script/sceneK.js` stubs) inside `projects/<slug>/`. Call this FIRST for any new animation so you never have to hand-write `index.html`, `window.__filmMeta`, `SCENES`, `renderAt`, or scene ID wiring — just fill in the generated `script/sceneK.js` scene function(s) afterwards. Preserves existing scene bodies cleanly on updates.",
+            "description": "Optional scaffolder for managed film projects (`film.json`, `index.html`, or modular `script/sceneK.js` / `story.json` / `stageMode: 'hybrid'` starter) inside `projects/<slug>/`. Only needed if you want managed scene stubs, audio/subtitle wiring, or story-kit boilerplate — not required when authoring HTML/CSS3D/SVG/Canvas/WebGL directly in `index.html`. Preserves existing scene bodies cleanly on updates.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -129,13 +131,18 @@ pub fn film_scaffold_tool_definition() -> Value {
                         "type": "boolean",
                         "description": "Set true (or write `story.json` first) for declarative story-kit skills (e.g. `mg-soft-clay-story`): generates managed `index.html` booting `StoryRuntime` without creating `script/scene*.js` stubs."
                     },
+                    "stageMode": {
+                        "type": "string",
+                        "enum": ["canvas", "hybrid"],
+                        "description": "Stage architecture: 'canvas' (default modular `AM.registerScene` in `script/scene*.js`), or 'hybrid' (HTML + CSS Grid/Flexbox + CSS 3D + Inline SVG & `<filter>` + Canvas/WebGL inside `index.html` with deterministic `window.renderAt(t)` and without `script/scene*.js` stubs)."
+                    },
                     "scenes": {
                         "type": "array",
                         "description": "Ordered list of film scenes. IDs must be unique.",
                         "items": {
                             "type": "object",
                             "properties": {
-                                "id": { "type": "string", "description": "Unique scene ID matching `AM.registerScene(\"<id>\", ...)`." },
+                                "id": { "type": "string", "description": "Unique scene ID (e.g. 'intro', 'climax')." },
                                 "title": { "type": "string" },
                                 "duration": { "type": "number", "description": "Optional scene duration in seconds (> 0). Omit to derive automatically from `words` / `audio` WAV duration (+ buffer)." },
                                 "audio": { "type": "string", "description": "Optional relative audio path (e.g. `audio/scene1.wav`)." },
@@ -391,6 +398,193 @@ pub(crate) fn render_managed_index_html(
     )
 }
 
+pub(crate) fn render_hybrid_starter_index_html(
+    manifest: &FilmManifestJson,
+    is_microstock: bool,
+) -> String {
+    let total_dur: f64 = manifest.scenes.iter().map(|s| s.duration).sum();
+    let total_dur_rounded = (total_dur * 1000.0).round() / 1000.0;
+    let total_frames = ((total_dur * (manifest.fps as f64)).round() as u32).max(1);
+    let safe_title = escape_html_text(&manifest.title);
+    let safe_bg = if manifest.background.trim().is_empty() {
+        "#0f1115"
+    } else {
+        manifest.background.trim()
+    };
+    let font_links = if is_microstock {
+        String::new()
+    } else {
+        concat!(
+            "  <link rel=\"preconnect\" href=\"https://fonts.googleapis.com\" />\n",
+            "  <link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin />\n",
+            "  <link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=Playfair+Display:ital,wght@0,400..700;1,400..700&display=swap\" />\n",
+        )
+        .to_string()
+    };
+    let three_script = if manifest.use_three {
+        "  <script src=\"/script/three.min.js\"></script>\n"
+    } else {
+        ""
+    };
+    let scenes_json =
+        serde_json::to_string_pretty(&manifest.scenes).unwrap_or_else(|_| "[]".into());
+    let title_json = serde_json::to_string(&manifest.title).unwrap_or_else(|_| "\"Motion Film\"".into());
+
+    format!(
+        r##"<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width={w}, initial-scale=1.0" />
+  <title>{title}</title>
+{font_links}  <style>
+    *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    :root {{ --t: 0; }}
+    html, body {{
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: {bg};
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }}
+    #stage {{
+      position: relative;
+      width: {w}px;
+      height: {h}px;
+      overflow: hidden;
+      background: {bg};
+      perspective: 1400px;
+      transform-style: preserve-3d;
+    }}
+    .hybrid-grid {{
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      transform-style: preserve-3d;
+    }}
+    #hybrid-card {{
+      width: 64%;
+      padding: 48px;
+      border-radius: 28px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      color: #ffffff;
+      transform-style: preserve-3d;
+    }}
+    #fx-canvas, #hybrid-svg {{
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }}
+  </style>
+{three_script}</head>
+<body>
+  <div id="stage">
+    <!-- TODO: hybrid stage stub by film_scaffold -->
+    <svg id="hybrid-svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}" aria-hidden="true">
+      <defs>
+        <filter id="soft-glow" x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur stdDeviation="8" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+      </defs>
+      <circle id="svg-orb" cx="{half_w}" cy="{half_h}" r="96" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="2" filter="url(#soft-glow)" />
+    </svg>
+    <div class="hybrid-grid">
+      <div id="hybrid-card">
+        <h1 style="font-size: 56px; font-weight: 800; letter-spacing: -0.03em;">{title}</h1>
+      </div>
+    </div>
+    <canvas id="fx-canvas" width="{w}" height="{h}"></canvas>
+  </div>
+  <script>
+  (function () {{
+    "use strict";
+    var TOTAL_DURATION = {total_dur:.3};
+    var SCENES = {scenes_json};
+    window.__filmMeta = {{
+      title: {title_json},
+      width: {w},
+      height: {h},
+      fps: {fps},
+      duration: TOTAL_DURATION,
+      totalFrames: {total_frames},
+      stageMode: "hybrid",
+      scenes: SCENES
+    }};
+
+    var card = document.getElementById("hybrid-card");
+    var orb = document.getElementById("svg-orb");
+    var canvas = document.getElementById("fx-canvas");
+    var ctx = canvas.getContext("2d");
+
+    window.renderAt = function (t) {{
+      var clamped = Math.max(0, Math.min(TOTAL_DURATION, Number(t) || 0));
+      var progress = TOTAL_DURATION > 0 ? clamped / TOTAL_DURATION : 0;
+      document.documentElement.style.setProperty("--t", String(clamped));
+      if (card) {{
+        var ry = -12 + progress * 24;
+        var ty = (1 - Math.min(1, progress * 3)) * 24;
+        card.style.transform = "translate3d(0, " + ty.toFixed(2) + "px, 0) rotateY(" + ry.toFixed(2) + "deg)";
+      }}
+      if (orb) {{
+        orb.setAttribute("r", String(96 + progress * 140));
+      }}
+      if (ctx) {{
+        ctx.clearRect(0, 0, {w}, {h});
+        ctx.fillStyle = "rgba(245, 158, 11, 0.75)";
+        ctx.fillRect(0, {h} - 6, {w} * progress, 6);
+      }}
+    }};
+
+    var waiters = [];
+    if (typeof document !== "undefined" && document.fonts && document.fonts.ready) {{
+      waiters.push(
+        Promise.race([
+          document.fonts.ready.catch(function () {{}}),
+          new Promise(function (resolve) {{ setTimeout(resolve, 1800); }})
+        ])
+      );
+    }}
+    if (waiters.length === 0) {{
+      window.renderAt(0);
+      window.__ready = true;
+    }} else {{
+      Promise.all(waiters).then(function () {{
+        window.renderAt(0);
+        window.__ready = true;
+      }});
+    }}
+  }})();
+  </script>
+</body>
+</html>
+"##,
+        w = manifest.width,
+        h = manifest.height,
+        half_w = manifest.width / 2,
+        half_h = manifest.height / 2,
+        fps = manifest.fps,
+        title = safe_title,
+        bg = safe_bg,
+        font_links = font_links,
+        three_script = three_script,
+        total_dur = total_dur_rounded,
+        total_frames = total_frames,
+        scenes_json = scenes_json,
+        title_json = title_json,
+    )
+}
+
 fn render_scene_stub(scene: &FilmManifestScene, width: u32, height: u32, background: &str) -> String {
     let id_json = serde_json::to_string(&scene.id).unwrap_or_else(|_| "\"scene1\"".into());
     let accent_json = serde_json::to_string(&scene.accent).unwrap_or_else(|_| "\"#f59e0b\"".into());
@@ -591,6 +785,23 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
         .get("overwriteIndexHtml")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    let requested_stage_mode = arguments
+        .get("stageMode")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_ascii_lowercase());
+    if let Some(ref sm) = requested_stage_mode {
+        if sm != "canvas" && sm != "hybrid" {
+            return json!({
+                "ok": false,
+                "code": "INVALID_STAGE_MODE",
+                "error": format!("Unsupported stageMode '{}'. Use 'canvas' or 'hybrid'.", sm)
+            });
+        }
+    }
+    let is_hybrid_mode = requested_stage_mode.as_deref() == Some("hybrid");
+    let effective_manage_index = if is_hybrid_mode { false } else { manage_index };
     let buffer_sec = arguments
         .get("buffer")
         .and_then(|v| v.as_f64())
@@ -746,7 +957,11 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
         manifest_scenes.push(FilmManifestScene {
             id: clean_id,
             title: scene_title,
-            script: format!("script/scene{}.js", idx + 1),
+            script: if is_hybrid_mode {
+                "index.html".to_string()
+            } else {
+                format!("script/scene{}.js", idx + 1)
+            },
             start: (acc_start * 1000.0).round() / 1000.0,
             duration: (resolved_duration * 1000.0).round() / 1000.0,
             audio,
@@ -772,14 +987,16 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
         }));
     }
 
-    if let Err(e) = std::fs::create_dir_all(&script_dir) {
-        return json!({
-            "ok": false,
-            "error": format!("Failed creating script directory '{}': {}", script_dir.display(), e)
-        });
+    if !is_hybrid_mode {
+        if let Err(e) = std::fs::create_dir_all(&script_dir) {
+            return json!({
+                "ok": false,
+                "error": format!("Failed creating script directory '{}': {}", script_dir.display(), e)
+            });
+        }
     }
 
-    if manage_index && index_path.is_file() && !film_json_path.is_file() && !overwrite_index {
+    if effective_manage_index && index_path.is_file() && !film_json_path.is_file() && !overwrite_index {
         return json!({
             "ok": false,
             "code": "UNMANAGED_INDEX_HTML_EXISTS",
@@ -789,7 +1006,12 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
 
     let manifest = FilmManifestJson {
         schema_version: 1,
-        manage_index_html: manage_index,
+        manage_index_html: effective_manage_index,
+        stage_mode: if is_hybrid_mode {
+            Some("hybrid".to_string())
+        } else {
+            None
+        },
         title: title.clone(),
         width,
         height,
@@ -862,7 +1084,27 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
         None
     };
 
-    if manage_index {
+    let mut wrote_hybrid_starter = false;
+    if is_hybrid_mode {
+        if !index_path.is_file() || overwrite_index {
+            let html = render_hybrid_starter_index_html(&manifest, lock.is_some());
+            if let Err(e) = std::fs::write(&index_path, &html) {
+                return json!({
+                    "ok": false,
+                    "error": format!("Failed writing {}: {}", index_path.display(), e)
+                });
+            }
+            wrote_hybrid_starter = true;
+            emit_event(
+                workspace_dir,
+                "file.edited",
+                json!({
+                    "file": if film_root_rel.is_empty() { "index.html".to_string() } else { format!("{}/index.html", film_root_rel) },
+                    "sessionID": session_id
+                }),
+            );
+        }
+    } else if effective_manage_index {
         let html = if is_story_mode {
             if let Some(kit) = crate::studio::generic_kit_lint::load_kit_manifest(&film_dir) {
                 crate::studio::generic_kit_lint::render_generic_kit_index_html(
@@ -906,7 +1148,14 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
     let mut existing_scenes = Vec::new();
     let mut scene_files = Vec::new();
 
-    if !is_story_mode {
+    if is_hybrid_mode {
+        scene_files.push("index.html".to_string());
+        if wrote_hybrid_starter {
+            created_scenes.push("index.html".to_string());
+        } else {
+            existing_scenes.push("index.html".to_string());
+        }
+    } else if !is_story_mode {
         for sc in &manifest.scenes {
             scene_files.push(sc.script.clone());
             let sc_path = film_dir.join(&sc.script);
@@ -942,7 +1191,7 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
         "filmRoot": film_root_rel,
         "filmJson": if film_root_rel.is_empty() { "film.json".to_string() } else { format!("{}/film.json", film_root_rel) },
         "indexHtml": if film_root_rel.is_empty() { "index.html".to_string() } else { format!("{}/index.html", film_root_rel) },
-        "managedIndexHtml": manage_index,
+        "managedIndexHtml": effective_manage_index,
         "createdScenes": created_scenes,
         "existingScenes": existing_scenes,
         "sceneFiles": scene_files,
@@ -953,16 +1202,20 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
         "lintValid": meta.lint.valid,
         "warnings": warnings,
         "output": format!(
-            "Scaffolded film '{}' ({}x{} @ {}fps, {} scene(s)) in '{}'. Now write the animation inside: {} (track real progress via sceneProgress on disk instead of todowrite).",
+            "Scaffolded film '{}' ({}x{} @ {}fps, {} scene(s){}) in '{}'. Now write the animation inside: {} (track real progress via sceneProgress on disk instead of todowrite).",
             manifest.title,
             manifest.width,
             manifest.height,
             manifest.fps,
             manifest.scenes.len(),
+            if is_hybrid_mode { ", stageMode=hybrid" } else { "" },
             film_root_rel,
             scene_files.join(", ")
         )
     });
+    if is_hybrid_mode {
+        result["stageMode"] = json!("hybrid");
+    }
     if let Some(prog) = scene_progress {
         result["sceneProgress"] = prog;
     }
@@ -1171,6 +1424,7 @@ mod tests {
         let manifest = FilmManifestJson {
             schema_version: 1,
             manage_index_html: true,
+            stage_mode: None,
             title: "Sub Test".to_string(),
             width: 1080,
             height: 1920,
@@ -1274,6 +1528,44 @@ mod tests {
         assert_eq!(ok_res["width"], 1920);
         assert_eq!(ok_res["height"], 1080);
         assert_eq!(ok_res["fps"], 60);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn film_scaffold_hybrid_stage_writes_starter_html_without_scene_stubs() {
+        let dir = std::env::temp_dir().join(format!("aetheria_scaffold_hybrid_{}", crate::paths::now_ms()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ws = dir.to_string_lossy().to_string();
+
+        let res = execute_film_scaffold(
+            "ses_hybrid",
+            &ws,
+            &json!({
+                "title": "Hybrid Showreel",
+                "preset": "landscape",
+                "stageMode": "hybrid",
+                "scenes": [
+                    { "id": "intro", "duration": 2.5 },
+                    { "id": "climax", "duration": 3.5 }
+                ]
+            }),
+        );
+        assert_eq!(res["ok"], true, "{:?}", res);
+        assert_eq!(res["stageMode"], "hybrid");
+        assert_eq!(res["managedIndexHtml"], false);
+        assert_eq!(res["sceneFiles"], json!(["index.html"]));
+        assert_eq!(res["createdScenes"], json!(["index.html"]));
+        assert_eq!(res["sceneProgress"]["stub"], json!(1));
+
+        let film_dir = dir.join(res["filmRoot"].as_str().unwrap());
+        assert!(!film_dir.join("script").join("scene1.js").exists());
+        assert!(!film_dir.join("script").join("scene2.js").exists());
+        let index_html = std::fs::read_to_string(film_dir.join("index.html")).unwrap();
+        assert!(index_html.contains("<!-- TODO: hybrid stage stub by film_scaffold -->"));
+        assert!(index_html.contains("window.renderAt"));
+        assert!(index_html.contains("perspective: 1400px"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

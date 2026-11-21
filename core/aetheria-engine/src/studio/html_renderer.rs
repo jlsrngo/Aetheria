@@ -169,12 +169,15 @@ pub(super) async fn launch_headless_browser_with_cdp(
 }
 
 pub(super) async fn wait_for_film_ready(cdp: &mut CdpWebSocket, meta: &mut FilmMeta) -> Result<(), String> {
+    let mut last_errors: Vec<String> = Vec::new();
+    let mut last_href = String::new();
+
     for attempt in 0..150 {
         let probe = cdp
             .call(
                 "Runtime.evaluate",
                 json!({
-                    "expression": "JSON.stringify({ ready: Boolean(window.__ready), readyDefined: typeof window.__ready !== 'undefined', docComplete: document.readyState === 'complete', hasRenderAt: typeof window.renderAt === 'function', meta: window.__filmMeta || window.AETHERIA_FILM || null })",
+                    "expression": "JSON.stringify({ ready: Boolean(window.__ready), readyDefined: typeof window.__ready !== 'undefined', docComplete: document.readyState === 'complete', hasRenderAt: typeof window.renderAt === 'function', href: String(location.href || ''), errors: (() => { const e = Array.isArray(window.__aetheriaErrors) ? window.__aetheriaErrors.slice(0, 6) : []; if (window.__runtimeError && !e.includes(String(window.__runtimeError))) e.push(String(window.__runtimeError)); return e; })(), meta: window.__filmMeta || window.AETHERIA_FILM || null })",
                     "returnByValue": true
                 }),
             )
@@ -185,6 +188,21 @@ pub(super) async fn wait_for_film_ready(cdp: &mut CdpWebSocket, meta: &mut FilmM
             .and_then(Value::as_str)
         {
             if let Ok(parsed) = serde_json::from_str::<Value>(raw_json) {
+                if let Some(href) = parsed.get("href").and_then(Value::as_str) {
+                    last_href = href.to_string();
+                }
+                if let Some(errs) = parsed.get("errors").and_then(Value::as_array) {
+                    let collected: Vec<String> = errs
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .filter(|s| !s.trim().is_empty())
+                        .map(str::to_string)
+                        .collect();
+                    if !collected.is_empty() {
+                        last_errors = collected;
+                    }
+                }
+
                 let is_ready = parsed.get("ready").and_then(Value::as_bool) == Some(true);
                 let has_render_at =
                     parsed.get("hasRenderAt").and_then(Value::as_bool) == Some(true);
@@ -193,22 +211,43 @@ pub(super) async fn wait_for_film_ready(cdp: &mut CdpWebSocket, meta: &mut FilmM
                 let doc_complete =
                     parsed.get("docComplete").and_then(Value::as_bool) == Some(true);
 
+                // Fail fast on startup script exceptions once DOM load completes so the agent sees the exact line error immediately instead of waiting 15s.
+                if doc_complete
+                    && !last_errors.is_empty()
+                    && ((attempt >= 4 && !has_render_at) || (attempt >= 6 && !is_ready))
+                {
+                    return Err(format!(
+                        "HTML film startup script error (window.renderAt / window.__ready not initialized): {}",
+                        last_errors.join(" | ")
+                    ));
+                }
+
                 // Proceed once explicit window.__ready is true, or when a film defined window.renderAt
                 // and completed DOM load without setting window.__ready after an initial settle grace window.
                 if has_render_at && (is_ready || (!ready_defined && doc_complete && attempt >= 6)) {
                     if let Some(rt_meta) = parsed.get("meta").filter(|v| v.is_object()) {
+                        if let Some(w) = rt_meta.get("width").and_then(Value::as_u64).filter(|&n| n >= 64) {
+                            meta.width = w as u32;
+                        }
+                        if let Some(h) = rt_meta.get("height").and_then(Value::as_u64).filter(|&n| n >= 64) {
+                            meta.height = h as u32;
+                        }
+                        if let Some(f) = rt_meta.get("fps").and_then(Value::as_u64).filter(|&n| n >= 1) {
+                            meta.fps = f as u32;
+                        }
                         if let Some(d) = rt_meta.get("duration").and_then(Value::as_f64) {
                             if d > 0.0 {
                                 meta.duration = d;
-                                meta.total_frames = ((d * meta.fps as f64).round() as u32).max(1);
                             }
                         }
+                        meta.total_frames = ((meta.duration * meta.fps as f64).round() as u32).max(1);
                     }
                     let _ = cdp
                         .call(
                             "Runtime.evaluate",
                             json!({
-                                "expression": "(() => { const s = document.createElement('style'); s.textContent = '#loading,#controls,.aetheria-standalone-controls,[data-aetheria-standalone-chrome]{display:none!important;opacity:0!important;visibility:hidden!important;}'; (document.head || document.documentElement).appendChild(s); return true; })()"
+                                "expression": "Promise.race([(document.fonts && document.fonts.ready) ? document.fonts.ready.catch(() => {}) : Promise.resolve(), new Promise(r => setTimeout(r, 1200))]).then(() => { const s = document.createElement('style'); s.textContent = '#loading,#controls,.aetheria-standalone-controls,[data-aetheria-standalone-chrome]{display:none!important;opacity:0!important;visibility:hidden!important;}'; (document.head || document.documentElement).appendChild(s); return true; })",
+                                "awaitPromise": true
                             }),
                         )
                         .await;
@@ -219,6 +258,15 @@ pub(super) async fn wait_for_film_ready(cdp: &mut CdpWebSocket, meta: &mut FilmM
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
 
+    if last_href.is_empty() || last_href == "about:blank" {
+        return Err("CDP navigation did not leave about:blank within 15s".to_string());
+    }
+    if !last_errors.is_empty() {
+        return Err(format!(
+            "HTML film did not expose window.renderAt / window.__ready within 15s; startup errors: {}",
+            last_errors.join(" | ")
+        ));
+    }
     Err("HTML film did not expose window.renderAt / window.__ready within 15s".to_string())
 }
 

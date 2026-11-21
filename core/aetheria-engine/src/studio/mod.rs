@@ -32,6 +32,7 @@ pub mod motion_linter;
 pub mod native_canvas;
 pub mod native_renderer;
 pub mod presets;
+pub(crate) mod preview_browser;
 pub mod preview_capture;
 pub mod project_registry;
 pub mod proxy_preview;

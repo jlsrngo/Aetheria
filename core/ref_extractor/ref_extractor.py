@@ -1220,7 +1220,11 @@ def _classify_motion_cadence(energy: float) -> str:
     return "minimal-hold"
 
 
-def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] = None) -> Dict[str, Any]:
+def extract_reference_blueprint(
+    video_path_str: str,
+    out_dir_str: Optional[str] = None,
+    fast_mode: bool = False,
+) -> Dict[str, Any]:
     v_path = Path(video_path_str).resolve()
     if not v_path.exists():
         return {"error": f"Reference video not found at: {v_path}"}
@@ -1347,10 +1351,10 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
     scenes: List[Dict[str, Any]] = []
     ast_scenes: List[Dict[str, Any]] = []
     scene_palettes: List[Dict[str, Any]] = []
-    ocr_engine = _get_ocr_engine()
+    ocr_engine = None if fast_mode else _get_ocr_engine()
     ocr_available = ocr_engine is not None
     ocr_warning: Optional[str] = None
-    if not ocr_available:
+    if not fast_mode and not ocr_available:
         try:
             from rapidocr_onnxruntime import RapidOCR as _ProbeOCR  # noqa: F401
             ocr_warning = "RapidOCR failed to initialize at runtime; on-screen text strings were NOT extracted."
@@ -1527,25 +1531,29 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
                 })
 
         mid_words = layout_info.get("hero", []) + layout_info.get("top", [])
-        sub_beats = extract_scene_sub_beats(
-            fr_start, fr_mid, fr_end, ts_start, ts_mid, ts_end, dur, mid_words, ocr_engine
-        )
-        layout_info["cleanPlate"] = clean_plate
-        motion_clues: Dict[str, Any] = {}
-        try:
-            from ref_motion_clues import extract_scene_motion_clues
-
-            motion_clues = extract_scene_motion_clues(
-                _frame_at,
-                start,
-                end,
-                width,
-                height,
-                ocr_summary_fn=lambda f: _quick_ocr_summary(f, ocr_engine),
-                sub_ts_list=sub_ts_list,
+        if fast_mode:
+            sub_beats = []
+            motion_clues: Dict[str, Any] = {}
+        else:
+            sub_beats = extract_scene_sub_beats(
+                fr_start, fr_mid, fr_end, ts_start, ts_mid, ts_end, dur, mid_words, ocr_engine
             )
-        except Exception:
             motion_clues = {}
+            try:
+                from ref_motion_clues import extract_scene_motion_clues
+
+                motion_clues = extract_scene_motion_clues(
+                    _frame_at,
+                    start,
+                    end,
+                    width,
+                    height,
+                    ocr_summary_fn=lambda f: _quick_ocr_summary(f, ocr_engine),
+                    sub_ts_list=sub_ts_list,
+                )
+            except Exception:
+                motion_clues = {}
+        layout_info["cleanPlate"] = clean_plate
         layout_info["motionClues"] = motion_clues
         if camera_motion is not None:
             layout_info["cameraMotion"] = camera_motion
@@ -1574,33 +1582,34 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
             "motionClues": motion_clues,
             "layout": layout_info,
         })
-        ast_scene_obj = {
-            "id": scene_id,
-            "index": i + 1,
-            "role": role,
-            "start": round(start, 3),
-            "end": round(end, 3),
-            "duration": dur,
-            "beatsStrip": beats_strip_rel,
-            "beatStripTimestamps": [round(float(t), 3) for t in beat_strip_ts],
-            "beatStripPanels": beat_strip_meta,
-            "subBeats": sub_beats,
-            "gridTiltDeg": grid_tilt_deg,
-            "contrastTiles": contrast_tiles,
-            "cleanPlate": clean_plate,
-            "cameraMotion": camera_motion,
-            "motionClues": motion_clues,
-            "layers": ast_layers,
-        }
-        skeleton_code = compile_scene_am_skeleton(ast_scene_obj, width, height)
-        skeletons_dir = out_dir / "skeletons"
-        skeletons_dir.mkdir(parents=True, exist_ok=True)
-        skeleton_rel = f"skeletons/scene{i + 1}.js"
-        with open(skeletons_dir / f"scene{i + 1}.js", "w", encoding="utf-8") as sf:
-            sf.write(skeleton_code)
-        ast_scene_obj["skeletonPath"] = f"ref/extracted/{skeleton_rel}"
-        ast_scene_obj["amCodeSkeleton"] = skeleton_code
-        ast_scenes.append(ast_scene_obj)
+        if not fast_mode:
+            ast_scene_obj = {
+                "id": scene_id,
+                "index": i + 1,
+                "role": role,
+                "start": round(start, 3),
+                "end": round(end, 3),
+                "duration": dur,
+                "beatsStrip": beats_strip_rel,
+                "beatStripTimestamps": [round(float(t), 3) for t in beat_strip_ts],
+                "beatStripPanels": beat_strip_meta,
+                "subBeats": sub_beats,
+                "gridTiltDeg": grid_tilt_deg,
+                "contrastTiles": contrast_tiles,
+                "cleanPlate": clean_plate,
+                "cameraMotion": camera_motion,
+                "motionClues": motion_clues,
+                "layers": ast_layers,
+            }
+            skeleton_code = compile_scene_am_skeleton(ast_scene_obj, width, height)
+            skeletons_dir = out_dir / "skeletons"
+            skeletons_dir.mkdir(parents=True, exist_ok=True)
+            skeleton_rel = f"skeletons/scene{i + 1}.js"
+            with open(skeletons_dir / f"scene{i + 1}.js", "w", encoding="utf-8") as sf:
+                sf.write(skeleton_code)
+            ast_scene_obj["skeletonPath"] = f"ref/extracted/{skeleton_rel}"
+            ast_scene_obj["amCodeSkeleton"] = skeleton_code
+            ast_scenes.append(ast_scene_obj)
 
     contact_sheets = build_dense_contact_sheets(_frame_at, sheet_timestamps, width, height, out_dir)
     cap.release()
@@ -1633,26 +1642,34 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
     with open(temporal_json_path, "w", encoding="utf-8") as f:
         json.dump(temporal_payload, f, indent=2)
 
-    style_ast = {
-        "version": 3,
-        "source": v_path.name,
-        "fps": int(round(fps)),
-        "width": width,
-        "height": height,
-        "aspectRatio": aspect_ratio,
-        "bpm": bpm,
-        "bpmSource": bpm_source,
-        "bpmConfidence": bpm_confidence,
-        "audioProfile": audio_profile,
-        "contactSheets": contact_sheets,
-        "beatTimestamps": beat_timestamps[:64],
-        "cuts": aligned_cuts,
-        "scenes": ast_scenes,
-    }
-    ast_json_path = out_dir / "style_ast.json"
-    with open(ast_json_path, "w", encoding="utf-8") as f:
-        json.dump(style_ast, f, indent=2)
+    ast_json_path: Optional[Path] = None
+    style_ast: Optional[Dict[str, Any]] = None
+    if not fast_mode:
+        style_ast = {
+            "version": 3,
+            "source": v_path.name,
+            "fps": int(round(fps)),
+            "width": width,
+            "height": height,
+            "aspectRatio": aspect_ratio,
+            "bpm": bpm,
+            "bpmSource": bpm_source,
+            "bpmConfidence": bpm_confidence,
+            "audioProfile": audio_profile,
+            "contactSheets": contact_sheets,
+            "beatTimestamps": beat_timestamps[:64],
+            "cuts": aligned_cuts,
+            "scenes": ast_scenes,
+        }
+        ast_json_path = out_dir / "style_ast.json"
+        with open(ast_json_path, "w", encoding="utf-8") as f:
+            json.dump(style_ast, f, indent=2)
 
+    extractor_backend = (
+        "python_cv2_fast"
+        if fast_mode
+        else ("python_cv2_rapidocr" if ocr_available else "python_cv2_no_ocr")
+    )
     style_spec = {
         "version": 2,
         "title": f"Extracted Reference Style ({v_path.name})",
@@ -1669,7 +1686,6 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
         "aspectRatio": aspect_ratio,
         "width": width,
         "height": height,
-        "resolution": f"{width}x{height}",
         "resolution": f"{width}x{height}",
         "theme": "light-measured" if is_light_theme else "dark-measured",
         "palette": {
@@ -1691,8 +1707,8 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
         "visualJumpTimestamps": temporal["visualJumpTimestamps"],
         "ocrAvailable": ocr_available,
         "ocrWarning": ocr_warning,
-        "extractorBackend": "python_cv2_rapidocr" if ocr_available else "python_cv2_no_ocr",
-        "astPath": "ref/extracted/style_ast.json",
+        "extractorBackend": extractor_backend,
+        "astPath": "ref/extracted/style_ast.json" if ast_json_path is not None else None,
         "scenes": scenes,
     }
 
@@ -1856,11 +1872,11 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
             md += f"- **Dense 6-Slice Timeline (exact position/size/words per timestamp):** `{' -> '.join(tl_parts)}`\n"
 
     md += f"""
-## Aetheria Modular HTML5/JS Reconstruction Directives
-1. **VISION BEATS RAW OCR (`contact_sheet_*.jpg` + `frames/ref_scene_*.jpg`)**: Treat the attached keyframes and `0.5s` contact sheets as the visual ground truth. OCR text and contour boxes above are noisy hints for timing/size/coordinates ONLY — NEVER copy garbled OCR fragments (e.g. `.S`, `Showrea`, `Ertem`, `Estem`, `Enum`), NEVER draw separate floating text overlays on top of icons that belong inside tile cells, and NEVER draw a `pill` box unless a real pill button is clearly visible in the image.
-2. **EXACT TIMING & RICH MULTI-PHASE CHOREOGRAPHY (`index.html` + `script/scene1..{len(scenes)}.js`)**: Mirror the measured `SCENES` timings and `{width}x{height}` (`{int(round(fps))}fps`) `window.__filmMeta` contract. Build every visible intra-scene phase from the contact sheet (`early -> mid -> late` morphs, vector icons inside tiles, blurred background depth `ctx.filter = "blur(6px)"`, 3D shapes, secondary screen transitions) deterministically via `window.renderAt(t)`.
-3. **PER-SCENE PALETTE & TYPOGRAPHY FIDELITY**: Switch backgrounds/accents per scene to match each scene's measured `cleanPlate.fillHex`, `contrastTiles`, `bgHex`, `accentHex`, and measured pixel font size/weight above — never substitute generic default colors.
-4. **CLOSED-LOOP VISUAL SELF-CRITIQUE**: After writing `index.html` and `script/scene*.js`, call `capture_film_preview` with `compareToReference: true` and visually audit `.aetheria/preview/comparison_strip.jpg` (`Reference | Preview | Diff Heatmap`) for overlapping text, duplicate elements, missing early/late beats, or wrong silhouettes — even if dark-background SSIM looks > 0.85!
+## Reference Visual & Timing Notes
+1. **VISION BEATS RAW OCR (`contact_sheet_*.jpg` + `frames/ref_scene_*.jpg`)**: Treat the keyframes and contact sheets as visual ground truth. OCR text and bounding boxes above are timing/coordinate hints only — never copy garbled OCR fragments or invent badges/pills not clearly present in the frames.
+2. **EXACT TIMING & MULTI-PHASE CHOREOGRAPHY (`index.html`)**: Mirror the measured timings and `{width}x{height}` (`{int(round(fps))}fps`) `window.__filmMeta` contract with deterministic `window.renderAt(t)` and `window.__ready = true`, using whichever web stack fits the visual craft best (self-contained HTML + CSS Grid/Flexbox + CSS 3D `perspective`/`preserve-3d` + Inline SVG & `<filter>` + Canvas/WebGL in `index.html`, or optional modular `script/scene*.js`).
+3. **PER-SCENE PALETTE & TYPOGRAPHY FIDELITY**: Match each scene's measured clean-plate background, surfaces, high-contrast accents, and typographic hierarchy.
+4. **VISUAL SELF-VERIFICATION**: After authoring or editing, verify rendered frames via `capture_film_preview` (full-res screenshots attach automatically for standalone/hybrid `index.html`; `compareToReference: true` is optional and advisory on standalone/hybrid films unless `passThreshold` is set) and refine surgically until crisp.
 """
 
     with open(report_md, "w", encoding="utf-8") as f:
@@ -1868,10 +1884,11 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
 
     return {
         "success": True,
+        "fastMode": fast_mode,
         "reportPath": str(report_md),
         "stylePath": str(style_json),
         "specPath": str(style_json),
-        "astPath": str(ast_json_path),
+        "astPath": str(ast_json_path) if ast_json_path is not None else None,
         "temporalPath": str(temporal_json_path),
         "blueprint": style_spec,
         "motionAst": style_ast,
@@ -1879,7 +1896,9 @@ def extract_reference_blueprint(video_path_str: str, out_dir_str: Optional[str] 
 
 
 if __name__ == "__main__":
-    vid = sys.argv[1] if len(sys.argv) > 1 else "workspace/ref/reference.mp4"
-    out = sys.argv[2] if len(sys.argv) > 2 else "workspace/ref/extracted"
-    res = extract_reference_blueprint(vid, out)
+    cli_args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    fast_flag = "--fast" in sys.argv[1:]
+    vid = cli_args[0] if len(cli_args) > 0 else "workspace/ref/reference.mp4"
+    out = cli_args[1] if len(cli_args) > 1 else "workspace/ref/extracted"
+    res = extract_reference_blueprint(vid, out, fast_mode=fast_flag)
     print(json.dumps(res, indent=2))

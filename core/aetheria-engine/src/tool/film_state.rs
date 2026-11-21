@@ -110,7 +110,9 @@ pub fn is_scaffold_stub_content(content: &str) -> bool {
     if content.trim().is_empty() {
         return true;
     }
-    if content.contains("// TODO: Write deterministic motion design beats here") {
+    if content.contains("// TODO: Write deterministic motion design beats here")
+        || content.contains("<!-- TODO: hybrid stage stub by film_scaffold -->")
+    {
         return true;
     }
     content.contains("managed stub by film_scaffold")
@@ -157,6 +159,9 @@ fn collect_scene_specs(film_dir: &Path) -> Option<Vec<(String, String)>> {
     if contains_path(film_dir, &manifest_path) && manifest_path.is_file() {
         if let Ok(raw) = std::fs::read_to_string(&manifest_path) {
             if let Ok(manifest) = serde_json::from_str::<super::film_scaffold::FilmManifestJson>(&raw) {
+                if manifest.stage_mode.as_deref() == Some("hybrid") {
+                    return Some(vec![("hybrid_stage".to_string(), "index.html".to_string())]);
+                }
                 if !manifest.scenes.is_empty() {
                     return Some(
                         manifest
@@ -181,7 +186,7 @@ fn collect_scene_specs(film_dir: &Path) -> Option<Vec<(String, String)>> {
                     && !crate::studio::builtin_runtime::is_builtin_three_path(rel)
             })
             .collect();
-        if !meta.scenes.is_empty() && (!script_srcs.is_empty() || film_dir.join("script").is_dir()) {
+        if !meta.scenes.is_empty() && !script_srcs.is_empty() {
             let entries = meta
                 .scenes
                 .into_iter()
@@ -361,13 +366,19 @@ pub fn collect_film_scene_progress(film_dir: &Path) -> Option<FilmSceneProgress>
                 SceneProgressStatus::Stub
             } else {
                 let is_previewed = if let Some(ref mk) = marker {
-                    mk.runtime_errors_count == 0
-                        && index_unchanged == Some(true)
-                        && mk
-                            .script_sha256
-                            .get(&norm_rel)
-                            .map(|h| h == &sha256_hex(&bytes))
-                            .unwrap_or(false)
+                    if norm_rel == "index.html" {
+                        mk.runtime_errors_count == 0
+                            && mk.index_sha256.is_some()
+                            && index_unchanged == Some(true)
+                    } else {
+                        mk.runtime_errors_count == 0
+                            && index_unchanged == Some(true)
+                            && mk
+                                .script_sha256
+                                .get(&norm_rel)
+                                .map(|h| h == &sha256_hex(&bytes))
+                                .unwrap_or(false)
+                    }
                 } else if let Some(prev_mt) = fallback_preview_mtime {
                     std::fs::metadata(&full_path)
                         .and_then(|m| m.modified())
@@ -644,6 +655,75 @@ mod tests {
         let clean_blockers = collect_film_completion_blockers(&ws_str);
         assert!(clean_blockers.is_empty(), "expected zero blockers once SFX is attached, got {:?}", clean_blockers);
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn hybrid_stage_tracks_stub_drafted_previewed_and_stale_re_edits_on_disk() {
+        let root = std::env::temp_dir().join(format!("aetheria_hybrid_state_{}", crate::paths::now_ms()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let ws_str = root.to_string_lossy().to_string();
+
+        let scaffold_res = execute_film_scaffold(
+            "ses_hybrid_state",
+            &ws_str,
+            &json!({
+                "title": "Hybrid State Test",
+                "preset": "landscape",
+                "stageMode": "hybrid",
+                "scenes": [{ "id": "intro", "duration": 2.0 }]
+            }),
+        );
+        assert_eq!(scaffold_res["ok"], json!(true));
+        let film_dir = root.join(scaffold_res["filmRoot"].as_str().unwrap());
+
+        let p_stub = collect_film_scene_progress(&film_dir).expect("progress");
+        assert_eq!(p_stub.stub, 1);
+        assert_eq!(p_stub.drafted, 0);
+        assert_eq!(p_stub.previewed, 0);
+
+        let blockers_stub = collect_film_completion_blockers(&ws_str);
+        assert!(blockers_stub.iter().any(|b| b.contains("hybrid_stage") && b.contains("stub")));
+
+        std::fs::write(
+            film_dir.join("index.html"),
+            "<!doctype html><html><body><div id='stage'>Real CSS3D + SVG + Canvas stage</div><script>window.__filmMeta={width:1920,height:1080,fps:30,duration:2,scenes:[{id:'intro',start:0,duration:2}]};window.renderAt=function(){};window.__ready=true;</script></body></html>",
+        )
+        .unwrap();
+        let p_drafted = collect_film_scene_progress(&film_dir).expect("progress");
+        assert_eq!(p_drafted.stub, 0);
+        assert_eq!(p_drafted.drafted, 1);
+        assert_eq!(p_drafted.previewed, 0);
+        assert!(collect_film_completion_blockers(&ws_str).is_empty());
+
+        record_preview_state(&film_dir, 0);
+        let p_previewed = collect_film_scene_progress(&film_dir).expect("progress");
+        assert_eq!(p_previewed.previewed, 1);
+
+        std::fs::write(
+            film_dir.join("index.html"),
+            "<!doctype html><html><body><div id='stage'>Updated v2</div><script>window.__filmMeta={width:1920,height:1080,fps:30,duration:2,scenes:[{id:'intro',start:0,duration:2}]};window.renderAt=function(){};window.__ready=true;</script></body></html>",
+        )
+        .unwrap();
+        let p_stale = collect_film_scene_progress(&film_dir).expect("progress");
+        assert_eq!(p_stale.drafted, 1);
+        assert_eq!(p_stale.previewed, 0);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn standalone_index_with_empty_script_dir_does_not_report_missing_scene_scripts() {
+        let root = std::env::temp_dir().join(format!("aetheria_standalone_dir_{}", crate::paths::now_ms()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("script")).unwrap();
+        std::fs::write(
+            root.join("index.html"),
+            "<!doctype html><html><body><div id='stage'></div><script>window.__filmMeta={width:1280,height:720,fps:30,duration:3,scenes:[{id:'s1',start:0,duration:3}]};window.renderAt=function(){};window.__ready=true;</script></body></html>",
+        )
+        .unwrap();
+        assert!(collect_scene_specs(&root).is_none());
         let _ = std::fs::remove_dir_all(&root);
     }
 }

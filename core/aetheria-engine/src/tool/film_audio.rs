@@ -974,6 +974,7 @@ pub async fn execute_film_audio(
         serde_json::from_str::<FilmManifestJson>(&raw).unwrap_or_else(|_| FilmManifestJson {
             schema_version: 1,
             manage_index_html: true,
+            stage_mode: None,
             title: "Motion Film".to_string(),
             width: default_w,
             height: default_h,
@@ -983,9 +984,22 @@ pub async fn execute_film_audio(
             scenes: Vec::new(),
         })
     } else {
+        let is_standalone_existing_html = index_path.is_file()
+            && std::fs::read_to_string(&index_path)
+                .ok()
+                .is_some_and(|html| {
+                    !super::film_feedback::extract_local_script_srcs(&html)
+                        .iter()
+                        .any(|s| s.to_ascii_lowercase().contains("scene"))
+                });
         FilmManifestJson {
             schema_version: 1,
-            manage_index_html: true,
+            manage_index_html: !is_standalone_existing_html,
+            stage_mode: if is_standalone_existing_html {
+                Some("hybrid".to_string())
+            } else {
+                None
+            },
             title: "Motion Film".to_string(),
             width: default_w,
             height: default_h,
