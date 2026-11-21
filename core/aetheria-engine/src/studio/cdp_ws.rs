@@ -92,9 +92,53 @@ fn parse_ws_url(ws_url: &str) -> Result<(String, u16, String), String> {
     Ok((host, port, path.to_string()))
 }
 
+struct BufferedCursor {
+    buf: Vec<u8>,
+    pos: usize,
+}
+
+impl BufferedCursor {
+    fn new(initial: Vec<u8>) -> Self {
+        Self {
+            buf: initial,
+            pos: 0,
+        }
+    }
+
+    fn available(&self) -> usize {
+        self.buf.len().saturating_sub(self.pos)
+    }
+
+    fn push_chunk(&mut self, chunk: &[u8]) {
+        if self.pos > 0 && self.pos == self.buf.len() {
+            self.buf.clear();
+            self.pos = 0;
+        } else if self.pos >= 65_536 {
+            self.buf.drain(..self.pos);
+            self.pos = 0;
+        }
+        self.buf.extend_from_slice(chunk);
+    }
+
+    fn take_exact(&mut self, needed: usize) -> Option<Vec<u8>> {
+        if self.available() < needed {
+            return None;
+        }
+        let end = self.pos + needed;
+        let out = self.buf[self.pos..end].to_vec();
+        self.pos = end;
+        if self.pos == self.buf.len() {
+            self.buf.clear();
+            self.pos = 0;
+        }
+        Some(out)
+    }
+}
+
 pub struct CdpWebSocket {
     stream: TcpStream,
-    read_buf: Vec<u8>,
+    cursor: BufferedCursor,
+    read_tmp: Vec<u8>,
     next_id: u64,
 }
 
@@ -104,6 +148,7 @@ impl CdpWebSocket {
         let mut stream = TcpStream::connect((host.as_str(), port))
             .await
             .map_err(|e| format!("Failed connecting CDP WebSocket {}:{}: {}", host, port, e))?;
+        let _ = stream.set_nodelay(true);
 
         let nonce = MSG_SEQ.fetch_add(1, Ordering::Relaxed) ^ crate::paths::now_ms();
         let mut raw_key = [0u8; 16];
@@ -158,25 +203,27 @@ impl CdpWebSocket {
         let leftover = hdr_buf[header_end..].to_vec();
         Ok(Self {
             stream,
-            read_buf: leftover,
+            cursor: BufferedCursor::new(leftover),
+            read_tmp: vec![0u8; 65_536],
             next_id: 1,
         })
     }
 
     async fn read_exact_bytes(&mut self, needed: usize) -> Result<Vec<u8>, String> {
-        let mut tmp = [0u8; 8192];
-        while self.read_buf.len() < needed {
+        loop {
+            if let Some(bytes) = self.cursor.take_exact(needed) {
+                return Ok(bytes);
+            }
             let n = self
                 .stream
-                .read(&mut tmp)
+                .read(&mut self.read_tmp)
                 .await
                 .map_err(|e| format!("CDP socket read error: {}", e))?;
             if n == 0 {
                 return Err("CDP socket closed unexpectedly".to_string());
             }
-            self.read_buf.extend_from_slice(&tmp[..n]);
+            self.cursor.push_chunk(&self.read_tmp[..n]);
         }
-        Ok(self.read_buf.drain(..needed).collect())
     }
 
     async fn write_frame(&mut self, opcode: u8, payload: &[u8]) -> Result<(), String> {
@@ -303,6 +350,26 @@ mod tests {
         let client_key = "dGhlIHNhbXBsZSBub25jZQ==";
         let accept = compute_ws_accept_key(client_key);
         assert_eq!(accept, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
+    }
+
+    #[test]
+    fn buffered_cursor_reads_across_chunks_and_compacts_cleanly() {
+        let mut cursor = BufferedCursor::new(vec![1, 2, 3]);
+        assert!(cursor.take_exact(4).is_none());
+        cursor.push_chunk(&[4, 5, 6, 7]);
+        assert_eq!(cursor.take_exact(2).unwrap(), vec![1, 2]);
+        assert_eq!(cursor.take_exact(4).unwrap(), vec![3, 4, 5, 6]);
+        assert_eq!(cursor.available(), 1);
+        assert_eq!(cursor.take_exact(1).unwrap(), vec![7]);
+        assert_eq!(cursor.available(), 0);
+        // Push > 64 KiB across two chunks and verify partial reads compact without corruption.
+        cursor.push_chunk(&vec![0xAA; 70_000]);
+        assert_eq!(cursor.take_exact(66_000).unwrap().len(), 66_000);
+        cursor.push_chunk(&[0xBB; 10]);
+        let tail = cursor.take_exact(4_010).unwrap();
+        assert!(tail[..4_000].iter().all(|&b| b == 0xAA));
+        assert!(tail[4_000..].iter().all(|&b| b == 0xBB));
+        assert_eq!(cursor.available(), 0);
     }
 }
 

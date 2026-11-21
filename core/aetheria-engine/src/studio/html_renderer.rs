@@ -1,5 +1,8 @@
 //! Headless Edge/Chrome CDP Frame Capture & Render Orchestrator (Zero Node.js / Zero Remotion).
 
+use super::cdp_pool::{
+    compute_render_worker_count, open_additional_cdp_tabs, OrderedFrameBuffer,
+};
 use super::cdp_ws::CdpWebSocket;
 use super::ffmpeg_pipeline::{
     build_ffmpeg_command, format_ffmpeg_failure_from_task, spawn_stderr_drain,
@@ -12,6 +15,10 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
+use std::sync::{
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    Arc,
+};
 use tokio::io::AsyncWriteExt;
 
 #[derive(Clone, Debug)]
@@ -76,6 +83,9 @@ fn spawn_headless_browser(
             "--no-default-browser-check",
             "--disable-background-timer-throttling",
             "--disable-renderer-backgrounding",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-extensions",
+            "--disable-ipc-flooding-protection",
             "--mute-audio",
         ])
         .arg(format!("--remote-debugging-port={}", cdp_port))
@@ -139,12 +149,13 @@ async fn wait_for_cdp_ws_url_polls(cdp_port: u16, max_polls: usize) -> Result<St
     ))
 }
 
-/// Spawns headless Edge/Chrome with fresh ephemeral CDP port retries to eliminate port TOCTOU races.
-pub(super) async fn launch_headless_browser_with_cdp(
+/// Spawns headless Chrome/Edge with fresh ephemeral CDP port retries and also returns the chosen CDP port
+/// so callers can provision parallel worker tabs.
+pub(super) async fn launch_headless_browser_with_port(
     browser_exe: &Path,
     width: u32,
     height: u32,
-) -> Result<(ChromeProcessGuard, CdpWebSocket), String> {
+) -> Result<(ChromeProcessGuard, CdpWebSocket, u16), String> {
     const MAX_ATTEMPTS: usize = 3;
     let mut last_err = String::new();
 
@@ -154,7 +165,7 @@ pub(super) async fn launch_headless_browser_with_cdp(
         let max_polls = if attempt < MAX_ATTEMPTS { 30 } else { 80 };
         match wait_for_cdp_ws_url_polls(cdp_port, max_polls).await {
             Ok(ws_url) => match CdpWebSocket::connect(&ws_url).await {
-                Ok(cdp) => return Ok((guard, cdp)),
+                Ok(cdp) => return Ok((guard, cdp, cdp_port)),
                 Err(err) => last_err = err,
             },
             Err(err) => last_err = err,
@@ -166,6 +177,16 @@ pub(super) async fn launch_headless_browser_with_cdp(
         "Failed connecting headless browser CDP after {} attempts: {}",
         MAX_ATTEMPTS, last_err
     ))
+}
+
+/// Spawns headless Edge/Chrome with fresh ephemeral CDP port retries to eliminate port TOCTOU races.
+pub(super) async fn launch_headless_browser_with_cdp(
+    browser_exe: &Path,
+    width: u32,
+    height: u32,
+) -> Result<(ChromeProcessGuard, CdpWebSocket), String> {
+    let (guard, cdp, _) = launch_headless_browser_with_port(browser_exe, width, height).await?;
+    Ok((guard, cdp))
 }
 
 pub(super) async fn wait_for_film_ready(cdp: &mut CdpWebSocket, meta: &mut FilmMeta) -> Result<(), String> {
@@ -270,7 +291,91 @@ pub(super) async fn wait_for_film_ready(cdp: &mut CdpWebSocket, meta: &mut FilmM
     Err("HTML film did not expose window.renderAt / window.__ready within 15s".to_string())
 }
 
-/// Renders the active HTML5+JS film using local headless Edge/Chrome CDP + FFmpeg.
+async fn prepare_film_tab(
+    cdp: &mut CdpWebSocket,
+    init_width: u32,
+    init_height: u32,
+    init_script: &str,
+    target_url: &str,
+    mut meta: FilmMeta,
+) -> Result<FilmMeta, String> {
+    let _ = cdp.call("Page.enable", json!({})).await?;
+    let _ = cdp.call("Runtime.enable", json!({})).await?;
+    let _ = cdp.call("Page.bringToFront", json!({})).await;
+    let _ = cdp
+        .call(
+            "Emulation.setDeviceMetricsOverride",
+            json!({
+                "width": init_width,
+                "height": init_height,
+                "deviceScaleFactor": 1,
+                "mobile": false
+            }),
+        )
+        .await?;
+    let _ = cdp
+        .call(
+            "Page.addScriptToEvaluateOnNewDocument",
+            json!({ "source": init_script }),
+        )
+        .await;
+    let _ = cdp
+        .call("Page.navigate", json!({ "url": target_url }))
+        .await?;
+    wait_for_film_ready(cdp, &mut meta).await?;
+    if meta.width != init_width || meta.height != init_height {
+        let _ = cdp
+            .call(
+                "Emulation.setDeviceMetricsOverride",
+                json!({
+                    "width": meta.width,
+                    "height": meta.height,
+                    "deviceScaleFactor": 1,
+                    "mobile": false
+                }),
+            )
+            .await?;
+    }
+    Ok(meta)
+}
+
+async fn capture_single_frame_jpeg(
+    cdp: &mut CdpWebSocket,
+    t: f64,
+    frame_num: u32,
+    jpeg_quality: u32,
+) -> Result<Vec<u8>, String> {
+    let eval_expr = format!(
+        "(() => {{ window.renderAt({:.6}); return new Promise(r => requestAnimationFrame(() => r(true))); }})()",
+        t
+    );
+    cdp.call(
+        "Runtime.evaluate",
+        json!({ "expression": eval_expr, "awaitPromise": true }),
+    )
+    .await?;
+
+    let shot = cdp
+        .call(
+            "Page.captureScreenshot",
+            json!({ "format": "jpeg", "quality": jpeg_quality, "optimizeForSpeed": true }),
+        )
+        .await?;
+    let Some(b64) = shot.get("data").and_then(Value::as_str) else {
+        return Err(format!(
+            "CDP screenshot missing base64 payload at frame {}",
+            frame_num
+        ));
+    };
+    B64.decode(b64).map_err(|e| {
+        format!(
+            "Failed decoding CDP screenshot at frame {}: {}",
+            frame_num, e
+        )
+    })
+}
+
+/// Renders the active HTML5+JS film using local headless Chrome/Edge multi-tab CDP + FFmpeg.
 pub async fn render_active_html_film<FStatus, FProgress>(
     params: HtmlRenderParams,
     mut on_status: FStatus,
@@ -294,7 +399,7 @@ where
         .unwrap_or_else(|| film_root.clone());
 
     let browser_exe = detect_browser_executable().ok_or_else(|| {
-        "No Microsoft Edge or Google Chrome executable found for headless HTML rendering".to_string()
+        "No Google Chrome or Microsoft Edge executable found for headless HTML rendering".to_string()
     })?;
     let ffmpeg_bin = locate_ffmpeg_binary().ok_or_else(|| {
         "FFmpeg executable not found on PATH, AETHERIA_FFMPEG, or ~/.aetheria/bin/".to_string()
@@ -316,21 +421,8 @@ where
 
     let (http_port, _server_guard) =
         start_ephemeral_film_server(film_root.clone(), ws_root.clone()).await?;
-    let (_chrome_guard, mut cdp) =
-        launch_headless_browser_with_cdp(&browser_exe, meta.width, meta.height).await?;
-    let _ = cdp.call("Page.enable", json!({})).await?;
-    let _ = cdp.call("Runtime.enable", json!({})).await?;
-    let _ = cdp
-        .call(
-            "Emulation.setDeviceMetricsOverride",
-            json!({
-                "width": meta.width,
-                "height": meta.height,
-                "deviceScaleFactor": 1,
-                "mobile": false
-            }),
-        )
-        .await?;
+    let (_chrome_guard, mut tab0, cdp_port) =
+        launch_headless_browser_with_port(&browser_exe, meta.width, meta.height).await?;
 
     let is_proxy = params.codec.eq_ignore_ascii_case("proxy");
     let init_script = if is_proxy {
@@ -338,16 +430,10 @@ where
     } else {
         "window.__aetheriaHeadless = true;"
     };
-    let _ = cdp
-        .call(
-            "Page.addScriptToEvaluateOnNewDocument",
-            json!({ "source": init_script }),
-        )
-        .await;
-
     let target_url = format!("http://127.0.0.1:{}/index.html", http_port);
-    let _ = cdp.call("Page.navigate", json!({ "url": target_url })).await?;
-    wait_for_film_ready(&mut cdp, &mut meta).await?;
+    let init_w = meta.width;
+    let init_h = meta.height;
+    meta = prepare_film_tab(&mut tab0, init_w, init_h, init_script, &target_url, meta).await?;
 
     let max_idx = meta.total_frames.saturating_sub(1);
     let (start_frame, end_frame) = match params.frame_range {
@@ -357,11 +443,44 @@ where
     let frames_to_render = end_frame - start_frame + 1;
     let fps_f = meta.fps.max(1) as f64;
 
+    let desired_workers = compute_render_worker_count(frames_to_render);
+    let mut workers = vec![tab0];
+    if desired_workers > 1 {
+        let extra_tabs = open_additional_cdp_tabs(cdp_port, desired_workers - 1).await;
+        let mut init_handles = Vec::with_capacity(extra_tabs.len());
+        for mut tab in extra_tabs {
+            let meta_clone = meta.clone();
+            let script = init_script.to_string();
+            let url = target_url.clone();
+            init_handles.push(tokio::spawn(async move {
+                prepare_film_tab(
+                    &mut tab,
+                    meta_clone.width,
+                    meta_clone.height,
+                    &script,
+                    &url,
+                    meta_clone,
+                )
+                .await
+                .map(|_| tab)
+            }));
+        }
+        for handle in init_handles {
+            if let Ok(Ok(ready_tab)) = handle.await {
+                workers.push(ready_tab);
+            }
+        }
+    }
+
     on_status(
         frames_to_render,
         format!(
-            "Exporting {} frames ({}x{} @ {}fps)",
-            frames_to_render, meta.width, meta.height, meta.fps
+            "Exporting {} frames ({}x{} @ {}fps, {} CDP workers)",
+            frames_to_render,
+            meta.width,
+            meta.height,
+            meta.fps,
+            workers.len()
         ),
     );
 
@@ -401,59 +520,85 @@ where
         .ok_or_else(|| "Failed capturing FFmpeg stdin".to_string())?;
     let ff_stderr_task = spawn_stderr_drain(ff_child.stderr.take());
 
+    let jpeg_quality = if is_proxy { 75 } else { 92 };
+    let total_jobs = frames_to_render as usize;
+    let next_idx = Arc::new(AtomicUsize::new(0));
+    let cancel = Arc::new(AtomicBool::new(false));
+    let (tx, mut rx) =
+        tokio::sync::mpsc::channel::<(usize, Result<Vec<u8>, String>)>((workers.len() * 4).max(8));
+
+    let mut worker_handles = Vec::with_capacity(workers.len());
+    for mut tab in workers {
+        let next_ref = Arc::clone(&next_idx);
+        let cancel_ref = Arc::clone(&cancel);
+        let tx_ref = tx.clone();
+        worker_handles.push(tokio::spawn(async move {
+            while !cancel_ref.load(Ordering::Relaxed) {
+                let idx = next_ref.fetch_add(1, Ordering::Relaxed);
+                if idx >= total_jobs {
+                    break;
+                }
+                let frame_num = start_frame + idx as u32;
+                let t = frame_num as f64 / fps_f;
+                let res = capture_single_frame_jpeg(&mut tab, t, frame_num, jpeg_quality).await;
+                let is_err = res.is_err();
+                if is_err {
+                    cancel_ref.store(true, Ordering::Relaxed);
+                }
+                if tx_ref.send((idx, res)).await.is_err() || is_err {
+                    break;
+                }
+            }
+        }));
+    }
+    drop(tx);
+
+    let mut reorder = OrderedFrameBuffer::new();
+    let mut rendered = 0u32;
     let mut last_percent = 999u32;
     let mut pipe_res: Result<(), String> = Ok(());
-    for (idx, frame_num) in (start_frame..=end_frame).enumerate() {
-        let t = frame_num as f64 / fps_f;
-        let eval_expr = format!(
-            "(() => {{ window.renderAt({:.6}); return new Promise(r => requestAnimationFrame(() => r(true))); }})()",
-            t
-        );
-        if let Err(e) = cdp
-            .call("Runtime.evaluate", json!({ "expression": eval_expr, "awaitPromise": true }))
-            .await
-        {
-            pipe_res = Err(e);
-            break;
-        }
 
-        let jpeg_quality = if is_proxy { 75 } else { 92 };
-        let shot = match cdp
-            .call(
-                "Page.captureScreenshot",
-                json!({ "format": "jpeg", "quality": jpeg_quality, "optimizeForSpeed": true }),
-            )
-            .await
-        {
-            Ok(v) => v,
-            Err(e) => {
-                pipe_res = Err(e);
+    while let Some((idx, frame_res)) = rx.recv().await {
+        match frame_res {
+            Err(err) => {
+                cancel.store(true, Ordering::Relaxed);
+                pipe_res = Err(err);
                 break;
             }
-        };
-        let Some(b64) = shot.get("data").and_then(Value::as_str) else {
-            pipe_res = Err(format!("CDP screenshot missing base64 payload at frame {}", frame_num));
-            break;
-        };
-        let jpeg_bytes = match B64.decode(b64) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                pipe_res = Err(format!("Failed decoding CDP screenshot at frame {}: {}", frame_num, e));
-                break;
+            Ok(jpeg_bytes) => {
+                for (ordered_idx, ordered_bytes) in reorder.push_and_drain(idx, jpeg_bytes) {
+                    if let Err(e) = ff_stdin.write_all(&ordered_bytes).await {
+                        cancel.store(true, Ordering::Relaxed);
+                        pipe_res = Err(format!(
+                            "Failed piping frame {} to FFmpeg: {}",
+                            start_frame + ordered_idx as u32,
+                            e
+                        ));
+                        break;
+                    }
+                    rendered += 1;
+                    let percent = ((rendered as f64 / frames_to_render as f64) * 100.0).round() as u32;
+                    if percent != last_percent || rendered == frames_to_render {
+                        last_percent = percent;
+                        on_progress(rendered, frames_to_render, percent.min(100));
+                    }
+                }
+                if pipe_res.is_err() {
+                    break;
+                }
             }
-        };
-
-        if let Err(e) = ff_stdin.write_all(&jpeg_bytes).await {
-            pipe_res = Err(format!("Failed piping frame {} to FFmpeg: {}", frame_num, e));
-            break;
         }
+    }
 
-        let rendered = (idx as u32) + 1;
-        let percent = ((rendered as f64 / frames_to_render as f64) * 100.0).round() as u32;
-        if percent != last_percent || rendered == frames_to_render {
-            last_percent = percent;
-            on_progress(rendered, frames_to_render, percent.min(100));
-        }
+    drop(rx);
+    for handle in worker_handles {
+        let _ = handle.await;
+    }
+    if pipe_res.is_ok() && rendered != frames_to_render {
+        pipe_res = Err(format!(
+            "Incomplete parallel frame capture: rendered {}/{} frames",
+            rendered, frames_to_render
+        ));
     }
 
     drop(ff_stdin);

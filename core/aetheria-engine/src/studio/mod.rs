@@ -16,6 +16,7 @@
 
 pub mod assets;
 pub mod builtin_runtime;
+pub(crate) mod cdp_pool;
 pub mod cdp_ws;
 pub mod composition_scanner;
 pub mod compositions;

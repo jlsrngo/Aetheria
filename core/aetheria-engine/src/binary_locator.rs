@@ -43,36 +43,52 @@ fn windows_local_appdata_dirs() -> Vec<PathBuf> {
     dirs
 }
 
-/// Finds a Chromium build (Edge or Chrome) the headless CDP exporter can drive.
-/// Edge ships with every Windows 10/11; Chrome is the fallback.
-pub fn detect_browser_executable() -> Option<PathBuf> {
-    let base = |key: &str| {
-        std::env::var(key)
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .map(PathBuf::from)
-    };
-
+/// Builds candidate browser executable paths preferring Google Chrome across all roots
+/// before falling back to Microsoft Edge so installed Edge does not shadow faster Chrome.
+fn browser_candidate_paths(program_files: &[PathBuf], local_app_dirs: &[PathBuf]) -> Vec<PathBuf> {
     let browsers = [
-        ("Microsoft", "Edge", "msedge.exe"),
         ("Google", "Chrome", "chrome.exe"),
+        ("Microsoft", "Edge", "msedge.exe"),
     ];
-
     let mut candidates = Vec::new();
-    for root in ["PROGRAMFILES(X86)", "PROGRAMFILES"] {
-        if let Some(root) = base(root) {
-            for (vendor, product, exe) in browsers {
-                candidates.push(root.join(vendor).join(product).join("Application").join(exe));
-            }
+    for (vendor, product, exe) in browsers {
+        for root in program_files {
+            candidates.push(root.join(vendor).join(product).join("Application").join(exe));
         }
-    }
-    for local in windows_local_appdata_dirs() {
-        for (vendor, product, exe) in browsers {
+        for local in local_app_dirs {
             candidates.push(local.join(vendor).join(product).join("Application").join(exe));
         }
     }
+    candidates
+}
 
-    candidates.into_iter().find(|path| path.is_file())
+/// Finds a Chromium build (Chrome preferred, Edge fallback) the headless CDP exporter can drive.
+/// Supports `AETHERIA_BROWSER` explicit override; Chrome avoids ~7x `--headless=new` capture stalls seen on Edge.
+pub fn detect_browser_executable() -> Option<PathBuf> {
+    if let Ok(explicit) = std::env::var("AETHERIA_BROWSER") {
+        let trimmed = explicit.trim();
+        if !trimmed.is_empty() {
+            let p = PathBuf::from(trimmed);
+            if p.is_file() {
+                return Some(p);
+            }
+        }
+    }
+
+    let program_files: Vec<PathBuf> = ["PROGRAMFILES", "PROGRAMFILES(X86)"]
+        .into_iter()
+        .filter_map(|key| {
+            std::env::var(key)
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .map(PathBuf::from)
+        })
+        .collect();
+    let local_app_dirs = windows_local_appdata_dirs();
+
+    browser_candidate_paths(&program_files, &local_app_dirs)
+        .into_iter()
+        .find(|path| path.is_file())
 }
 
 /// Locates an `ffmpeg` executable without relying on Node.js.
@@ -251,6 +267,27 @@ pub fn locate_ytdlp_binary() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browser_candidate_paths_prefers_chrome_across_all_roots_over_edge() {
+        let pf = vec![
+            PathBuf::from("C:\\Program Files"),
+            PathBuf::from("C:\\Program Files (x86)"),
+        ];
+        let local = vec![PathBuf::from("C:\\Users\\Test\\AppData\\Local")];
+        let paths = browser_candidate_paths(&pf, &local);
+        let chrome_local_idx = paths
+            .iter()
+            .position(|p| {
+                p == &PathBuf::from("C:\\Users\\Test\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe")
+            })
+            .expect("chrome local path");
+        let edge_pf_idx = paths
+            .iter()
+            .position(|p| p == &PathBuf::from("C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe"))
+            .expect("edge pf path");
+        assert!(chrome_local_idx < edge_pf_idx);
+    }
 
     #[test]
     fn test_detect_browser_returns_existing_file() {
