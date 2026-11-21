@@ -1,6 +1,7 @@
-Executes shell commands inside the active workspace for media asset inspection (FFmpeg/FFprobe), script validation, or running helper scripts in `.aetheria/scratch/`.
+Executes shell commands inside the active workspace for media asset inspection (`ffmpeg`, Python/OpenCV), script validation, or running helper scripts in `.aetheria/scratch/`.
 
 CRITICAL RULES & PRIORITY:
-1. NATIVE TOOLS FIRST: Always prefer native tools (`read`, `edit`, `write`, `glob`, `grep`, `render_video`) for writing modular HTML5/JS films (`index.html`, `script/scene*.js`) and rendering MP4 videos.
-2. ISOLATED SCRATCH LOCATION: Any temporary helper scripts must be written to and executed from `.aetheria/scratch/`. Never clutter the root project folder with temporary scripts.
-3. WORKSPACE SCOPE: Strictly limited to the active project folder. Destructive commands outside the workspace are forbidden.
+1. NATIVE TOOLS FIRST: Always prefer native tools (`read`, `edit`, `write`, `glob`, `grep`, `render_video`) when editing project files (`index.html`, scripts, assets) and rendering MP4 videos.
+2. MEDIA PROBING: `ffmpeg` is pre-added to `PATH`, while `ffprobe` may not be installed on Windows — probe video width/height/fps/duration directly with `ffmpeg -i <file>` or `python -c "import cv2; ..."` instead of searching for or scripting `ffprobe`.
+3. ISOLATED SCRATCH LOCATION: Any temporary helper scripts must be written to and executed from `.aetheria/scratch/`. Never clutter the root project folder with temporary scripts.
+4. WORKSPACE SCOPE: Strictly limited to the active project folder. Destructive commands outside the workspace are forbidden.

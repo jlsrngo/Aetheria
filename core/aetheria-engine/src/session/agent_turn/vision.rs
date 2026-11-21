@@ -138,7 +138,7 @@ fn process_attached_files_inner(
                     let img_path = ref_dir.join(format!("ref_{}", clean_name));
                     if std::fs::write(&img_path, &bytes).is_ok() {
                         ocr_transcriptions.push(format!(
-                            "[Reference Image Style Asset: '{}' saved at ref/ref_{} — translate its palette, composition, lighting, and typography into procedural Canvas/WebGL code; NEVER load or draw 'ref/ref_{}' directly as a canvas backdrop/image]",
+                            "[Reference Image Style Asset: '{}' saved at ref/ref_{} — translate its palette, composition, lighting, and typography into procedural HTML/CSS/SVG/Canvas/WebGL code; NEVER load or draw 'ref/ref_{}' directly as a canvas backdrop/image]",
                             file_name, clean_name, clean_name
                         ));
                     }
@@ -401,6 +401,41 @@ pub fn process_attached_files(
     (transcriptions, image_urls)
 }
 
+async fn extract_attached_video_blueprint(
+    workspace_dir: &str,
+    video_rel_path: &str,
+    image_urls: &mut Vec<String>,
+) -> Option<String> {
+    let ext_res = crate::tool::ref_extractor::execute_ref_extractor(
+        workspace_dir,
+        &serde_json::json!({
+            "videoPath": video_rel_path,
+            "outputDir": "ref/extracted"
+        }),
+    )
+    .await;
+
+    if ext_res.get("error").is_some() {
+        return None;
+    }
+
+    if let Some(imgs) = ext_res.get("_vision_images").and_then(|v| v.as_array()) {
+        for item in imgs {
+            if let Some(url) = item.as_str() {
+                if !url.is_empty() && !image_urls.iter().any(|existing| existing == url) {
+                    image_urls.push(url.to_string());
+                }
+            }
+        }
+    }
+
+    let report_path = ext_res
+        .get("reportPath")
+        .and_then(|v| v.as_str())
+        .unwrap_or("ref/extracted/ref_report.md");
+    Some(report_path.to_string())
+}
+
 /// Async attachment ingestion that also runs MotionClone `ref_extractor` on local video attachments
 /// so `ref/extracted/style.json`, `ref_report.md`, and temporal keyframes exist on turn 1.
 pub async fn process_attached_files_and_blueprints(
@@ -413,7 +448,7 @@ pub async fn process_attached_files_and_blueprints(
 
     for vid in saved_videos {
         let mut blueprint_imgs = Vec::new();
-        let report_opt = super::social_links::attach_extracted_video_blueprint(
+        let report_opt = extract_attached_video_blueprint(
             workspace_dir,
             &vid.rel_path,
             &mut blueprint_imgs,
@@ -422,22 +457,28 @@ pub async fn process_attached_files_and_blueprints(
 
         if blueprint_imgs.is_empty() {
             let ref_dir = resolve_workspace_ref_dir(workspace_dir);
-            let probed_dur = ffmpeg_bin
-                .and_then(|ff| {
-                    crate::studio::reference_compare::probe_video_duration_secs(
-                        ff,
-                        &vid.disk_path,
-                    )
-                })
-                .unwrap_or(10.0);
-            super::social_links::extract_sample_frames_ffmpeg(
+            let (probed_dur, _) =
+                super::social_links::probe_video_meta_async(ffmpeg_bin, &vid.disk_path).await;
+            let sheet_path = ref_dir.join(format!("ref_{}_sheet.jpg", vid.prefix));
+            if let Some(sheet_url) = super::social_links::extract_compact_contact_sheet_ffmpeg(
                 ffmpeg_bin,
-                &ref_dir,
                 &vid.disk_path,
-                &vid.prefix,
+                &sheet_path,
                 probed_dur,
-                &mut blueprint_imgs,
-            );
+            )
+            .await
+            {
+                blueprint_imgs.push(sheet_url);
+            } else {
+                super::social_links::extract_sample_frames_ffmpeg(
+                    ffmpeg_bin,
+                    &ref_dir,
+                    &vid.disk_path,
+                    &vid.prefix,
+                    probed_dur,
+                    &mut blueprint_imgs,
+                );
+            }
         }
 
         for img in blueprint_imgs {
@@ -511,7 +552,7 @@ pub(crate) fn append_tool_vision_message(
     }
     let mut parts = vec![serde_json::json!({
         "type": "text",
-        "text": "[Visual Inspection Images attached from tool execution. Examine composition, colors, lighting, typography, and layout, and compare against any user reference images/links before finalizing or making edits.]"
+        "text": "[Tool visual output attached below.]"
     })];
     for url in images {
         parts.push(serde_json::json!({

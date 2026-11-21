@@ -127,7 +127,7 @@ pub fn bash_tool_definition() -> Value {
                 "properties": {
                     "command": {
                         "type": "string",
-                        "description": "Shell command to execute inside the active project workspace (e.g. Python/OpenCV pixel inspection, FFmpeg/FFprobe, Node.js, or validation utility)."
+                        "description": "Shell command to execute inside the active project workspace (e.g. Python/OpenCV pixel inspection, FFmpeg frame extraction, Node.js, or validation utility)."
                     },
                     "workdir": {
                         "type": "string",

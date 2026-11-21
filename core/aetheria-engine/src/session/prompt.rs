@@ -90,17 +90,47 @@ pub async fn handle_prompt(
         .or_else(|| body.get("files"))
         .cloned();
 
-    let model_val = session.get("model").cloned().unwrap_or_else(default_model_ref);
-    let provider_id = model_val
-        .get("providerID")
-        .and_then(|v| v.as_str())
+    let sess_model_val = session.get("model").cloned().unwrap_or_else(default_model_ref);
+    let body_model_val = body
+        .get("model")
+        .or_else(|| body.pointer("/prompt/model"))
+        .filter(|v| v.is_object());
+    let provider_id = body_model_val
+        .and_then(|m| m.get("providerID").and_then(|v| v.as_str()))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .or_else(|| sess_model_val.get("providerID").and_then(|v| v.as_str()))
         .unwrap_or("local-cli")
         .to_string();
-    let model_id = model_val
-        .get("id")
-        .and_then(|v| v.as_str())
+    let model_id = body_model_val
+        .and_then(|m| {
+            m.get("id")
+                .or_else(|| m.get("modelID"))
+                .and_then(|v| v.as_str())
+        })
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            sess_model_val
+                .get("id")
+                .or_else(|| sess_model_val.get("modelID"))
+                .and_then(|v| v.as_str())
+        })
         .unwrap_or("kiro/auto")
         .to_string();
+    let model_variant = body_model_val
+        .and_then(|m| m.get("variant").and_then(|v| v.as_str()))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            sess_model_val
+                .get("variant")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        });
 
     let user_msg_id = gen_id("msg");
     let created_ms = now_ms();
@@ -112,15 +142,20 @@ pub async fn handle_prompt(
         || body.get("steer").and_then(|v| v.as_bool()).unwrap_or(false);
     let is_mid_turn_steer = wants_steer && crate::session::session::is_active_run(&session_id);
 
+    let mut user_model = json!({
+        "providerID": provider_id,
+        "id": model_id
+    });
+    if let Some(ref var) = model_variant {
+        user_model["variant"] = json!(var);
+    }
+
     let mut user_msg = json!({
         "id": user_msg_id,
         "type": "user",
         "role": "user",
         "agent": "default",
-        "model": {
-            "providerID": provider_id,
-            "id": model_id
-        },
+        "model": user_model,
         "text": prompt_text,
         "content": [{ "type": "text", "text": prompt_text }],
         "time": { "created": created_ms }
@@ -135,6 +170,15 @@ pub async fn handle_prompt(
     let mut updated_title: Option<String> = None;
     let _history = with_store(|store| {
         if let Some(sess) = store.sessions.get_mut(&session_id) {
+            if body_model_val.is_some() {
+                sess["model"] = user_model.clone();
+            } else if let Some(ref var) = model_variant {
+                if sess.get("model").is_none_or(|m| !m.is_object()) {
+                    sess["model"] = user_model.clone();
+                } else {
+                    sess["model"]["variant"] = json!(var);
+                }
+            }
             let current_title = sess.get("title").and_then(|v| v.as_str()).unwrap_or("");
             if current_title.is_empty()
                 || current_title.eq_ignore_ascii_case("New Session")

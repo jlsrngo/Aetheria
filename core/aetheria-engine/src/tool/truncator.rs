@@ -388,8 +388,11 @@ pub fn bound_tool_output_with_spill(
         return (raw_output.to_string(), false, None);
     }
 
-    let spill_rel = workspace_dir
-        .and_then(|ws| spill_output_to_workspace(ws, call_id, raw_output));
+    let spill_rel = if needs_line_truncation || needs_byte_truncation {
+        workspace_dir.and_then(|ws| spill_output_to_workspace(ws, call_id, raw_output))
+    } else {
+        None
+    };
 
     let (bounded_body, lines_included) = match direction {
         TruncateDirection::Head => {

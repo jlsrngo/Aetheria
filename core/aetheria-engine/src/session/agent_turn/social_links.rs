@@ -272,42 +272,64 @@ pub(crate) fn extract_sample_frames_ffmpeg(
     extracted
 }
 
-pub(crate) async fn attach_extracted_video_blueprint(
-    workspace_dir: &str,
-    video_rel_path: &str,
-    image_urls: &mut Vec<String>,
+pub(crate) async fn extract_compact_contact_sheet_ffmpeg(
+    ffmpeg_bin: Option<&Path>,
+    mp4_path: &Path,
+    sheet_path: &Path,
+    duration_secs: f64,
 ) -> Option<String> {
-    let ext_res = crate::tool::ref_extractor::execute_ref_extractor(
-        workspace_dir,
-        &serde_json::json!({
-            "videoPath": video_rel_path,
-            "outputDir": "ref/extracted"
-        }),
-    )
-    .await;
+    let ff_cmd = ffmpeg_bin?;
+    let safe_dur = if duration_secs.is_finite() && duration_secs > 0.4 {
+        duration_secs
+    } else {
+        8.0
+    };
+    let sample_fps = (12.0 / safe_dur).clamp(0.25, 12.0);
+    let vf = format!("fps={:.4},scale=240:-2,tile=4x3", sample_fps);
 
-    if ext_res.get("error").is_some() {
+    let mut cmd = tokio::process::Command::new(ff_cmd);
+    crate::paths::configure_hidden_tokio_command(&mut cmd);
+    cmd.args(["-y", "-hide_banner", "-loglevel", "error", "-i"])
+        .arg(mp4_path)
+        .args(["-vf", &vf, "-frames:v", "1", "-q:v", "4"])
+        .arg(sheet_path);
+
+    let ok = tokio::time::timeout(std::time::Duration::from_secs(20), cmd.output())
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if !ok {
         return None;
     }
-
-    if let Some(imgs) = ext_res.get("_vision_images").and_then(|v| v.as_array()) {
-        for item in imgs {
-            if let Some(url) = item.as_str() {
-                if !url.is_empty() && !image_urls.iter().any(|existing| existing == url) {
-                    image_urls.push(url.to_string());
-                }
-            }
-        }
+    let bytes = tokio::fs::read(sheet_path).await.ok()?;
+    if bytes.is_empty() {
+        return None;
     }
-
-    let report_path = ext_res
-        .get("reportPath")
-        .and_then(|v| v.as_str())
-        .unwrap_or("ref/extracted/ref_report.md");
-    Some(report_path.to_string())
+    Some(format!("data:image/jpeg;base64,{}", BASE64_STANDARD.encode(&bytes)))
 }
 
-/// Automatically extracts visual keyframes & metadata if prompt contains TikTok, YouTube, or Pinterest links.
+pub(crate) async fn probe_video_meta_async(
+    ffmpeg_bin: Option<&Path>,
+    mp4_path: &Path,
+) -> (f64, Option<(u32, u32)>) {
+    let Some(ff) = ffmpeg_bin.map(Path::to_path_buf) else {
+        return (10.0, None);
+    };
+    let mp4 = mp4_path.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        let dur = crate::studio::reference_compare::probe_video_duration_secs(&ff, &mp4)
+            .unwrap_or(10.0);
+        let dims = crate::tool::ref_extractor::probe_video_dimensions_sync(&ff, &mp4);
+        (dur, dims)
+    })
+    .await
+    .unwrap_or((10.0, None))
+}
+
+/// Automatically extracts lightweight storyboard previews if prompt contains TikTok, YouTube, or Pinterest links.
+/// Heavy full-video `ref_extractor.py` stays on-demand via `extract_video_reference` to keep first-turn latency ~1-2s.
 pub async fn process_social_links(
     workspace_dir: &str,
     prompt_text: &str,
@@ -340,87 +362,60 @@ pub async fn process_social_links(
                         .unwrap_or_else(|_| Path::new(workspace_dir).join("ref"));
                     let _ = std::fs::create_dir_all(&ref_dir);
                     let mp4_path = ref_dir.join("ref_tiktok.mp4");
-                    let wav_path = ref_dir.join("ref_voice.wav");
+                    let sheet_path = ref_dir.join("ref_tiktok_contact_sheet.jpg");
 
                     let mut has_mp4 = false;
+                    let mut has_sheet = false;
+                    let mut probed_dims = None;
+                    let mut probed_dur = duration as f64;
                     if !play_url.is_empty() {
                         if let Ok(vid_resp) = reqwest::get(play_url).await {
                             if let Ok(vid_bytes) = vid_resp.bytes().await {
-                                if !vid_bytes.is_empty() {
-                                    if std::fs::write(&mp4_path, &vid_bytes).is_ok() {
-                                        has_mp4 = true;
+                                if !vid_bytes.is_empty() && std::fs::write(&mp4_path, &vid_bytes).is_ok() {
+                                    has_mp4 = true;
+                                    let (d, dims) = probe_video_meta_async(ffmpeg_bin, &mp4_path).await;
+                                    if d > 0.4 {
+                                        probed_dur = d;
                                     }
-                                    if let Some(ff_cmd) = ffmpeg_bin {
-                                        let mut ff_audio = std::process::Command::new(ff_cmd);
-                                        crate::paths::configure_hidden_std_command(&mut ff_audio);
-                                        let _ = ff_audio
-                                            .args([
-                                                "-y",
-                                                "-i",
-                                                &mp4_path.to_string_lossy(),
-                                                "-vn",
-                                                "-acodec",
-                                                "pcm_s16le",
-                                                "-ar",
-                                                "24000",
-                                                "-ac",
-                                                "1",
-                                                &wav_path.to_string_lossy(),
-                                            ])
-                                            .output();
-
-                                        let mut saved_frames = Vec::new();
-                                        let sample_points = compute_relative_sample_timestamps(duration as f64);
-                                        for (idx, (_ratio, ts)) in sample_points.iter().enumerate() {
-                                            let frame_name = format!("ref_tiktok_frame_{}.jpg", idx + 1);
-                                            let frame_jpg = ref_dir.join(&frame_name);
-                                            let mut ff_frame = std::process::Command::new(ff_cmd);
-                                            crate::paths::configure_hidden_std_command(&mut ff_frame);
-                                            let _ = ff_frame
-                                                .args([
-                                                    "-y",
-                                                    "-ss",
-                                                    ts.as_str(),
-                                                    "-i",
-                                                    &mp4_path.to_string_lossy(),
-                                                    "-frames:v",
-                                                    "1",
-                                                    "-q:v",
-                                                    "4",
-                                                    &frame_jpg.to_string_lossy(),
-                                                ])
-                                                .output();
-                                            if let Ok(jpg_bytes) = std::fs::read(&frame_jpg) {
-                                                if !jpg_bytes.is_empty() {
-                                                    saved_frames.push(format!("ref/{}", frame_name));
-                                                    let b64 = BASE64_STANDARD.encode(&jpg_bytes);
-                                                    image_urls.push(format!("data:image/jpeg;base64,{}", b64));
-                                                }
-                                            }
-                                        }
-                                        let _ = saved_frames;
+                                    probed_dims = dims;
+                                    if let Some(sheet_url) = extract_compact_contact_sheet_ffmpeg(
+                                        ffmpeg_bin,
+                                        &mp4_path,
+                                        &sheet_path,
+                                        probed_dur,
+                                    )
+                                    .await
+                                    {
+                                        image_urls.push(sheet_url);
+                                        has_sheet = true;
+                                    } else {
+                                        extract_sample_frames_ffmpeg(
+                                            ffmpeg_bin,
+                                            &ref_dir,
+                                            &mp4_path,
+                                            "tiktok",
+                                            probed_dur,
+                                            &mut image_urls,
+                                        );
                                     }
                                 }
                             }
                         }
                     }
 
-                    let blueprint_path = if has_mp4 {
-                        attach_extracted_video_blueprint(workspace_dir, "ref/ref_tiktok.mp4", &mut image_urls).await
+                    let dims_str = probed_dims
+                        .map(|(w, h)| format!("{w}x{h}"))
+                        .unwrap_or_else(|| "unknown".to_string());
+                    let preview_note = if has_sheet {
+                        "Storyboard contact sheet attached: ref/ref_tiktok_contact_sheet.jpg."
+                    } else if has_mp4 {
+                        "Sample frames extracted to ref/."
                     } else {
-                        None
+                        "Reference metadata only (video stream unavailable)."
                     };
-                    let blueprint_line = blueprint_path
-                        .map(|p| format!("\n                        - MotionClone Blueprint & Motion Ghidra AST Decompiled: {}, ref/extracted/style_ast.json, ref/extracted/skeletons/scene*.js, ref/extracted/style.json, ref/extracted/temporal.json", p))
-                        .unwrap_or_default();
-
                     ocr_transcriptions.push(format!(
-                        "[TikTok Reference Video Extracted (@{}, duration: {}s, title: \"{}\"):\n\
-                        - Reference Video Saved: ref/ref_tiktok.mp4\n\
-                        - Reference Frames Saved at normalized ratios [10%, 35%, 60%, 85%]: ref/ref_tiktok_frame_1.jpg, ref/ref_tiktok_frame_2.jpg, ref/ref_tiktok_frame_3.jpg, ref/ref_tiktok_frame_4.jpg{}\n\
-                        - Reference Voice Track Extracted: ref/ref_voice.wav. When the user requests matching or using this voice sample, pass `refAudio: \"ref/ref_voice.wav\"` and `cloneVoice: true` to `voicebox_speak` so Voicebox clones the speaker's exact vocal timbre and intonation!\n\
-                        - Keyframes attached to vision context: study the reference's motion language (entrance/exit choreography, camera moves, layout zones, typography hierarchy, palette) and translate it into this video's own style per the Visual Style System — inspired by, never a pixel copy.]",
-                        author, duration, title, blueprint_line
+                        "[TikTok Reference Video Ready (@{}, {}, {:.1}s, title: \"{}\"): saved at ref/ref_tiktok.mp4. {} Inspect specific timestamps via `bash` (Python/OpenCV/FFmpeg) or `extract_video_reference` when needed — translate style procedurally, never paste ref media onto canvas.]",
+                        author, dims_str, probed_dur, title, preview_note
                     ));
                 }
             }
@@ -441,7 +436,7 @@ pub async fn process_social_links(
                 .unwrap_or_else(|_| Path::new(workspace_dir).join("ref"));
             let _ = std::fs::create_dir_all(&ref_dir);
             let yt_mp4 = ref_dir.join("ref_youtube.mp4");
-            let yt_wav = ref_dir.join("ref_voice.wav");
+            let sheet_path = ref_dir.join("ref_youtube_contact_sheet.jpg");
             let ytdlp_note: String;
 
             if let Some(ytdlp_bin) = crate::paths::locate_ytdlp_binary() {
@@ -464,22 +459,19 @@ pub async fn process_social_links(
                 }
                 match tokio::time::timeout(std::time::Duration::from_secs(90), dl.output()).await {
                     Ok(Ok(out)) if out.status.success() && yt_mp4.is_file() => {
-                        extract_audio_track_ffmpeg(ffmpeg_bin, &yt_mp4, &yt_wav);
-                        let blueprint_path = attach_extracted_video_blueprint(
-                            workspace_dir,
-                            "ref/ref_youtube.mp4",
-                            &mut image_urls,
+                        let (dur, dims) = probe_video_meta_async(ffmpeg_bin, &yt_mp4).await;
+                        let mut sheet_line = String::new();
+                        if let Some(sheet_url) = extract_compact_contact_sheet_ffmpeg(
+                            ffmpeg_bin,
+                            &yt_mp4,
+                            &sheet_path,
+                            dur,
                         )
-                        .await;
-                        if image_urls.is_empty() {
-                            let dur = ffmpeg_bin
-                                .and_then(|ff| {
-                                    crate::studio::reference_compare::probe_video_duration_secs(
-                                        ff,
-                                        &yt_mp4,
-                                    )
-                                })
-                                .unwrap_or(10.0);
+                        .await
+                        {
+                            image_urls.push(sheet_url);
+                            sheet_line = "\n- Storyboard Contact Sheet: ref/ref_youtube_contact_sheet.jpg".to_string();
+                        } else {
                             extract_sample_frames_ffmpeg(
                                 ffmpeg_bin,
                                 &ref_dir,
@@ -489,15 +481,14 @@ pub async fn process_social_links(
                                 &mut image_urls,
                             );
                         }
-                        let bp_line = blueprint_path
-                            .map(|p| format!("\n- MotionClone Blueprint Extracted: {}, ref/extracted/style.json, ref/extracted/temporal.json", p))
-                            .unwrap_or_default();
+                        let dims_str = dims
+                            .map(|(w, h)| format!(" ({w}x{h}, {dur:.1}s)"))
+                            .unwrap_or_else(|| format!(" ({dur:.1}s)"));
                         ocr_transcriptions.push(format!(
-                            "[YouTube Reference Video Extracted (ID: {}):\n\
+                            "[YouTube Reference Video Extracted (ID: {}{}:\n\
                              - Reference Video Downloaded via yt-dlp: ref/ref_youtube.mp4{}\n\
-                             - Reference Voice Track Extracted: ref/ref_voice.wav\n\
-                             - Scene keyframes & measured blueprint attached for accurate pacing, palette, and motion replication.]",
-                            vid_id, bp_line
+                             - Inspect exact timestamps via `bash` (Python/OpenCV/FFmpeg) or call `extract_video_reference` when needed.]",
+                            vid_id, dims_str, sheet_line
                         ));
                         continue;
                     }
@@ -553,6 +544,9 @@ pub async fn process_social_links(
                         let mut primary_img: Option<(Vec<u8>, String, String)> = None;
                         let mut extracted_video_frames: Vec<Vec<u8>> = Vec::new();
                         let mut has_mp4 = false;
+                        let mut has_sheet = false;
+                        let mut probed_dur = 10.0;
+                        let mut probed_dims = None;
 
                         if let Some(ref img_url) = img_url_opt {
                             if let Ok(img_resp) = client.get(img_url).send().await {
@@ -571,8 +565,6 @@ pub async fn process_social_links(
                                 };
                                 if let Ok(bytes) = img_resp.bytes().await {
                                     if !bytes.is_empty() {
-                                        let b64 = BASE64_STANDARD.encode(&bytes);
-                                        image_urls.push(format!("data:{};base64,{}", mime, b64));
                                         primary_img = Some((bytes.to_vec(), ext.to_string(), mime));
                                     }
                                 }
@@ -586,46 +578,29 @@ pub async fn process_social_links(
                                         let mp4_path = ref_dir.join("ref_pinterest.mp4");
                                         if std::fs::write(&mp4_path, &vbytes).is_ok() {
                                             has_mp4 = true;
-                                        }
-                                        if let Some(ff_cmd) = ffmpeg_bin {
-                                            let probed_dur =
-                                                crate::studio::reference_compare::probe_video_duration_secs(
-                                                    ff_cmd,
+                                            let (dur, dims) = probe_video_meta_async(ffmpeg_bin, &mp4_path).await;
+                                            probed_dur = dur;
+                                            probed_dims = dims;
+                                            let sheet_path = ref_dir.join("ref_pinterest_contact_sheet.jpg");
+                                            if let Some(sheet_url) = extract_compact_contact_sheet_ffmpeg(
+                                                ffmpeg_bin,
+                                                &mp4_path,
+                                                &sheet_path,
+                                                probed_dur,
+                                            )
+                                            .await
+                                            {
+                                                image_urls.push(sheet_url);
+                                                has_sheet = true;
+                                            } else {
+                                                extracted_video_frames = extract_sample_frames_ffmpeg(
+                                                    ffmpeg_bin,
+                                                    &ref_dir,
                                                     &mp4_path,
-                                                )
-                                                .unwrap_or(8.0);
-                                            let sample_points =
-                                                compute_relative_sample_timestamps(probed_dur);
-                                            for (idx, (_ratio, ts)) in sample_points.iter().enumerate() {
-                                                let frame_jpg = ref_dir
-                                                    .join(format!("ref_pinterest_frame_{}.jpg", idx + 1));
-                                                let mut ff_frame = std::process::Command::new(ff_cmd);
-                                                crate::paths::configure_hidden_std_command(&mut ff_frame);
-                                                if ff_frame
-                                                    .args([
-                                                        "-y",
-                                                        "-ss",
-                                                        ts.as_str(),
-                                                        "-i",
-                                                        &mp4_path.to_string_lossy(),
-                                                        "-frames:v",
-                                                        "1",
-                                                        "-q:v",
-                                                        "4",
-                                                        &frame_jpg.to_string_lossy(),
-                                                    ])
-                                                    .output()
-                                                    .map(|o| o.status.success())
-                                                    .unwrap_or(false)
-                                                {
-                                                    if let Ok(jpg_bytes) = std::fs::read(&frame_jpg) {
-                                                        if !jpg_bytes.is_empty() {
-                                                            let b64 = BASE64_STANDARD.encode(&jpg_bytes);
-                                                            image_urls.push(format!("data:image/jpeg;base64,{}", b64));
-                                                            extracted_video_frames.push(jpg_bytes);
-                                                        }
-                                                    }
-                                                }
+                                                    "pinterest",
+                                                    probed_dur,
+                                                    &mut image_urls,
+                                                );
                                             }
                                         }
                                     }
@@ -633,37 +608,65 @@ pub async fn process_social_links(
                             }
                         }
 
-                        let mut saved_files = persist_reference_frames_to_dir(
-                            &ref_dir,
-                            "pinterest",
-                            primary_img
-                                .as_ref()
-                                .map(|(bytes, ext, _)| (bytes.as_slice(), ext.as_str())),
-                            &extracted_video_frames,
-                        );
-                        if has_mp4 {
-                            saved_files.push("ref/ref_pinterest.mp4".to_string());
-                            if let Some(report_rel) = attach_extracted_video_blueprint(
-                                workspace_dir,
-                                "ref/ref_pinterest.mp4",
-                                &mut image_urls,
-                            )
-                            .await
-                            {
-                                saved_files.push(report_rel);
-                                if ref_dir.join("extracted").join("style.json").is_file() {
-                                    saved_files.push("ref/extracted/style.json".to_string());
-                                }
+                        // Attach og:image only if no video storyboard/frames were extracted (1 compact image instead of 17).
+                        if image_urls.is_empty() {
+                            if let Some((ref bytes, _, ref mime)) = primary_img {
+                                image_urls.push(format!(
+                                    "data:{};base64,{}",
+                                    mime,
+                                    BASE64_STANDARD.encode(bytes)
+                                ));
                             }
                         }
 
+                        let mut saved_files = if has_sheet {
+                            let mut list = vec![
+                                "ref/ref_pinterest.mp4".to_string(),
+                                "ref/ref_pinterest_contact_sheet.jpg".to_string(),
+                            ];
+                            if let Some((ref bytes, ref ext, _)) = primary_img {
+                                let cover_rel = format!("ref/ref_pinterest.{}", ext);
+                                if std::fs::write(ref_dir.join(format!("ref_pinterest.{}", ext)), bytes).is_ok() {
+                                    list.push(cover_rel);
+                                }
+                            }
+                            list
+                        } else {
+                            let mut list = persist_reference_frames_to_dir(
+                                &ref_dir,
+                                "pinterest",
+                                primary_img
+                                    .as_ref()
+                                    .map(|(bytes, ext, _)| (bytes.as_slice(), ext.as_str())),
+                                &extracted_video_frames,
+                            );
+                            if has_mp4 {
+                                list.push("ref/ref_pinterest.mp4".to_string());
+                            }
+                            list
+                        };
+                        let _ = &mut saved_files;
+
                         if !saved_files.is_empty() || pin_title.is_some() {
                             let title_str = pin_title.as_deref().unwrap_or("Pinterest Pin");
-                            ocr_transcriptions.push(format!(
-                                "[Pinterest Reference Visual Extracted (title: \"{}\", saved: [{}]): Reference image attached directly to vision context — study its visual composition, color palette, typography, and motion aesthetic, and translate it into procedural/animated code rather than drawing the static reference file directly.]",
-                                title_str,
-                                saved_files.join(", ")
-                            ));
+                            if has_mp4 {
+                                let dims_str = probed_dims
+                                    .map(|(w, h)| format!("{w}x{h}, "))
+                                    .unwrap_or_default();
+                                ocr_transcriptions.push(format!(
+                                    "[Pinterest Reference Video Ready (title: \"{}\", {}{:.1}s, saved: [{}]): Storyboard contact sheet attached to vision context. Inspect individual frames/timestamps via `bash` (Python/OpenCV/FFmpeg) or `extract_video_reference` when needed; never paste ref media directly onto the stage.]",
+                                    title_str,
+                                    dims_str,
+                                    probed_dur,
+                                    saved_files.join(", ")
+                                ));
+                            } else {
+                                ocr_transcriptions.push(format!(
+                                    "[Pinterest Reference Image Ready (title: \"{}\", saved: [{}]): Image attached directly to vision context — reconstruct its palette, typography, and layout procedurally without drawing the ref file directly.]",
+                                    title_str,
+                                    saved_files.join(", ")
+                                ));
+                            }
                         }
                     }
                 }

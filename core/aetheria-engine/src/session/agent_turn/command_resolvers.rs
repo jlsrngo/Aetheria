@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-const STYLE_JSON_SOFT_CAP_CHARS: usize = 14_000;
+const STYLE_JSON_SOFT_CAP_CHARS: usize = 6_000;
 
 fn compact_scene_entry(sc: &serde_json::Value, max_regions: usize) -> serde_json::Value {
     let Some(obj) = sc.as_object() else {
@@ -152,6 +152,11 @@ pub(crate) fn summarize_style_json_compact(raw: &str, max_chars: usize) -> Strin
 
 /// Injects active video reference report (and keyframe inventory) if present in workspace.
 pub fn resolve_reference_report(workspace_dir: &str) -> Option<String> {
+    resolve_reference_report_for_prompt(workspace_dir, "")
+}
+
+/// Injects active video reference context adapted cleanly for read-only planning questions vs build turns.
+pub fn resolve_reference_report_for_prompt(workspace_dir: &str, prompt_text: &str) -> Option<String> {
     let ws_path = Path::new(workspace_dir);
     let report_candidates = [
         ws_path.join("ref").join("ref_report.md"),
@@ -163,15 +168,9 @@ pub fn resolve_reference_report(workspace_dir: &str) -> Option<String> {
         ws_path.join("ref").join("style.json"),
         ws_path.join("workspace").join("ref").join("extracted").join("style.json"),
     ];
-    let ast_candidates = [
-        ws_path.join("ref").join("extracted").join("style_ast.json"),
-        ws_path.join("ref").join("style_ast.json"),
-        ws_path.join("workspace").join("ref").join("extracted").join("style_ast.json"),
-    ];
 
     let target_report = report_candidates.into_iter().find(|p| p.exists());
     let target_style = style_candidates.into_iter().find(|p| p.exists());
-    let target_ast = ast_candidates.into_iter().find(|p| p.exists());
 
     let mut sections = Vec::new();
     if let Some(report_path) = target_report {
@@ -189,26 +188,48 @@ pub fn resolve_reference_report(workspace_dir: &str) -> Option<String> {
             }
         }
     }
-    if let Some(ast_path) = target_ast {
-        if let Ok(ast_raw) = std::fs::read_to_string(&ast_path) {
-            let snippet: String = ast_raw.trim().chars().take(6000).collect();
-            if !snippet.is_empty() {
-                sections.push(format!("Decompiled Motion AST (ref/extracted/style_ast.json):\n{}", snippet));
-            }
-        }
-    }
 
     if sections.is_empty() {
+        if !crate::studio::project_registry::is_hypothetical_or_planning_question(prompt_text) {
+            let ref_dir = ws_path.join("ref");
+            let saved_refs: Vec<String> = [
+                "ref_pinterest.mp4",
+                "ref_tiktok.mp4",
+                "ref_youtube.mp4",
+                "ref_pinterest_contact_sheet.jpg",
+                "ref_tiktok_contact_sheet.jpg",
+                "ref_youtube_contact_sheet.jpg",
+                "ref_pinterest.jpg",
+            ]
+            .iter()
+            .filter(|name| ref_dir.join(name).is_file())
+            .map(|name| format!("ref/{}", name))
+            .collect();
+            if !saved_refs.is_empty() {
+                return Some(format!(
+                    "[Active Video Reference Analysis (Saved Media)]: Reference files already exist at workspace root: [{}]. Inspect frames directly via `read` / `bash` (FFmpeg/Python) or `extract_video_reference`, then author directly in `index.html` (HTML + CSS Grid/3D + SVG + Canvas/WebGL) and verify with `capture_film_preview` (skip `film_audio` when the user asked for no audio).",
+                    saved_refs.join(", ")
+                ));
+            }
+        }
         return None;
+    }
+
+    if crate::studio::project_registry::is_hypothetical_or_planning_question(prompt_text) {
+        return Some(format!(
+            "[Active Video Reference Analysis (Read-Only Context)]:\n\"\"\"\n{}\n\"\"\"\n\
+            [NOTE: The user is asking a planning/methodology question — answer directly in text using the extracted metrics above. Do NOT create files, scaffold projects, or generate audio until the user asks you to build.]",
+            sections.join("\n\n---\n\n")
+        ));
     }
 
     Some(format!(
         "[Active Video Reference Blueprint (MotionClone-Grade Reference)]:\n\"\"\"\n{}\n\"\"\"\n\
         GUIDELINES WHEN PRODUCING FROM REFERENCE:\n\
-        0. STRICT REFERENCE PRECEDENCE OVER SKILLS: This Active Video Reference Blueprint STRICTLY OVERRIDES any active `/skill` aesthetic defaults (palette, background lightness/darkness, resolution, FPS, aspect ratio, layout boxes, or scene timings) and satisfies the Style/Orientation Gate — DO NOT pause to call `question` asking for a `/skill` or orientation. Never replace the reference's measured style with a skill preset. (`ref/extracted/*` lives at workspace root `ref/...`, NOT inside `projects/<slug>/ref/`.)\n\
-        1. FAST SCAFFOLD FIRST (DO NOT GLOB OR READ SKELETONS ONE-BY-ONE): All reference extraction (`width`, `height`, `fps`, `totalDuration`, `scenes`, `audioProfile`, beat strips, and keyframes) is ALREADY complete above. Immediately call `film_scaffold` with the exact measured `width`, `height`, `fps`, and `scenes` array (preserving every scene's exact `id` and `duration`). Do NOT waste turns globbing `ref/extracted/**` or reading `ref/extracted/skeletons/scene*.js` one-by-one — for multi-scene (`>= 4` scenes) remakes, the harness automatically launches its direct vision-first per-scene remake compiler right after `film_scaffold`.\n\
-        2. AUDIO GENRE MATCH (`film_audio`): Check `audioProfile.mode` in `ref_report.md`/`style.json`. When `'bgm-sfx-only'` (visual showreel without spoken dialogue), `film_audio({{ mode: 'showreel', bpm, scenes: [{{ id, narration: '', duration }}] }})` syncs beats/SFX cleanly WITHOUT TTS narration or subtitle stickers blocking the canvas; use normal `narration` only when spoken narration is wanted.\n\
-        3. DETERMINISTIC HTML ENGINE & VISUAL VERIFICATION: Drive all motion via `window.renderAt(t)` and `window.AM`. NEVER load `ref/ref_*` directly on canvas. For 1–3 scene references, author directly with `inspect_ref_frame`/`sample_ref_region`/`write`/`edit` and verify via `capture_film_preview(compareToReference: true, passThreshold: 0.65)`.",
+        0. STRICT REFERENCE PRECEDENCE OVER SKILLS: This Active Video Reference Blueprint STRICTLY OVERRIDES any active `/skill` aesthetic defaults (palette, background lightness/darkness, resolution, FPS, aspect ratio, layout boxes, or scene timings) and satisfies the Style/Orientation Gate — DO NOT pause to call `question` asking for a `/skill` or orientation. Never replace the reference's measured style with a skill preset. (`ref/` and `ref/extracted/*` live at workspace root, NOT inside `projects/<slug>/ref/`.)\n\
+        1. INSPECT & AUTHOR FREELY: Reference extraction (`width`, `height`, `fps`, `totalDuration`, `scenes`, `audioProfile`, storyboard/contact sheets, and keyframes) is ready above. Inspect `ref/` keyframes directly via `read` or `bash` (Python/OpenCV/FFmpeg) or `inspect_ref_frame`, then build the film using whichever web stack fits best: author self-contained HTML + CSS Grid/Flexbox + CSS 3D + Inline SVG & `<filter>` + Canvas/WebGL directly in `index.html`, or optionally call `film_scaffold` for modular `script/scene*.js` or `stageMode: \"hybrid\"`.\n\
+        2. AUDIO OPT-IN ONLY (`film_audio`): Only call `film_audio` when audio is desired; skip audio completely if the user asks for no audio (e.g. 'ga perlu audio', 'no audio', 'silent'). When audio IS wanted for a visual showreel without speech, use `film_audio({{ mode: 'showreel', bpm, scenes: [{{ id, narration: '', duration }}] }})`.\n\
+        3. DETERMINISTIC HTML ENGINE & VISUAL VERIFICATION: Expose `window.__filmMeta` (`width`, `height`, `fps`, `duration`, `scenes`), deterministic `window.renderAt(t)`, and `window.__ready = true` (NEVER paste `ref/ref_*` images directly as a backdrop). Verify with `capture_film_preview` (full-res frames attach automatically for standalone/hybrid `index.html`; `compareToReference: true` is optional and advisory on standalone/hybrid films unless `passThreshold` is explicitly set).",
         sections.join("\n\n---\n\n")
     ))
 }

@@ -7,7 +7,8 @@
 
 pub use super::command_resolvers::{
     resolve_dynamic_style_or_skill_command, resolve_mentioned_files,
-    resolve_motioncraft_style_command, resolve_reference_report, resolve_voice_preset_command,
+    resolve_motioncraft_style_command, resolve_reference_report,
+    resolve_reference_report_for_prompt, resolve_voice_preset_command,
 };
 
 use crate::knowledge::get_active_knowledge_for_workspace;
@@ -88,42 +89,43 @@ pub fn load_am_api_reference(workspace_dir: &str) -> String {
     EMBEDDED_AM_API_REFERENCE.to_string()
 }
 
-/// Returns `true` only on active video / motion turns so general chat never pays AM API token overhead.
+/// Returns `true` only when the turn explicitly uses a `/mg-*` Canvas skill, Microstock lock,
+/// explicit `window.AM` / `film_scaffold` usage, or an existing `aetheria-motion.js` film on disk.
+/// Unstyled video/showreel/reference turns stay lean without Canvas-2D API bias.
 pub fn should_inject_am_api_reference(
     workspace_dir: &str,
     prompt_text: &str,
-    has_style_or_ref: bool,
+    has_explicit_skill: bool,
 ) -> bool {
     if crate::tool::catalog::is_greeting_prompt(prompt_text) {
         return false;
     }
-    if has_style_or_ref
+    if has_explicit_skill
         || crate::studio::microstock::active_microstock_lock(workspace_dir).is_some()
     {
         return true;
     }
     let lower = prompt_text.to_ascii_lowercase();
-    const VIDEO_HINTS: &[&str] = &[
-        "video",
-        "motion",
-        "animasi",
-        "animation",
-        "scene",
-        "adegan",
-        "film_scaffold",
-        "capture_film_preview",
+    const AM_EXPLICIT_HINTS: &[&str] = &[
         "aetheria-motion",
-        "renderat",
-        "canvas",
-        "<svg",
-        "three.js",
-        "webgl",
-        "tiktok",
-        "reels",
-        "shorts",
-        "storyboard",
+        "window.am",
+        "am.",
+        "registerscene",
+        "film_scaffold",
     ];
-    VIDEO_HINTS.iter().any(|k| lower.contains(k))
+    if AM_EXPLICIT_HINTS.iter().any(|k| lower.contains(k)) {
+        return true;
+    }
+    if !workspace_dir.trim().is_empty() {
+        if let Some(html_path) = crate::studio::motion::resolve_active_html_film_path(Some(workspace_dir)) {
+            if let Ok(html) = std::fs::read_to_string(&html_path) {
+                if html.to_ascii_lowercase().contains("aetheria-motion.js") {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Assembles complete system prompt with environment block, living memory, knowledge base, skills, and plugin rules.
@@ -363,6 +365,11 @@ mod tests {
             "explain Rust lifetimes and borrow checker",
             false
         ));
+        assert!(!super::should_inject_am_api_reference(
+            &ws,
+            "buatkan video showreel animasi dari referensi",
+            false
+        ));
         assert!(super::should_inject_am_api_reference(
             &ws,
             "/mg-flat-vector buatkan intro",
@@ -370,7 +377,17 @@ mod tests {
         ));
         assert!(super::should_inject_am_api_reference(
             &ws,
-            "buatkan video animasi 2 scene tentang kopi",
+            "edit scene1 pakai window.AM",
+            false
+        ));
+        std::fs::write(
+            tmp.join("index.html"),
+            "<!doctype html><script src=\"/script/aetheria-motion.js\"></script>",
+        )
+        .unwrap();
+        assert!(super::should_inject_am_api_reference(
+            &ws,
+            "perbarui warna latar",
             false
         ));
         let _ = std::fs::remove_dir_all(&tmp);

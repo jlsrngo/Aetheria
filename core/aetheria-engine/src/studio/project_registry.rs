@@ -136,8 +136,55 @@ pub fn extract_explicit_video_title(prompt: &str) -> Option<String> {
     None
 }
 
+/// Returns true when the user is asking a hypothetical/planning question rather than asking
+/// to scaffold or build files right now.
+pub fn is_hypothetical_or_planning_question(prompt: &str) -> bool {
+    let trimmed = prompt.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if [
+        "coba buat",
+        "buatkan sekarang",
+        "kerjakan sekarang",
+        "langsung buat",
+        "build it",
+        "make it now",
+        "create it now",
+    ]
+    .iter()
+    .any(|kw| lower.contains(kw))
+    {
+        return false;
+    }
+    if [
+        "apa yang kamu lakukan",
+        "apa yang akan kamu",
+        "apa yang bakal kamu",
+        "bagaimana cara",
+        "gimana cara",
+        "what would you do",
+        "how would you",
+        "what is your plan",
+        "rencana kamu",
+    ]
+    .iter()
+    .any(|kw| lower.contains(kw))
+    {
+        return true;
+    }
+    trimmed.ends_with('?')
+        && ["kalau ", "misalnya ", "andaikan ", "if i ask", "what if"]
+            .iter()
+            .any(|prefix| lower.starts_with(prefix))
+}
+
 /// Returns true when the prompt explicitly requests a brand-new video or multi-scene storyboard.
 pub fn is_new_video_creation_prompt(prompt: &str) -> bool {
+    if is_hypothetical_or_planning_question(prompt) {
+        return false;
+    }
     if extract_explicit_video_title(prompt).is_some() {
         return true;
     }
@@ -159,6 +206,11 @@ pub fn is_new_video_creation_prompt(prompt: &str) -> bool {
         "video edukasi",
         "video promosi",
         "video tentang",
+        "showreel",
+        "remake",
+        "recreate",
+        "buat animasi",
+        "buatkan animasi",
     ]
     .iter()
     .any(|kw| lower.contains(kw))
@@ -904,5 +956,19 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn hypothetical_planning_questions_are_not_treated_as_new_project_creation() {
+        let q1 = "kalau kamu ku suruh buat kan video berbasis kode js dan html ini contohnya https://pin.it/byKoQ42rJ apa yang kamu lakukan?";
+        assert!(is_hypothetical_or_planning_question(q1));
+        assert!(!is_new_video_creation_prompt(q1));
+
+        let b1 = "coba buat kamu aja buat tema nya tapi aku mau yang mirip banget ga perlu audio";
+        assert!(!is_hypothetical_or_planning_question(b1));
+
+        let b2 = "Buat animasi showreel 1280x720 dari referensi di ref/";
+        assert!(!is_hypothetical_or_planning_question(b2));
+        assert!(is_new_video_creation_prompt(b2));
     }
 }

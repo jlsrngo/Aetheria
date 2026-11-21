@@ -47,8 +47,8 @@ pub fn derive_syntax_invariants(extensions: &[&str]) -> Vec<String> {
     let has_html_motion = extensions.iter().any(|&e| e == ".html" || e == ".js");
 
     if has_html_motion {
-        inv.push("- Modular HTML Motion Architecture: Author films directly inside the opened project folder (`index.html`, `script/scene1..N.js`, `audio/*.wav`) with deterministic `window.renderAt(t)` and `window.__ready = true`.".to_string());
-        inv.push("- Zero Node/Remotion Dependencies: Pure browser Canvas 2D / SVG / CSS + Vanilla JS (`window.AM`) with frame-accurate seeking and headless Chrome/Edge CDP MP4 export.".to_string());
+        inv.push("- Open HTML Motion Architecture: Author films directly inside the opened project folder (`index.html` using HTML + CSS Grid/3D + Inline SVG + Canvas/WebGL, plus optional `script/scene*.js` or `audio/*.wav`) with `window.__filmMeta`, deterministic `window.renderAt(t)`, and `window.__ready = true`.".to_string());
+        inv.push("- Zero Node/Remotion Dependencies: Pure browser rendering with frame-accurate seeking and headless Chrome/Edge CDP preview & MP4 export.".to_string());
     }
     inv.push("- Active Folder Isolation: Only inspect and operate on files within the currently opened active project folder.".to_string());
 

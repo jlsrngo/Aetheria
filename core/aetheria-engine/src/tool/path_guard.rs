@@ -77,10 +77,11 @@ fn is_film_artifact_rel(norm_rel: &str) -> bool {
         || lower == "story.json"
         || lower == "kit.json"
         || lower == "microstock/manifest.json"
+        || lower == ".aetheria/preview"
     {
         return true;
     }
-    ["script/", "audio/", "img/", "images/"]
+    ["script/", "audio/", "img/", "images/", ".aetheria/preview/"]
         .iter()
         .any(|prefix| lower.starts_with(prefix))
 }
@@ -201,6 +202,19 @@ mod tests {
 
         let html_p = resolve_isolated_path(&ws, "./index.html").unwrap();
         assert_eq!(html_p, dir.join("projects").join(&proj.id).join("index.html"));
+
+        let prev_p = resolve_isolated_path(&ws, ".aetheria/preview/preview_0.jpg").unwrap();
+        assert_eq!(
+            prev_p,
+            dir.join("projects")
+                .join(&proj.id)
+                .join(".aetheria")
+                .join("preview")
+                .join("preview_0.jpg")
+        );
+
+        let active_ptr_p = resolve_isolated_path(&ws, ".aetheria/active-project.json").unwrap();
+        assert_eq!(active_ptr_p, dir.join(".aetheria").join("active-project.json"));
 
         let ref_p = resolve_isolated_path(&ws, "ref/ref_report.md").unwrap();
         assert_eq!(ref_p, dir.join("ref").join("ref_report.md"));

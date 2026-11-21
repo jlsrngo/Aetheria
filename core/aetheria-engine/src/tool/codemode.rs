@@ -18,7 +18,7 @@ pub fn codemode_tool_definition() -> Value {
         "type": "function",
         "function": {
             "name": "codemode",
-            "description": "Execute a self-contained JavaScript script in a workspace-jailed Node.js VM sandbox with pre-bound helpers (`workspaceDir`, jailed `fs`, `path`, `readText`, `writeText`, `readJson`, `writeJson`, `exists`, `listDir`, `mkdir`). Use this for batch scene generation, bulk JSON/SVG/geometry math, or multi-file transformations in a single step.",
+            "description": "Execute a self-contained JavaScript script in a workspace-jailed JS VM sandbox with pre-bound helpers (`workspaceDir`, jailed `fs`, `path`, `readText`, `writeText`, `readJson`, `writeJson`, `exists`, `listDir`, `mkdir`). NOTE: `require`, `import`, `process`, and `child_process` are NOT available here — use `bash` whenever you need Node.js modules, Python/OpenCV, or FFmpeg.",
             "parameters": {
                 "type": "object",
                 "properties": {

@@ -186,7 +186,7 @@ pub fn filter_tools_for_profile(profile: ToolProfile, all_tools: Vec<Value>) -> 
             include_render: true
         }
     );
-    all_tools
+    let mut filtered: Vec<Value> = all_tools
         .into_iter()
         .filter(|t| {
             let name = t
@@ -195,7 +195,13 @@ pub fn filter_tools_for_profile(profile: ToolProfile, all_tools: Vec<Value>) -> 
                 .unwrap_or("");
             is_tool_allowed_in_role(role, name, include_render)
         })
-        .collect()
+        .collect();
+    filtered.sort_by(|a, b| {
+        let na = a.pointer("/function/name").and_then(Value::as_str).unwrap_or("");
+        let nb = b.pointer("/function/name").and_then(Value::as_str).unwrap_or("");
+        na.cmp(nb)
+    });
+    filtered
 }
 
 /// Model-aware tool filter (mirrors OpenCode `tool/model-policy.ts`).
@@ -357,6 +363,105 @@ fn prompt_looks_like_general_engineering(prompt_text: &str) -> bool {
     .any(|k| lower.contains(k))
 }
 
+fn prompt_has_slash_media(prompt_text: &str) -> bool {
+    let lower = prompt_text.to_ascii_lowercase();
+    [
+        "/mg-",
+        "/adobe-stock",
+        "/conspiracy-crime-board",
+        "/editorial-kinetic",
+        "/audio:",
+        "/voice:",
+        "/preset:",
+        "/ref",
+    ]
+    .iter()
+    .any(|k| lower.contains(k))
+}
+
+fn prompt_has_video_keywords(prompt_text: &str) -> bool {
+    let lower = prompt_text.to_ascii_lowercase();
+    [
+        "video",
+        "film",
+        "animasi",
+        "animation",
+        "motion graphics",
+        "motion design",
+        "storyboard",
+        "film_scaffold",
+        "film_audio",
+        "capture_film_preview",
+        "extract_video_reference",
+        "render_video",
+        "render mp4",
+        "ekspor mp4",
+        "render sekarang",
+        "aetheria-motion",
+        "tiktok",
+        "reels",
+        "shorts",
+        "microstock",
+        "voiceover",
+        "sulih suara",
+        "narasi",
+        "scene1",
+        "scene ",
+        "adegan",
+        "showreel",
+        "remake",
+        "recreate",
+        "motion",
+        "keyframe",
+        "index.html",
+        "stagemode",
+        "hybrid",
+    ]
+    .iter()
+    .any(|k| lower.contains(k))
+}
+
+fn collect_user_msg_text(msg: &Value) -> String {
+    let mut chunks = Vec::new();
+    if let Some(t) = msg.get("text").and_then(Value::as_str) {
+        chunks.push(t.to_string());
+    }
+    if let Some(c) = msg.get("content").and_then(Value::as_str) {
+        chunks.push(c.to_string());
+    }
+    for key in ["parts", "content"] {
+        if let Some(arr) = msg.get(key).and_then(Value::as_array) {
+            for item in arr {
+                if let Some(t) = item.get("text").and_then(Value::as_str) {
+                    chunks.push(t.to_string());
+                }
+            }
+        }
+    }
+    chunks.join("\n")
+}
+
+fn history_has_video_user_turn(history: &[Value]) -> bool {
+    for msg in history {
+        let role = msg
+            .get("role")
+            .or_else(|| msg.pointer("/info/role"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if role != "user" {
+            continue;
+        }
+        let text = collect_user_msg_text(msg);
+        if text.trim().is_empty() || prompt_looks_like_general_engineering(&text) {
+            continue;
+        }
+        if prompt_has_slash_media(&text) || prompt_has_video_keywords(&text) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Selects `Director` on video-production turns, or narrows non-video turns to
 /// `General` (plugins), `GeneralCode` (workspace editing/commands), or `GeneralChat` (lightweight Q&A).
 pub fn resolve_coordinator_profile(
@@ -370,53 +475,20 @@ pub fn resolve_coordinator_profile(
         || lower.contains("bukan video")
         || lower.contains("not a video");
 
-    let has_slash_media = lower.contains("/mg-")
-        || lower.contains("/adobe-stock")
-        || lower.contains("/conspiracy-crime-board")
-        || lower.contains("/editorial-kinetic")
-        || lower.contains("/audio:")
-        || lower.contains("/voice:")
-        || lower.contains("/preset:")
-        || lower.contains("/ref");
-
-    let has_video_keywords = !explicitly_non_video
-        && [
-            "video",
-            "film",
-            "animasi",
-            "animation",
-            "motion graphics",
-            "motion design",
-            "storyboard",
-            "film_scaffold",
-            "film_audio",
-            "capture_film_preview",
-            "extract_video_reference",
-            "render_video",
-            "render mp4",
-            "ekspor mp4",
-            "render sekarang",
-            "aetheria-motion",
-            "tiktok",
-            "reels",
-            "shorts",
-            "microstock",
-            "voiceover",
-            "sulih suara",
-            "narasi",
-            "scene1",
-            "scene ",
-            "adegan",
-        ]
-        .iter()
-        .any(|k| lower.contains(k));
+    let has_slash_media = prompt_has_slash_media(prompt_text);
+    let has_video_keywords = !explicitly_non_video && prompt_has_video_keywords(prompt_text);
 
     let in_video_flow = !explicitly_non_video
         && !prompt_looks_like_general_engineering(prompt_text)
         && (has_slash_media
             || has_video_keywords
             || crate::studio::microstock::active_microstock_lock(workspace_dir).is_some()
-            || history_used_video_tools(history));
+            || history_used_video_tools(history)
+            || history_has_video_user_turn(history));
+
+    if crate::studio::project_registry::is_hypothetical_or_planning_question(prompt_text) {
+        return ToolProfile::GeneralChat;
+    }
 
     if in_video_flow {
         ToolProfile::Director {
@@ -664,10 +736,60 @@ mod tests {
             }
         );
         assert_eq!(
+            resolve_coordinator_profile(
+                &ws,
+                "Buat showreel hybrid HTML+CSS3D+SVG+Canvas 1280x720 dari ref.",
+                &[]
+            ),
+            ToolProfile::Director {
+                include_render: false
+            }
+        );
+        assert_eq!(
             resolve_coordinator_profile(&ws, "Render sekarang ke mp4 video kopi ini", &[]),
             ToolProfile::Director {
                 include_render: true
             }
+        );
+
+        assert_eq!(
+            resolve_coordinator_profile(
+                &ws,
+                "kalau kamu ku suruh buat kan video berbasis kode js dan html ini contohnya https://pin.it/byKoQ42rJ apa yang kamu lakukan?",
+                &[]
+            ),
+            ToolProfile::GeneralChat
+        );
+
+        let video_history = vec![serde_json::json!({
+            "role": "user",
+            "text": "kalau kamu ku suruh buat kan video berbasis kode js dan html ini contohnya https://pin.it/byKoQ42rJ apa yang kamu lakukan?"
+        })];
+        assert_eq!(
+            resolve_coordinator_profile(
+                &ws,
+                "coba buat kamu aja buat tema nya tapi aku mau yang mirip banget ga perlu audio",
+                &video_history
+            ),
+            ToolProfile::Director {
+                include_render: false
+            }
+        );
+        assert_eq!(
+            resolve_coordinator_profile(
+                &ws,
+                "Tugas non-video: buat file hello.txt",
+                &video_history
+            ),
+            ToolProfile::GeneralCode
+        );
+        assert_eq!(
+            resolve_coordinator_profile(
+                &ws,
+                "Periksa error cargo test di backend",
+                &video_history
+            ),
+            ToolProfile::GeneralCode
         );
 
         assert!(check_tool_allowed_runtime(
