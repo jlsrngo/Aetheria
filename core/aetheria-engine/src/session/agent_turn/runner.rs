@@ -291,6 +291,9 @@ pub async fn run_agent_turn(
             }
         }
 
+        super::history::bound_inline_images(&mut chat_messages);
+        let llm_started_ms = now_ms();
+        let active_inline_images = super::history::count_active_inline_images(&chat_messages);
         let mut http_ctx = StepHttpContext {
             client: &client,
             cfg: &cfg,
@@ -452,12 +455,37 @@ pub async fn run_agent_turn(
         }
         unknown_finish_retries = 0;
 
+        let llm_elapsed_ms = now_ms().saturating_sub(llm_started_ms);
         let cost_tiers = resolve_model_cost_tiers(&cfg, &current_provider_id, &current_model_id);
         let step_usage = record_step_usage(stream_out.usage.as_ref(), &cost_tiers);
         usage_acc.record_step(step_usage);
         last_step_usage = step_usage;
         last_finish = step_finish;
         overflow_compacted_this_step = false;
+
+        if tool_calls.is_empty() {
+            let (prompt_tok, cached_tok, comp_tok) = step_usage
+                .map(|u| {
+                    (
+                        u.tokens.input.saturating_add(u.tokens.cache.read),
+                        u.tokens.cache.read,
+                        u.tokens.output.saturating_add(u.tokens.reasoning),
+                    )
+                })
+                .unwrap_or((0, 0, 0));
+            crate::paths::log_engine(
+                "step_perf",
+                &format!(
+                    "step={} llm_ms={} tools_ms=0 prompt_tok={} cached_tok={} comp_tok={} active_imgs={} tools=0",
+                    step + 1,
+                    llm_elapsed_ms,
+                    prompt_tok,
+                    cached_tok,
+                    comp_tok,
+                    active_inline_images,
+                ),
+            );
+        }
 
         {
             let ep = TurnEndpoint {
@@ -532,6 +560,8 @@ pub async fn run_agent_turn(
         chat_messages.push(msg);
         let step_vision_enabled =
             model_supports_vision_from_config(Some(&cfg), &current_provider_id, &current_model_id);
+        let tool_call_count = tool_calls.len();
+        let tools_started_ms = now_ms();
         let batch = execute_tool_batch(
             session_id,
             workspace_dir,
@@ -545,6 +575,32 @@ pub async fn run_agent_turn(
             &mut chat_messages,
         )
         .await;
+        let tools_elapsed_ms = now_ms().saturating_sub(tools_started_ms);
+        {
+            let (prompt_tok, cached_tok, comp_tok) = step_usage
+                .map(|u| {
+                    (
+                        u.tokens.input.saturating_add(u.tokens.cache.read),
+                        u.tokens.cache.read,
+                        u.tokens.output.saturating_add(u.tokens.reasoning),
+                    )
+                })
+                .unwrap_or((0, 0, 0));
+            crate::paths::log_engine(
+                "step_perf",
+                &format!(
+                    "step={} llm_ms={} tools_ms={} prompt_tok={} cached_tok={} comp_tok={} active_imgs={} tools={}",
+                    step + 1,
+                    llm_elapsed_ms,
+                    tools_elapsed_ms,
+                    prompt_tok,
+                    cached_tok,
+                    comp_tok,
+                    active_inline_images,
+                    tool_call_count,
+                ),
+            );
+        }
 
         if batch.was_interrupted {
             emit_session_error(

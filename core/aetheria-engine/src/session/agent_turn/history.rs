@@ -256,19 +256,127 @@ pub(crate) fn build_historical_turn_warning(msg: &Value, unresolved: &[String]) 
     }
 }
 
-/// Hysteresis image byte cap constants (mirrors OpenCode `model-request.ts:225-253`).
+/// Hysteresis image byte & count cap constants (mirrors OpenCode `model-request.ts:225-253`
+/// plus count-based pruning so compact JPEGs never silently accumulate to 180k+ visual tokens).
 pub const IMAGE_BUDGET_TRIGGER_BYTES: usize = 25 * 1024 * 1024; // 25 MiB
 pub const IMAGE_BUDGET_TARGET_BYTES: usize = 15 * 1024 * 1024;  // 15 MiB
+pub const IMAGE_BUDGET_MAX_COUNT: usize = 16;
+pub const IMAGE_BUDGET_TARGET_COUNT: usize = 14;
 
-/// Bounds total inline base64 `image_url` bytes across `chat_messages` using deterministic
-/// FIFO-replay hysteresis (`trigger_bytes` -> prune oldest images down to `target_bytes`) so
-/// adding images at the tail never shifts existing cut boundaries until the surviving window
-/// crosses `trigger_bytes` again — keeping prompt-cache prefixes stable between cuts.
+/// Detects whether a multimodal user message carries rendered preview screenshots
+/// (from `capture_film_preview`) rather than core reference keyframes (`ref_scene_`).
+fn is_preview_vision_message(msg: &Value) -> bool {
+    if msg.get("role").and_then(Value::as_str) != Some("user") {
+        return false;
+    }
+    let Some(arr) = msg.get("content").and_then(Value::as_array) else {
+        return false;
+    };
+    let mut has_inline_img = false;
+    let mut mentions_preview = false;
+    let mut mentions_ref_only = false;
+    for part in arr {
+        if part
+            .pointer("/image_url/url")
+            .and_then(Value::as_str)
+            .is_some_and(|u| u.starts_with("data:image/"))
+        {
+            has_inline_img = true;
+        } else if let Some(txt) = part.get("text").and_then(Value::as_str) {
+            let lower = txt.to_ascii_lowercase();
+            if lower.contains("preview_")
+                || lower.contains("comparison_strip")
+                || lower.contains("capture_film_preview")
+            {
+                mentions_preview = true;
+            }
+            if lower.contains("ref_scene_") || lower.contains("contact_sheet_") {
+                mentions_ref_only = true;
+            }
+        }
+    }
+    has_inline_img && mentions_preview && !mentions_ref_only
+}
+
+/// Counts active inline `data:image/` attachments currently present across `chat_messages`.
+pub fn count_active_inline_images(chat_messages: &[Value]) -> usize {
+    let mut count = 0usize;
+    for msg in chat_messages {
+        if let Some(arr) = msg.get("content").and_then(Value::as_array) {
+            for part in arr {
+                if part
+                    .pointer("/image_url/url")
+                    .and_then(Value::as_str)
+                    .is_some_and(|u| u.starts_with("data:image/"))
+                {
+                    count += 1;
+                }
+            }
+        }
+    }
+    count
+}
+
+/// Bounds total inline base64 `image_url` attachments across `chat_messages`:
+/// 1. Replaces image attachments in superseded `capture_film_preview` rounds whenever a newer
+///    preview round exists (preserving the text manifest labels and keeping reference keyframes).
+/// 2. Applies deterministic FIFO-replay hysteresis on BOTH total byte size (`trigger_bytes` ->
+///    `target_bytes`) and active image count (`max_count` -> `target_count`), keeping prompt-cache
+///    prefixes stable between cuts.
 pub fn bound_inline_images_with_limits(
     chat_messages: &mut [Value],
     trigger_bytes: usize,
     target_bytes: usize,
 ) -> usize {
+    bound_inline_images_with_count_and_bytes(
+        chat_messages,
+        trigger_bytes,
+        target_bytes,
+        usize::MAX,
+        usize::MAX,
+    )
+}
+
+pub fn bound_inline_images_with_count_and_bytes(
+    chat_messages: &mut [Value],
+    trigger_bytes: usize,
+    target_bytes: usize,
+    max_count: usize,
+    target_count: usize,
+) -> usize {
+    let mut removed = 0usize;
+
+    // 1. Prune superseded `capture_film_preview` rounds (keep only the latest preview batch).
+    let preview_msg_indices: Vec<usize> = chat_messages
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, msg)| is_preview_vision_message(msg).then_some(idx))
+        .collect();
+    if preview_msg_indices.len() > 1 {
+        for &old_idx in &preview_msg_indices[..preview_msg_indices.len() - 1] {
+            if let Some(arr) = chat_messages
+                .get_mut(old_idx)
+                .and_then(|m| m.get_mut("content"))
+                .and_then(|c| c.as_array_mut())
+            {
+                for part in arr.iter_mut() {
+                    let is_img = part
+                        .pointer("/image_url/url")
+                        .and_then(Value::as_str)
+                        .is_some_and(|u| u.starts_with("data:image/"));
+                    if is_img {
+                        *part = json!({
+                            "type": "text",
+                            "text": "[Superseded preview image removed; inspect the latest capture_film_preview batch instead.]"
+                        });
+                        removed += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Deterministic FIFO-replay hysteresis on BOTH byte budget and max image count.
     let mut kept: std::collections::VecDeque<(usize, usize, usize)> =
         std::collections::VecDeque::new();
     let mut kept_bytes: usize = 0;
@@ -288,8 +396,10 @@ pub fn bound_inline_images_with_limits(
                 }
                 kept.push_back((msg_idx, part_idx, img_len));
                 kept_bytes += img_len;
-                if kept_bytes > trigger_bytes {
-                    while kept_bytes > target_bytes && kept.len() > 1 {
+                if kept_bytes > trigger_bytes || kept.len() > max_count {
+                    while (kept_bytes > target_bytes || kept.len() > target_count)
+                        && kept.len() > 1
+                    {
                         if let Some((old_m, old_p, old_len)) = kept.pop_front() {
                             kept_bytes = kept_bytes.saturating_sub(old_len);
                             remove_slots.push((old_m, old_p));
@@ -306,7 +416,6 @@ pub fn bound_inline_images_with_limits(
         }
     }
 
-    let mut removed = 0usize;
     for (msg_idx, part_idx) in remove_slots {
         if let Some(part) = chat_messages
             .get_mut(msg_idx)
@@ -325,10 +434,12 @@ pub fn bound_inline_images_with_limits(
 }
 
 pub fn bound_inline_images(chat_messages: &mut [Value]) -> usize {
-    bound_inline_images_with_limits(
+    bound_inline_images_with_count_and_bytes(
         chat_messages,
         IMAGE_BUDGET_TRIGGER_BYTES,
         IMAGE_BUDGET_TARGET_BYTES,
+        IMAGE_BUDGET_MAX_COUNT,
+        IMAGE_BUDGET_TARGET_COUNT,
     )
 }
 
@@ -988,6 +1099,74 @@ mod tests {
         assert_eq!(rem4, 1);
         assert_eq!(step3[0], step4[0]);
         assert_eq!(step3[1], step4[1]);
+    }
+
+    #[test]
+    fn prunes_superseded_preview_batches_and_enforces_max_image_count_cap() {
+        let ref_msg = json!({
+            "role": "user",
+            "content": [
+                { "type": "text", "text": "[Tool visual output attached below in exact order:\n1. ref/extracted/frames/ref_scene_01.jpg\n]" },
+                { "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,REF1" } }
+            ]
+        });
+        let prev_round1 = json!({
+            "role": "user",
+            "content": [
+                { "type": "text", "text": "[Tool visual output attached below in exact order:\n1. preview_0.jpg @ t=0.5s\n2. preview_1.jpg @ t=2.0s\n]" },
+                { "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,P1A" } },
+                { "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,P1B" } }
+            ]
+        });
+        let prev_round2 = json!({
+            "role": "user",
+            "content": [
+                { "type": "text", "text": "[Tool visual output attached below in exact order:\n1. preview_0.jpg @ t=0.5s\n]" },
+                { "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,P2A" } }
+            ]
+        });
+        let mut msgs = vec![ref_msg, prev_round1, prev_round2];
+        let removed = bound_inline_images(&mut msgs);
+        assert_eq!(removed, 2, "old preview round images must be pruned");
+        assert_eq!(count_active_inline_images(&msgs), 2, "ref keyframe + latest preview kept");
+        assert!(msgs[0].pointer("/content/1/image_url/url").is_some());
+        assert!(msgs[2].pointer("/content/1/image_url/url").is_some());
+        assert!(msgs[1]
+            .pointer("/content/1/text")
+            .and_then(Value::as_str)
+            .is_some_and(|s| s.contains("Superseded preview image removed")));
+
+        // Count-based FIFO hysteresis: 18 tiny images (well below 25 MiB):
+        // At image #17 (> 16), prunes oldest 3 down to target (14); image #18 brings count to 15
+        // (<= 16) without shifting the cut boundary (prompt-cache stable).
+        let mut many: Vec<Value> = (0..18)
+            .map(|i| {
+                json!({
+                    "role": "user",
+                    "content": [{
+                        "type": "image_url",
+                        "image_url": { "url": format!("data:image/jpeg;base64,IMG{:02}", i) }
+                    }]
+                })
+            })
+            .collect();
+        let count_removed = bound_inline_images(&mut many);
+        assert_eq!(count_removed, 3);
+        assert_eq!(count_active_inline_images(&many), IMAGE_BUDGET_TARGET_COUNT + 1);
+
+        // Appending 2 more images crosses 16 again (17 > 16) and prunes cleanly down to 14.
+        for i in 18..20 {
+            many.push(json!({
+                "role": "user",
+                "content": [{
+                    "type": "image_url",
+                    "image_url": { "url": format!("data:image/jpeg;base64,IMG{:02}", i) }
+                }]
+            }));
+        }
+        let count_removed2 = bound_inline_images(&mut many);
+        assert_eq!(count_removed2, 3);
+        assert_eq!(count_active_inline_images(&many), IMAGE_BUDGET_TARGET_COUNT);
     }
 
     #[test]
