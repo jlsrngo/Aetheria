@@ -28,6 +28,12 @@ pub async fn run_session_prompt_sync(
         .and_then(|v| v.as_str())
         .unwrap_or("gemini-3.8-flash-low")
         .to_string();
+    let model_variant = model_ref
+        .get("variant")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
 
     let user_msg_id = gen_id("msg");
     let created_ms = now_ms();
@@ -37,15 +43,20 @@ pub async fn run_session_prompt_sync(
         prompt_text.to_string()
     };
 
+    let mut persisted_model = json!({
+        "providerID": provider_id,
+        "id": model_id
+    });
+    if let Some(ref var) = model_variant {
+        persisted_model["variant"] = json!(var);
+    }
+
     let user_msg = json!({
         "id": user_msg_id,
         "type": "user",
         "role": "user",
         "agent": "default",
-        "model": {
-            "providerID": provider_id,
-            "id": model_id
-        },
+        "model": persisted_model.clone(),
         "text": display_prompt,
         "content": [{ "type": "text", "text": display_prompt }],
         "time": { "created": created_ms }
@@ -70,10 +81,7 @@ pub async fn run_session_prompt_sync(
                 json!({
                     "id": session_id,
                     "title": title,
-                    "model": {
-                        "providerID": provider_id,
-                        "id": model_id
-                    },
+                    "model": persisted_model,
                     "time": {
                         "created": created_ms,
                         "updated": created_ms

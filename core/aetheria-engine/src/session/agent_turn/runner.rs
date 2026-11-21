@@ -29,7 +29,7 @@ use serde_json::{json, Value};
 
 use super::context::{
     assemble_system_prompt_for_turn, resolve_mentioned_files, resolve_motioncraft_style_command,
-    resolve_reference_report, resolve_voice_preset_command,
+    resolve_reference_report_for_prompt, resolve_voice_preset_command,
 };
 use super::step_http::{execute_step_and_stream, StepHttpContext, StepStreamOutcome};
 use super::tool_batch::execute_tool_batch;
@@ -219,7 +219,7 @@ pub async fn run_agent_turn(
 
     let (configured_steps, max_loop_steps) =
         mark_active_turn_and_resolve_steps(session_id, workspace_dir, started_ms, &cfg);
-    const MAX_TURN_WALL_CLOCK_MS: u64 = 15 * 60 * 1000;
+    const MAX_TURN_WALL_CLOCK_MS: u64 = 30 * 60 * 1000;
     let mut step = 0usize;
     let mut overflow_compacted_this_step = false;
     let mut consecutive_blocked_batches = 0usize;
@@ -227,7 +227,7 @@ pub async fn run_agent_turn(
     while step < max_loop_steps {
         if crate::paths::now_ms().saturating_sub(started_ms) >= MAX_TURN_WALL_CLOCK_MS {
             reached_max_steps = true;
-            final_text = "Turn wall-clock time budget (15m) reached; finalizing cleanly.".to_string();
+            final_text = "Turn wall-clock time budget (30m) reached; finalizing cleanly.".to_string();
             final_text_streamed = true;
             break;
         }
@@ -339,7 +339,7 @@ pub async fn run_agent_turn(
                 StepStreamOutcome::Failed(step_err) => {
                     if !overflow_compacted_this_step
                         && policy.auto_enabled
-                        && step_err.category == "context-overflow"
+                        && (step_err.is_context_overflow || step_err.category == "context-overflow")
                     {
                         overflow_compacted_this_step = true;
                         match compact_with_budget_ladder(
@@ -526,6 +526,7 @@ pub async fn run_agent_turn(
             &current_provider_id,
             &current_model_id,
             started_ms,
+            &content_parts,
             &tool_calls,
         );
         chat_messages.push(msg);
@@ -696,7 +697,9 @@ async fn prepare_initial_chat_messages(
         let is_first_session_turn = !history
             .iter()
             .any(|m| m.get("type").and_then(|v| v.as_str()) == Some("assistant"));
-        if crate::studio::project_registry::has_active_project_selection(ws_path) {
+        if crate::studio::project_registry::has_active_project_selection(ws_path)
+            || crate::studio::project_registry::is_new_video_creation_prompt(prompt_text)
+        {
             if let Some(html_name) = first_html_or_svg_attachment_name(files) {
                 let _ = crate::studio::project_registry::ensure_project_for_uploaded_file(
                     ws_path, &html_name,
@@ -714,14 +717,46 @@ async fn prepare_initial_chat_messages(
             }
         }
     }
-    let sys_prompt = super::context::optimize_system_prompt_for_model(
-        assemble_system_prompt_for_turn(workspace_dir, prompt_text),
-        model_id,
-    );
-    let (effective_history, was_compacted) = crate::session::compaction::compact_session_history(
-        history,
-        crate::session::compaction::DEFAULT_CONTEXT_WINDOW,
-    );
+    let is_greeting = is_greeting_prompt(prompt_text);
+    let frozen_hit = if !is_greeting && !workspace_dir.trim().is_empty() {
+        crate::session::session::with_store(|store| {
+            let sess = store.sessions.get(session_id)?;
+            let matches_ws = sess.get("frozenSystemWorkspace").and_then(Value::as_str)
+                == Some(workspace_dir);
+            let matches_model =
+                sess.get("frozenSystemModel").and_then(Value::as_str) == Some(model_id);
+            if matches_ws && matches_model {
+                sess.get("frozenSystemPrompt")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            } else {
+                None
+            }
+        })
+    } else {
+        None
+    };
+    let sys_prompt = if let Some(cached) = frozen_hit {
+        cached
+    } else {
+        let computed = super::context::optimize_system_prompt_for_model(
+            assemble_system_prompt_for_turn(workspace_dir, prompt_text),
+            model_id,
+        );
+        if !is_greeting && !workspace_dir.trim().is_empty() {
+            crate::session::session::with_store(|store| {
+                if let Some(sess) = store.sessions.get_mut(session_id) {
+                    sess["frozenSystemPrompt"] = json!(computed);
+                    sess["frozenSystemWorkspace"] = json!(workspace_dir);
+                    sess["frozenSystemModel"] = json!(model_id);
+                }
+            });
+        }
+        computed
+    };
+    let initial_limit = resolve_model_context_limit(cfg, provider_id, model_id);
+    let (effective_history, was_compacted) =
+        crate::session::compaction::compact_session_history(history, initial_limit.context);
     if was_compacted {
         crate::paths::log_engine(
             "session",
@@ -758,12 +793,11 @@ async fn prepare_initial_chat_messages(
     attached_images.extend(social_images);
 
     let lower_prompt = prompt_text.trim().to_lowercase();
-    let is_greeting = is_greeting_prompt(prompt_text);
     if !is_greeting {
         extra_context.extend(resolve_mentioned_files(workspace_dir, prompt_text));
-        let mut has_style_or_ref = false;
+        let mut has_explicit_skill = false;
         if let Some(style_ctx) = resolve_motioncraft_style_command(workspace_dir, prompt_text) {
-            has_style_or_ref = true;
+            has_explicit_skill = true;
             extra_context.push(style_ctx);
         }
         if let Some(audio_ctx) = resolve_voice_preset_command(prompt_text) {
@@ -795,9 +829,22 @@ async fn prepare_initial_chat_messages(
             || lower_prompt.contains("video preset")
             || has_media_attachments
             || !attached_images.is_empty();
-        if wants_reference {
-            if let Some(ref_report) = resolve_reference_report(workspace_dir) {
-                has_style_or_ref = true;
+        let already_injected_ref_report = chat_messages.iter().any(|m| match m.get("content") {
+            Some(Value::String(s)) => {
+                s.contains("[Active Video Reference Blueprint")
+                    || s.contains("[Active Video Reference Analysis")
+            }
+            Some(Value::Array(arr)) => arr.iter().any(|item| {
+                item.get("text").and_then(|v| v.as_str()).is_some_and(|t| {
+                    t.contains("[Active Video Reference Blueprint")
+                        || t.contains("[Active Video Reference Analysis")
+                })
+            }),
+            _ => false,
+        });
+        if wants_reference && !already_injected_ref_report {
+            if let Some(ref_report) = resolve_reference_report_for_prompt(workspace_dir, prompt_text)
+            {
                 extra_context.push(ref_report);
             }
         }
@@ -814,7 +861,7 @@ async fn prepare_initial_chat_messages(
             && super::context::should_inject_am_api_reference(
                 workspace_dir,
                 prompt_text,
-                has_style_or_ref,
+                has_explicit_skill,
             )
         {
             let am_ref = super::context::load_am_api_reference(workspace_dir);
@@ -1024,7 +1071,7 @@ pub(crate) fn model_supports_vision_from_config(
         || has_openai_reasoning_vision
 }
 
-fn local_bridge_supports_reasoning_effort(provider_id: &str, model_id: &str) -> Option<bool> {
+pub(crate) fn local_bridge_supports_reasoning_effort(provider_id: &str, model_id: &str) -> Option<bool> {
     let p = provider_id.trim().to_ascii_lowercase();
     let m = model_id.trim().to_ascii_lowercase();
     let uses_bridge = matches!(
@@ -1078,6 +1125,53 @@ pub(crate) fn model_supports_reasoning_from_config(
     ["o1", "o3", "o4", "gpt-5", "gemini-2.5", "gemini-3", "deepseek-r"]
         .iter()
         .any(|prefix| lower.contains(prefix))
+}
+
+/// Resolves the effective `reasoning_effort` for a turn, preferring an explicit
+/// session `model.variant` (e.g. `9router/ComboMaut` with `variant: "high"`) and
+/// falling back to global `/agent/default/reasoning` or `/reasoning_effort`.
+pub(crate) fn resolve_session_reasoning_effort(
+    session_id: &str,
+    cfg: &Value,
+    provider_id: &str,
+    model_id: &str,
+) -> Option<String> {
+    let explicitly_disabled = find_model_config(cfg, provider_id, model_id)
+        .and_then(|m| {
+            m.get("reasoning")
+                .or_else(|| m.pointer("/capabilities/reasoning"))
+                .and_then(Value::as_bool)
+        })
+        == Some(false)
+        || local_bridge_supports_reasoning_effort(provider_id, model_id) == Some(false);
+    if explicitly_disabled {
+        return None;
+    }
+
+    let session_variant = crate::session::session::with_store(|s| {
+        s.sessions
+            .get(session_id)
+            .and_then(|sess| sess.pointer("/model/variant"))
+            .and_then(Value::as_str)
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty() && !v.eq_ignore_ascii_case("default"))
+    });
+    if let Some(variant) = session_variant {
+        return Some(variant);
+    }
+
+    let cfg_effort = cfg
+        .pointer("/agent/default/reasoning")
+        .or_else(|| cfg.pointer("/reasoning_effort"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)?;
+    if model_supports_reasoning_from_config(Some(cfg), provider_id, model_id) {
+        Some(cfg_effort)
+    } else {
+        None
+    }
 }
 
 async fn resolve_provider_connection(
@@ -1138,8 +1232,11 @@ async fn resolve_provider_connection(
         .and_then(|v| v.as_u64())
         .filter(|&ms| ms >= 50)
         .unwrap_or(180_000);
+    // Use per-read idle timeout instead of total wall timeout so long high-output streams
+    // (e.g. 50 KB+ code writes taking >140s) stay alive as long as bytes are streaming.
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_millis(request_timeout_ms))
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .read_timeout(std::time::Duration::from_millis(request_timeout_ms))
         .build()
         .unwrap_or_default();
 
@@ -1149,6 +1246,18 @@ async fn resolve_provider_connection(
         api_key,
         client,
     }
+}
+
+fn resolve_agent_step_budget(cfg: &Value, session_agent_id: Option<&str>) -> (Option<usize>, usize) {
+    let configured_steps = session_agent_id.and_then(|agent_id| {
+        cfg.pointer(&format!("/agent/{}/steps", agent_id))
+            .or_else(|| cfg.pointer(&format!("/agent/{}/maxSteps", agent_id)))
+            .or_else(|| cfg.pointer(&format!("/agent/{}/max_steps", agent_id)))
+            .and_then(|v| v.as_u64())
+            .map(|n| n.max(1) as usize)
+    });
+    let max_loop_steps = configured_steps.unwrap_or(usize::MAX);
+    (configured_steps, max_loop_steps)
 }
 
 fn mark_active_turn_and_resolve_steps(
@@ -1171,15 +1280,7 @@ fn mark_active_turn_and_resolve_steps(
             .and_then(|v| v.as_str())
             .map(str::to_string)
     });
-    let configured_steps = session_agent_id.as_deref().and_then(|agent_id| {
-        cfg.pointer(&format!("/agent/{}/steps", agent_id))
-            .or_else(|| cfg.pointer(&format!("/agent/{}/maxSteps", agent_id)))
-            .or_else(|| cfg.pointer(&format!("/agent/{}/max_steps", agent_id)))
-            .and_then(|v| v.as_u64())
-            .map(|n| n.max(1) as usize)
-    });
-    let max_loop_steps = configured_steps.unwrap_or(51);
-    (configured_steps, max_loop_steps)
+    resolve_agent_step_budget(cfg, session_agent_id.as_deref())
 }
 
 async fn run_auto_compaction_or_finalize(
@@ -1261,9 +1362,13 @@ async fn maybe_compact_in_turn(
         }
         *last_usage_slot = None;
         *cycle_start_tokens = 0;
-    } else if (step >= 28 && chat_messages.len() > 65)
-        || est_tokens > policy.context_limit.saturating_mul(85) / 100
-        || crate::session::compaction::should_compact(chat_messages, policy.context_limit)
+    } else if policy.context_limit > 0
+        && (est_tokens > policy.context_limit.saturating_mul(95) / 100
+            || (!policy.auto_enabled
+                && crate::session::compaction::should_compact(
+                    chat_messages,
+                    policy.context_limit,
+                )))
     {
         *chat_messages = crate::session::compaction::emergency_compact_messages(chat_messages);
     }
@@ -1863,5 +1968,128 @@ mod tests {
         assert_eq!(ver_r, 1);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn opencode_parity_unlimited_steps_and_session_variant_reasoning() {
+        let cfg = json!({});
+        assert_eq!(resolve_agent_step_budget(&cfg, Some("default")), (None, usize::MAX));
+
+        let capped_cfg = json!({ "agent": { "default": { "steps": 12 } } });
+        assert_eq!(resolve_agent_step_budget(&capped_cfg, Some("default")), (Some(12), 12));
+
+        let sid = format!("ses_variant_test_{}", crate::paths::now_ms());
+        crate::session::session::with_store(|store| {
+            store.sessions.insert(
+                sid.clone(),
+                json!({
+                    "id": sid,
+                    "model": { "providerID": "9router", "id": "ComboMaut", "variant": "high" }
+                }),
+            );
+        });
+        assert_eq!(
+            resolve_session_reasoning_effort(&sid, &cfg, "9router", "ComboMaut").as_deref(),
+            Some("high")
+        );
+        crate::session::session::with_store(|store| {
+            store.sessions.remove(&sid);
+        });
+    }
+
+    #[tokio::test]
+    async fn maybe_compact_in_turn_does_not_fire_emergency_compaction_on_long_message_count() {
+        let client = reqwest::Client::new();
+        let target = TurnTarget {
+            session_id: "ses_no_premature_compact",
+            workspace_dir: "",
+            assistant_msg_id: "msg_1",
+            started_ms: 1000,
+        };
+        let ep = TurnEndpoint {
+            client: &client,
+            base_url: "http://127.0.0.1:1/v1",
+            api_key: "k",
+            provider_id: "9router",
+            model_id: "ComboMaut",
+        };
+        let policy = CompactionPolicy {
+            auto_enabled: true,
+            background_enabled: false,
+            ceiling: crate::session::compaction_budget::calculate_ceiling(200_000),
+            context_limit: 200_000,
+        };
+        let mut chat_messages = vec![json!({ "role": "system", "content": "OpenCode system" })];
+        for i in 0..75 {
+            chat_messages.push(json!({ "role": "user", "content": format!("msg {}", i) }));
+        }
+        let orig_len = chat_messages.len();
+        let mut content_parts = Vec::new();
+        let usage_acc = TurnUsageAccumulator::default();
+        let mut last_usage = None;
+        let mut cycle_start = 0usize;
+
+        let ok = maybe_compact_in_turn(
+            35,
+            policy,
+            &target,
+            &ep,
+            &mut content_parts,
+            &usage_acc,
+            &mut chat_messages,
+            &mut last_usage,
+            &mut cycle_start,
+        )
+        .await;
+        assert!(ok);
+        assert_eq!(chat_messages.len(), orig_len);
+    }
+
+    #[tokio::test]
+    async fn maybe_compact_in_turn_skips_compaction_when_context_window_unknown() {
+        let client = reqwest::Client::new();
+        let target = TurnTarget {
+            session_id: "ses_unknown_ctx_window",
+            workspace_dir: "",
+            assistant_msg_id: "msg_1",
+            started_ms: 1000,
+        };
+        let ep = TurnEndpoint {
+            client: &client,
+            base_url: "http://127.0.0.1:1/v1",
+            api_key: "k",
+            provider_id: "9router",
+            model_id: "ComboMaut",
+        };
+        let policy = CompactionPolicy {
+            auto_enabled: true,
+            background_enabled: false,
+            ceiling: usize::MAX,
+            context_limit: 0,
+        };
+        let mut chat_messages = vec![json!({ "role": "system", "content": "OpenCode system" })];
+        for _ in 0..30 {
+            chat_messages.push(json!({ "role": "user", "content": "X".repeat(40_000) }));
+        }
+        let orig_len = chat_messages.len();
+        let mut content_parts = Vec::new();
+        let usage_acc = TurnUsageAccumulator::default();
+        let mut last_usage = None;
+        let mut cycle_start = 0usize;
+
+        let ok = maybe_compact_in_turn(
+            40,
+            policy,
+            &target,
+            &ep,
+            &mut content_parts,
+            &usage_acc,
+            &mut chat_messages,
+            &mut last_usage,
+            &mut cycle_start,
+        )
+        .await;
+        assert!(ok);
+        assert_eq!(chat_messages.len(), orig_len);
     }
 }

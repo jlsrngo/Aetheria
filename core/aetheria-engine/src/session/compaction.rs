@@ -15,8 +15,8 @@ pub const DEFAULT_KEEP_TOKENS: usize = 8_000;
 /// Minimum recent messages to preserve intact even under tight budgets.
 pub const MIN_RECENT_MESSAGES_TO_PRESERVE: usize = 6;
 
-/// Default assumed context window if not specified by provider (128k standard).
-pub const DEFAULT_CONTEXT_WINDOW: usize = 128_000;
+/// Default assumed context window if not specified by provider (200k matching OpenCode).
+pub const DEFAULT_CONTEXT_WINDOW: usize = 200_000;
 
 /// Approximates token count using character length (~4 characters per token).
 pub fn estimate_tokens(text: &str) -> usize {
@@ -73,7 +73,7 @@ pub fn total_history_tokens(history: &[Value]) -> usize {
 
 /// Checks if the history should be compacted based on context limits.
 pub fn should_compact(history: &[Value], context_limit: usize) -> bool {
-    if history.len() <= MIN_RECENT_MESSAGES_TO_PRESERVE {
+    if context_limit == 0 || history.len() <= MIN_RECENT_MESSAGES_TO_PRESERVE {
         return false;
     }
     let threshold = context_limit.saturating_sub(DEFAULT_BUFFER_TOKENS);
@@ -91,7 +91,7 @@ pub use super::provider_error::{
 /// - Older messages are synthesized into an anchored OpenCode summary block.
 /// - Recent messages (up to `DEFAULT_KEEP_TOKENS` or `MIN_RECENT_MESSAGES_TO_PRESERVE`) are kept intact.
 pub fn compact_session_history(history: &[Value], context_limit: usize) -> (Vec<Value>, bool) {
-    if history.len() <= MIN_RECENT_MESSAGES_TO_PRESERVE {
+    if context_limit == 0 || history.len() <= MIN_RECENT_MESSAGES_TO_PRESERVE {
         return (history.to_vec(), false);
     }
 

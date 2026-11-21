@@ -260,54 +260,65 @@ pub(crate) fn build_historical_turn_warning(msg: &Value, unresolved: &[String]) 
 pub const IMAGE_BUDGET_TRIGGER_BYTES: usize = 25 * 1024 * 1024; // 25 MiB
 pub const IMAGE_BUDGET_TARGET_BYTES: usize = 15 * 1024 * 1024;  // 15 MiB
 
-/// Bounds total inline base64 `image_url` bytes across `chat_messages` using hysteresis
-/// (`trigger_bytes` -> prune oldest images down to `target_bytes`) so prompt-cache prefixes remain
-/// stable between cuts while preventing multimodal payload blowups.
+/// Bounds total inline base64 `image_url` bytes across `chat_messages` using deterministic
+/// FIFO-replay hysteresis (`trigger_bytes` -> prune oldest images down to `target_bytes`) so
+/// adding images at the tail never shifts existing cut boundaries until the surviving window
+/// crosses `trigger_bytes` again — keeping prompt-cache prefixes stable between cuts.
 pub fn bound_inline_images_with_limits(
     chat_messages: &mut [Value],
     trigger_bytes: usize,
     target_bytes: usize,
 ) -> usize {
-    let mut total_bytes: usize = 0;
-    for msg in chat_messages.iter() {
+    let mut kept: std::collections::VecDeque<(usize, usize, usize)> =
+        std::collections::VecDeque::new();
+    let mut kept_bytes: usize = 0;
+    let mut remove_slots: Vec<(usize, usize)> = Vec::new();
+
+    for (msg_idx, msg) in chat_messages.iter().enumerate() {
         if let Some(arr) = msg.get("content").and_then(|v| v.as_array()) {
-            for part in arr {
-                if let Some(url) = part.pointer("/image_url/url").and_then(|v| v.as_str()) {
-                    if url.starts_with("data:image/") {
-                        total_bytes += url.len();
-                    }
-                }
-            }
-        }
-    }
-    if total_bytes <= trigger_bytes {
-        return 0;
-    }
-    let mut removed = 0usize;
-    for msg in chat_messages.iter_mut() {
-        if total_bytes <= target_bytes {
-            break;
-        }
-        if let Some(arr) = msg.get_mut("content").and_then(|v| v.as_array_mut()) {
-            for part in arr.iter_mut() {
-                if total_bytes <= target_bytes {
-                    break;
-                }
+            for (part_idx, part) in arr.iter().enumerate() {
                 let img_len = part
                     .pointer("/image_url/url")
                     .and_then(|v| v.as_str())
                     .filter(|u| u.starts_with("data:image/"))
                     .map(|u| u.len())
                     .unwrap_or(0);
-                if img_len > 0 {
-                    *part = json!({
-                        "type": "text",
-                        "text": "[This image was removed to keep the conversation within multimodal size limits.]"
-                    });
-                    total_bytes = total_bytes.saturating_sub(img_len);
-                    removed += 1;
+                if img_len == 0 {
+                    continue;
+                }
+                kept.push_back((msg_idx, part_idx, img_len));
+                kept_bytes += img_len;
+                if kept_bytes > trigger_bytes {
+                    while kept_bytes > target_bytes && kept.len() > 1 {
+                        if let Some((old_m, old_p, old_len)) = kept.pop_front() {
+                            kept_bytes = kept_bytes.saturating_sub(old_len);
+                            remove_slots.push((old_m, old_p));
+                        }
+                    }
+                    if kept_bytes > target_bytes && kept_bytes > trigger_bytes && kept.len() == 1 {
+                        if let Some((old_m, old_p, old_len)) = kept.pop_front() {
+                            kept_bytes = kept_bytes.saturating_sub(old_len);
+                            remove_slots.push((old_m, old_p));
+                        }
+                    }
                 }
             }
+        }
+    }
+
+    let mut removed = 0usize;
+    for (msg_idx, part_idx) in remove_slots {
+        if let Some(part) = chat_messages
+            .get_mut(msg_idx)
+            .and_then(|m| m.get_mut("content"))
+            .and_then(|c| c.as_array_mut())
+            .and_then(|arr| arr.get_mut(part_idx))
+        {
+            *part = json!({
+                "type": "text",
+                "text": "[This image was removed to keep the conversation within multimodal size limits.]"
+            });
+            removed += 1;
         }
     }
     removed
@@ -334,6 +345,14 @@ pub fn build_chat_messages_with_options(
     model_supports_vision: bool,
 ) -> Vec<Value> {
     let mut chat_messages = vec![json!({ "role": "system", "content": sys_prompt })];
+    let compact_start_idx = effective_history
+        .iter()
+        .rposition(|m| {
+            m.get("compactedSummary").and_then(|v| v.as_bool()) == Some(true)
+                || m.get("compacted").and_then(|v| v.as_bool()) == Some(true)
+        })
+        .unwrap_or(0);
+    let active_history = &effective_history[compact_start_idx..];
 
     // Pre-scan clean assistant turns so buckets resolved in a later turn j > i
     // do not keep carrying stale `[UNRESOLVED TOOL ERRORS IN TURN]` warnings on turn i.
@@ -341,7 +360,7 @@ pub fn build_chat_messages_with_options(
         std::collections::HashMap::new();
     let mut cross_turn_failed_subagent_buckets: std::collections::HashMap<String, Vec<(String, String)>> =
         std::collections::HashMap::new();
-    for (idx, m) in effective_history.iter().enumerate() {
+    for (idx, m) in active_history.iter().enumerate() {
         if m.get("type").and_then(|v| v.as_str()) != Some("assistant") {
             continue;
         }
@@ -408,9 +427,9 @@ pub fn build_chat_messages_with_options(
         }
     }
 
-    let total_turns = effective_history.len();
-    for (turn_idx, m) in effective_history.iter().enumerate() {
-        let is_recent_turn = turn_idx + 3 >= total_turns;
+    const HISTORICAL_TEXT_ATTACHMENT_CAP: usize = 60_000;
+    const HISTORICAL_TOOL_OUTPUT_CAP: usize = 50_000;
+    for (turn_idx, m) in active_history.iter().enumerate() {
         let mtype = m.get("type").and_then(|v| v.as_str()).unwrap_or("");
         if mtype == "synthetic" {
             let txt = m.get("text").and_then(|v| v.as_str()).unwrap_or("");
@@ -422,7 +441,7 @@ pub fn build_chat_messages_with_options(
             let mut enriched_txt = txt.to_string();
             let mut img_urls: Vec<String> = Vec::new();
             let mut omitted_img_count = 0usize;
-            let text_att_cap = if is_recent_turn { 60_000usize } else { 24_000usize };
+            let text_att_cap = HISTORICAL_TEXT_ATTACHMENT_CAP;
             if let Some(arr) = m.get("files").and_then(|v| v.as_array()) {
                 for f in arr {
                     let fname = f.get("name").and_then(|v| v.as_str()).unwrap_or("attached_file");
@@ -466,19 +485,22 @@ pub fn build_chat_messages_with_options(
             }
         } else if mtype == "assistant" {
             let parts = m.get("content").and_then(|v| v.as_array());
-            let tool_out_cap = if is_recent_turn { 4_000usize } else { 800usize };
-            let tool_args_cap = if is_recent_turn { 2_400usize } else { 600usize };
 
             // Preserve multi-step causal boundaries: walk `parts` in order so intervening text
             // between tool batches emits separate (assistant -> tool -> assistant) steps instead
-            // of collapsing every step into one synthetic parallel batch.
+            // of collapsing every step into one synthetic parallel batch. Keep outputs/args stable
+            // across turns so provider KV prompt-cache prefixes never invalidate.
             let mut pending_text = String::new();
+            let mut pending_reasoning = String::new();
+            let mut pending_reasoning_field: Option<String> = None;
             let mut pending_tool_calls: Vec<Value> = Vec::new();
             let mut pending_tool_results: Vec<Value> = Vec::new();
             let mut emitted_any_step = false;
 
             let flush_tool_step = |msgs: &mut Vec<Value>,
                                    pre_text: &mut String,
+                                   pre_reasoning: &mut String,
+                                   pre_reasoning_field: &mut Option<String>,
                                    tcs: &mut Vec<Value>,
                                    trs: &mut Vec<Value>,
                                    emitted: &mut bool| {
@@ -491,11 +513,18 @@ pub fn build_chat_messages_with_options(
                     Value::String(std::mem::take(pre_text))
                 };
                 pre_text.clear();
-                msgs.push(json!({
+                let mut step_msg = json!({
                     "role": "assistant",
                     "content": content_val,
                     "tool_calls": std::mem::take(tcs)
-                }));
+                });
+                let r_txt = std::mem::take(pre_reasoning);
+                let r_field = pre_reasoning_field.take();
+                if !r_txt.trim().is_empty() {
+                    let field = r_field.as_deref().unwrap_or("reasoning_content");
+                    step_msg[field] = Value::String(r_txt);
+                }
+                msgs.push(step_msg);
                 for tr in trs.drain(..) {
                     msgs.push(tr);
                 }
@@ -505,11 +534,35 @@ pub fn build_chat_messages_with_options(
             if let Some(arr) = parts {
                 for p in arr {
                     let ptype = p.get("type").and_then(|t| t.as_str()).unwrap_or("");
-                    if ptype == "text" {
+                    if ptype == "reasoning" {
                         if !pending_tool_calls.is_empty() {
                             flush_tool_step(
                                 &mut chat_messages,
                                 &mut pending_text,
+                                &mut pending_reasoning,
+                                &mut pending_reasoning_field,
+                                &mut pending_tool_calls,
+                                &mut pending_tool_results,
+                                &mut emitted_any_step,
+                            );
+                        }
+                        if pending_reasoning_field.is_none() {
+                            if let Some(f) = p.get("reasoningField").and_then(Value::as_str) {
+                                if !f.trim().is_empty() {
+                                    pending_reasoning_field = Some(f.to_string());
+                                }
+                            }
+                        }
+                        if let Some(r) = p.get("text").and_then(Value::as_str) {
+                            pending_reasoning.push_str(r);
+                        }
+                    } else if ptype == "text" {
+                        if !pending_tool_calls.is_empty() {
+                            flush_tool_step(
+                                &mut chat_messages,
+                                &mut pending_text,
+                                &mut pending_reasoning,
+                                &mut pending_reasoning_field,
                                 &mut pending_tool_calls,
                                 &mut pending_tool_results,
                                 &mut emitted_any_step,
@@ -532,8 +585,9 @@ pub fn build_chat_messages_with_options(
                                     .map(|s| s.to_string())
                             })
                             .unwrap_or_else(|| "{}".to_string());
-                        let out_str: String = if out_str_raw.len() > tool_out_cap {
-                            let mut truncated: String = out_str_raw.chars().take(tool_out_cap).collect();
+                        let out_str: String = if out_str_raw.len() > HISTORICAL_TOOL_OUTPUT_CAP {
+                            let mut truncated: String =
+                                out_str_raw.chars().take(HISTORICAL_TOOL_OUTPUT_CAP).collect();
                             truncated.push_str("...[truncated historical output]");
                             truncated
                         } else {
@@ -541,38 +595,12 @@ pub fn build_chat_messages_with_options(
                         };
 
                         let args_raw = serde_json::to_string(&input_val).unwrap_or_else(|_| "{}".to_string());
-                        let args_compact = if args_raw.len() > tool_args_cap {
-                            let fp = input_val
-                                .get("filePath")
-                                .or_else(|| input_val.get("path"))
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("");
-                            if fn_name == "write" {
-                                let preview: String = input_val
-                                    .get("content")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("")
-                                    .chars()
-                                    .take(160)
-                                    .collect();
-                                json!({
-                                    "filePath": fp,
-                                    "content": format!("{} ... [historical content omitted ({} chars)]", preview, args_raw.len())
-                                })
-                                .to_string()
-                            } else {
-                                json!({ "filePath": fp, "_note": "[historical content omitted]" }).to_string()
-                            }
-                        } else {
-                            args_raw
-                        };
-
                         let mut tc_obj = json!({
                             "id": cid,
                             "type": "function",
                             "function": {
                                 "name": fn_name,
-                                "arguments": args_compact
+                                "arguments": args_raw
                             }
                         });
                         if let Some(extra) = p.get("extra_content").filter(|v| !v.is_null()) {
@@ -594,6 +622,8 @@ pub fn build_chat_messages_with_options(
                 flush_tool_step(
                     &mut chat_messages,
                     &mut pending_text,
+                    &mut pending_reasoning,
+                    &mut pending_reasoning_field,
                     &mut pending_tool_calls,
                     &mut pending_tool_results,
                     &mut emitted_any_step,
@@ -634,8 +664,15 @@ pub fn build_chat_messages_with_options(
             }
 
             if !clean_txt.is_empty() || !emitted_any_step {
-                if !clean_txt.is_empty() {
-                    chat_messages.push(json!({ "role": "assistant", "content": clean_txt }));
+                if !clean_txt.is_empty() || !pending_reasoning.trim().is_empty() {
+                    let mut final_msg = json!({ "role": "assistant", "content": clean_txt });
+                    if !pending_reasoning.trim().is_empty() {
+                        let field = pending_reasoning_field
+                            .as_deref()
+                            .unwrap_or("reasoning_content");
+                        final_msg[field] = Value::String(pending_reasoning);
+                    }
+                    chat_messages.push(final_msg);
                 }
             }
         }
@@ -928,6 +965,82 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(!joined.contains("[UNRESOLVED TOOL ERRORS IN TURN:"));
+    }
+
+    #[test]
+    fn fifo_replay_image_hysteresis_keeps_cut_boundary_stable_on_append() {
+        let img = |ch: &str, count: usize| {
+            json!({
+                "role": "user",
+                "content": [{
+                    "type": "image_url",
+                    "image_url": { "url": format!("data:image/png;base64,{}", ch.repeat(count)) }
+                }]
+            })
+        };
+        let mut step3 = vec![img("A", 400), img("B", 400)];
+        let rem3 = bound_inline_images_with_limits(&mut step3, 500, 450);
+        assert_eq!(rem3, 1);
+
+        // Appending a small image stays below trigger (500), so the cut boundary stays identical.
+        let mut step4 = vec![img("A", 400), img("B", 400), img("C", 10)];
+        let rem4 = bound_inline_images_with_limits(&mut step4, 500, 450);
+        assert_eq!(rem4, 1);
+        assert_eq!(step3[0], step4[0]);
+        assert_eq!(step3[1], step4[1]);
+    }
+
+    #[test]
+    fn slices_at_compacted_summary_and_keeps_historical_tool_payloads_cache_stable() {
+        let big_out = "O".repeat(6_000);
+        let big_code = "C".repeat(3_500);
+        let hist = vec![
+            json!({ "type": "user", "text": "very old pre-compaction message" }),
+            json!({
+                "type": "assistant",
+                "compactedSummary": true,
+                "content": [{ "type": "text", "text": "## Objective\n- Anchored summary" }]
+            }),
+            json!({
+                "type": "assistant",
+                "content": [
+                    { "type": "reasoning", "text": "thinking step", "reasoningField": "reasoning" },
+                    {
+                        "type": "tool",
+                        "id": "call_big",
+                        "name": "write",
+                        "state": {
+                            "status": "completed",
+                            "input": { "filePath": "index.html", "content": big_code },
+                            "structured": { "ok": true, "output": big_code }
+                        }
+                    },
+                    {
+                        "type": "tool",
+                        "id": "call_read",
+                        "name": "read",
+                        "state": {
+                            "status": "completed",
+                            "input": { "filePath": "ref.txt" },
+                            "content": [{ "type": "text", "text": big_out }]
+                        }
+                    }
+                ]
+            }),
+            json!({ "type": "user", "text": "t2" }),
+            json!({ "type": "user", "text": "t3" }),
+            json!({ "type": "user", "text": "t4" }),
+            json!({ "type": "user", "text": "t5" }),
+        ];
+
+        let msgs = build_chat_messages(&hist, "sys");
+        let serialized = serde_json::to_string(&msgs).unwrap();
+        assert!(!serialized.contains("very old pre-compaction message"));
+        assert!(serialized.contains("Anchored summary"));
+        assert!(serialized.contains(&big_code));
+        assert!(serialized.contains(&big_out));
+        let step_msg = msgs.iter().find(|m| m.get("tool_calls").is_some()).unwrap();
+        assert_eq!(step_msg["reasoning"], json!("thinking step"));
     }
 }
 

@@ -147,7 +147,7 @@ pub fn emergency_compact_messages(messages: &[Value]) -> Vec<Value> {
                  Already completed in this turn:\n{}\n\
                  Actions executed: {}\n\
                  IMPORTANT: Do NOT greet the user and do NOT repeat files already written above. \
-                 Continue immediately with creating the remaining files and calling 'render_video'.",
+                 Continue immediately from the current workspace state without repeating completed edits.",
                 if files_written.is_empty() {
                     "- (none yet)".to_string()
                 } else {

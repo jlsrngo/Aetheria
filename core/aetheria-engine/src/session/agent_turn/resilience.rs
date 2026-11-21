@@ -6,7 +6,9 @@ pub use super::retry::{
     SYNTHETIC_OUTPUT_LIMIT_PROMPT,
 };
 pub use super::stale_settlement::settle_stale_session_state;
-pub use super::stream_parser::{parse_completion_body, sanitize_multimodal_messages_to_text};
+pub use super::stream_parser::{
+    parse_completion_body, parse_completion_body_with_usage, sanitize_multimodal_messages_to_text,
+};
 
 use serde_json::{json, Value};
 use std::time::Duration;
@@ -22,6 +24,8 @@ pub struct ResilientCompletionOutput {
     pub assistant_text: String,
     pub tool_calls: Vec<Value>,
     pub finish_reason: String,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
 }
 
 /// Executes a resilient chat completion request with full OpenCode recovery protections.
@@ -66,11 +70,16 @@ pub(crate) fn build_resilient_chat_payload_with_tool_choice(
 ) -> Value {
     let mut outbound_msgs = chat_messages.to_vec();
     super::history::bound_inline_images(&mut outbound_msgs);
+    let has_tool_history = outbound_msgs.iter().any(|m| {
+        m.get("role").and_then(Value::as_str) == Some("tool")
+            || m.get("tool_calls").and_then(Value::as_array).is_some_and(|a| !a.is_empty())
+    });
     let mut payload = json!({
         "model": model_id,
         "messages": outbound_msgs,
         "max_tokens": max_tokens,
-        "stream": true
+        "stream": true,
+        "stream_options": { "include_usage": true }
     });
     // OpenCode pattern: omit `temperature` when `None` (especially for all Gemini 2.5/3 models
     // so they run at their native calibrated temperature instead of degraded 0.3 overrides).
@@ -81,11 +90,18 @@ pub(crate) fn build_resilient_chat_payload_with_tool_choice(
         payload["reasoning_effort"] = json!(effort);
     }
     if !tools.is_empty() {
-        let normalized_tools = crate::bridge::schema::normalize_tools_for_model(model_id, tools);
+        let mut normalized_tools = crate::bridge::schema::normalize_tools_for_model(model_id, tools);
+        for t in &mut normalized_tools {
+            if let Some(fn_obj) = t.get_mut("function").and_then(Value::as_object_mut) {
+                fn_obj.entry("strict").or_insert_with(|| json!(false));
+            }
+        }
         payload["tools"] = Value::Array(normalized_tools);
         if let Some(tc) = tool_choice {
             payload["tool_choice"] = tc.clone();
         }
+    } else if has_tool_history {
+        payload["tools"] = json!([]);
     }
     payload
 }
@@ -103,7 +119,7 @@ pub async fn send_resilient_chat_completion_with_options(
     max_tokens: u64,
     reasoning_effort: Option<&str>,
 ) -> Result<ResilientCompletionOutput, String> {
-    send_resilient_chat_completion_with_tool_choice(
+    send_resilient_chat_completion_with_session(
         client,
         base_url,
         api_key,
@@ -113,6 +129,7 @@ pub async fn send_resilient_chat_completion_with_options(
         temperature,
         max_tokens,
         reasoning_effort,
+        None,
         None,
     )
     .await
@@ -132,6 +149,37 @@ pub async fn send_resilient_chat_completion_with_tool_choice(
     reasoning_effort: Option<&str>,
     tool_choice: Option<&Value>,
 ) -> Result<ResilientCompletionOutput, String> {
+    send_resilient_chat_completion_with_session(
+        client,
+        base_url,
+        api_key,
+        model_id,
+        chat_messages,
+        tools,
+        temperature,
+        max_tokens,
+        reasoning_effort,
+        tool_choice,
+        None,
+    )
+    .await
+}
+
+/// Variant accepting both optional `tool_choice` and `session_affinity` cache routing headers.
+#[allow(clippy::too_many_arguments)]
+pub async fn send_resilient_chat_completion_with_session(
+    client: &reqwest::Client,
+    base_url: &mut String,
+    api_key: &mut String,
+    model_id: &mut String,
+    chat_messages: &mut Vec<Value>,
+    tools: &[Value],
+    temperature: Option<f64>,
+    max_tokens: u64,
+    reasoning_effort: Option<&str>,
+    tool_choice: Option<&Value>,
+    session_affinity: Option<&str>,
+) -> Result<ResilientCompletionOutput, String> {
     let max_retries: usize = 6;
     let mut attempt: usize = 0;
     let mut timeout_retries: usize = 0;
@@ -140,7 +188,7 @@ pub async fn send_resilient_chat_completion_with_tool_choice(
 
     loop {
         let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-        let payload = build_resilient_chat_payload_with_tool_choice(
+        let mut payload = build_resilient_chat_payload_with_tool_choice(
             model_id,
             chat_messages,
             tools,
@@ -149,11 +197,19 @@ pub async fn send_resilient_chat_completion_with_tool_choice(
             reasoning_effort,
             tool_choice,
         );
+        if let Some(sid) = session_affinity.map(str::trim).filter(|s| !s.is_empty()) {
+            payload["prompt_cache_key"] = json!(sid);
+        }
 
         let mut req = client
             .post(&url)
             .header("Content-Type", "application/json")
-            .header("Accept", "application/json");
+            .header("User-Agent", "aetheria-engine/1.0");
+        if let Some(sid) = session_affinity.map(str::trim).filter(|s| !s.is_empty()) {
+            req = req
+                .header("x-session-affinity", sid)
+                .header("X-Session-Id", sid);
+        }
         let active_key = crate::provider::protocol_adapters::select_healthy_api_key(api_key);
         if !active_key.is_empty() {
             req = req.header("Authorization", format!("Bearer {}", active_key));
@@ -161,12 +217,14 @@ pub async fn send_resilient_chat_completion_with_tool_choice(
 
         match req.json(&payload).send().await {
             Ok(resp) if resp.status().is_success() => match resp.text().await {
-                Ok(raw_body) => match parse_completion_body(&raw_body) {
-                    Ok((assistant_text, tool_calls, finish_reason)) => {
+                Ok(raw_body) => match parse_completion_body_with_usage(&raw_body) {
+                    Ok((assistant_text, tool_calls, finish_reason, input_tokens, output_tokens)) => {
                         return Ok(ResilientCompletionOutput {
                             assistant_text,
                             tool_calls,
                             finish_reason,
+                            input_tokens,
+                            output_tokens,
                         });
                     }
                     Err(parse_err) => {

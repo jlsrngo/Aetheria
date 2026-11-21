@@ -37,18 +37,41 @@ async fn sleep_interruptible(
     }
 }
 
-async fn send_post_interruptible(
+async fn send_post_interruptible_with_headers(
     client: &reqwest::Client,
     base_url: &str,
     api_key: &str,
+    session_id: &str,
     body: &Value,
+    extra_headers: &[(String, String)],
     interrupt_rx: &tokio::sync::watch::Receiver<bool>,
 ) -> Result<Result<reqwest::Response, reqwest::Error>, ()> {
     tokio::select! {
         biased;
         _ = wait_session_interrupt(interrupt_rx.clone()) => Err(()),
-        res = send_raw_post(client, base_url, api_key, body) => Ok(res),
+        res = send_raw_post_with_headers(client, base_url, api_key, session_id, body, extra_headers) => Ok(res),
     }
+}
+
+#[allow(dead_code)]
+async fn send_post_interruptible(
+    client: &reqwest::Client,
+    base_url: &str,
+    api_key: &str,
+    session_id: &str,
+    body: &Value,
+    interrupt_rx: &tokio::sync::watch::Receiver<bool>,
+) -> Result<Result<reqwest::Response, reqwest::Error>, ()> {
+    send_post_interruptible_with_headers(
+        client,
+        base_url,
+        api_key,
+        session_id,
+        body,
+        &[],
+        interrupt_rx,
+    )
+    .await
 }
 
 #[derive(Debug, Clone)]
@@ -57,6 +80,7 @@ pub(crate) struct StepHttpError {
     pub category: String,
     pub message: String,
     pub retryable: bool,
+    pub is_context_overflow: bool,
 }
 
 impl StepHttpError {
@@ -66,6 +90,7 @@ impl StepHttpError {
             category: c.category.to_string(),
             message: c.message,
             retryable: c.retryable,
+            is_context_overflow: c.kind == ProviderErrorKind::ContextOverflow,
         }
     }
 
@@ -75,6 +100,7 @@ impl StepHttpError {
             category: category.to_string(),
             message,
             retryable: true,
+            is_context_overflow: false,
         }
     }
 
@@ -84,6 +110,7 @@ impl StepHttpError {
             category: "aborted".to_string(),
             message: "Execution interrupted by user.".to_string(),
             retryable: false,
+            is_context_overflow: false,
         }
     }
 
@@ -93,6 +120,7 @@ impl StepHttpError {
             category: "aborted-in-flight".to_string(),
             message: "Execution interrupted by user.".to_string(),
             retryable: false,
+            is_context_overflow: false,
         }
     }
 }
@@ -281,6 +309,10 @@ fn build_step_request_body(ctx: &StepHttpContext<'_>, tools_def: &[Value]) -> Va
             "content": crate::session::coordinator::MAX_STEPS_PROMPT
         }));
     }
+    let has_tool_history = outbound_messages.iter().any(|m| {
+        m.get("role").and_then(Value::as_str) == Some("tool")
+            || m.get("tool_calls").and_then(Value::as_array).is_some_and(|a| !a.is_empty())
+    });
     let model_limit = crate::session::compaction_budget::resolve_model_context_limit(
         ctx.cfg,
         ctx.current_provider_id,
@@ -294,31 +326,31 @@ fn build_step_request_body(ctx: &StepHttpContext<'_>, tools_def: &[Value]) -> Va
         "messages": outbound_messages,
         "max_tokens": max_tokens,
         "stream": true,
-        "stream_options": { "include_usage": true }
+        "stream_options": { "include_usage": true },
+        "prompt_cache_key": ctx.session_id
     });
-    if let Some(effort) = ctx
-        .cfg
-        .pointer("/agent/default/reasoning")
-        .or_else(|| ctx.cfg.pointer("/reasoning_effort"))
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        if super::runner::model_supports_reasoning_from_config(
-            Some(ctx.cfg),
-            ctx.current_provider_id,
-            ctx.current_model_id,
-        ) {
-            req_body["reasoning_effort"] = json!(effort);
-        }
+    if let Some(effort) = super::runner::resolve_session_reasoning_effort(
+        ctx.session_id,
+        ctx.cfg,
+        ctx.current_provider_id,
+        ctx.current_model_id,
+    ) {
+        req_body["reasoning_effort"] = json!(effort);
     }
     if !tools_def.is_empty() {
-        let normalized_tools =
+        let mut normalized_tools =
             crate::bridge::schema::normalize_tools_for_model(ctx.current_model_id, tools_def);
+        for t in &mut normalized_tools {
+            if let Some(fn_obj) = t.get_mut("function").and_then(Value::as_object_mut) {
+                fn_obj.entry("strict").or_insert_with(|| json!(false));
+            }
+        }
         req_body["tools"] = Value::Array(normalized_tools);
         if ctx.step_limit_reached {
             req_body["tool_choice"] = json!("none");
         }
+    } else if has_tool_history {
+        req_body["tools"] = json!([]);
     }
     req_body
 }
@@ -331,14 +363,17 @@ async fn send_step_with_retries(
     let mut net_attempt = 0usize;
     let mut timeout_attempt = 0usize;
 
+    let extra_headers = resolve_provider_custom_headers(ctx.cfg, ctx.current_provider_id);
     loop {
         let active_key =
             crate::provider::protocol_adapters::select_healthy_api_key(ctx.api_key);
-        let send_res = send_post_interruptible(
+        let send_res = send_post_interruptible_with_headers(
             ctx.client,
             ctx.base_url,
             &active_key,
+            ctx.session_id,
             req_body,
+            &extra_headers,
             interrupt_rx,
         )
         .await
@@ -543,7 +578,7 @@ async fn heal_bridge_or_fail(
     let new_port = crate::bridge::ensure_bridge_running().await;
     *ctx.base_url = format!("http://127.0.0.1:{}/v1", new_port);
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-    send_raw_post(ctx.client, ctx.base_url, ctx.api_key, req_body)
+    send_raw_post(ctx.client, ctx.base_url, ctx.api_key, ctx.session_id, req_body)
         .await
         .map_err(|re| {
             StepHttpError::transport(
@@ -557,11 +592,12 @@ async fn post_recovery_request(
     client: &reqwest::Client,
     base_url: &str,
     api_key: &str,
+    session_id: &str,
     req_body: &Value,
     err_ctx: &str,
     classify_timeout: bool,
 ) -> Result<reqwest::Response, StepHttpError> {
-    let resp = send_raw_post(client, base_url, api_key, req_body)
+    let resp = send_raw_post(client, base_url, api_key, session_id, req_body)
         .await
         .map_err(|e| {
             let category = if classify_timeout && e.is_timeout() {
@@ -602,6 +638,7 @@ async fn recover_error_response(
             ctx.client,
             ctx.base_url,
             ctx.api_key,
+            ctx.session_id,
             req_body,
             "Error reaching AI provider after 413 media strip",
             false,
@@ -630,6 +667,7 @@ async fn recover_error_response(
                 ctx.client,
                 ctx.base_url,
                 &next_key,
+                ctx.session_id,
                 req_body,
                 "Error during multi-key rotation retry",
                 false,
@@ -666,6 +704,7 @@ async fn recover_error_response(
                     ctx.client,
                     ctx.base_url,
                     ctx.api_key,
+                    ctx.session_id,
                     req_body,
                     "Error reaching AI provider during failover",
                     false,
@@ -690,6 +729,7 @@ async fn recover_error_response(
             ctx.client,
             ctx.base_url,
             ctx.api_key,
+            ctx.session_id,
             req_body,
             "Error reaching AI provider during multimodal fallback retry",
             false,
@@ -700,19 +740,74 @@ async fn recover_error_response(
     Err(StepHttpError::from_classified(classified))
 }
 
+fn resolve_provider_custom_headers(cfg: &Value, provider_id: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let ptrs = [
+        format!("/provider/{}/options/headers", provider_id),
+        format!("/provider/{}/request/headers", provider_id),
+        format!("/providers/{}/options/headers", provider_id),
+        format!("/providers/{}/request/headers", provider_id),
+    ];
+    for ptr in &ptrs {
+        let Some(obj) = cfg.pointer(ptr).and_then(Value::as_object) else {
+            continue;
+        };
+        for (k, v) in obj {
+            let Some(val) = v.as_str().map(str::trim).filter(|s| !s.is_empty()) else {
+                continue;
+            };
+            let key_clean = k.trim();
+            if key_clean.is_empty()
+                || key_clean.eq_ignore_ascii_case("content-type")
+                || key_clean.eq_ignore_ascii_case("authorization")
+                || key_clean.eq_ignore_ascii_case("content-length")
+                || key_clean.eq_ignore_ascii_case("host")
+                || key_clean.eq_ignore_ascii_case("x-session-affinity")
+                || key_clean.eq_ignore_ascii_case("x-session-id")
+                || key_clean.eq_ignore_ascii_case("user-agent")
+            {
+                continue;
+            }
+            if !out
+                .iter()
+                .any(|(ek, _): &(String, String)| ek.eq_ignore_ascii_case(key_clean))
+            {
+                out.push((key_clean.to_string(), val.to_string()));
+            }
+        }
+    }
+    out
+}
+
+async fn send_raw_post_with_headers(
+    client: &reqwest::Client,
+    base_url: &str,
+    api_key: &str,
+    session_id: &str,
+    body: &Value,
+    extra_headers: &[(String, String)],
+) -> Result<reqwest::Response, reqwest::Error> {
+    let mut req = client
+        .post(format!("{}/chat/completions", base_url))
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("User-Agent", "aetheria-engine/1.0")
+        .header("x-session-affinity", session_id)
+        .header("X-Session-Id", session_id);
+    for (k, v) in extra_headers {
+        req = req.header(k.as_str(), v.as_str());
+    }
+    req.json(body).send().await
+}
+
 async fn send_raw_post(
     client: &reqwest::Client,
     base_url: &str,
     api_key: &str,
+    session_id: &str,
     body: &Value,
 ) -> Result<reqwest::Response, reqwest::Error> {
-    client
-        .post(format!("{}/chat/completions", base_url))
-        .header("Content-Type", "application/json")
-        .header("Authorization", format!("Bearer {}", api_key))
-        .json(body)
-        .send()
-        .await
+    send_raw_post_with_headers(client, base_url, api_key, session_id, body, &[]).await
 }
 
 fn resolve_configured_kenari_key(cfg: &Value) -> Option<String> {
@@ -742,7 +837,7 @@ fn resolve_configured_kenari_key(cfg: &Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_transient_gateway_status, resolve_configured_kenari_key};
+    use super::{is_transient_gateway_status, resolve_configured_kenari_key, StepHttpContext};
     use serde_json::json;
 
     #[test]
@@ -769,6 +864,91 @@ mod tests {
             resolve_configured_kenari_key(&cfg).as_deref(),
             Some("kn-user-test-key")
         );
+    }
+
+    #[test]
+    fn test_build_step_request_body_includes_session_variant_and_32k_output_floor() {
+        let sid = format!("ses_step_http_{}", crate::paths::now_ms());
+        crate::session::session::with_store(|store| {
+            store.sessions.insert(
+                sid.clone(),
+                json!({
+                    "id": sid,
+                    "model": { "providerID": "9router", "id": "ComboMaut", "variant": "high" }
+                }),
+            );
+        });
+        let client = reqwest::Client::new();
+        let cfg = json!({});
+        let mut pid = "9router".to_string();
+        let mut mid = "ComboMaut".to_string();
+        let mut base_url = "http://127.0.0.1:20128/v1".to_string();
+        let mut api_key = "test-key".to_string();
+        let mut msgs = vec![json!({ "role": "system", "content": "hi" })];
+        let ctx = StepHttpContext {
+            client: &client,
+            cfg: &cfg,
+            session_id: &sid,
+            workspace_dir: "",
+            is_local_bridge: false,
+            step_limit_reached: false,
+            current_provider_id: &mut pid,
+            current_model_id: &mut mid,
+            base_url: &mut base_url,
+            api_key: &mut api_key,
+            chat_messages: &mut msgs,
+        };
+        let body = super::build_step_request_body(&ctx, &[]);
+        assert_eq!(body["reasoning_effort"], json!("high"));
+        assert_eq!(body["prompt_cache_key"], json!(sid));
+        assert!(body["max_tokens"].as_u64().unwrap_or(0) >= 32_000);
+        assert!(body.get("tools").is_none());
+
+        let tool_spec = json!([{
+            "type": "function",
+            "function": { "name": "read", "parameters": { "type": "object" } }
+        }]);
+        let with_tools = super::build_step_request_body(&ctx, tool_spec.as_array().unwrap());
+        assert_eq!(with_tools["tools"][0]["function"]["strict"], json!(false));
+
+        let mut tool_hist = vec![
+            json!({ "role": "assistant", "content": null, "tool_calls": [{ "id": "c1", "type": "function", "function": { "name": "read", "arguments": "{}" } }] }),
+            json!({ "role": "tool", "tool_call_id": "c1", "content": "ok" }),
+        ];
+        let ctx_hist = StepHttpContext {
+            client: &client,
+            cfg: &cfg,
+            session_id: &sid,
+            workspace_dir: "",
+            is_local_bridge: false,
+            step_limit_reached: false,
+            current_provider_id: &mut pid,
+            current_model_id: &mut mid,
+            base_url: &mut base_url,
+            api_key: &mut api_key,
+            chat_messages: &mut tool_hist,
+        };
+        let empty_tools_hist = super::build_step_request_body(&ctx_hist, &[]);
+        assert_eq!(empty_tools_hist["tools"], json!([]));
+
+        let hdr_cfg = json!({
+            "provider": {
+                "9router": {
+                    "options": {
+                        "headers": {
+                            "X-Custom-Org": "arunaki",
+                            "Authorization": "Bearer hijack"
+                        }
+                    }
+                }
+            }
+        });
+        let custom_hdrs = super::resolve_provider_custom_headers(&hdr_cfg, "9router");
+        assert_eq!(custom_hdrs, vec![("X-Custom-Org".to_string(), "arunaki".to_string())]);
+
+        crate::session::session::with_store(|store| {
+            store.sessions.remove(&sid);
+        });
     }
 }
 

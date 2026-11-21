@@ -27,13 +27,14 @@ impl Default for ModelContextLimit {
     fn default() -> Self {
         Self {
             context: crate::session::compaction::DEFAULT_CONTEXT_WINDOW,
-            output: 16_000,
+            output: 32_000,
         }
     }
 }
 
 /// Resolves `(context_window, output_limit)` for a configured model.
-/// Falls back to `128_000 / 16_000` when the model lacks explicit limits.
+/// Falls back to `context = 0` (unknown window — never triggers premature auto-compaction,
+/// matching OpenCode) and `output = 32_000` (`1_000_000 / 65_536` for recognized Gemini 2.x/3.x).
 pub fn resolve_model_context_limit(
     cfg: &Value,
     provider_id: &str,
@@ -43,6 +44,21 @@ pub fn resolve_model_context_limit(
         .pointer(&format!("/provider/{}/models/{}", provider_id, model_id))
         .or_else(|| cfg.pointer(&format!("/providers/{}/models/{}", provider_id, model_id)));
 
+    let lower = model_id.trim().to_ascii_lowercase();
+    let default_context = if lower.contains("gemini-3")
+        || lower.contains("gemini-2.5")
+        || lower.contains("gemini-2.0")
+    {
+        1_000_000
+    } else {
+        0
+    };
+    let default_output = if lower.contains("gemini-3") || lower.contains("gemini-2.5") {
+        65_536
+    } else {
+        32_000
+    };
+
     let context = model_cfg
         .and_then(|m| {
             m.pointer("/limit/context")
@@ -51,14 +67,14 @@ pub fn resolve_model_context_limit(
         .and_then(|v| v.as_u64())
         .map(|n| n as usize)
         .filter(|&n| n > 0)
-        .unwrap_or(crate::session::compaction::DEFAULT_CONTEXT_WINDOW);
+        .unwrap_or(default_context);
 
     let output = model_cfg
         .and_then(|m| m.pointer("/limit/output"))
         .and_then(|v| v.as_u64())
         .map(|n| n as usize)
         .filter(|&n| n > 0)
-        .unwrap_or(16_000);
+        .unwrap_or(default_output);
 
     ModelContextLimit { context, output }
 }
@@ -82,7 +98,7 @@ pub fn calculate_ceiling(context_window: usize) -> usize {
 /// Prevents providers from rejecting requests when `input_tokens + max_tokens > context_window`,
 /// while letting high-output models (e.g. Gemini 65k) use their full output capacity when headroom allows.
 pub fn compute_output_limit(model_limit: ModelContextLimit, estimated_input_tokens: usize) -> u64 {
-    const MAX_CAP: usize = 65_536;
+    const MAX_CAP: usize = 128_000;
     const MIN_FLOOR: usize = 1_024;
     let model_out = model_limit.output.clamp(MIN_FLOOR, MAX_CAP);
     if model_limit.context == 0 {
@@ -151,13 +167,22 @@ pub fn measure_stored_history_tokens(history: &[Value]) -> (usize, usize) {
         if has_error {
             continue;
         }
-        if let Some(tokens) = msg.get("tokens").and_then(total_tokens_from_usage_json) {
+        let usage_val = msg.get("lastStepTokens").or_else(|| msg.get("tokens"));
+        if let Some(tokens) = usage_val.and_then(total_tokens_from_usage_json) {
             if cycle_start == 0 {
-                let inp = msg
-                    .pointer("/tokens/input")
+                let inp = usage_val
+                    .and_then(|u| u.get("input"))
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0) as usize;
-                cycle_start = inp;
+                let cache_r = usage_val
+                    .and_then(|u| u.pointer("/cache/read"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as usize;
+                let cache_w = usage_val
+                    .and_then(|u| u.pointer("/cache/write"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as usize;
+                cycle_start = inp.saturating_add(cache_r).saturating_add(cache_w);
             }
             last_measured_idx = Some(idx);
             last_measured_total = tokens;
@@ -245,6 +270,47 @@ mod tests {
         assert_eq!(cycle_start, 115_000);
         assert!(total >= 115_100);
         assert!(total >= calculate_ceiling(128_000));
+    }
+
+    #[test]
+    fn opencode_parity_default_and_gemini_limits_unlock_high_output() {
+        let cfg = json!({});
+        let custom_limit = resolve_model_context_limit(&cfg, "9router", "ComboMaut");
+        assert_eq!(custom_limit.context, 0);
+        assert_eq!(calculate_ceiling(custom_limit.context), usize::MAX);
+        assert_eq!(custom_limit.output, 32_000);
+        assert_eq!(compute_output_limit(custom_limit, 10_000), 32_000);
+
+        let gemini_limit = resolve_model_context_limit(&cfg, "antigravity", "gemini-3.8-flash-high");
+        assert_eq!(gemini_limit.context, 1_000_000);
+        assert_eq!(gemini_limit.output, 65_536);
+        assert_eq!(compute_output_limit(gemini_limit, 25_000), 65_536);
+    }
+
+    #[test]
+    fn measure_stored_history_prefers_last_step_tokens_over_cumulative_tokens() {
+        let hist = vec![
+            json!({ "type": "user", "text": "step 1" }),
+            json!({
+                "type": "assistant",
+                "role": "assistant",
+                "tokens": {
+                    "input": 180000,
+                    "output": 4000,
+                    "reasoning": 12000,
+                    "cache": { "read": 90000, "write": 0 }
+                },
+                "lastStepTokens": {
+                    "input": 5000,
+                    "output": 500,
+                    "reasoning": 1000,
+                    "cache": { "read": 45000, "write": 0 }
+                }
+            }),
+        ];
+        let (cycle_start, total) = measure_stored_history_tokens(&hist);
+        assert_eq!(cycle_start, 50_000);
+        assert_eq!(total, 51_500);
     }
 }
 

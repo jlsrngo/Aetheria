@@ -13,12 +13,11 @@ use std::time::Duration;
 
 use super::kiro_standby::{acquire_subagent_turn_standby, register_subagent_pending};
 use super::resilience::{
-    send_resilient_chat_completion, send_resilient_chat_completion_with_options,
-    SYNTHETIC_OUTPUT_LIMIT_PROMPT,
+    send_resilient_chat_completion, SYNTHETIC_OUTPUT_LIMIT_PROMPT,
 };
 use super::subagent_provider::{
     resolve_child_vision_capability, resolve_subagent_max_tokens,
-    resolve_subagent_provider_config_for_call, resolve_subagent_reasoning_effort,
+    resolve_subagent_provider_config_for_call,
 };
 use super::subagent_tool_batch::execute_subagent_tool_calls;
 use crate::paths::now_ms;
@@ -510,12 +509,23 @@ async fn run_subagent_loop(
     mut chat_messages: Vec<Value>,
 ) -> Value {
     let child_session_id = child_session_id.to_string();
+    let (parent_provider_id, parent_model_id, parent_variant) =
+        super::subagent_provider::resolve_parent_model_ref_with_variant(parent_session_id);
     let (mut base_url, mut api_key, mut model_id, provider_id) =
         resolve_subagent_provider_config_for_call(parent_session_id, subagent_type, model_override)
             .await;
+    let inherited_variant = if provider_id == parent_provider_id && model_id == parent_model_id {
+        parent_variant
+    } else {
+        None
+    };
     crate::session::session::with_store(|store| {
         if let Some(sess) = store.sessions.get_mut(&child_session_id) {
-            sess["model"] = json!({ "providerID": &provider_id, "id": &model_id });
+            let mut mref = json!({ "providerID": &provider_id, "id": &model_id });
+            if let Some(ref v) = inherited_variant {
+                mref["variant"] = json!(v);
+            }
+            sess["model"] = mref;
             crate::session::session::save_store(store);
         }
     });
@@ -523,8 +533,13 @@ async fn run_subagent_loop(
     let subagent_cfg = crate::provider::read_aetheria_config();
     let subagent_max_tokens =
         resolve_subagent_max_tokens(&subagent_cfg, subagent_type, &provider_id, &model_id);
-    let subagent_reasoning =
-        resolve_subagent_reasoning_effort(&subagent_cfg, subagent_type, &provider_id, &model_id);
+    let subagent_reasoning = super::subagent_provider::resolve_subagent_reasoning_effort_with_fallback(
+        &subagent_cfg,
+        subagent_type,
+        &provider_id,
+        &model_id,
+        inherited_variant.as_deref(),
+    );
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(15))
         .timeout(Duration::from_secs(120))
@@ -581,22 +596,20 @@ async fn run_subagent_loop(
         for steer in crate::session::coordinator::drain_pending_steers(&child_session_id) {
             chat_messages.push(json!({ "role": "user", "content": steer.text }));
         }
-        if crate::session::compaction::should_compact(
-            &chat_messages,
-            crate::session::compaction::DEFAULT_CONTEXT_WINDOW,
-        ) {
+        let subagent_ctx_limit = crate::session::compaction_budget::resolve_model_context_limit(
+            &subagent_cfg,
+            &provider_id,
+            &model_id,
+        )
+        .context;
+        if crate::session::compaction::should_compact(&chat_messages, subagent_ctx_limit) {
             chat_messages = crate::session::compaction::emergency_compact_messages(&chat_messages);
         }
 
         steps_run += 1;
-        // OpenCode pattern: omit `temperature` for ALL Gemini models (2.5 & 3.x) so they retain
-        // their native calibrated sampling instead of being degraded by 0.3 overrides.
-        let subagent_temperature = if model_id.to_ascii_lowercase().contains("gemini") {
-            None
-        } else {
-            Some(0.3)
-        };
-        let completion = match send_resilient_chat_completion_with_options(
+        // OpenCode pattern: omit `temperature` so models retain their native calibrated sampling.
+        let subagent_temperature: Option<f64> = None;
+        let completion = match super::resilience::send_resilient_chat_completion_with_session(
             &client,
             &mut base_url,
             &mut api_key,
@@ -606,6 +619,8 @@ async fn run_subagent_loop(
             subagent_temperature,
             subagent_max_tokens,
             subagent_reasoning.as_deref(),
+            None,
+            Some(&child_session_id),
         )
         .await
         {

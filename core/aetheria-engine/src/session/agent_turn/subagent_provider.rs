@@ -97,7 +97,47 @@ pub(crate) fn resolve_subagent_reasoning_effort(
     Some(effort)
 }
 
+/// Resolves per-role reasoning effort, falling back to an inherited parent session variant
+/// when the subagent uses the same provider/model and per-role reasoning is unset.
+pub(crate) fn resolve_subagent_reasoning_effort_with_fallback(
+    cfg: &Value,
+    subagent_type: &str,
+    provider_id: &str,
+    model_id: &str,
+    fallback_variant: Option<&str>,
+) -> Option<String> {
+    if let Some(configured) =
+        resolve_subagent_reasoning_effort(cfg, subagent_type, provider_id, model_id)
+    {
+        return Some(configured);
+    }
+    let variant = fallback_variant
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("default"))?;
+    let explicitly_disabled = super::runner::find_model_config(cfg, provider_id, model_id)
+        .and_then(|m| {
+            m.get("reasoning")
+                .or_else(|| m.pointer("/capabilities/reasoning"))
+                .and_then(Value::as_bool)
+        })
+        == Some(false)
+        || super::runner::local_bridge_supports_reasoning_effort(provider_id, model_id)
+            == Some(false);
+    if explicitly_disabled {
+        None
+    } else {
+        Some(variant.to_string())
+    }
+}
+
 pub(crate) fn resolve_parent_model_ref(parent_session_id: &str) -> (String, String) {
+    let (provider_id, model_id, _) = resolve_parent_model_ref_with_variant(parent_session_id);
+    (provider_id, model_id)
+}
+
+pub(crate) fn resolve_parent_model_ref_with_variant(
+    parent_session_id: &str,
+) -> (String, String, Option<String>) {
     let parent_model = with_store(|store| {
         store
             .sessions
@@ -121,8 +161,14 @@ pub(crate) fn resolve_parent_model_ref(parent_session_id: &str) -> (String, Stri
         .filter(|s| !s.is_empty())
         .unwrap_or("kiro/auto")
         .to_string();
+    let variant = parent_model
+        .get("variant")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
 
-    (provider_id, model_id)
+    (provider_id, model_id, variant)
 }
 
 fn resolve_provider_endpoint_and_key(cfg: &Value, provider_id: &str, bridge_url: &str) -> (String, String) {
