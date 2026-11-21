@@ -927,6 +927,11 @@ def build_scene_beats_strip(
         )
         sheet[r * panel_h : (r + 1) * panel_h, c * panel_w : (c + 1) * panel_w] = resized
     cv2.imwrite(str(out_path), sheet, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    try:
+        vision_dir = out_path.parent.parent / "vision"
+        _write_vision_copy(sheet, vision_dir, out_path.name, max_edge=1080, quality=80)
+    except Exception:
+        pass
     return out_path.name
 
 

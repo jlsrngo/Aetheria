@@ -1858,6 +1858,139 @@
     ctx.restore();
   }
 
+  /**
+   * Draws a variable-width tapered crescent / calligraphic light ribbon along `points` (`[{x, y}]` or `[[x, y]]`),
+   * tapering smoothly to 0px at both tail and head with a soft Gaussian outer aura (never a stiff uniform wire).
+   */
+  function drawTaperedRibbon(ctx, points, maxWidth = 24, opts = {}) {
+    if (!ctx || !Array.isArray(points) || points.length < 3 || !(maxWidth > 0)) return;
+    const pts = points.map((p) =>
+      Array.isArray(p)
+        ? { x: Number(p[0]) || 0, y: Number(p[1]) || 0 }
+        : { x: Number(p.x) || 0, y: Number(p.y) || 0 }
+    );
+    const n = pts.length;
+    const color = opts.color || "#FF9624";
+    const coreColor = opts.coreColor || "#FFF9E6";
+    const alpha = clamp(Number(opts.alpha ?? 1.0), 0, 1);
+    const asymmetry = clamp(Number(opts.asymmetry ?? 0.78), 0.5, 0.95);
+    const glowBlur = Math.max(2, Number(opts.glowBlur ?? Math.round(maxWidth * 0.55)));
+    if (alpha <= 0.005) return;
+
+    const leftPts = [];
+    const rightPts = [];
+    for (let i = 0; i < n; i++) {
+      const u = i / (n - 1);
+      const w = Math.sin(Math.pow(u, 0.74) * Math.PI) * maxWidth;
+      const pPrev = pts[Math.max(0, i - 1)];
+      const pNext = pts[Math.min(n - 1, i + 1)];
+      const tx = pNext.x - pPrev.x;
+      const ty = pNext.y - pPrev.y;
+      const len = Math.hypot(tx, ty) || 1;
+      const nx = -ty / len;
+      const ny = tx / len;
+      leftPts.push({ x: pts[i].x + nx * w * asymmetry, y: pts[i].y + ny * w * asymmetry });
+      rightPts.push({
+        x: pts[i].x - nx * w * (1 - asymmetry),
+        y: pts[i].y - ny * w * (1 - asymmetry),
+      });
+    }
+
+    const traceHull = () => {
+      ctx.beginPath();
+      ctx.moveTo(leftPts[0].x, leftPts[0].y);
+      for (let i = 1; i < n; i++) ctx.lineTo(leftPts[i].x, leftPts[i].y);
+      for (let i = n - 1; i >= 0; i--) ctx.lineTo(rightPts[i].x, rightPts[i].y);
+      ctx.closePath();
+    };
+
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+
+    ctx.save();
+    ctx.filter = `blur(${glowBlur}px)`;
+    ctx.fillStyle = hexAlpha(color, 0.72 * alpha);
+    traceHull();
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    ctx.filter = "blur(2px)";
+    ctx.fillStyle = hexAlpha(color, 0.88 * alpha);
+    traceHull();
+    ctx.fill();
+    ctx.restore();
+
+    ctx.strokeStyle = hexAlpha(coreColor, 0.92 * alpha);
+    ctx.lineWidth = Math.max(1.5, maxWidth * 0.1);
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      if (i === 0) ctx.moveTo(pts[i].x, pts[i].y);
+      else ctx.lineTo(pts[i].x, pts[i].y);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /**
+   * Computes a deterministic damped spring collision jolt `{ dx, dy, rot, sx, sy }`
+   * when an impulse/dot impacts an element at `hitTime`.
+   */
+  function impactRecoil(t, hitTime, opts = {}) {
+    const dt = Number(t) - Number(hitTime);
+    const dur = Number(opts.duration ?? 1.05);
+    if (!(dt > 0) || dt > dur) {
+      return { dx: 0, dy: 0, rot: 0, sx: 1, sy: 1 };
+    }
+    const ampX = Number(opts.ampX ?? 0);
+    const ampY = Number(opts.ampY ?? -22);
+    const ampRot = Number(opts.ampRot ?? -0.085);
+    const squash = Number(opts.squash ?? 0.06);
+    const damping = Number(opts.damping ?? 6.5);
+    const freq = Number(opts.freq ?? 26.0);
+    const decay = Math.exp(-damping * dt);
+    const osc = Math.sin(dt * freq);
+    return {
+      dx: ampX * decay * osc,
+      dy: ampY * decay * osc,
+      rot: ampRot * decay * Math.sin(dt * (freq * 0.82)),
+      sx: 1 + squash * decay * osc,
+      sy: 1 - squash * decay * osc,
+    };
+  }
+
+  /**
+   * Applies deterministic elastic vertex-lag rotation / 3D shear to an array of 2D vertices
+   * (`[{x, y}]` or `[[x, y]]`), so trailing vertices lag behind leading vertices ("meleyot" / follow-through).
+   */
+  function twistPolygon(points, angle, lagFactor = 0.35) {
+    if (!Array.isArray(points) || points.length === 0) return [];
+    const pts = points.map((p) =>
+      Array.isArray(p)
+        ? { x: Number(p[0]) || 0, y: Number(p[1]) || 0 }
+        : { x: Number(p.x) || 0, y: Number(p.y) || 0 }
+    );
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (let i = 0; i < pts.length; i++) {
+      if (pts[i].y < minY) minY = pts[i].y;
+      if (pts[i].y > maxY) maxY = pts[i].y;
+    }
+    const spanY = Math.max(1e-4, maxY - minY);
+    const baseAngle = Number(angle) || 0;
+    const lag = Number(lagFactor) || 0;
+    return pts.map((p) => {
+      const v = (p.y - minY) / spanY;
+      const localA = baseAngle - v * lag;
+      const c = Math.cos(localA);
+      return {
+        x: p.x * c + Math.sin(localA) * (p.y * 0.18 * lag),
+        y: p.y + Math.sin(localA) * (p.x * 0.08 * lag),
+      };
+    });
+  }
+
   const API = {
     TAU,
     clamp,
@@ -1920,6 +2053,9 @@
     drawOpticalGlow,
     drawBloomStroke,
     drawSphericalLens,
+    drawTaperedRibbon,
+    impactRecoil,
+    twistPolygon,
   };
 
   global.AetheriaMotion = API;

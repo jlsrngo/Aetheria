@@ -135,6 +135,18 @@ pub(crate) fn select_extracted_vision_keyframes(
                             .pointer("/keyframes/mid")
                             .and_then(Value::as_str)
                             .or_else(|| sc.get("keyframe").and_then(Value::as_str));
+                        // Prefer the 6-panel adaptive beat strip (`ref_scene_XX_beats.jpg` containing
+                        // scene-start, motion-peak, camera-peak, mid-pacing, scene-end) when present on disk,
+                        // so the vision model sees full intra-scene motion & cross-scene continuity on Turn 1.
+                        if let Some(bs_p) = sc
+                            .get("beatsStrip")
+                            .and_then(Value::as_str)
+                            .and_then(|s| resolve_style_frame_in_dir(frames_dir, s))
+                        {
+                            if seen.insert(bs_p.clone()) {
+                                midpoints.push(bs_p);
+                            }
+                        }
                         if let Some(kfs_arr) = sc.get("keyframes").and_then(Value::as_array) {
                             for item in kfs_arr {
                                 let Some(path_str) = item.get("path").and_then(Value::as_str) else {
@@ -396,9 +408,40 @@ pub(crate) fn build_compact_extraction_summary(
                 .get("keyframe")
                 .and_then(Value::as_str)
                 .unwrap_or("");
-            lines.push(format!(
+            let mut scene_line = format!(
                 "  Scene {idx} ({id}): {start:.2}s-{end:.2}s (mid {mid:.2}s) | bg={bg} text={text} accent={accent} | keyframe={kf}"
-            ));
+            );
+            if let Some(segs) = s
+                .pointer("/cameraMotion/segments")
+                .and_then(Value::as_array)
+                .filter(|a| !a.is_empty())
+            {
+                let seg = &segs[0];
+                let sf = seg.get("scaleFrom").and_then(Value::as_f64).unwrap_or(1.0);
+                let st = seg.get("scaleTo").and_then(Value::as_f64).unwrap_or(1.0);
+                let txf = seg.get("txFrom").and_then(Value::as_f64).unwrap_or(0.0);
+                let txt = seg.get("txTo").and_then(Value::as_f64).unwrap_or(0.0);
+                let tyf = seg.get("tyFrom").and_then(Value::as_f64).unwrap_or(0.0);
+                let tyt = seg.get("tyTo").and_then(Value::as_f64).unwrap_or(0.0);
+                let ease = seg.get("ease").and_then(Value::as_str).unwrap_or("inOutCubic");
+                scene_line.push_str(&format!(
+                    " | cam: scale={sf:.2}->{st:.2} pan=({txf:.0},{tyf:.0})->({txt:.0},{tyt:.0}) ease={ease}"
+                ));
+            }
+            if let Some(panels) = s.get("beatStripPanels").and_then(Value::as_array).filter(|a| !a.is_empty()) {
+                let tags: Vec<String> = panels
+                    .iter()
+                    .filter_map(|p| {
+                        let t = p.get("t").and_then(Value::as_f64)?;
+                        let r = p.get("reason").and_then(Value::as_str).unwrap_or("beat");
+                        Some(format!("{r}@{t:.2}s"))
+                    })
+                    .collect();
+                if !tags.is_empty() {
+                    scene_line.push_str(&format!(" | beats=[{}]", tags.join(", ")));
+                }
+            }
+            lines.push(scene_line);
         }
     }
 
@@ -418,9 +461,12 @@ pub(crate) fn build_compact_extraction_summary(
                 .pointer("/keyframes/mid")
                 .and_then(Value::as_str)
                 .unwrap_or("");
+            let bs = s.get("beatsStrip").and_then(Value::as_str).unwrap_or("");
             (!kf.is_empty() && Path::new(kf).file_name().and_then(|n| n.to_str()) == Some(base))
                 || (!kf_mid.is_empty()
                     && Path::new(kf_mid).file_name().and_then(|n| n.to_str()) == Some(base))
+                || (!bs.is_empty()
+                    && Path::new(bs).file_name().and_then(|n| n.to_str()) == Some(base))
         });
         if let Some(s) = matched {
             let idx = s.get("index").and_then(Value::as_u64).unwrap_or(0);

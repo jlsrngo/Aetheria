@@ -54,6 +54,9 @@ Do NOT call `Math.random()`, `Date.now()`, `performance.now()`, `requestAnimatio
 - `AM.drawOpticalGlow(ctx, x, y, radius, colorHex = "#FF8800", intensity = 1.0)` — 3-layer additive (`lighter`) optical bloom orb (wide atmospheric halo + saturated mid bloom + white-hot core)
 - `AM.drawBloomStroke(ctx, drawPathFn, opts?)` — Gaussian-blurred additive (`lighter`) glowing stroke (`{ color, coreColor, lineWidth, glowRadius, intensity, lineCap, lineJoin }`)
 - `AM.drawSphericalLens(ctx, cx, cy, radius, strength, drawContentFn, opts?)` — deterministic pixel-level spherical/water-bubble lens refraction shader (`strength` `0..1.4`, `{ chromatic, rimAlpha, rimColor }`)
+- `AM.drawTaperedRibbon(ctx, points, maxWidth = 24, opts?)` — variable-width tapered crescent/calligraphic light ribbon with Gaussian aura (`{ color, coreColor, alpha, asymmetry, glowBlur }`)
+- `AM.impactRecoil(t, hitTime, opts?)` — deterministic damped spring collision jolt returning `{ dx, dy, rot, sx, sy }` (`{ ampX, ampY, ampRot, squash, damping, freq, duration }`)
+- `AM.twistPolygon(points, angle, lagFactor = 0.35)` — deterministic elastic vertex-lag rotation/shear for polygon vertices (`[{x, y}]` or `[[x, y]]`)
 - `AM.drawGridBackdrop(ctx, t, accentColor, bgTop, bgBottom, W = 1080, H = 1920)`
 - `AM.drawCharacterRig(ctx, t, opts?)` — `{ x, y, scale, coatColor, coatShade, skinColor, hairColor, hairStyle, glasses, reactTime, reachTime, lean, expression, collarColor, leftSh, ... }`
 - `AM.drawTopHeader(ctx, scene, localTimeOrIdx, globalTime)` — **OPTIONAL** top bar (omit unless active skill wants header bar)

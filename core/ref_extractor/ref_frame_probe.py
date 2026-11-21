@@ -124,6 +124,86 @@ def inspect_reference_frame(
     }
 
 
+def inspect_reference_motion_strip(
+    video_path: Path,
+    start_sec: float,
+    end_sec: float,
+    num_frames: int = 8,
+    crop: Optional[Tuple[int, int, int, int]] = None,
+    save_path: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Extracts a 1-image chronological micro-strip (`num_frames` tiles across `[start_sec, end_sec]`)
+    so the agent sees exact frame-by-frame motion, deformation, and cross-scene continuity in 1 call."""
+    count = max(2, min(16, int(num_frames)))
+    t0 = max(0.0, float(start_sec))
+    t1 = max(t0 + 0.04, float(end_sec))
+    timestamps = [round(t0 + (t1 - t0) * (i / float(count - 1)), 3) for i in range(count)]
+
+    tiles: List[np.ndarray] = []
+    meta_first: Optional[Dict[str, Any]] = None
+    used_crop = [0, 0, 0, 0]
+    for ts in timestamps:
+        fr, meta = _read_frame_at_sec(video_path, ts)
+        if fr is None:
+            continue
+        if meta_first is None:
+            meta_first = meta
+        w, h = meta["width"], meta["height"]
+        cx, cy, cw, ch = _clamp_box(crop, w, h)
+        used_crop = [cx, cy, cw, ch]
+        roi = fr[cy : cy + ch, cx : cx + cw]
+        tile_w = 240 if cw <= ch else 320
+        tile_h = max(120, min(420, int(round(tile_w * (ch / float(max(1, cw)))))))
+        tile = cv2.resize(roi, (tile_w, tile_h), interpolation=cv2.INTER_AREA)
+        cv2.rectangle(tile, (0, 0), (102, 24), (8, 8, 12), -1)
+        cv2.putText(
+            tile,
+            f"{meta['timestampSec']:.2f}s",
+            (6, 17),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.52,
+            (255, 255, 255),
+            1,
+            cv2.LINE_AA,
+        )
+        tiles.append(tile)
+
+    if not tiles or meta_first is None:
+        return {"ok": False, "error": "Failed to decode frames for motion micro-strip"}
+
+    cols = 4 if len(tiles) <= 8 else 6
+    rows = (len(tiles) + cols - 1) // cols
+    th, tw = tiles[0].shape[:2]
+    grid = np.full((rows * th, cols * tw, 3), 10, dtype=np.uint8)
+    for idx, tile in enumerate(tiles):
+        r, c = divmod(idx, cols)
+        grid[r * th : (r + 1) * th, c * tw : (c + 1) * tw] = tile
+
+    ok_enc, buf = cv2.imencode(".jpg", grid, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    if not ok_enc:
+        return {"ok": False, "error": "Failed to JPEG-encode motion micro-strip"}
+    jpeg_bytes = buf.tobytes()
+    if save_path is not None:
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        save_path.write_bytes(jpeg_bytes)
+
+    data_url = "data:image/jpeg;base64," + base64.b64encode(jpeg_bytes).decode("ascii")
+    return {
+        "ok": True,
+        "isMotionStrip": True,
+        "startSec": timestamps[0],
+        "endSec": timestamps[-1],
+        "framesCount": len(tiles),
+        "timestamps": timestamps,
+        "canvasWidth": meta_first["width"],
+        "canvasHeight": meta_first["height"],
+        "crop": used_crop,
+        "outputWidth": int(grid.shape[1]),
+        "outputHeight": int(grid.shape[0]),
+        "dataUrl": data_url,
+    }
+
+
 def sample_reference_region(
     video_path: Path,
     timestamp_sec: float,
@@ -208,6 +288,8 @@ def main() -> None:
     parser.add_argument("mode", choices=["inspect", "sample"])
     parser.add_argument("--video", required=True, type=str)
     parser.add_argument("--t", required=True, type=float)
+    parser.add_argument("--end-t", type=float, default=None, help="Optional end timestamp for multi-frame motion micro-strip")
+    parser.add_argument("--frames", type=int, default=8, help="Number of frames in motion micro-strip (2..16)")
     parser.add_argument("--box", type=str, default=None, help="Optional x,y,w,h crop/sample box")
     parser.add_argument("--out", type=str, default=None, help="Optional JPEG output path (inspect mode)")
     args = parser.parse_args()
@@ -215,12 +297,22 @@ def main() -> None:
     try:
         box = _parse_box(args.box)
         if args.mode == "inspect":
-            res = inspect_reference_frame(
-                Path(args.video),
-                args.t,
-                crop=box,
-                save_path=Path(args.out) if args.out else None,
-            )
+            if args.end_t is not None and float(args.end_t) > float(args.t) + 0.04:
+                res = inspect_reference_motion_strip(
+                    Path(args.video),
+                    args.t,
+                    float(args.end_t),
+                    num_frames=args.frames,
+                    crop=box,
+                    save_path=Path(args.out) if args.out else None,
+                )
+            else:
+                res = inspect_reference_frame(
+                    Path(args.video),
+                    args.t,
+                    crop=box,
+                    save_path=Path(args.out) if args.out else None,
+                )
         else:
             res = sample_reference_region(Path(args.video), args.t, box=box)
         print(json.dumps(res))

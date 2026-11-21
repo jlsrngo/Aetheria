@@ -422,13 +422,18 @@ def estimate_scene_camera_motion(
     valid_inliers = [pair_inliers[i] for i, (v, tr) in enumerate(zip(pair_valid, pair_tracked)) if v and tr]
     valid_ratios = [pair_ratios[i] for i, (v, tr) in enumerate(zip(pair_valid, pair_tracked)) if v and tr]
 
-    # Honesty gate: insufficient tracked features -> never invent motion
-    if valid_tracked_pairs < 2 or valid_frac < 0.45 or not valid_inliers:
-        return None
+    # Honesty gate: when sparse ORB keypoints fail on smooth gradients / glowing dark scenes,
+    # try dense Farneback optical-flow fallback before giving up.
+    if (
+        valid_tracked_pairs < 2
+        or valid_frac < 0.45
+        or not valid_inliers
+        or int(round(float(np.median(valid_inliers)))) < MIN_INLIERS
+        or float(np.median(valid_ratios)) < MIN_INLIER_RATIO
+    ):
+        return _estimate_dense_flow_camera_fallback(grays, width, height, scene_start_sec)
     med_inliers = int(round(float(np.median(valid_inliers))))
     med_ratio = float(np.median(valid_ratios))
-    if med_inliers < MIN_INLIERS or med_ratio < MIN_INLIER_RATIO:
-        return None
 
     # Decompose full cumulative curve
     local_ts: List[float] = []
@@ -551,6 +556,88 @@ def estimate_scene_camera_motion(
         ],
         "pivot": pivot,
         "peakChangeSec": peak_change_sec,
+    }
+
+
+def _estimate_dense_flow_camera_fallback(
+    grays: List[Tuple[int, float, np.ndarray, float]],
+    width: int,
+    height: int,
+    scene_start_sec: float,
+) -> Optional[Dict[str, Any]]:
+    """Dense Farneback optical-flow camera fallback for gradient/glow/low-keypoint scenes."""
+    if len(grays) < 3:
+        return None
+    flow_w = 180
+    flow_h = max(64, int(round(height * (flow_w / float(max(1, width))))))
+    yy, xx = np.mgrid[0:flow_h, 0:flow_w]
+    rx = (xx - flow_w * 0.5) / max(1.0, flow_w * 0.5)
+    ry = (yy - flow_h * 0.5) / max(1.0, flow_h * 0.5)
+    r_norm2 = np.maximum(0.15, rx * rx + ry * ry)
+
+    smalls = [cv2.resize(g[2], (flow_w, flow_h), interpolation=cv2.INTER_AREA) for g in grays]
+    cum_s = 1.0
+    cum_tx = 0.0
+    cum_ty = 0.0
+    scales = [1.0]
+    txs = [0.0]
+    tys = [0.0]
+    step_mags = []
+
+    for i in range(1, len(smalls)):
+        flow = cv2.calcOpticalFlowFarneback(
+            smalls[i - 1], smalls[i], None, 0.5, 2, 13, 2, 5, 1.1, 0
+        )
+        fx, fy = flow[..., 0], flow[..., 1]
+        active = (fx * fx + fy * fy) > 0.04
+        if int(np.sum(active)) < int(flow_w * flow_h * 0.12):
+            scales.append(cum_s)
+            txs.append(cum_tx)
+            tys.append(cum_ty)
+            step_mags.append(0.0)
+            continue
+        mdx = float(np.median(fx))
+        mdy = float(np.median(fy))
+        # Radial divergence (zoom) after removing median pan
+        div = float(np.median(((fx - mdx) * rx + (fy - mdy) * ry) / r_norm2)) / max(1.0, flow_w * 0.5)
+        step_scale = float(np.clip(1.0 + div, 0.88, 1.14))
+        cum_s = float(np.clip(cum_s * step_scale, 0.45, 2.6))
+        cum_tx += mdx * (width / float(flow_w))
+        cum_ty += mdy * (height / float(flow_h))
+        scales.append(cum_s)
+        txs.append(cum_tx)
+        tys.append(cum_ty)
+        step_mags.append(abs(step_scale - 1.0) * 14.0 + math.hypot(mdx, mdy) * 0.25)
+
+    d_scale = max(scales) - min(scales)
+    d_pan = max(math.hypot(txs[i], tys[i]) for i in range(len(txs)))
+    if d_scale < 0.06 and d_pan < max(18.0, width * 0.03):
+        return None
+
+    local_ts = [round(max(0.0, g[1] - scene_start_sec), 3) for g in grays]
+    global_ts = [round(g[1], 3) for g in grays]
+    peak_idx = int(np.argmax(np.asarray(step_mags, dtype=np.float64))) if step_mags else 0
+    peak_sec = round(global_ts[min(len(global_ts) - 1, peak_idx + 1)], 3)
+    return {
+        "segments": [
+            {
+                "t0": local_ts[0],
+                "t1": local_ts[-1],
+                "scaleFrom": round(scales[0], 4),
+                "scaleTo": round(scales[-1], 4),
+                "rotDegFrom": 0.0,
+                "rotDegTo": 0.0,
+                "txFrom": round(txs[0], 2),
+                "txTo": round(txs[-1], 2),
+                "tyFrom": round(tys[0], 2),
+                "tyTo": round(tys[-1], 2),
+                "ease": "inOutCubic",
+                "confidence": "medium",
+                "backend": "dense_optical_flow",
+            }
+        ],
+        "pivot": {"x": 0.5, "y": 0.5},
+        "peakChangeSec": peak_sec,
     }
 
 

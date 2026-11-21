@@ -224,6 +224,7 @@ pub async fn run_agent_turn(
     let mut overflow_compacted_this_step = false;
     let mut consecutive_blocked_batches = 0usize;
     let mut preview_captures_done = 0usize;
+    let mut ref_probe_batches_done = 0usize;
 
     while step < max_loop_steps {
         if crate::paths::now_ms().saturating_sub(started_ms) >= MAX_TURN_WALL_CLOCK_MS {
@@ -568,6 +569,14 @@ pub async fn run_agent_turn(
                 .and_then(|n| n.as_str())
                 == Some("capture_film_preview")
         });
+        let batch_had_ref_probe = tool_calls.iter().any(|tc| {
+            matches!(
+                tc.get("function")
+                    .and_then(|f| f.get("name"))
+                    .and_then(|n| n.as_str()),
+                Some("inspect_ref_frame" | "sample_ref_region")
+            )
+        });
         let tools_started_ms = now_ms();
         let batch = execute_tool_batch(
             session_id,
@@ -582,6 +591,15 @@ pub async fn run_agent_turn(
             &mut chat_messages,
         )
         .await;
+        if batch_had_ref_probe && !batch.all_blocked {
+            ref_probe_batches_done += 1;
+            if ref_probe_batches_done >= 1 {
+                chat_messages.push(json!({
+                    "role": "user",
+                    "content": "SYSTEM BUDGET NOTE: Reference micro-strip / frame inspection complete. Proceed directly to authoring `index.html` with `write` now (do NOT issue additional `inspect_ref_frame`, `sample_ref_region`, `bash`, or `glob` turns before writing `index.html`)."
+                }));
+            }
+        }
         if batch_had_preview && !batch.all_blocked {
             preview_captures_done += 1;
             let nudge = if preview_captures_done == 1 {
