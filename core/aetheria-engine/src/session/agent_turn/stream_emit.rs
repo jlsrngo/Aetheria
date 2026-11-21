@@ -66,13 +66,66 @@ where
     text: Option<FragmentBlock>,
     reasoning: Option<FragmentBlock>,
     accumulated_reasoning: String,
-    reasoning_details: Option<Value>,
+    reasoning_field: Option<String>,
+    reasoning_details: Option<Vec<Value>>,
     reasoning_opaque: Option<String>,
     tool_calls: BTreeMap<usize, StreamToolCall>,
     content_parts: Vec<Value>,
     flush_deadline: Option<Instant>,
     pub raw_finish: Option<String>,
     pub usage: Option<Value>,
+}
+
+fn append_text_field(target: &mut Value, incoming: &Value, field: &str) {
+    if let Some(delta) = incoming.get(field).and_then(Value::as_str) {
+        if !delta.is_empty() {
+            let prev = target.get(field).and_then(Value::as_str).unwrap_or("");
+            target[field] = Value::String(format!("{}{}", prev, delta));
+        }
+    }
+}
+
+fn details_match_slot(a: &Value, b: &Value) -> bool {
+    let a_id = a.get("id").and_then(Value::as_str).unwrap_or("");
+    let b_id = b.get("id").and_then(Value::as_str).unwrap_or("");
+    if !a_id.is_empty() || !b_id.is_empty() {
+        return a_id == b_id;
+    }
+    let a_ty = a.get("type").and_then(Value::as_str).unwrap_or("");
+    let b_ty = b.get("type").and_then(Value::as_str).unwrap_or("");
+    if !matches!(a_ty, "reasoning.text" | "reasoning.summary" | "summary") || a_ty != b_ty {
+        return false;
+    }
+    a.get("format") == b.get("format")
+        && a.get("index") == b.get("index")
+        && (a.get("signature").is_none()
+            || b.get("signature").is_none()
+            || a.get("signature") == b.get("signature"))
+}
+
+fn merge_reasoning_details_chunk(acc: &mut Vec<Value>, incoming: &Value) {
+    let items: Vec<&Value> = match incoming {
+        Value::Array(arr) => arr.iter().collect(),
+        Value::Object(_) => vec![incoming],
+        _ => return,
+    };
+    for item in items {
+        if !item.is_object() {
+            continue;
+        }
+        if let Some(last) = acc.last_mut().filter(|prev| details_match_slot(prev, item)) {
+            append_text_field(last, item, "text");
+            append_text_field(last, item, "summary");
+            if let Some(sig) = item.get("signature").filter(|v| !v.is_null()) {
+                last["signature"] = sig.clone();
+            }
+            if let Some(data) = item.get("data").filter(|v| !v.is_null()) {
+                last["data"] = data.clone();
+            }
+        } else {
+            acc.push(item.clone());
+        }
+    }
 }
 
 impl StreamStepEmitter<fn(&str, &str, Value)> {
@@ -99,6 +152,7 @@ where
             text: None,
             reasoning: None,
             accumulated_reasoning: String::new(),
+            reasoning_field: None,
             reasoning_details: None,
             reasoning_opaque: None,
             tool_calls: BTreeMap::new(),
@@ -223,6 +277,7 @@ where
                 "type": "reasoning",
                 "id": blk.part_id,
                 "text": blk.full,
+                "reasoningField": self.reasoning_field.as_deref().unwrap_or("reasoning_content"),
                 "time": { "start": blk.started_at, "end": end_ms, "created": blk.started_at, "completed": end_ms }
             }));
         }
@@ -260,8 +315,15 @@ where
     /// Appends a streamed reasoning fragment, holding open text (flushing its
     /// pending delta first) so text blocks remain unified across reasoning bursts.
     pub fn on_reasoning_delta(&mut self, frag: &str) {
+        self.on_reasoning_delta_with_field("reasoning_content", frag);
+    }
+
+    pub fn on_reasoning_delta_with_field(&mut self, field: &str, frag: &str) {
         if frag.is_empty() {
             return;
+        }
+        if self.reasoning_field.is_none() && !field.trim().is_empty() {
+            self.reasoning_field = Some(field.to_string());
         }
         self.flush_text_pending();
         if self.reasoning.is_none() {
@@ -320,6 +382,41 @@ where
         self.arm_deadline();
     }
 
+    /// Resolves the logical slot index for an incoming streamed tool-call delta, handling
+    /// gateways that omit `index` or emit sparse indices keyed only by `id`.
+    pub fn resolve_tool_call_index(
+        &self,
+        explicit_index: Option<usize>,
+        id: Option<&str>,
+        arr_pos: usize,
+    ) -> usize {
+        if let Some(idx) = explicit_index {
+            return idx;
+        }
+        let clean_id = id.map(str::trim).filter(|s| !s.is_empty());
+        if let Some(cid) = clean_id {
+            if let Some((&existing_idx, _)) =
+                self.tool_calls.iter().find(|(_, tc)| tc.call_id == cid)
+            {
+                return existing_idx;
+            }
+            if !self.tool_calls.contains_key(&arr_pos) {
+                return arr_pos;
+            }
+            return self
+                .tool_calls
+                .keys()
+                .next_back()
+                .map(|m| m + 1)
+                .unwrap_or(arr_pos)
+                .max(arr_pos);
+        }
+        if arr_pos == 0 && !self.tool_calls.is_empty() {
+            return *self.tool_calls.keys().next_back().unwrap_or(&0);
+        }
+        arr_pos
+    }
+
     /// Accumulates a streamed tool call chunk, flushing any buffered deltas first
     /// and emitting `session.next.tool.input.started` as soon as the tool name arrives.
     pub fn on_tool_call_delta(
@@ -344,7 +441,9 @@ where
             entry.call_id = cid.to_string();
         }
         if let Some(n) = name.filter(|s| !s.is_empty()) {
-            entry.name = n.to_string();
+            if entry.name.is_empty() {
+                entry.name = n.to_string();
+            }
         }
         if !entry.started_emitted && !entry.name.is_empty() {
             entry.started_emitted = true;
@@ -381,7 +480,8 @@ where
 
     pub fn on_reasoning_details(&mut self, details: &Value) {
         if !details.is_null() {
-            self.reasoning_details = Some(details.clone());
+            let acc = self.reasoning_details.get_or_insert_with(Vec::new);
+            merge_reasoning_details_chunk(acc, details);
         }
     }
 
@@ -472,10 +572,16 @@ where
             "content": content_val,
         });
         if !reasoning.is_empty() {
-            assistant_msg["reasoning_content"] = Value::String(reasoning.clone());
+            let field = self
+                .reasoning_field
+                .as_deref()
+                .unwrap_or("reasoning_content");
+            assistant_msg[field] = Value::String(reasoning.clone());
         }
         if let Some(rd) = self.reasoning_details.take() {
-            assistant_msg["reasoning_details"] = rd;
+            if !rd.is_empty() {
+                assistant_msg["reasoning_details"] = Value::Array(rd);
+            }
         }
         if let Some(ro) = self.reasoning_opaque.take() {
             assistant_msg["reasoning_opaque"] = Value::String(ro);
@@ -672,5 +778,47 @@ mod tests {
         );
         assert_eq!(parts.len(), 1);
         assert_eq!(parts[0]["text"], "partial");
+    }
+
+    #[test]
+    fn resolves_sparse_tool_call_indices_preserves_first_name_and_merges_reasoning() {
+        let log: Rc<RefCell<Vec<(String, Value)>>> = Rc::new(RefCell::new(Vec::new()));
+        let log_c = log.clone();
+        let mut em = StreamStepEmitter::with_emitter("ws", "s1", "m1", move |_, kind, props| {
+            log_c.borrow_mut().push((kind.to_string(), props));
+        });
+
+        em.on_reasoning_delta_with_field("reasoning", "step 1 ");
+        em.on_reasoning_delta_with_field("reasoning_content", "step 2");
+        em.on_reasoning_details(&json!([
+            { "id": "rsn_0", "type": "reasoning.text", "text": "hello ", "signature": "sigA" }
+        ]));
+        em.on_reasoning_details(&json!([
+            { "id": "rsn_0", "type": "reasoning.text", "text": "world" }
+        ]));
+
+        let idx0 = em.resolve_tool_call_index(None, Some("call_a"), 0);
+        em.on_tool_call_delta(idx0, Some("call_a"), Some("write"), Some("{\"file"));
+        // Subsequent continuation omits index and id, and sends an overwritten name that must not clobber "write"
+        let idx0_cont = em.resolve_tool_call_index(None, None, 0);
+        assert_eq!(idx0_cont, idx0);
+        em.on_tool_call_delta(idx0_cont, None, Some("read"), Some("Path\":\"index.html\"}"));
+
+        // Second tool call without explicit `index`, keyed only by new `id`
+        let idx1 = em.resolve_tool_call_index(None, Some("call_b"), 0);
+        assert_ne!(idx1, idx0);
+        em.on_tool_call_delta(idx1, Some("call_b"), Some("bash"), Some("{\"command\":\"ls\"}"));
+
+        let out = em.finish_all();
+        assert_eq!(out.assistant_msg["reasoning"], json!("step 1 step 2"));
+        assert!(out.assistant_msg.get("reasoning_content").is_none());
+        let details = out.assistant_msg["reasoning_details"].as_array().unwrap();
+        assert_eq!(details.len(), 1);
+        assert_eq!(details[0]["text"], "hello world");
+        assert_eq!(details[0]["signature"], "sigA");
+
+        assert_eq!(out.tool_calls.len(), 2);
+        assert_eq!(out.tool_calls[0]["function"]["name"], "write");
+        assert_eq!(out.tool_calls[1]["function"]["name"], "bash");
     }
 }

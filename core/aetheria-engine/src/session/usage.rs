@@ -66,6 +66,12 @@ impl TurnUsageAccumulator {
         }
         Some(out)
     }
+
+    /// Returns the most recent step's usage so context-window tracking measures active
+    /// context rather than cumulative multi-step input + cache sums.
+    pub fn last_step(&self) -> Option<RecordedUsage> {
+        self.steps.last().cloned()
+    }
 }
 
 fn finite_or_zero(value: f64) -> f64 {
@@ -105,16 +111,27 @@ pub fn parse_provider_usage(raw_usage: Option<&Value>) -> Option<(TokenUsage, Op
         return None;
     }
 
-    let openai_cached = as_u64(obj.get("prompt_tokens_details").and_then(|d| d.get("cached_tokens")));
-    let explicit_cache_read = as_u64(obj.get("cache_read_input_tokens"))
+    let openai_cached = as_u64(
+        obj.get("prompt_tokens_details")
+            .and_then(|d| d.get("cached_tokens")),
+    );
+    let cache_read = openai_cached
+        .or_else(|| as_u64(obj.get("prompt_cache_hit_tokens")))
+        .or_else(|| as_u64(obj.get("cached_tokens")))
+        .or_else(|| as_u64(obj.get("cache_read_input_tokens")))
         .or_else(|| as_u64(obj.get("cacheReadInputTokens")))
-        .or_else(|| as_u64(obj.get("cache").and_then(|c| c.get("read"))));
-    let cache_read = explicit_cache_read.or(openai_cached).unwrap_or(0);
-
-    let cache_write = as_u64(obj.get("cache_creation_input_tokens"))
-        .or_else(|| as_u64(obj.get("cacheWriteInputTokens")))
-        .or_else(|| as_u64(obj.get("cache").and_then(|c| c.get("write"))))
+        .or_else(|| as_u64(obj.get("cache").and_then(|c| c.get("read"))))
         .unwrap_or(0);
+
+    let cache_write = as_u64(
+        obj.get("prompt_tokens_details")
+            .and_then(|d| d.get("cache_write_tokens")),
+    )
+    .or_else(|| as_u64(obj.get("cache_creation_input_tokens")))
+    .or_else(|| as_u64(obj.get("cache_created_input_tokens")))
+    .or_else(|| as_u64(obj.get("cacheWriteInputTokens")))
+    .or_else(|| as_u64(obj.get("cache").and_then(|c| c.get("write"))))
+    .unwrap_or(0);
 
     let input = if let Some(v) = as_u64(obj.get("non_cached_input_tokens"))
         .or_else(|| as_u64(obj.get("nonCachedInputTokens")))
@@ -122,8 +139,8 @@ pub fn parse_provider_usage(raw_usage: Option<&Value>) -> Option<(TokenUsage, Op
     {
         v
     } else if let Some(prompt_tokens) = as_u64(obj.get("prompt_tokens")) {
-        // OpenAI `prompt_tokens` includes `prompt_tokens_details.cached_tokens`.
-        prompt_tokens.saturating_sub(openai_cached.unwrap_or(0))
+        // OpenAI/9router `prompt_tokens` can include cached read + write tokens.
+        prompt_tokens.saturating_sub(cache_read.saturating_add(cache_write))
     } else if let Some(input_tokens) = as_u64(obj.get("input_tokens")) {
         input_tokens
     } else {
@@ -346,6 +363,29 @@ mod tests {
         let raw = json!({ "prompt_tokens": 1000, "completion_tokens": 500, "cost": 0 });
         let rec = record_step_usage(Some(&raw), &parity_tiers()).expect("usage present");
         assert_eq!(rec.cost, 0.0);
+    }
+
+    #[test]
+    fn parses_prompt_cache_hit_tokens_and_subtracts_cache_write_from_prompt_tokens() {
+        let raw_deepseek = json!({
+            "prompt_tokens": 10000,
+            "prompt_cache_hit_tokens": 9200,
+            "completion_tokens": 200
+        });
+        let rec1 = record_step_usage(Some(&raw_deepseek), &parity_tiers()).expect("usage present");
+        assert_eq!(rec1.tokens.cache.read, 9200);
+        assert_eq!(rec1.tokens.input, 800);
+
+        let raw_top_cached = json!({
+            "prompt_tokens": 12000,
+            "cached_tokens": 10000,
+            "prompt_tokens_details": { "cache_write_tokens": 1500 },
+            "completion_tokens": 300
+        });
+        let rec2 = record_step_usage(Some(&raw_top_cached), &parity_tiers()).expect("usage present");
+        assert_eq!(rec2.tokens.cache.read, 10000);
+        assert_eq!(rec2.tokens.cache.write, 1500);
+        assert_eq!(rec2.tokens.input, 500);
     }
 }
 

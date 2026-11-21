@@ -35,6 +35,30 @@ pub fn sanitize_multimodal_messages_to_text(messages: &mut [Value]) -> bool {
 /// 1. Standard JSON (`{"choices":[{"message":{...},"finish_reason":"..."}]}`)
 /// 2. Server-Sent Events stream (`data: {"choices":[{"delta":{...}}]}`)
 pub fn parse_completion_body(raw_body: &str) -> Result<(String, Vec<Value>, String), String> {
+    let (text, tool_calls, finish_reason, _, _) = parse_completion_body_with_usage(raw_body)?;
+    Ok((text, tool_calls, finish_reason))
+}
+
+fn extract_usage_tokens(val: &Value) -> (Option<u64>, Option<u64>) {
+    let usage = match val.get("usage") {
+        Some(u) if u.is_object() => u,
+        _ => return (None, None),
+    };
+    let input = usage
+        .get("prompt_tokens")
+        .and_then(|v| v.as_u64())
+        .or_else(|| usage.get("input_tokens").and_then(|v| v.as_u64()));
+    let output = usage
+        .get("completion_tokens")
+        .and_then(|v| v.as_u64())
+        .or_else(|| usage.get("output_tokens").and_then(|v| v.as_u64()));
+    (input, output)
+}
+
+/// Variant of `parse_completion_body` that also returns optional `(input_tokens, output_tokens)`.
+pub fn parse_completion_body_with_usage(
+    raw_body: &str,
+) -> Result<(String, Vec<Value>, String, Option<u64>, Option<u64>), String> {
     let trimmed = raw_body.trim();
     if trimmed.is_empty() {
         return Err("Empty response body from LLM provider".to_string());
@@ -71,7 +95,8 @@ pub fn parse_completion_body(raw_body: &str) -> Result<(String, Vec<Value>, Stri
                 .cloned()
                 .unwrap_or_default();
 
-            return Ok((text, tool_calls, finish_reason));
+            let (in_tok, out_tok) = extract_usage_tokens(&data);
+            return Ok((text, tool_calls, finish_reason, in_tok, out_tok));
         }
     }
 
@@ -83,6 +108,8 @@ pub fn parse_completion_body(raw_body: &str) -> Result<(String, Vec<Value>, Stri
         (String, String, String, Option<Value>),
     > = std::collections::BTreeMap::new();
     let mut parsed_any_chunk = false;
+    let mut sse_input_tokens: Option<u64> = None;
+    let mut sse_output_tokens: Option<u64> = None;
 
     for raw_line in trimmed.lines() {
         let line = raw_line.trim();
@@ -95,6 +122,13 @@ pub fn parse_completion_body(raw_body: &str) -> Result<(String, Vec<Value>, Stri
         }
         if let Ok(chunk) = serde_json::from_str::<Value>(data_str) {
             parsed_any_chunk = true;
+            let (in_tok, out_tok) = extract_usage_tokens(&chunk);
+            if in_tok.is_some() {
+                sse_input_tokens = in_tok;
+            }
+            if out_tok.is_some() {
+                sse_output_tokens = out_tok;
+            }
             if let Some(fr) = chunk
                 .pointer("/choices/0/finish_reason")
                 .and_then(|v| v.as_str())
@@ -161,7 +195,13 @@ pub fn parse_completion_body(raw_body: &str) -> Result<(String, Vec<Value>, Stri
                 tool_calls.push(tc_obj);
             }
         }
-        return Ok((accumulated_text, tool_calls, finish_reason));
+        return Ok((
+            accumulated_text,
+            tool_calls,
+            finish_reason,
+            sse_input_tokens,
+            sse_output_tokens,
+        ));
     }
 
     let preview: String = trimmed.chars().take(200).collect();

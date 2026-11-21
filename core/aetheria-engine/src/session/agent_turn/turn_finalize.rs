@@ -59,27 +59,29 @@ pub(crate) fn persist_tool_checkpoint(
     provider_id: &str,
     model_id: &str,
     started_ms: u64,
+    prior_parts: &[Value],
     tool_calls: &[Value],
 ) {
-    let content = tool_calls
-        .iter()
-        .map(|call| {
-            let name = call.pointer("/function/name").and_then(|v| v.as_str()).unwrap_or("tool");
-            let id = call.get("id").cloned().unwrap_or(Value::Null);
-            let input = call
-                .pointer("/function/arguments")
-                .and_then(|v| v.as_str())
-                .and_then(|s| serde_json::from_str::<Value>(s).ok())
-                .unwrap_or_else(|| json!({}));
-            json!({
-                "type": "tool",
-                "id": id,
-                "name": name,
-                "state": { "status": "running", "input": input },
-                "time": { "created": started_ms }
-            })
+    let mut content = prior_parts.to_vec();
+    content.extend(tool_calls.iter().map(|call| {
+        let name = call
+            .pointer("/function/name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("tool");
+        let id = call.get("id").cloned().unwrap_or(Value::Null);
+        let input = call
+            .pointer("/function/arguments")
+            .and_then(|v| v.as_str())
+            .and_then(|s| serde_json::from_str::<Value>(s).ok())
+            .unwrap_or_else(|| json!({}));
+        json!({
+            "type": "tool",
+            "id": id,
+            "name": name,
+            "state": { "status": "running", "input": input },
+            "time": { "created": started_ms }
         })
-        .collect::<Vec<_>>();
+    }));
     save_checkpoint_message(
         session_id,
         assistant_msg_id,
@@ -317,6 +319,7 @@ pub(crate) async fn finalize_agent_turn(
     );
 
     let total_usage = usage_acc.totals();
+    let effective_last_step = last_step_usage.or_else(|| usage_acc.last_step());
     let assistant_msg = json!({
         "id": assistant_msg_id,
         "type": "assistant",
@@ -327,6 +330,7 @@ pub(crate) async fn finalize_agent_turn(
         "finish": last_finish.as_str(),
         "cost": cost_to_json(total_usage.as_ref()),
         "tokens": tokens_to_json(total_usage.as_ref()),
+        "lastStepTokens": tokens_to_json(effective_last_step.as_ref()),
         "time": { "created": started_ms, "completed": completed_ms }
     });
 
@@ -549,4 +553,52 @@ fn finalize_failed_turn_with_opts(
         "session.status",
         json!({ "sessionID": session_id, "status": { "type": "idle" } }),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn persist_tool_checkpoint_preserves_prior_parts_while_new_tool_runs() {
+        let sid = format!("ses_chk_preserve_{}", crate::paths::now_ms());
+        let prior_parts = vec![
+            json!({ "type": "text", "id": "txt_1", "text": "Inspecting keyframes." }),
+            json!({
+                "type": "tool",
+                "id": "call_read_1",
+                "name": "read",
+                "state": { "status": "completed", "input": { "filePath": "ref/frame_1.jpg" } },
+                "time": { "created": 100, "completed": 110 }
+            }),
+        ];
+        let running_calls = vec![json!({
+            "id": "call_prev_2",
+            "type": "function",
+            "function": { "name": "capture_film_preview", "arguments": "{\"timestamps\":[1.0]}" }
+        })];
+
+        persist_tool_checkpoint(
+            &sid,
+            "msg_asst_1",
+            "9router",
+            "ComboMaut",
+            100,
+            &prior_parts,
+            &running_calls,
+        );
+
+        let stored_msgs = with_store(|store| store.messages.remove(&sid)).unwrap_or_default();
+        assert_eq!(stored_msgs.len(), 1);
+        let content = stored_msgs[0]
+            .get("content")
+            .and_then(Value::as_array)
+            .expect("assistant content array");
+        assert_eq!(content.len(), 3);
+        assert_eq!(content[0]["id"], "txt_1");
+        assert_eq!(content[1]["id"], "call_read_1");
+        assert_eq!(content[1]["state"]["status"], "completed");
+        assert_eq!(content[2]["id"], "call_prev_2");
+        assert_eq!(content[2]["state"]["status"], "running");
+    }
 }

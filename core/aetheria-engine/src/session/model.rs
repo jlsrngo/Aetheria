@@ -27,10 +27,19 @@ pub fn default_model_ref() -> Value {
             m.get("id").and_then(|v| v.as_str()),
         ) {
             if !pid.is_empty() && !mid.is_empty() && pid != "kiro" && !mid.starts_with("kiro/") {
-                return json!({
+                let mut model_obj = json!({
                     "providerID": pid,
                     "id": mid
                 });
+                if let Some(variant) = m
+                    .get("variant")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
+                    model_obj["variant"] = json!(variant);
+                }
+                return model_obj;
             }
         }
     }

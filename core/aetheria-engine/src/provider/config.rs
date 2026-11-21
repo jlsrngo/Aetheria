@@ -45,7 +45,21 @@ pub fn normalize_provider_entry(pid: &str, raw_val: &Value) -> Value {
         .and_then(|v| v.as_str())
         .unwrap_or("openai");
 
-    json!({
+    let headers = raw_val
+        .pointer("/options/headers")
+        .or_else(|| raw_val.pointer("/request/headers"))
+        .or_else(|| raw_val.get("headers"))
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+
+    let set_cache_key = raw_val
+        .pointer("/options/setCacheKey")
+        .and_then(|v| v.as_bool());
+
+    let compatibility = raw_val.get("compatibility").cloned();
+    let cache = raw_val.get("cache").cloned();
+
+    let mut normalized = json!({
         "id": pid,
         "name": name,
         "type": ptype,
@@ -56,6 +70,7 @@ pub fn normalize_provider_entry(pid: &str, raw_val: &Value) -> Value {
             "url": base_url
         },
         "request": {
+            "headers": headers,
             "body": {
                 "apiKey": api_key
             }
@@ -63,12 +78,23 @@ pub fn normalize_provider_entry(pid: &str, raw_val: &Value) -> Value {
         "options": {
             "baseURL": base_url,
             "apiKey": api_key,
-            "priority": priority
+            "priority": priority,
+            "headers": headers
         },
         "models": models,
         "active": active,
         "priority": priority
-    })
+    });
+    if let Some(flag) = set_cache_key {
+        normalized["options"]["setCacheKey"] = json!(flag);
+    }
+    if let Some(compat) = compatibility {
+        normalized["compatibility"] = compat;
+    }
+    if let Some(cache_cfg) = cache {
+        normalized["cache"] = cache_cfg;
+    }
+    normalized
 }
 
 pub fn read_aetheria_config() -> Value {

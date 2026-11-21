@@ -166,13 +166,30 @@ fn process_sse_line<F: FnMut(&str, &str, Value)>(
             }
         }
         if let Some(delta) = choice.get("delta") {
-            if let Some(r_frag) = delta
+            let reasoning_hit = delta
                 .get("reasoning_content")
-                .or_else(|| delta.get("reasoning"))
-                .or_else(|| delta.get("thought"))
                 .and_then(|v| v.as_str())
-            {
-                emitter.on_reasoning_delta(r_frag);
+                .map(|s| ("reasoning_content", s))
+                .or_else(|| {
+                    delta
+                        .get("reasoning")
+                        .and_then(|v| v.as_str())
+                        .map(|s| ("reasoning", s))
+                })
+                .or_else(|| {
+                    delta
+                        .get("reasoning_text")
+                        .and_then(|v| v.as_str())
+                        .map(|s| ("reasoning_text", s))
+                })
+                .or_else(|| {
+                    delta
+                        .get("thought")
+                        .and_then(|v| v.as_str())
+                        .map(|s| ("thought", s))
+                });
+            if let Some((r_field, r_frag)) = reasoning_hit {
+                emitter.on_reasoning_delta_with_field(r_field, r_frag);
             }
             if let Some(rd) = delta.get("reasoning_details") {
                 emitter.on_reasoning_details(rd);
@@ -185,12 +202,9 @@ fn process_sse_line<F: FnMut(&str, &str, Value)>(
             }
             if let Some(tc_arr) = delta.get("tool_calls").and_then(|v| v.as_array()) {
                 for (arr_pos, tc) in tc_arr.iter().enumerate() {
-                    let index = tc
-                        .get("index")
-                        .and_then(|v| v.as_u64())
-                        .map(|n| n as usize)
-                        .unwrap_or(arr_pos);
+                    let explicit_index = tc.get("index").and_then(|v| v.as_u64()).map(|n| n as usize);
                     let id = tc.get("id").and_then(|v| v.as_str());
+                    let index = emitter.resolve_tool_call_index(explicit_index, id, arr_pos);
                     let name = tc.pointer("/function/name").and_then(|v| v.as_str());
                     let args = tc.pointer("/function/arguments").and_then(|v| v.as_str());
                     emitter.on_tool_call_delta(index, id, name, args);

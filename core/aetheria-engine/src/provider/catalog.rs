@@ -91,6 +91,12 @@ pub fn build_catalog() -> (Vec<Value>, Vec<Value>) {
                     .pointer("/limit/output")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(32_768);
+                let variants = mval
+                    .get("variants")
+                    .and_then(|v| v.as_array())
+                    .filter(|arr| !arr.is_empty())
+                    .cloned()
+                    .unwrap_or_else(|| vec![json!("low"), json!("medium"), json!("high")]);
                 models.push(json!({
                     "id": mid,
                     "providerID": pid,
@@ -108,7 +114,7 @@ pub fn build_catalog() -> (Vec<Value>, Vec<Value>) {
                         "output": ["text"]
                     },
                     "request": { "headers": {}, "body": {} },
-                    "variants": [],
+                    "variants": variants,
                     "time": { "released": 0 },
                     "cost": mval.get("cost").cloned().unwrap_or_else(|| json!([])),
                     "status": "active",
