@@ -1,0 +1,1634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SHOWREEL '26 — Motion Graphics</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;700&family=Playfair+Display:ital,wght@1,400;1,600;1,700&family=Space+Grotesk:wght@700&family=Syne:wght@700;800;900&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: #000;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    #viewport {
+      position: relative;
+      width: 1080px;
+      height: 1920px;
+      overflow: hidden;
+      background: #12120F;
+      transform-origin: center center;
+    }
+
+    /* Common Layers */
+    .scene {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 1080px;
+      height: 1920px;
+      display: none;
+      overflow: hidden;
+    }
+    .scene.active {
+      display: block;
+    }
+
+    /* Global HUD Chrome Layer */
+    #hud {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 1080px;
+      height: 1920px;
+      pointer-events: none;
+      z-index: 100;
+    }
+    .corner {
+      position: absolute;
+      width: 36px;
+      height: 36px;
+      border-color: rgba(230, 226, 218, 0.45);
+      border-style: solid;
+      border-width: 0;
+    }
+    .corner.tl { top: 44px; left: 44px; border-top-width: 2.5px; border-left-width: 2.5px; }
+    .corner.tr { top: 44px; right: 44px; border-top-width: 2.5px; border-right-width: 2.5px; }
+    .corner.bl { bottom: 44px; left: 44px; border-bottom-width: 2.5px; border-left-width: 2.5px; }
+    .corner.br { bottom: 44px; right: 44px; border-bottom-width: 2.5px; border-right-width: 2.5px; }
+
+    .hud-text {
+      position: absolute;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 20px;
+      font-weight: 500;
+      letter-spacing: 2px;
+      color: rgba(230, 226, 218, 0.6);
+      text-transform: uppercase;
+    }
+    #hud-title { top: 52px; left: 72px; }
+    #hud-timecode { top: 52px; right: 72px; }
+    #hud-scene-name { bottom: 84px; left: 72px; }
+    #hud-bpm { bottom: 84px; right: 72px; display: flex; align-items: center; gap: 8px; }
+    #hud-bpm-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #E6E2DA;
+      display: inline-block;
+    }
+
+    /* HUD Timeline Track */
+    #hud-timeline {
+      position: absolute;
+      bottom: 60px;
+      left: 72px;
+      width: 936px;
+      height: 14px;
+    }
+    #hud-timeline-svg {
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+    }
+
+    /* SCENE 1: INIT */
+    #scene-init {
+      background: #12120F;
+    }
+    .init-bg-watermark {
+      position: absolute;
+      top: 160px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-family: 'Space Grotesk', 'Syne', sans-serif;
+      font-size: 340px;
+      font-weight: 700;
+      color: rgba(230, 226, 218, 0.05);
+      line-height: 1;
+      pointer-events: none;
+      letter-spacing: -6px;
+    }
+    #init-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 1080px;
+      height: 1920px;
+    }
+    #init-status {
+      position: absolute;
+      top: 1140px;
+      left: 0;
+      width: 1080px;
+      text-align: center;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 24px;
+      letter-spacing: 4px;
+      color: #E6E2DA;
+      text-transform: uppercase;
+    }
+
+    /* SCENE 2: TYPE */
+    #scene-type {
+      background: #E53F25;
+    }
+    .type-verb-label {
+      position: absolute;
+      top: 390px;
+      left: 72px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 22px;
+      letter-spacing: 3px;
+      color: #151411;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+    .type-guide-circle {
+      position: absolute;
+      top: 480px;
+      right: -220px;
+      width: 860px;
+      height: 860px;
+      border-radius: 50%;
+      border: 1px solid rgba(21, 20, 17, 0.35);
+      pointer-events: none;
+    }
+    .type-guide-circle.dashed {
+      border: 1px dashed rgba(21, 20, 17, 0.25);
+      transform: scale(1.3);
+    }
+    .type-line {
+      position: absolute;
+      left: 0;
+      width: 1080px;
+      height: 1px;
+      background: rgba(21, 20, 17, 0.35);
+    }
+    .type-line.cap { top: 760px; }
+    .type-line.base { top: 940px; }
+    .type-line-tag {
+      position: absolute;
+      right: 72px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 15px;
+      letter-spacing: 2px;
+      color: rgba(21, 20, 17, 0.65);
+      font-weight: 600;
+    }
+    .type-line-tag.cap { top: 735px; }
+    .type-line-tag.base { top: 948px; }
+    .type-subtitle {
+      position: absolute;
+      top: 1040px;
+      left: 72px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 18px;
+      letter-spacing: 3px;
+      color: rgba(21, 20, 17, 0.85);
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    #type-stage {
+      position: absolute;
+      top: 760px;
+      left: 72px;
+      width: 936px;
+      height: 180px;
+      overflow: visible;
+      display: flex;
+      align-items: flex-end;
+    }
+
+    /* SCENE 3: FORM */
+    #scene-form {
+      background: #E6E2DA;
+    }
+    .form-column-lines {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 1080px;
+      height: 1920px;
+      pointer-events: none;
+    }
+    #form-svg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 1080px;
+      height: 1920px;
+    }
+    #form-title {
+      position: absolute;
+      top: 1140px;
+      left: 72px;
+      font-family: 'Playfair Display', serif;
+      font-style: italic;
+      font-size: 170px;
+      font-weight: 400;
+      color: #151411;
+      line-height: 0.9;
+    }
+    #form-sub {
+      position: absolute;
+      top: 1330px;
+      left: 72px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 18px;
+      letter-spacing: 3px;
+      color: rgba(21, 20, 17, 0.7);
+      text-transform: uppercase;
+    }
+
+    /* SCENE 4: SYSTEMS */
+    #scene-systems {
+      background: #12120F;
+    }
+    .systems-glow {
+      position: absolute;
+      top: 450px;
+      left: 140px;
+      width: 800px;
+      height: 800px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(229, 63, 37, 0.28) 0%, rgba(18, 18, 15, 0) 70%);
+      pointer-events: none;
+    }
+    .systems-telemetry {
+      position: absolute;
+      top: 180px;
+      left: 72px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 20px;
+      line-height: 1.8;
+      letter-spacing: 2px;
+      color: rgba(230, 226, 218, 0.75);
+    }
+    .systems-telemetry span {
+      display: inline-block;
+      width: 160px;
+      color: rgba(230, 226, 218, 0.45);
+    }
+    #systems-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 1080px;
+      height: 1920px;
+    }
+    #systems-title {
+      position: absolute;
+      top: 1220px;
+      left: 72px;
+      font-family: 'Playfair Display', serif;
+      font-style: italic;
+      font-size: 160px;
+      color: #E6E2DA;
+      line-height: 0.9;
+    }
+
+    /* SCENE 5: DEPTH */
+    #scene-depth {
+      background: #E53F25;
+      perspective: 1600px;
+      overflow: hidden;
+    }
+    .depth-banner {
+      position: absolute;
+      width: 2400px;
+      left: -400px;
+      font-family: 'Syne', sans-serif;
+      font-size: 190px;
+      font-weight: 900;
+      color: transparent;
+      -webkit-text-stroke: 3px rgba(21, 20, 17, 0.85);
+      letter-spacing: 12px;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+    .depth-banner.top { top: 200px; }
+    .depth-banner.bottom { top: 1280px; }
+    .depth-telemetry {
+      position: absolute;
+      top: 440px;
+      left: 72px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 20px;
+      line-height: 1.8;
+      letter-spacing: 2px;
+      color: #151411;
+      font-weight: 600;
+    }
+    .depth-telemetry span {
+      display: inline-block;
+      width: 180px;
+      opacity: 0.7;
+    }
+    #depth-carousel-wrapper {
+      position: absolute;
+      top: 860px;
+      left: 540px;
+      width: 0;
+      height: 0;
+      transform-style: preserve-3d;
+    }
+    .depth-floor-shadow {
+      position: absolute;
+      top: 1080px;
+      left: 190px;
+      width: 700px;
+      height: 140px;
+      border-radius: 50%;
+      background: radial-gradient(ellipse, rgba(21, 20, 17, 0.4) 0%, rgba(229, 63, 37, 0) 75%);
+      pointer-events: none;
+    }
+    .depth-card {
+      position: absolute;
+      width: 250px;
+      height: 400px;
+      left: -125px;
+      top: -200px;
+      border-radius: 24px;
+      background: #151411;
+      color: #E6E2DA;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      padding: 24px 20px;
+      backface-visibility: hidden;
+      transform-style: preserve-3d;
+    }
+    .depth-card.light {
+      background: #E6E2DA;
+      color: #151411;
+    }
+    .depth-card-header {
+      width: 100%;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 22px;
+      font-weight: 700;
+      text-align: left;
+    }
+    .depth-card-icon {
+      width: 120px;
+      height: 120px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .depth-card-label {
+      width: 100%;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 18px;
+      letter-spacing: 3px;
+      font-weight: 700;
+      text-align: left;
+      text-transform: uppercase;
+    }
+
+    /* SCENE 6: INTERFACE */
+    #scene-interface {
+      background: #E6E2DA;
+    }
+    .interface-pill-top {
+      position: absolute;
+      top: 150px;
+      left: 72px;
+      width: 936px;
+      height: 56px;
+      background: #151411;
+      border-radius: 28px;
+      display: flex;
+      align-items: center;
+      padding: 0 24px;
+      gap: 14px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 18px;
+      letter-spacing: 2px;
+      color: #E6E2DA;
+      font-weight: 600;
+    }
+    .interface-pill-dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #E53F25;
+    }
+    .card-box {
+      position: absolute;
+      border: 2px solid #151411;
+      border-radius: 24px;
+      background: #E6E2DA;
+      padding: 28px;
+      overflow: hidden;
+    }
+    .card-header-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 18px;
+      letter-spacing: 2px;
+      color: #151411;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    #card-frames {
+      top: 236px;
+      left: 72px;
+      width: 936px;
+      height: 380px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    #card-frames-num {
+      font-family: 'Space Grotesk', 'Syne', sans-serif;
+      font-size: 195px;
+      font-weight: 700;
+      line-height: 0.88;
+      color: #151411;
+      letter-spacing: -6px;
+    }
+    #card-frames-footer {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 18px;
+      letter-spacing: 3px;
+      color: rgba(21, 20, 17, 0.7);
+    }
+    .card-fps-badge {
+      position: absolute;
+      top: 24px;
+      right: 24px;
+      background: #E53F25;
+      color: #E6E2DA;
+      padding: 6px 14px;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 700;
+    }
+    #card-easing {
+      top: 646px;
+      left: 72px;
+      width: 450px;
+      height: 380px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    #card-easing-num {
+      font-family: 'Space Grotesk', 'Syne', sans-serif;
+      font-size: 135px;
+      font-weight: 700;
+      color: #151411;
+      line-height: 0.9;
+      letter-spacing: -3px;
+    }
+    .mini-bar-chart {
+      display: flex;
+      align-items: flex-end;
+      gap: 12px;
+      height: 80px;
+    }
+    .mini-bar {
+      width: 32px;
+      border-radius: 6px;
+      background: #151411;
+    }
+    .mini-bar.accent {
+      background: #E53F25;
+    }
+    #card-keys {
+      top: 646px;
+      right: 72px;
+      width: 456px;
+      height: 380px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    #card-keys-num {
+      font-family: 'Space Grotesk', 'Syne', sans-serif;
+      font-size: 135px;
+      font-weight: 700;
+      color: #151411;
+      line-height: 0.9;
+    }
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 2px;
+    }
+    .toggle-switch {
+      width: 80px;
+      height: 44px;
+      border-radius: 22px;
+      border: 2px solid #151411;
+      position: relative;
+    }
+    .toggle-knob {
+      position: absolute;
+      top: 4px;
+      left: 4px;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: #151411;
+    }
+    #card-energy {
+      top: 1056px;
+      left: 72px;
+      width: 936px;
+      height: 360px;
+    }
+    #energy-svg {
+      width: 100%;
+      height: 240px;
+      margin-top: 20px;
+    }
+    #interface-cursor {
+      position: absolute;
+      width: 32px;
+      height: 32px;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    /* SCENE 7: FLUID */
+    #scene-fluid {
+      background: #12120F;
+    }
+    .fluid-telemetry {
+      position: absolute;
+      top: 180px;
+      left: 72px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 20px;
+      line-height: 1.8;
+      letter-spacing: 2px;
+      color: rgba(230, 226, 218, 0.75);
+    }
+    .fluid-telemetry span {
+      display: inline-block;
+      width: 160px;
+      color: rgba(230, 226, 218, 0.45);
+    }
+    #fluid-svg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 1080px;
+      height: 1920px;
+    }
+    #fluid-title {
+      position: absolute;
+      top: 1220px;
+      left: 72px;
+      font-family: 'Playfair Display', serif;
+      font-style: italic;
+      font-size: 170px;
+      color: #E6E2DA;
+      line-height: 0.9;
+    }
+
+    /* SCENE 8: RHYTHM */
+    #scene-rhythm {
+      background: #E53F25;
+    }
+    #rhythm-container {
+      position: absolute;
+      top: 150px;
+      left: 0;
+      width: 1080px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow: hidden;
+    }
+    .rhythm-strip {
+      width: 4800px;
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      font-size: 140px;
+      line-height: 1.1;
+      padding: 8px 0;
+    }
+    .rhythm-strip.bold-sans {
+      font-family: 'Space Grotesk', 'Syne', sans-serif;
+      font-weight: 700;
+      color: #151411;
+      letter-spacing: 2px;
+    }
+    .rhythm-strip.italic-serif {
+      font-family: 'Playfair Display', serif;
+      font-style: italic;
+      color: #151411;
+      letter-spacing: 2px;
+    }
+    .rhythm-strip.pill-black {
+      background: #151411;
+      color: #E53F25 !important;
+      padding: 10px 0;
+    }
+
+    /* SCENE 9: OUTRO */
+    #scene-outro {
+      background: #12120F;
+    }
+    .outro-glow {
+      position: absolute;
+      top: 420px;
+      left: 140px;
+      width: 800px;
+      height: 800px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(229, 63, 37, 0.22) 0%, rgba(18, 18, 15, 0) 70%);
+      pointer-events: none;
+    }
+    .outro-grid-plus {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 1080px;
+      height: 1920px;
+      pointer-events: none;
+    }
+    #outro-content {
+      position: absolute;
+      top: 560px;
+      left: 72px;
+      width: 936px;
+    }
+    #outro-headline {
+      font-family: 'Space Grotesk', 'Syne', sans-serif;
+      font-size: 152px;
+      font-weight: 700;
+      color: #E6E2DA;
+      line-height: 0.9;
+      letter-spacing: -2px;
+      white-space: nowrap;
+    }
+    #outro-headline .dot {
+      color: #E53F25;
+    }
+    #outro-subtitle {
+      font-family: 'Playfair Display', serif;
+      font-style: italic;
+      font-size: 76px;
+      color: #E53F25;
+      margin-top: 14px;
+      margin-bottom: 50px;
+      line-height: 1;
+    }
+    .outro-line {
+      width: 100%;
+      height: 2px;
+      background: rgba(230, 226, 218, 0.4);
+      margin-bottom: 36px;
+    }
+    .outro-table {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 22px;
+      letter-spacing: 2px;
+      color: rgba(230, 226, 218, 0.7);
+      margin-bottom: 60px;
+    }
+    .outro-row {
+      display: flex;
+      justify-content: space-between;
+    }
+    .outro-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 16px;
+      border: 2px solid rgba(230, 226, 218, 0.5);
+      border-radius: 40px;
+      padding: 16px 36px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 20px;
+      letter-spacing: 3px;
+      color: #E6E2DA;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .outro-pill-dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #E53F25;
+    }
+  </style>
+</head>
+<body>
+  <div id="viewport">
+    <!-- GLOBAL HUD -->
+    <div id="hud">
+      <div class="corner tl"></div>
+      <div class="corner tr"></div>
+      <div class="corner bl"></div>
+      <div class="corner br"></div>
+      <div id="hud-title" class="hud-text">SHOWREEL '26</div>
+      <div id="hud-timecode" class="hud-text">00:00:00:00</div>
+      <div id="hud-scene-name" class="hud-text">00/07 INIT</div>
+      <div id="hud-bpm" class="hud-text"><span id="hud-bpm-dot"></span> 120 BPM</div>
+      <div id="hud-timeline">
+        <svg id="hud-timeline-svg" viewBox="0 0 936 14"></svg>
+      </div>
+    </div>
+
+    <!-- SCENE 1: INIT -->
+    <div id="scene-init" class="scene">
+      <div class="init-bg-watermark">'26</div>
+      <canvas id="init-canvas" width="1080" height="1920"></canvas>
+      <div id="init-status">> INITIALIZING MOTION</div>
+    </div>
+
+    <!-- SCENE 2: TYPE -->
+    <div id="scene-type" class="scene">
+      <div class="type-verb-label" id="type-verb">VERB 01 / 04</div>
+      <div class="type-guide-circle"></div>
+      <div class="type-guide-circle dashed"></div>
+      <div class="type-line cap"></div>
+      <div class="type-line base"></div>
+      <div class="type-line-tag cap">CAP HEIGHT</div>
+      <div class="type-line-tag base">BASELINE</div>
+      <div id="type-stage"></div>
+      <div class="type-subtitle">— THE FOUR VERBS OF MOTION</div>
+    </div>
+
+    <!-- SCENE 3: FORM -->
+    <div id="scene-form" class="scene">
+      <svg class="form-column-lines" width="1080" height="1920" viewBox="0 0 1080 1920">
+        <line x1="216" y1="0" x2="216" y2="1920" stroke="rgba(21,20,17,0.06)" stroke-width="1.5"/>
+        <line x1="432" y1="0" x2="432" y2="1920" stroke="rgba(21,20,17,0.06)" stroke-width="1.5"/>
+        <line x1="648" y1="0" x2="648" y2="1920" stroke="rgba(21,20,17,0.06)" stroke-width="1.5"/>
+        <line x1="864" y1="0" x2="864" y2="1920" stroke="rgba(21,20,17,0.06)" stroke-width="1.5"/>
+      </svg>
+      <svg id="form-svg" viewBox="0 0 1080 1920"></svg>
+      <div id="form-title">form.</div>
+      <div id="form-sub">FIG. 02 — COMPOSITION IN 7 PRIMITIVES</div>
+    </div>
+
+    <!-- SCENE 4: SYSTEMS -->
+    <div id="scene-systems" class="scene">
+      <div class="systems-glow"></div>
+      <div class="systems-telemetry">
+        <div><span>PARTICLES</span> 1,200</div>
+        <div><span>ROT.Y</span> <span id="telemetry-rot">100.8°</span></div>
+        <div><span>STATE</span> TORUS</div>
+        <div><span>MORPH</span> 0.00</div>
+      </div>
+      <canvas id="systems-canvas" width="1080" height="1920"></canvas>
+      <div id="systems-title">systems</div>
+    </div>
+
+    <!-- SCENE 5: DEPTH -->
+    <div id="scene-depth" class="scene">
+      <div class="depth-banner top" id="depth-banner-top">DEPTH DEPTH DEPTH DEPTH</div>
+      <div class="depth-telemetry">
+        <div><span>CARDS</span> 10</div>
+        <div><span>PERSPECTIVE</span> 1600PX</div>
+        <div><span>ROT.Y</span> <span id="depth-rot-y">-108°</span></div>
+      </div>
+      <div class="depth-floor-shadow"></div>
+      <div id="depth-carousel-wrapper"></div>
+      <div class="depth-banner bottom" id="depth-banner-bottom">DEPTH DEPTH DEPTH DEPTH</div>
+    </div>
+
+    <!-- SCENE 6: INTERFACE -->
+    <div id="scene-interface" class="scene">
+      <div class="interface-pill-top">
+        <span class="interface-pill-dot"></span>
+        <span>RENDER COMPLETE — 450/450 FRAMES • 0 DROPPED</span>
+      </div>
+      <div class="card-box" id="card-frames">
+        <div class="card-header-label">FRAMES RENDERED</div>
+        <div class="card-fps-badge">30 FPS</div>
+        <div id="card-frames-num">447</div>
+        <div id="card-frames-footer">1080 × 1920 • 15.0 S • H.264</div>
+      </div>
+      <div class="card-box" id="card-easing">
+        <div class="card-header-label">EASING CURVES</div>
+        <div id="card-easing-num">36</div>
+        <div class="mini-bar-chart" id="mini-bars"></div>
+      </div>
+      <div class="card-box" id="card-keys">
+        <div class="card-header-label">KEYFRAMES BY HAND</div>
+        <div id="card-keys-num">0</div>
+        <div class="toggle-row">
+          <div class="toggle-switch"><div class="toggle-knob"></div></div>
+          <span>AUTOMATED OFF</span>
+        </div>
+      </div>
+      <div class="card-box" id="card-energy">
+        <div class="card-header-label">MOTION ENERGY — 15S</div>
+        <svg id="energy-svg" viewBox="0 0 880 240"></svg>
+      </div>
+      <svg id="interface-cursor" viewBox="0 0 24 24">
+        <path d="M4 2 L20 12 L12 14 L8 22 Z" fill="#151411"/>
+      </svg>
+    </div>
+
+    <!-- SCENE 7: FLUID -->
+    <div id="scene-fluid" class="scene">
+      <div class="fluid-telemetry">
+        <div><span>VISCOSITY</span> 0.82</div>
+        <div><span>BLOBS</span> 08</div>
+        <div><span>FILTER</span> GOO • Σ22</div>
+      </div>
+      <svg id="fluid-svg" viewBox="0 0 1080 1920">
+        <defs>
+          <filter id="goo" x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="22" result="blur" />
+            <feColorMatrix in="blur" mode="matrix" values="
+              1 0 0 0 0
+              0 1 0 0 0
+              0 0 1 0 0
+              0 0 0 35 -14" result="goo" />
+          </filter>
+        </defs>
+        <!-- Background concentric radar circles -->
+        <g id="fluid-radar-rings" stroke="rgba(230,226,218,0.12)" stroke-width="1.5" fill="none">
+          <circle cx="540" cy="680" r="160" />
+          <circle cx="540" cy="680" r="280" />
+          <circle cx="540" cy="680" r="400" />
+          <circle cx="540" cy="680" r="520" />
+        </g>
+        <g id="fluid-goo-group" filter="url(#goo)"></g>
+      </svg>
+      <div id="fluid-title">fluid.</div>
+    </div>
+
+    <!-- SCENE 8: RHYTHM -->
+    <div id="scene-rhythm" class="scene">
+      <div id="rhythm-container"></div>
+    </div>
+
+    <!-- SCENE 9: OUTRO -->
+    <div id="scene-outro" class="scene">
+      <div class="outro-glow"></div>
+      <svg class="outro-grid-plus" id="outro-grid" viewBox="0 0 1080 1920"></svg>
+      <div id="outro-content">
+        <div id="outro-headline">CLAUDE<span class="dot">.</span></div>
+        <div id="outro-subtitle">motion designer</div>
+        <div class="outro-line"></div>
+        <div class="outro-table">
+          <div class="outro-row">
+            <span>SHOWREEL '26</span>
+            <span>15 SEC</span>
+          </div>
+          <div class="outro-row">
+            <span>450 FRAMES</span>
+            <span>0 KEYFRAMES BY HAND</span>
+          </div>
+          <div class="outro-row">
+            <span>HTML • CSS • SVG • CANVAS</span>
+            <span>GSAP</span>
+          </div>
+        </div>
+        <div class="outro-pill">
+          <span class="outro-pill-dot"></span>
+          <span>OPEN FOR PROJECTS — 2026</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* Film Meta Contract */
+    window.__filmMeta = {
+      title: "SHOWREEL '26",
+      width: 1080,
+      height: 1920,
+      fps: 30,
+      duration: 15.0,
+      scenes: [
+        { id: "init", start: 0.0, end: 1.5, duration: 1.5 },
+        { id: "type", start: 1.5, end: 3.2, duration: 1.7 },
+        { id: "form", start: 3.2, end: 5.0, duration: 1.8 },
+        { id: "systems", start: 5.0, end: 6.5, duration: 1.5 },
+        { id: "depth", start: 6.5, end: 7.97, duration: 1.47 },
+        { id: "interface", start: 7.97, end: 9.3, duration: 1.33 },
+        { id: "fluid", start: 9.3, end: 11.0, duration: 1.7 },
+        { id: "rhythm", start: 11.0, end: 13.0, duration: 2.0 },
+        { id: "outro", start: 13.0, end: 15.0, duration: 2.0 }
+      ]
+    };
+
+    /* Responsive scaling for standalone browser preview */
+    function autoScaleViewport() {
+      const vp = document.getElementById('viewport');
+      const scale = Math.min(window.innerWidth / 1080, window.innerHeight / 1920);
+      vp.style.transform = `scale(${scale})`;
+    }
+    window.addEventListener('resize', autoScaleViewport);
+    autoScaleViewport();
+
+    /* DOM caching */
+    const scenes = {
+      init: document.getElementById('scene-init'),
+      type: document.getElementById('scene-type'),
+      form: document.getElementById('scene-form'),
+      systems: document.getElementById('scene-systems'),
+      depth: document.getElementById('scene-depth'),
+      interface: document.getElementById('scene-interface'),
+      fluid: document.getElementById('scene-fluid'),
+      rhythm: document.getElementById('scene-rhythm'),
+      outro: document.getElementById('scene-outro')
+    };
+
+    const hudCorners = document.querySelectorAll('.corner');
+    const hudTexts = document.querySelectorAll('.hud-text');
+    const hudTitle = document.getElementById('hud-title');
+    const hudTimecode = document.getElementById('hud-timecode');
+    const hudSceneName = document.getElementById('hud-scene-name');
+    const hudBpm = document.getElementById('hud-bpm');
+    const hudBpmDot = document.getElementById('hud-bpm-dot');
+    const hudTimelineSvg = document.getElementById('hud-timeline-svg');
+
+    /* Build HUD Timeline Ticks */
+    const NUM_SEGMENTS = 7;
+    const TRACK_W = 936;
+    const STEP = TRACK_W / NUM_SEGMENTS;
+
+    function renderHudTimeline(sceneIndex, segProgress, isDarkTheme) {
+      const strokeColor = isDarkTheme ? 'rgba(230, 226, 218, 0.45)' : 'rgba(21, 20, 17, 0.4)';
+      const activeRed = '#E53F25';
+
+      let html = `<line x1="0" y1="7" x2="${TRACK_W}" y2="7" stroke="${strokeColor}" stroke-width="1.5" />`;
+      // Segment ticks
+      for (let i = 0; i <= NUM_SEGMENTS; i++) {
+        const x = i * STEP;
+        html += `<line x1="${x}" y1="0" x2="${x}" y2="14" stroke="${strokeColor}" stroke-width="1.5" />`;
+      }
+
+      // Red progress fill bar
+      let fillWidth = 0;
+      if (sceneIndex === 0) {
+        fillWidth = 12; // initial pip
+      } else if (sceneIndex >= NUM_SEGMENTS) {
+        fillWidth = TRACK_W;
+      } else {
+        fillWidth = Math.min(TRACK_W, (sceneIndex) * STEP);
+      }
+      html += `<line x1="0" y1="7" x2="${fillWidth}" y2="7" stroke="${activeRed}" stroke-width="4.5" stroke-linecap="round" />`;
+
+      hudTimelineSvg.innerHTML = html;
+    }
+
+    function setHudTheme(theme) {
+      const isDark = (theme === 'dark');
+      const color = isDark ? 'rgba(230, 226, 218, 0.65)' : 'rgba(21, 20, 17, 0.85)';
+      const cornerColor = isDark ? 'rgba(230, 226, 218, 0.45)' : 'rgba(21, 20, 17, 0.45)';
+
+      hudCorners.forEach(c => c.style.borderColor = cornerColor);
+      hudTexts.forEach(t => t.style.color = color);
+      hudBpmDot.style.background = isDark ? '#E6E2DA' : '#151411';
+    }
+
+    /* PRE-BUILD STATIC ASSETS & GEOMETRY */
+
+    // 1. Grid plus markers for Outro & Init
+    function buildGridPlus(svgEl, cols, rows, stroke) {
+      let markup = '';
+      const dx = 1080 / (cols + 1);
+      const dy = 1920 / (rows + 1);
+      const s = 9;
+      for (let c = 1; c <= cols; c++) {
+        for (let r = 1; r <= rows; r++) {
+          const x = c * dx;
+          const y = r * dy;
+          markup += `<path d="M${x - s} ${y} L${x + s} ${y} M${x} ${y - s} L${x} ${y + s}" stroke="${stroke}" stroke-width="1.5"/>`;
+        }
+      }
+      svgEl.innerHTML = markup;
+    }
+    buildGridPlus(document.getElementById('outro-grid'), 7, 13, 'rgba(230, 226, 218, 0.12)');
+
+    // 2. Pre-generate 1,200 3D Sphere/Torus points (Fibonacci celestial sphere)
+    const TORUS_PARTICLE_COUNT = 1200;
+    const torusPoints = [];
+    for (let i = 0; i < TORUS_PARTICLE_COUNT; i++) {
+      const phi = Math.acos(1 - 2 * (i + 0.5) / TORUS_PARTICLE_COUNT);
+      const theta = Math.PI * (1 + Math.sqrt(5)) * i;
+      const r = 295 + (i % 7) * 8 - (i % 3) * 6;
+      const x = r * Math.sin(phi) * Math.cos(theta);
+      const y = r * Math.sin(phi) * Math.sin(theta) * 0.96;
+      const z = r * Math.cos(phi);
+      const isRed = (i % 9 === 0);
+      torusPoints.push({ x, y, z, isRed });
+    }
+
+    // 3. Setup CSS 3D Carousel Cards
+    const carouselWrapper = document.getElementById('depth-carousel-wrapper');
+    const CARD_COUNT = 10;
+    const CAROUSEL_RADIUS = 480;
+    const cardDefs = [
+      { num: "01", icon: `<svg width="70" height="70" viewBox="0 0 100 100"><path d="M10 50 Q 30 20, 50 50 T 90 50" fill="none" stroke="currentColor" stroke-width="12" stroke-linecap="round"/></svg>`, label: "WAVE", light: false },
+      { num: "02", icon: `<svg width="70" height="70" viewBox="0 0 100 100"><circle cx="50" cy="50" r="32" fill="none" stroke="currentColor" stroke-width="12"/></svg>`, label: "RING", light: false },
+      { num: "03", icon: `<svg width="70" height="70" viewBox="0 0 100 100"><polygon points="50,15 90,85 10,85" fill="currentColor"/></svg>`, label: "TRIANGLE", light: false },
+      { num: "04", icon: `<svg width="80" height="80" viewBox="0 0 100 100"><path d="M10 75 A 40 40 0 0 1 90 75 Z" fill="currentColor"/></svg>`, label: "ARCH", light: true },
+      { num: "05", icon: `<svg width="70" height="70" viewBox="0 0 100 100"><path d="M40 15 H60 V40 H85 V60 H60 V85 H40 V60 H15 V40 H40 Z" fill="currentColor"/></svg>`, label: "PLUS", light: false },
+      { num: "06", icon: `<svg width="70" height="70" viewBox="0 0 100 100"><rect x="15" y="15" width="70" height="70" rx="10" fill="currentColor"/></svg>`, label: "SQUARE", light: false },
+      { num: "07", icon: `<svg width="70" height="70" viewBox="0 0 100 100"><path d="M20 30 H80 M20 50 H80 M20 70 H80" stroke="currentColor" stroke-width="10" stroke-linecap="round"/></svg>`, label: "BARS", light: false },
+      { num: "08", icon: `<svg width="70" height="70" viewBox="0 0 100 100"><circle cx="30" cy="30" r="10" fill="currentColor"/><circle cx="70" cy="30" r="10" fill="currentColor"/><circle cx="30" cy="70" r="10" fill="currentColor"/><circle cx="70" cy="70" r="10" fill="currentColor"/></svg>`, label: "GRID", light: false },
+      { num: "09", icon: `<svg width="70" height="70" viewBox="0 0 100 100"><path d="M50 15 L85 85 L15 85 Z" fill="none" stroke="currentColor" stroke-width="10"/></svg>`, label: "DELTA", light: false },
+      { num: "10", icon: `<svg width="70" height="70" viewBox="0 0 100 100"><circle cx="50" cy="50" r="38" fill="currentColor"/></svg>`, label: "ORB", light: false }
+    ];
+
+    carouselWrapper.innerHTML = cardDefs.map((c, i) => {
+      const angle = (i / CARD_COUNT) * 360;
+      return `
+        <div class="depth-card ${c.light ? 'light' : ''}" style="transform: rotateY(${angle}deg) translateZ(${CAROUSEL_RADIUS}px)">
+          <div class="depth-card-header">${c.num}</div>
+          <div class="depth-card-icon">${c.icon}</div>
+          <div class="depth-card-label">${c.label}</div>
+        </div>
+      `;
+    }).join('');
+
+    // 4. Setup Rhythm rows
+    const rhythmContainer = document.getElementById('rhythm-container');
+    const rhythmRowsData = [
+      { type: 'bold-sans', text: 'ON • MOTION • MOTION • MOTION • MOTION • MOTION • MOTI', speed: -140 },
+      { type: 'italic-serif pill-black', text: 'motion • motion • motion • motion • motion • motion • moti', speed: 120 },
+      { type: 'bold-sans', text: 'ON • MOTION • MOTION • MOTION • MOTION • MOTION • MOTI', speed: -160 },
+      { type: 'italic-serif', text: '• motion • motion • motion • motion • motion • motion • m', speed: 100 },
+      { type: 'bold-sans pill-black', text: '• MOTION • MOTION • MOTION • MOTION • MOTION • MOTI', speed: -130 },
+      { type: 'italic-serif', text: 'motion • motion • motion • motion • motion • motion • moti', speed: 150 },
+      { type: 'bold-sans', text: 'ON • MOTION • MOTION • MOTION • MOTION • MOTION • MOTI', speed: -170 }
+    ];
+
+    rhythmContainer.innerHTML = rhythmRowsData.map((r, i) => `
+      <div class="rhythm-strip ${r.type}" id="rhythm-strip-${i}">
+        ${r.text}
+      </div>
+    `).join('');
+
+    // 5. Setup Mini-bars for Interface scene
+    const miniBarsContainer = document.getElementById('mini-bars');
+    const barHeights = [28, 44, 30, 56, 76, 42, 60];
+    miniBarsContainer.innerHTML = barHeights.map((h, i) => `
+      <div class="mini-bar ${i === 4 ? 'accent' : ''}" style="height: ${h}px"></div>
+    `).join('');
+
+    /* =========================================================================
+       DETERMINISTIC RENDER AT TIME T (0.00s - 15.00s)
+       ========================================================================= */
+
+    window.renderAt = function(t) {
+      // Clamp t
+      t = Math.max(0, Math.min(15.0, t));
+
+      // Global Timecode formatting: 00:00:SS:FF
+      const totalFrames = Math.floor(t * 30);
+      const s = Math.floor(t);
+      const f = totalFrames % 30;
+      hudTimecode.textContent = `00:00:${String(s).padStart(2, '0')}:${String(f).padStart(2, '0')}`;
+
+      // Scene Switching & Theme
+      let currentScene = 'init';
+      let sceneIdx = 0;
+      let theme = 'dark';
+      let sceneLabel = '00/07 INIT';
+
+      if (t < 1.50) {
+        currentScene = 'init'; sceneIdx = 0; theme = 'dark'; sceneLabel = '00/07 INIT';
+      } else if (t < 3.20) {
+        currentScene = 'type'; sceneIdx = 1; theme = 'red'; sceneLabel = '01/07 TYPE';
+      } else if (t < 5.00) {
+        currentScene = 'form'; sceneIdx = 2; theme = 'cream'; sceneLabel = '02/07 FORM';
+      } else if (t < 6.50) {
+        currentScene = 'systems'; sceneIdx = 3; theme = 'dark'; sceneLabel = '03/07 SYSTEMS';
+      } else if (t < 7.97) {
+        currentScene = 'depth'; sceneIdx = 4; theme = 'red'; sceneLabel = '04/07 DEPTH';
+      } else if (t < 9.30) {
+        currentScene = 'interface'; sceneIdx = 5; theme = 'cream'; sceneLabel = '05/07 INTERFACE';
+      } else if (t < 11.00) {
+        currentScene = 'fluid'; sceneIdx = 6; theme = 'dark'; sceneLabel = '06/07 FLUID';
+      } else if (t < 13.00) {
+        currentScene = 'rhythm'; sceneIdx = 7; theme = 'red'; sceneLabel = '07/07 RHYTHM';
+      } else {
+        currentScene = 'outro'; sceneIdx = 7; theme = 'dark'; sceneLabel = '07/07 RHYTHM';
+      }
+
+      // Update Scene Activation
+      for (const key in scenes) {
+        if (key === currentScene) {
+          scenes[key].classList.add('active');
+        } else {
+          scenes[key].classList.remove('active');
+        }
+      }
+
+      // Update HUD
+      hudSceneName.textContent = sceneLabel;
+      setHudTheme(theme);
+      renderHudTimeline(sceneIdx, 0, theme === 'dark');
+
+      /* SCENE SPECIFIC RENDERS */
+
+      // -----------------------------------------------------------
+      // 1. SCENE: INIT (0.0s - 1.5s)
+      // -----------------------------------------------------------
+      if (currentScene === 'init') {
+        const localT = t; // 0..1.5
+        const canvas = document.getElementById('init-canvas');
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, 1080, 1920);
+
+        // Center crosshair axes
+        const cx = 540;
+        const cy = 900;
+        ctx.strokeStyle = 'rgba(230, 226, 218, 0.16)';
+        ctx.lineWidth = 1.5;
+
+        // Vertical axis
+        ctx.beginPath();
+        ctx.moveTo(cx, 160);
+        ctx.lineTo(cx, 1720);
+        ctx.stroke();
+
+        // Horizontal axis
+        ctx.beginPath();
+        ctx.moveTo(80, cy);
+        ctx.lineTo(1000, cy);
+        ctx.stroke();
+
+        // Plus marker grid
+        ctx.fillStyle = 'rgba(230, 226, 218, 0.22)';
+        const cols = 7;
+        const rows = 11;
+        const dx = 1080 / (cols + 1);
+        const dy = 1920 / (rows + 1);
+        const pSize = 7;
+        for (let c = 1; c <= cols; c++) {
+          for (let r = 1; r <= rows; r++) {
+            const px = c * dx;
+            const py = r * dy;
+            ctx.fillRect(px - pSize, py - 0.75, pSize * 2, 1.5);
+            ctx.fillRect(px - 0.75, py - pSize, 1.5, pSize * 2);
+          }
+        }
+
+        // Perspective ellipse ground ring
+        ctx.strokeStyle = 'rgba(229, 63, 37, 0.35)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy + 30, 240, 48, 0, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Radar dial circle
+        const dialRadius = 250;
+        const startAngle = -Math.PI / 2;
+        const sweepAngle = Math.PI * 2 * Math.min(1.0, localT / 1.3);
+
+        ctx.strokeStyle = '#E6E2DA';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(cx, cy, dialRadius, startAngle, startAngle + sweepAngle);
+        ctx.stroke();
+
+        // Radial tick marks around circle (36 ticks)
+        const tickCount = 36;
+        for (let i = 0; i < tickCount; i++) {
+          const angle = (i / tickCount) * Math.PI * 2 - Math.PI / 2;
+          if (angle <= startAngle + sweepAngle) {
+            const x1 = cx + Math.cos(angle) * (dialRadius + 8);
+            const y1 = cy + Math.sin(angle) * (dialRadius + 8);
+            const x2 = cx + Math.cos(angle) * (dialRadius + 28);
+            const y2 = cy + Math.sin(angle) * (dialRadius + 28);
+            ctx.strokeStyle = 'rgba(230, 226, 218, 0.5)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+          }
+        }
+
+        // Red indicator dot parked at top (12 o'clock)
+        ctx.fillStyle = '#E53F25';
+        ctx.beginPath();
+        ctx.arc(cx, cy - dialRadius, 20, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Status text typing
+        const fullStatus = "> INITIALIZING M";
+        const charsToShow = Math.min(fullStatus.length, Math.floor((localT / 1.1) * fullStatus.length));
+        document.getElementById('init-status').textContent = fullStatus.substring(0, charsToShow);
+      }
+
+      // -----------------------------------------------------------
+      // 2. SCENE: TYPE (1.5s - 3.2s)
+      // -----------------------------------------------------------
+      else if (currentScene === 'type') {
+        const localT = t - 1.5; // 0..1.7s
+        const typeStage = document.getElementById('type-stage');
+        const verbLabel = document.getElementById('type-verb');
+
+        if (localT < 0.45) {
+          // VERB 01: MOVE
+          verbLabel.textContent = "VERB 01 / 04";
+          const p = Math.min(1.0, localT / 0.22);
+          const ease = 1 - Math.pow(1 - p, 4);
+          const offsetX = (1 - ease) * -400;
+          typeStage.innerHTML = `
+            <div style="
+              font-family: 'Space Grotesk', 'Syne', sans-serif;
+              font-size: 195px;
+              font-weight: 700;
+              letter-spacing: -3px;
+              color: #151411;
+              line-height: 0.85;
+              margin-bottom: -16px;
+              transform: translateX(${offsetX}px);
+            ">MOVE</div>
+          `;
+        } else if (localT < 0.90) {
+          // VERB 02: SHAPE (letters rotated and offset)
+          verbLabel.textContent = "VERB 02 / 04";
+          const subT = (localT - 0.45);
+          const p = Math.min(1.0, subT / 0.22);
+          const scale = 0.95 + 0.05 * p;
+          typeStage.innerHTML = `
+            <div style="
+              display: flex;
+              gap: 8px;
+              font-family: 'Space Grotesk', 'Syne', sans-serif;
+              font-size: 190px;
+              font-weight: 700;
+              color: #151411;
+              line-height: 0.85;
+              margin-bottom: -16px;
+              transform: scale(${scale});
+            ">
+              <span style="display:inline-block; transform: rotate(-8deg) translateY(6px);">S</span>
+              <span style="display:inline-block; transform: rotate(4deg) translateY(-8px);">H</span>
+              <span style="display:inline-block; transform: rotate(-3deg) translateY(4px);">A</span>
+              <span style="display:inline-block; transform: rotate(7deg) translateY(-6px);">P</span>
+              <span style="display:inline-block; transform: rotate(-5deg) translateY(8px);">E</span>
+            </div>
+          `;
+        } else if (localT < 1.35) {
+          // VERB 03: bend (Italic Serif)
+          verbLabel.textContent = "VERB 03 / 04";
+          const subT = (localT - 0.90);
+          const p = Math.min(1.0, subT / 0.25);
+          const skewX = (1 - p) * 12;
+          typeStage.innerHTML = `
+            <div style="
+              font-family: 'Playfair Display', serif;
+              font-style: italic;
+              font-size: 235px;
+              font-weight: 400;
+              color: #151411;
+              line-height: 0.82;
+              margin-bottom: -22px;
+              transform: skewX(${skewX}deg);
+            ">bend</div>
+          `;
+        } else {
+          // VERB 04: BREAK (horizontal split offset)
+          verbLabel.textContent = "VERB 04 / 04";
+          const subT = (localT - 1.35);
+          const p = Math.min(1.0, subT / 0.18);
+          const breakShift = p * 28;
+          typeStage.innerHTML = `
+            <div style="position: relative; font-family: 'Space Grotesk', 'Syne', sans-serif; font-size: 195px; font-weight: 700; line-height: 0.85; margin-bottom: -16px; color: #151411;">
+              <div style="clip-path: polygon(0 0, 100% 0, 100% 50%, 0 50%); transform: translateX(${breakShift}px);">BREAK</div>
+              <div style="position: absolute; top: 0; left: 0; clip-path: polygon(0 50%, 100% 50%, 100% 100%, 0 100%); transform: translateX(-${breakShift}px);">BREAK</div>
+            </div>
+          `;
+        }
+      }
+
+      // -----------------------------------------------------------
+      // 3. SCENE: FORM (3.2s - 5.0s)
+      // -----------------------------------------------------------
+      else if (currentScene === 'form') {
+        const localT = t - 3.2; // 0..1.8s
+        const p = Math.min(1.0, localT / 0.6);
+        const ease = 1 - Math.pow(1 - p, 3);
+
+        const formSvg = document.getElementById('form-svg');
+        const cx = 540;
+        const cy = 760;
+
+        // Primitives layout & spring animation
+        const circleR = 260 * ease;
+        const triY = 320 - (1 - ease) * 180;
+        const barX = 420 + (1 - ease) * 300;
+        const semiRot = -20 + Math.sin(localT * 3) * 6;
+        const diamondRot = 45 + Math.cos(localT * 3) * 8;
+
+        // Build SVG primitives
+        let svg = `
+          <!-- Dashed Guide Circle -->
+          <circle cx="${cx}" cy="${cy}" r="360" fill="none" stroke="rgba(21,20,17,0.3)" stroke-width="2" stroke-dasharray="8 8" />
+
+          <!-- Outlined Triangle Top Left -->
+          <polygon points="200,${triY - 90} 320,${triY + 110} 80,${triY + 110}" fill="none" stroke="#151411" stroke-width="7" stroke-linejoin="round"/>
+
+          <!-- Red Bar Top Right -->
+          <rect x="${barX}" y="350" width="480" height="60" fill="#E53F25" />
+
+          <!-- Central Black Circle -->
+          <circle cx="${cx}" cy="${cy}" r="${circleR}" fill="#151411" />
+
+          <!-- Red Semi-Circle Bottom Left -->
+          <g transform="translate(320, 920) rotate(${semiRot})">
+            <path d="M -170 0 A 170 170 0 0 1 170 0 Z" fill="#E53F25" />
+          </g>
+
+          <!-- Rotated Black Diamond to the Right -->
+          <g transform="translate(860, 920) rotate(${diamondRot})">
+            <rect x="-70" y="-70" width="140" height="140" fill="#151411" />
+          </g>
+
+          <!-- Dot Matrix Bottom Right -->
+          <g transform="translate(740, 1150)">
+        `;
+
+        for (let r = 0; r < 4; r++) {
+          for (let c = 0; c < 4; c++) {
+            svg += `<circle cx="${c * 36}" cy="${r * 36}" r="9" fill="#151411" />`;
+          }
+        }
+        svg += `</g>`;
+
+        formSvg.innerHTML = svg;
+      }
+
+      // -----------------------------------------------------------
+      // 4. SCENE: SYSTEMS (5.0s - 6.5s)
+      // -----------------------------------------------------------
+      else if (currentScene === 'systems') {
+        const localT = t - 5.0; // 0..1.5s
+        const canvas = document.getElementById('systems-canvas');
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, 1080, 1920);
+
+        const rotY = localT * 1.6 + 1.2;
+        const rotX = 0.55 + Math.sin(localT * 1.2) * 0.15;
+        const angleDeg = ((rotY * 180 / Math.PI) % 360).toFixed(1);
+        document.getElementById('telemetry-rot').textContent = `${angleDeg}°`;
+
+        const cx = 540;
+        const cy = 780;
+        const fov = 900;
+
+        // Render 1,200 3D Torus particles
+        for (let i = 0; i < TORUS_PARTICLE_COUNT; i++) {
+          const pt = torusPoints[i];
+
+          // Rotate around X
+          const y1 = pt.y * Math.cos(rotX) - pt.z * Math.sin(rotX);
+          const z1 = pt.y * Math.sin(rotX) + pt.z * Math.cos(rotX);
+
+          // Rotate around Y
+          const x2 = pt.x * Math.cos(rotY) + z1 * Math.sin(rotY);
+          const z2 = -pt.x * Math.sin(rotY) + z1 * Math.cos(rotY);
+
+          // Projection
+          const scale = fov / (fov + z2 + 450);
+          const projX = cx + x2 * scale;
+          const projY = cy + y1 * scale;
+          const radius = Math.max(1.2, 3.2 * scale);
+
+          ctx.fillStyle = pt.isRed ? '#E53F25' : (scale > 1.0 ? '#FFFFFF' : 'rgba(230, 226, 218, 0.7)');
+          ctx.beginPath();
+          ctx.arc(projX, projY, radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Tilted 3D Orbital Rings around the Torus
+        ctx.lineWidth = 1.8;
+        const rings = [
+          { tiltX: 0.25, tiltZ: 0.1, r: 350, color: 'rgba(230, 226, 218, 0.45)' },
+          { tiltX: 0.95, tiltZ: -0.35, r: 365, color: 'rgba(230, 226, 218, 0.45)' },
+          { tiltX: -0.85, tiltZ: 0.3, r: 360, color: 'rgba(230, 226, 218, 0.35)' }
+        ];
+
+        rings.forEach(ring => {
+          ctx.strokeStyle = ring.color;
+          ctx.beginPath();
+          const steps = 72;
+          for (let s = 0; s <= steps; s++) {
+            const angle = (s / steps) * Math.PI * 2;
+            const rx0 = Math.cos(angle) * ring.r;
+            const ry0 = Math.sin(angle) * ring.r;
+            const rz0 = 0;
+
+            const y1 = ry0 * Math.cos(ring.tiltX) - rz0 * Math.sin(ring.tiltX);
+            const z1 = ry0 * Math.sin(ring.tiltX) + rz0 * Math.cos(ring.tiltX);
+
+            const x2 = rx0 * Math.cos(ring.tiltZ) - y1 * Math.sin(ring.tiltZ);
+            const y2 = rx0 * Math.sin(ring.tiltZ) + y1 * Math.cos(ring.tiltZ);
+
+            const x3 = x2 * Math.cos(rotY * 0.4) + z1 * Math.sin(rotY * 0.4);
+            const z3 = -x2 * Math.sin(rotY * 0.4) + z1 * Math.cos(rotY * 0.4);
+
+            const scale = fov / (fov + z3 + 450);
+            const px = cx + x3 * scale;
+            const py = cy + y2 * scale;
+            if (s === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+          }
+          ctx.closePath();
+          ctx.stroke();
+        });
+      }
+
+      // -----------------------------------------------------------
+      // 5. SCENE: DEPTH (6.5s - 7.97s)
+      // -----------------------------------------------------------
+      else if (currentScene === 'depth') {
+        const localT = t - 6.5; // 0..1.47s
+        // Card 04 ARCH faces front at localT = 0.73s with rotDeg = -108°
+        const rotDeg = -108 - (localT - 0.73) * 35;
+        carouselWrapper.style.transform = `rotateY(${rotDeg}deg)`;
+        document.getElementById('depth-rot-y').textContent = `${Math.round(rotDeg)}°`;
+
+        // Horizontal banner scroll
+        const scroll1 = (localT * 180) % 600;
+        const scroll2 = -(localT * 180) % 600;
+        document.getElementById('depth-banner-top').style.transform = `translateX(${scroll1}px)`;
+        document.getElementById('depth-banner-bottom').style.transform = `translateX(${scroll2}px)`;
+      }
+
+      // -----------------------------------------------------------
+      // 6. SCENE: INTERFACE (7.97s - 9.3s)
+      // -----------------------------------------------------------
+      else if (currentScene === 'interface') {
+        const localT = t - 7.97; // 0..1.33s
+        const frameTarget = 450;
+        const frameStart = 432;
+        const currentFrameNum = Math.min(frameTarget, Math.floor(frameStart + (localT / 1.25) * (frameTarget - frameStart)));
+        document.getElementById('card-frames-num').textContent = currentFrameNum;
+
+        // Animated red spline curve
+        const splinePath = [
+          [20, 180],
+          [160, 160],
+          [280, 180],
+          [420, 120],
+          [560, 140],
+          [680, 90],
+          [780, 110],
+          [860, 60]
+        ];
+
+        // Draw dotted grid lines
+        const energySvg = document.getElementById('energy-svg');
+        let svg = `
+          <line x1="0" y1="60" x2="880" y2="60" stroke="rgba(21,20,17,0.18)" stroke-dasharray="6 6" />
+          <line x1="0" y1="120" x2="880" y2="120" stroke="rgba(21,20,17,0.18)" stroke-dasharray="6 6" />
+          <line x1="0" y1="180" x2="880" y2="180" stroke="rgba(21,20,17,0.18)" stroke-dasharray="6 6" />
+        `;
+
+        // Build smooth cubic bezier spline path
+        const progressP = Math.min(1.0, localT / 1.2);
+        const maxIdx = Math.max(1, Math.floor(progressP * (splinePath.length - 1)));
+        let d = `M ${splinePath[0][0]} ${splinePath[0][1]}`;
+        for (let i = 1; i <= maxIdx; i++) {
+          const prev = splinePath[i - 1];
+          const curr = splinePath[i];
+          const mx = (prev[0] + curr[0]) / 2;
+          d += ` C ${mx} ${prev[1]}, ${mx} ${curr[1]}, ${curr[0]} ${curr[1]}`;
+        }
+        const tip = splinePath[maxIdx];
+
+        svg += `
+          <path d="${d}" fill="none" stroke="#E53F25" stroke-width="6" stroke-linecap="round"/>
+          <circle cx="${tip[0]}" cy="${tip[1]}" r="8" fill="#151411" />
+        `;
+        energySvg.innerHTML = svg;
+
+        // Animated mouse cursor position
+        const cursor = document.getElementById('interface-cursor');
+        const cursorX = 640 + Math.sin(localT * 4) * 80;
+        const cursorY = 960 + Math.cos(localT * 3) * 60;
+        cursor.style.transform = `translate(${cursorX}px, ${cursorY}px)`;
+      }
+
+      // -----------------------------------------------------------
+      // 7. SCENE: FLUID (9.3s - 11.0s)
+      // -----------------------------------------------------------
+      else if (currentScene === 'fluid') {
+        const localT = t - 9.3; // 0..1.7s
+        const gooGroup = document.getElementById('fluid-goo-group');
+        const cx = 540;
+        const cy = 680;
+
+        let blobsHtml = '';
+
+        // Main body blobs forming an organic elongated shape
+        const b0x = cx + Math.sin(localT * 2.8) * 30;
+        const b0y = cy + Math.cos(localT * 2.5) * 25;
+        const b0r = 155 + Math.sin(localT * 3.5) * 15;
+        blobsHtml += `<circle cx="${b0x}" cy="${b0y}" r="${b0r}" fill="#E53F25" />`;
+
+        const b1x = cx + Math.sin(localT * 2.0 + 0.5) * 45;
+        const b1y = cy - 110 + Math.cos(localT * 2.4) * 30;
+        const b1r = 125 + Math.cos(localT * 3.0) * 15;
+        blobsHtml += `<circle cx="${b1x}" cy="${b1y}" r="${b1r}" fill="#E53F25" />`;
+
+        const b2x = cx + 75 + Math.cos(localT * 2.2) * 35;
+        const b2y = cy + 125 + Math.sin(localT * 2.5) * 25;
+        const b2r = 115 + Math.sin(localT * 3.2) * 15;
+        blobsHtml += `<circle cx="${b2x}" cy="${b2y}" r="${b2r}" fill="#E53F25" />`;
+
+        const b3x = cx - 85 + Math.sin(localT * 2.6) * 25;
+        const b3y = cy - 30 + Math.cos(localT * 2.2) * 20;
+        const b3r = 85 + Math.sin(localT * 4.0) * 10;
+        blobsHtml += `<circle cx="${b3x}" cy="${b3y}" r="${b3r}" fill="#E53F25" />`;
+
+        // Distinct satellite droplets orbiting outside the metaball
+        const aTop = localT * 3.0;
+        const sTopX = cx + Math.cos(aTop) * 55;
+        const sTopY = cy - 380 + Math.sin(aTop * 0.8) * 35;
+        blobsHtml += `<circle cx="${sTopX}" cy="${sTopY}" r="55" fill="#E53F25" />`;
+
+        const aRight = localT * -2.4 + 0.9;
+        const sRightX = cx + 220 + Math.cos(aRight) * 45;
+        const sRightY = cy - 250 + Math.sin(aRight) * 45;
+        blobsHtml += `<circle cx="${sRightX}" cy="${sRightY}" r="75" fill="#E53F25" />`;
+
+        const aBot = localT * 2.0 + 2.4;
+        const sBotX = cx + Math.cos(aBot) * 360;
+        const sBotY = cy + Math.sin(aBot) * 360;
+        blobsHtml += `<circle cx="${sBotX}" cy="${sBotY}" r="40" fill="#E53F25" />`;
+
+        gooGroup.innerHTML = blobsHtml;
+      }
+
+      // -----------------------------------------------------------
+      // 8. SCENE: RHYTHM (11.0s - 13.0s)
+      // -----------------------------------------------------------
+      else if (currentScene === 'rhythm') {
+        const localT = t - 11.0; // 0..2.0s
+        rhythmRowsData.forEach((row, i) => {
+          const el = document.getElementById(`rhythm-strip-${i}`);
+          if (el) {
+            const offset = (localT * row.speed) % 1200;
+            el.style.transform = `translateX(${offset}px)`;
+          }
+        });
+      }
+
+      // -----------------------------------------------------------
+      // 9. SCENE: OUTRO (13.0s - 15.0s)
+      // -----------------------------------------------------------
+      else if (currentScene === 'outro') {
+        const localT = t - 13.0; // 0..2.0s
+        const p = Math.min(1.0, localT / 0.5);
+        const ease = 1 - Math.pow(1 - p, 4);
+
+        const content = document.getElementById('outro-content');
+        content.style.transform = `translateY(${(1 - ease) * 60}px)`;
+        content.style.opacity = ease;
+      }
+    };
+
+    /* Autoplay loop when opened in browser preview */
+    if (typeof window !== 'undefined' && !window.__aetheriaHeadless && !navigator.webdriver) {
+      let playbackT = 0;
+      function loop() {
+        if (!window.__aetheriaHeadless) {
+          playbackT = (playbackT + 1 / 30) % 15.0;
+          window.renderAt(playbackT);
+          requestAnimationFrame(loop);
+        }
+      }
+      requestAnimationFrame(loop);
+    }
+
+    /* Initial call */
+    window.renderAt(0);
+    window.__ready = true;
+  </script>
+</body>
+</html>

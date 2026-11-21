@@ -1,0 +1,1645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SHOWREEL '26 — Gemini 3.8 Flash-High</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&family=Playfair+Display:ital,wght@1,600;1,700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+
+    body {
+      background: #060607;
+      color: #e5e5e5;
+      font-family: 'JetBrains Mono', monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow: hidden;
+      padding: 12px;
+    }
+
+    /* Video Canvas Viewport - 9:16 aspect ratio */
+    .viewport-container {
+      position: relative;
+      width: min(100vw - 24px, 506px);
+      height: min(calc((100vw - 24px) * 16 / 9), calc(100vh - 90px));
+      background: #000;
+      box-shadow: 0 25px 70px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.08);
+      border-radius: 14px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #stage {
+      position: absolute;
+      width: 720px;
+      height: 1280px;
+      transform-origin: center center;
+      overflow: hidden;
+      background: #0c0c0e;
+      color: #fff;
+    }
+
+    /* Common HUD Overlay Layer (always rendered on top) */
+    .hud-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 100;
+      padding: 44px 38px 48px 38px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      mix-blend-mode: normal;
+    }
+
+    /* Corner brackets */
+    .corner {
+      position: absolute;
+      width: 26px;
+      height: 26px;
+      border-color: currentColor;
+      border-style: solid;
+      opacity: 0.9;
+    }
+    .corner-tl { top: 32px; left: 32px; border-width: 2px 0 0 2px; }
+    .corner-tr { top: 32px; right: 32px; border-width: 2px 2px 0 0; }
+    .corner-bl { bottom: 36px; left: 32px; border-width: 0 0 2px 2px; }
+    .corner-br { bottom: 36px; right: 32px; border-width: 0 2px 2px 0; }
+
+    /* HUD Top bar */
+    .hud-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 15px;
+      font-weight: 500;
+      letter-spacing: 0.12em;
+    }
+    .hud-timecode {
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+    }
+
+    /* HUD Bottom Timeline bar */
+    .hud-footer {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .hud-status-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 14px;
+      letter-spacing: 0.12em;
+      font-weight: 600;
+    }
+    .hud-bpm {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .hud-bpm-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: currentColor;
+      transition: transform 0.08s ease;
+    }
+    .hud-bpm-dot.pulse {
+      transform: scale(1.4);
+    }
+    .timeline-bar {
+      position: relative;
+      width: 100%;
+      height: 2px;
+      background: rgba(255, 255, 255, 0.2);
+    }
+    .timeline-fill {
+      position: absolute;
+      left: 0;
+      top: 0;
+      height: 100%;
+      background: #F44F24;
+      width: 0%;
+    }
+    .timeline-ticks {
+      position: absolute;
+      inset: -5px 0;
+      display: flex;
+      justify-content: space-between;
+    }
+    .timeline-tick {
+      width: 1.5px;
+      height: 12px;
+      background: rgba(255, 255, 255, 0.4);
+    }
+
+    /* Scene Container */
+    .scene {
+      position: absolute;
+      inset: 0;
+      display: none !important;
+      overflow: hidden;
+    }
+    .scene.active {
+      display: block !important;
+    }
+    #scene-interface.active {
+      display: flex !important;
+    }
+
+    /* Colors and theme variations */
+    .theme-dark { color: #f2f2f2; }
+    .theme-dark .timeline-bar { background: rgba(255, 255, 255, 0.18); }
+    .theme-dark .timeline-tick { background: rgba(255, 255, 255, 0.35); }
+
+    .theme-red { color: #111111; }
+    .theme-red .timeline-bar { background: rgba(0, 0, 0, 0.22); }
+    .theme-red .timeline-tick { background: rgba(0, 0, 0, 0.45); }
+    .theme-red .timeline-fill { background: #111111; }
+
+    .theme-cream { color: #111111; }
+    .theme-cream .timeline-bar { background: rgba(0, 0, 0, 0.18); }
+    .theme-cream .timeline-tick { background: rgba(0, 0, 0, 0.38); }
+    .theme-cream .timeline-fill { background: #F44F24; }
+
+    /* Scene 0: INIT */
+    #scene-init {
+      background: #0B0B0D;
+    }
+    .init-grid {
+      position: absolute;
+      inset: 0;
+      background-image: 
+        radial-gradient(circle at center, transparent 40%, rgba(0,0,0,0.85) 100%),
+        radial-gradient(rgba(255, 255, 255, 0.12) 1px, transparent 1px);
+      background-size: 100% 100%, 80px 80px;
+      background-position: center center;
+    }
+    .init-cross-h {
+      position: absolute;
+      top: 50%;
+      left: 0;
+      width: 100%;
+      height: 1px;
+      background: rgba(255, 255, 255, 0.12);
+    }
+    .init-cross-v {
+      position: absolute;
+      left: 50%;
+      top: 0;
+      width: 1px;
+      height: 100%;
+      background: rgba(255, 255, 255, 0.12);
+    }
+    .init-bg-watermark {
+      position: absolute;
+      top: 140px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-family: 'Inter', sans-serif;
+      font-size: 320px;
+      font-weight: 900;
+      color: rgba(255, 255, 255, 0.05);
+      line-height: 1;
+      letter-spacing: -0.05em;
+      pointer-events: none;
+    }
+    .init-compass {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 380px;
+      height: 380px;
+    }
+    .init-compass svg {
+      width: 100%;
+      height: 100%;
+    }
+    .init-core-dot {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 42px;
+      height: 52px;
+      border-radius: 50%;
+      background: #F44F24;
+      box-shadow: 0 0 35px rgba(244, 79, 36, 0.7);
+    }
+    .init-caption {
+      position: absolute;
+      top: 730px;
+      left: 0;
+      width: 100%;
+      text-align: center;
+    }
+    .init-caption h2 {
+      font-size: 23px;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      color: #fff;
+      margin-bottom: 12px;
+    }
+    .init-caption p {
+      font-size: 14px;
+      letter-spacing: 0.16em;
+      color: rgba(255, 255, 255, 0.55);
+    }
+
+    /* Scene 1: TYPE (THE FOUR VERBS) */
+    #scene-type {
+      background: #F44F24;
+      color: #111;
+    }
+    .type-verb-label {
+      position: absolute;
+      top: 300px;
+      left: 50px;
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 0.22em;
+    }
+    .type-lines {
+      position: absolute;
+      top: 500px;
+      left: 0;
+      width: 100%;
+      height: 150px;
+    }
+    .type-line-cap, .type-line-base {
+      position: absolute;
+      left: 0;
+      width: 100%;
+      height: 1px;
+      background: rgba(0, 0, 0, 0.4);
+    }
+    .type-line-cap { top: 0; }
+    .type-line-base { bottom: 0; }
+    .type-line-text {
+      position: absolute;
+      right: 48px;
+      font-size: 13px;
+      letter-spacing: 0.14em;
+      color: rgba(0, 0, 0, 0.6);
+      transform: translateY(-50%);
+    }
+    .type-orbit {
+      position: absolute;
+      top: 575px;
+      right: -80px;
+      transform: translateY(-50%);
+      width: 540px;
+      height: 540px;
+      border: 1px solid rgba(0, 0, 0, 0.35);
+      border-radius: 50%;
+    }
+    .type-orbit-dashed {
+      position: absolute;
+      top: 575px;
+      right: -110px;
+      transform: translateY(-50%);
+      width: 600px;
+      height: 600px;
+      border: 1.5px dashed rgba(0, 0, 0, 0.25);
+      border-radius: 50%;
+    }
+    .type-kinetic-word {
+      position: absolute;
+      left: 45px;
+      top: 512px;
+      font-family: 'Inter', sans-serif;
+      font-weight: 900;
+      font-size: 136px;
+      line-height: 1;
+      letter-spacing: -0.05em;
+      color: #111;
+      transform-origin: left center;
+      white-space: nowrap;
+    }
+    .type-subtitle {
+      position: absolute;
+      top: 730px;
+      left: 50px;
+      font-size: 15px;
+      letter-spacing: 0.18em;
+      font-weight: 600;
+      color: rgba(0, 0, 0, 0.85);
+    }
+
+    /* Scene 2: FORM (BAUHAUS COMPOSITION) */
+    #scene-form {
+      background: #ECE8DF;
+      color: #111;
+    }
+    .form-grid-lines {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      justify-content: space-evenly;
+      pointer-events: none;
+    }
+    .form-grid-v {
+      width: 1px;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.06);
+    }
+    .form-stage {
+      position: absolute;
+      top: 240px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 600px;
+      height: 600px;
+    }
+    .form-orbit-circle {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 440px;
+      height: 440px;
+      border: 1.5px dashed rgba(0, 0, 0, 0.25);
+      border-radius: 50%;
+    }
+    .form-triangle {
+      position: absolute;
+      top: 60px;
+      left: 100px;
+      width: 160px;
+      height: 140px;
+    }
+    .form-black-circle {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 270px;
+      height: 270px;
+      border-radius: 50%;
+      background: #111;
+    }
+    .form-red-semicircle {
+      position: absolute;
+      top: 310px;
+      left: 110px;
+      width: 180px;
+      height: 90px;
+      background: #F44F24;
+      border-radius: 0 0 180px 180px;
+      transform: rotate(70deg);
+    }
+    .form-red-bar {
+      position: absolute;
+      top: 150px;
+      right: 70px;
+      width: 36px;
+      height: 240px;
+      background: #F44F24;
+      transform: rotate(45deg);
+    }
+    .form-black-square {
+      position: absolute;
+      bottom: 120px;
+      right: 120px;
+      width: 110px;
+      height: 110px;
+      background: #111;
+      transform: rotate(18deg);
+    }
+    .form-dot-grid {
+      position: absolute;
+      bottom: 250px;
+      right: 90px;
+      display: grid;
+      grid-template-columns: repeat(4, 15px);
+      gap: 14px;
+    }
+    .form-dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: #111;
+    }
+    .form-title {
+      position: absolute;
+      bottom: 300px;
+      left: 50px;
+      font-family: 'Playfair Display', serif;
+      font-style: italic;
+      font-size: 128px;
+      line-height: 0.9;
+      color: #111;
+    }
+    .form-subtext {
+      position: absolute;
+      bottom: 240px;
+      left: 52px;
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.16em;
+      color: rgba(0, 0, 0, 0.7);
+    }
+
+    /* Scene 3: SYSTEMS (3D PARTICLES) */
+    #scene-systems {
+      background: #08080A;
+      color: #fff;
+    }
+    .systems-glow {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 600px;
+      height: 600px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(244, 79, 36, 0.22) 0%, rgba(244, 79, 36, 0.05) 50%, transparent 75%);
+    }
+    .systems-telemetry {
+      position: absolute;
+      top: 130px;
+      left: 50px;
+      font-size: 15px;
+      line-height: 2.1;
+      letter-spacing: 0.14em;
+    }
+    .systems-telemetry-row {
+      display: flex;
+      gap: 36px;
+    }
+    .systems-telemetry-label {
+      color: rgba(255, 255, 255, 0.55);
+      width: 130px;
+    }
+    .systems-telemetry-val {
+      color: #fff;
+      font-weight: 600;
+    }
+    #systems-canvas {
+      position: absolute;
+      inset: 0;
+      width: 720px;
+      height: 1280px;
+    }
+    .systems-title {
+      position: absolute;
+      bottom: 170px;
+      left: 50px;
+      font-family: 'Playfair Display', serif;
+      font-style: italic;
+      font-size: 134px;
+      line-height: 0.9;
+      color: #ECE8DF;
+    }
+
+    /* Scene 4: DEPTH (3D CARD CAROUSEL) */
+    #scene-depth {
+      background: #F44F24;
+      color: #111;
+      perspective: 1600px;
+    }
+    .depth-bg-text {
+      position: absolute;
+      width: 100%;
+      font-family: 'Inter', sans-serif;
+      font-size: 140px;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+      white-space: nowrap;
+      -webkit-text-stroke: 2.5px #111;
+      color: transparent;
+      user-select: none;
+    }
+    .depth-bg-text-top { top: 130px; }
+    .depth-bg-text-bottom { bottom: 170px; }
+    .depth-telemetry {
+      position: absolute;
+      top: 310px;
+      left: 50px;
+      font-size: 14px;
+      line-height: 2.1;
+      letter-spacing: 0.14em;
+    }
+    .depth-telemetry-row {
+      display: flex;
+      gap: 32px;
+    }
+    .depth-telemetry-label {
+      color: rgba(0, 0, 0, 0.6);
+      width: 120px;
+    }
+    .depth-telemetry-val {
+      font-weight: 700;
+      color: #111;
+    }
+    .depth-carousel-stage {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 200px;
+      height: 330px;
+      transform-style: preserve-3d;
+    }
+    .depth-floor-shadow {
+      position: absolute;
+      top: 53%;
+      left: 50%;
+      transform: translate(-50%, -50%) rotateX(80deg);
+      width: 600px;
+      height: 600px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(0, 0, 0, 0.45) 0%, transparent 65%);
+      pointer-events: none;
+    }
+    .depth-card {
+      position: absolute;
+      inset: 0;
+      border-radius: 18px;
+      background: #111;
+      color: #fff;
+      padding: 22px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4);
+      backface-visibility: hidden;
+    }
+    .depth-card.highlight {
+      background: #ECE8DF;
+      color: #111;
+      box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+    }
+    .depth-card-header {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+    }
+    .depth-card-glyph {
+      align-self: center;
+      width: 100px;
+      height: 100px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .depth-card-footer {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+    }
+
+    /* Scene 5: INTERFACE (SWISS BENTO GRID) */
+    #scene-interface {
+      background: #ECE8DF;
+      color: #111;
+      padding: 130px 45px 170px 45px;
+      flex-direction: column;
+      gap: 22px;
+    }
+    .bento-card {
+      background: transparent;
+      border: 2px solid #111;
+      border-radius: 22px;
+      padding: 28px 30px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .bento-top-card {
+      height: 320px;
+    }
+    .bento-card-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      color: rgba(0, 0, 0, 0.7);
+    }
+    .bento-badge-red {
+      background: #F44F24;
+      color: #fff;
+      padding: 5px 14px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+    }
+    .bento-big-num {
+      font-family: 'Inter', sans-serif;
+      font-size: 132px;
+      font-weight: 900;
+      line-height: 1;
+      letter-spacing: -0.05em;
+      color: #111;
+    }
+    .bento-subtext {
+      font-size: 13px;
+      letter-spacing: 0.14em;
+      color: rgba(0, 0, 0, 0.6);
+      font-weight: 600;
+    }
+    .bento-mid-row {
+      display: flex;
+      gap: 20px;
+      height: 290px;
+    }
+    .bento-mid-card {
+      flex: 1;
+    }
+    .bento-num-med {
+      font-family: 'Inter', sans-serif;
+      font-size: 88px;
+      font-weight: 900;
+      line-height: 1;
+      letter-spacing: -0.05em;
+      color: #111;
+    }
+    .bento-switch {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .bento-switch-track {
+      width: 78px;
+      height: 42px;
+      border: 2px solid #111;
+      border-radius: 999px;
+      position: relative;
+    }
+    .bento-switch-thumb {
+      position: absolute;
+      top: 5px;
+      left: 6px;
+      width: 28px;
+      height: 28px;
+      background: #111;
+      border-radius: 50%;
+      transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .bento-switch-thumb.active {
+      transform: translateX(36px);
+      background: #F44F24;
+    }
+    .bento-switch-label {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+    }
+    .bento-wave-card {
+      height: 240px;
+    }
+    .bento-bars {
+      display: flex;
+      align-items: flex-end;
+      gap: 6px;
+      height: 100px;
+      padding-bottom: 8px;
+    }
+    .bento-bar {
+      flex: 1;
+      background: #111;
+      border-radius: 4px;
+      min-height: 8px;
+    }
+
+    /* Scene 6: FLUID (GOOEY METABALLS) */
+    #scene-fluid {
+      background: #0B0B0D;
+      color: #fff;
+    }
+    .fluid-radar {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 620px;
+      height: 620px;
+    }
+    .fluid-radar-circle {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 50%;
+    }
+    .fluid-blobs-container {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 580px;
+      height: 580px;
+      filter: url('#goo');
+    }
+    .fluid-blob {
+      position: absolute;
+      border-radius: 50%;
+      background: #F44F24;
+      transform-origin: center center;
+    }
+    .fluid-title {
+      position: absolute;
+      bottom: 170px;
+      left: 50px;
+      font-family: 'Playfair Display', serif;
+      font-style: italic;
+      font-size: 148px;
+      line-height: 0.9;
+      color: #ECE8DF;
+    }
+
+    /* Scene 7: RHYTHM & FINALE */
+    #scene-rhythm {
+      background: #F44F24;
+      color: #111;
+      overflow: hidden;
+    }
+    .rhythm-stripes {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 0;
+    }
+    .rhythm-stripe {
+      height: 120px;
+      display: flex;
+      align-items: center;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+    .rhythm-stripe.dark {
+      background: #111;
+      color: #F44F24;
+    }
+    .rhythm-stripe.light {
+      background: #F44F24;
+      color: #111;
+    }
+    .rhythm-track {
+      display: flex;
+      font-family: 'Inter', sans-serif;
+      font-weight: 900;
+      font-size: 86px;
+      letter-spacing: -0.04em;
+    }
+    .rhythm-track.serif {
+      font-family: 'Playfair Display', serif;
+      font-style: italic;
+      font-weight: 600;
+      font-size: 82px;
+    }
+
+    /* Finale Card inside Scene 7 */
+    .finale-layer {
+      position: absolute;
+      inset: 0;
+      background: #0B0B0D;
+      color: #fff;
+      display: none;
+      flex-direction: column;
+      justify-content: center;
+      padding: 0 54px;
+    }
+    .finale-layer.show {
+      display: flex;
+    }
+    .finale-glow {
+      position: absolute;
+      top: 35%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 450px;
+      height: 450px;
+      background: radial-gradient(circle, rgba(244, 79, 36, 0.28) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .finale-title {
+      font-family: 'Inter', sans-serif;
+      font-size: 96px;
+      font-weight: 900;
+      line-height: 1;
+      letter-spacing: -0.04em;
+      color: #ECE8DF;
+    }
+    .finale-title span {
+      color: #F44F24;
+    }
+    .finale-subtitle {
+      font-family: 'Playfair Display', serif;
+      font-style: italic;
+      font-size: 58px;
+      color: #F44F24;
+      margin-top: 10px;
+      margin-bottom: 54px;
+    }
+    .finale-divider {
+      width: 100%;
+      height: 1px;
+      background: rgba(255, 255, 255, 0.2);
+      margin-bottom: 30px;
+    }
+    .finale-specs {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      font-size: 14px;
+      letter-spacing: 0.16em;
+      color: rgba(255, 255, 255, 0.85);
+      margin-bottom: 50px;
+    }
+    .finale-spec-row {
+      display: flex;
+      justify-content: space-between;
+    }
+    .finale-pill {
+      align-self: flex-start;
+      border: 1.5px solid rgba(255, 255, 255, 0.45);
+      border-radius: 999px;
+      padding: 14px 28px;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: rgba(255, 255, 255, 0.04);
+    }
+    .finale-pill-dot {
+      width: 10px;
+      height: 10px;
+      background: #F44F24;
+      border-radius: 50%;
+    }
+
+    /* UI Controller Toolbar (outside video stage) */
+    .toolbar {
+      margin-top: 14px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      background: #141417;
+      padding: 10px 18px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      width: min(100vw - 24px, 506px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    }
+    .play-btn {
+      background: #F44F24;
+      border: none;
+      color: #fff;
+      padding: 8px 16px;
+      border-radius: 7px;
+      font-family: inherit;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .play-btn:hover {
+      background: #ff6038;
+    }
+    .slider {
+      flex: 1;
+      accent-color: #F44F24;
+      cursor: pointer;
+    }
+    .frame-badge {
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+      color: rgba(255, 255, 255, 0.6);
+      min-width: 90px;
+      text-align: right;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Video Player Viewport -->
+  <div class="viewport-container" id="viewport">
+    <div id="stage">
+
+      <!-- Scene 0: INIT -->
+      <div class="scene active" id="scene-init">
+        <div class="init-grid"></div>
+        <div class="init-cross-h"></div>
+        <div class="init-cross-v"></div>
+        <div class="init-bg-watermark">'26</div>
+        <div class="init-compass">
+          <svg viewBox="0 0 380 380" id="compass-svg">
+            <circle cx="190" cy="190" r="145" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="1.5" />
+            <!-- Generated radial ticks -->
+            <g id="compass-ticks"></g>
+          </svg>
+        </div>
+        <div class="init-core-dot" id="init-dot"></div>
+        <div class="init-caption">
+          <h2>&gt; INITIALIZING MOTION</h2>
+          <p>120 BPM &middot; 30 FPS &middot; 1080 &times; 1920</p>
+        </div>
+      </div>
+
+      <!-- Scene 1: TYPE (THE FOUR VERBS) -->
+      <div class="scene" id="scene-type">
+        <div class="type-verb-label" id="type-verb-num">VERB 01 / 04</div>
+        <div class="type-orbit"></div>
+        <div class="type-orbit-dashed"></div>
+        <div class="type-lines">
+          <div class="type-line-cap">
+            <span class="type-line-text">CAP HEIGHT</span>
+          </div>
+          <div class="type-line-base">
+            <span class="type-line-text">BASELINE</span>
+          </div>
+        </div>
+        <div class="type-kinetic-word" id="type-word">MOVE</div>
+        <div class="type-subtitle">&mdash; THE FOUR VERBS OF MOTION</div>
+      </div>
+
+      <!-- Scene 2: FORM (BAUHAUS PRIMITIVES) -->
+      <div class="scene" id="scene-form">
+        <div class="form-grid-lines">
+          <div class="form-grid-v"></div>
+          <div class="form-grid-v"></div>
+          <div class="form-grid-v"></div>
+          <div class="form-grid-v"></div>
+        </div>
+        <div class="form-stage" id="form-stage">
+          <div class="form-orbit-circle"></div>
+          <svg class="form-triangle" viewBox="0 0 160 140">
+            <polygon points="80,10 150,130 10,130" fill="none" stroke="#111" stroke-width="3" />
+          </svg>
+          <div class="form-black-circle" id="form-circle"></div>
+          <div class="form-red-semicircle" id="form-semicircle"></div>
+          <div class="form-red-bar" id="form-bar"></div>
+          <div class="form-black-square" id="form-square"></div>
+          <div class="form-dot-grid">
+            <div class="form-dot"></div><div class="form-dot"></div><div class="form-dot"></div><div class="form-dot"></div>
+            <div class="form-dot"></div><div class="form-dot"></div><div class="form-dot"></div><div class="form-dot"></div>
+            <div class="form-dot"></div><div class="form-dot"></div><div class="form-dot"></div><div class="form-dot"></div>
+          </div>
+        </div>
+        <div class="form-title">form.</div>
+        <div class="form-subtext">FIG. 02 &mdash; COMPOSITION IN 7 PRIMITIVES</div>
+      </div>
+
+      <!-- Scene 3: SYSTEMS (3D ROTATING PARTICLE SPHERE) -->
+      <div class="scene" id="scene-systems">
+        <div class="systems-glow"></div>
+        <div class="systems-telemetry">
+          <div class="systems-telemetry-row">
+            <span class="systems-telemetry-label">PARTICLES</span>
+            <span class="systems-telemetry-val">1,200</span>
+          </div>
+          <div class="systems-telemetry-row">
+            <span class="systems-telemetry-label">ROT.Y</span>
+            <span class="systems-telemetry-val" id="systems-rot-y">189.1&deg;</span>
+          </div>
+          <div class="systems-telemetry-row">
+            <span class="systems-telemetry-label">STATE</span>
+            <span class="systems-telemetry-val">POINT</span>
+          </div>
+          <div class="systems-telemetry-row">
+            <span class="systems-telemetry-label">MORPH</span>
+            <span class="systems-telemetry-val">1.00</span>
+          </div>
+        </div>
+        <canvas id="systems-canvas" width="720" height="1280"></canvas>
+        <div class="systems-title">systems</div>
+      </div>
+
+      <!-- Scene 4: DEPTH (3D CYLINDER CAROUSEL) -->
+      <div class="scene" id="scene-depth">
+        <div class="depth-bg-text depth-bg-text-top" id="depth-bg-top">DEPTH DEPTH DEPTH DEPTH</div>
+        <div class="depth-telemetry">
+          <div class="depth-telemetry-row">
+            <span class="depth-telemetry-label">CARDS</span>
+            <span class="depth-telemetry-val">10</span>
+          </div>
+          <div class="depth-telemetry-row">
+            <span class="depth-telemetry-label">PERSPECTIVE</span>
+            <span class="depth-telemetry-val">1600PX</span>
+          </div>
+          <div class="depth-telemetry-row">
+            <span class="depth-telemetry-label">ROT.Y</span>
+            <span class="depth-telemetry-val" id="depth-rot-y">-108&deg;</span>
+          </div>
+        </div>
+        <div class="depth-floor-shadow"></div>
+        <div class="depth-carousel-stage" id="depth-carousel"></div>
+        <div class="depth-bg-text depth-bg-text-bottom" id="depth-bg-bottom">DEPTH DEPTH DEPTH DEPTH</div>
+      </div>
+
+      <!-- Scene 5: INTERFACE (SWISS BENTO DASHBOARD) -->
+      <div class="scene" id="scene-interface">
+        <div class="bento-card bento-top-card">
+          <div class="bento-card-meta">
+            <span>FRAMES RENDERED</span>
+            <span class="bento-badge-red">30 FPS</span>
+          </div>
+          <div class="bento-big-num" id="bento-counter">383</div>
+          <div class="bento-subtext">1080 &times; 1920 &middot; 15.0 S &middot; H.264</div>
+        </div>
+        <div class="bento-mid-row">
+          <div class="bento-card bento-mid-card">
+            <div class="bento-card-meta">EASING CURVES</div>
+            <div class="bento-num-med">21</div>
+            <div style="font-size:24px; letter-spacing:6px;" id="bento-blocks">&block; &block; _</div>
+          </div>
+          <div class="bento-card bento-mid-card">
+            <div class="bento-card-meta">KEYFRAMES BY HAND</div>
+            <div class="bento-num-med">0</div>
+            <div class="bento-switch">
+              <div class="bento-switch-track">
+                <div class="bento-switch-thumb active" id="bento-thumb"></div>
+              </div>
+              <span class="bento-switch-label" id="bento-toggle-text">AUTOMATED ON</span>
+            </div>
+          </div>
+        </div>
+        <div class="bento-card bento-wave-card">
+          <div class="bento-card-meta">MOTION ENERGY &mdash; 15S</div>
+          <div class="bento-bars" id="bento-bars"></div>
+        </div>
+      </div>
+
+      <!-- Scene 6: FLUID (GOOEY METABALLS) -->
+      <div class="scene" id="scene-fluid">
+        <div class="systems-telemetry" style="top:130px; left:50px;">
+          <div class="systems-telemetry-row">
+            <span class="systems-telemetry-label">VISCOSITY</span>
+            <span class="systems-telemetry-val">0.82</span>
+          </div>
+          <div class="systems-telemetry-row">
+            <span class="systems-telemetry-label">BLOBS</span>
+            <span class="systems-telemetry-val">08</span>
+          </div>
+          <div class="systems-telemetry-row">
+            <span class="systems-telemetry-label">FILTER</span>
+            <span class="systems-telemetry-val">GOO &middot; &Sigma;22</span>
+          </div>
+        </div>
+        <div class="fluid-radar">
+          <div class="fluid-radar-circle" style="width:160px; height:160px;"></div>
+          <div class="fluid-radar-circle" style="width:320px; height:320px;"></div>
+          <div class="fluid-radar-circle" style="width:480px; height:480px;"></div>
+          <div class="fluid-radar-circle" style="width:620px; height:620px;"></div>
+        </div>
+        <div class="fluid-blobs-container" id="fluid-blobs"></div>
+        <div class="fluid-title">fluid.</div>
+      </div>
+
+      <!-- Scene 7: RHYTHM & FINALE -->
+      <div class="scene" id="scene-rhythm">
+        <div class="rhythm-stripes" id="rhythm-stripes">
+          <div class="rhythm-stripe light">
+            <div class="rhythm-track" id="track-0">MOTION &middot; MOTION &middot; MOTION &middot; MOTION &middot; MOTION &middot;</div>
+          </div>
+          <div class="rhythm-stripe dark">
+            <div class="rhythm-track serif" id="track-1">motion &middot; motion &middot; motion &middot; motion &middot; motion &middot;</div>
+          </div>
+          <div class="rhythm-stripe light">
+            <div class="rhythm-track" id="track-2">MOTION &middot; MOTION &middot; MOTION &middot; MOTION &middot; MOTION &middot;</div>
+          </div>
+          <div class="rhythm-stripe dark">
+            <div class="rhythm-track serif" id="track-3">motion &middot; motion &middot; motion &middot; motion &middot; motion &middot;</div>
+          </div>
+          <div class="rhythm-stripe light">
+            <div class="rhythm-track" id="track-4">MOTION &middot; MOTION &middot; MOTION &middot; MOTION &middot; MOTION &middot;</div>
+          </div>
+          <div class="rhythm-stripe dark">
+            <div class="rhythm-track serif" id="track-5">motion &middot; motion &middot; motion &middot; motion &middot; motion &middot;</div>
+          </div>
+        </div>
+
+        <!-- Finale Overlay Card -->
+        <div class="finale-layer" id="finale-layer">
+          <div class="finale-glow"></div>
+          <div class="finale-title">GEMINI<span>.</span></div>
+          <div class="finale-subtitle">3.8 flash-high</div>
+          <div class="finale-divider"></div>
+          <div class="finale-specs">
+            <div class="finale-spec-row">
+              <span>SHOWREEL '26</span>
+              <span>15 SEC</span>
+            </div>
+            <div class="finale-spec-row">
+              <span>MODEL ID</span>
+              <span>GEMINI 3.8 FLASH-HIGH</span>
+            </div>
+            <div class="finale-spec-row">
+              <span>450 FRAMES</span>
+              <span>0 KEYFRAMES BY HAND</span>
+            </div>
+            <div class="finale-spec-row">
+              <span>HTML &middot; CSS &middot; SVG &middot; CANVAS</span>
+              <span>CODE-DRIVEN</span>
+            </div>
+          </div>
+          <div class="finale-pill">
+            <div class="finale-pill-dot"></div>
+            <span>OPEN FOR PROJECTS &mdash; 2026</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Persistent Global HUD Overlay -->
+      <div class="hud-layer theme-dark" id="hud">
+        <div class="corner corner-tl"></div>
+        <div class="corner corner-tr"></div>
+        <div class="corner corner-bl"></div>
+        <div class="corner corner-br"></div>
+
+        <div class="hud-header">
+          <span>SHOWREEL '26 &middot; GEMINI 3.8 FLASH-HIGH</span>
+          <span class="hud-timecode" id="hud-timecode">00:00:00:00</span>
+        </div>
+
+        <div class="hud-footer">
+          <div class="hud-status-row">
+            <span id="hud-scene-name">00/07 INIT</span>
+            <div class="hud-bpm">
+              <div class="hud-bpm-dot" id="bpm-dot"></div>
+              <span>120 BPM</span>
+            </div>
+          </div>
+          <div class="timeline-bar">
+            <div class="timeline-fill" id="timeline-fill"></div>
+            <div class="timeline-ticks">
+              <div class="timeline-tick"></div>
+              <div class="timeline-tick"></div>
+              <div class="timeline-tick"></div>
+              <div class="timeline-tick"></div>
+              <div class="timeline-tick"></div>
+              <div class="timeline-tick"></div>
+              <div class="timeline-tick"></div>
+              <div class="timeline-tick"></div>
+              <div class="timeline-tick"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- SVG Gooey Filter for Fluid Scene -->
+  <svg style="position: absolute; width: 0; height: 0;" aria-hidden="true">
+    <defs>
+      <filter id="goo">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="22" result="blur" />
+        <feColorMatrix in="blur" mode="matrix" values="
+          1 0 0 0 0
+          0 1 0 0 0
+          0 0 1 0 0
+          0 0 0 28 -10" result="goo" />
+        <feBlend in="SourceGraphic" in2="goo" />
+      </filter>
+    </defs>
+  </svg>
+
+  <!-- Outside Toolbar Controls -->
+  <div class="toolbar">
+    <button class="play-btn" id="play-btn">Pause</button>
+    <input type="range" class="slider" id="scrubber" min="0" max="449" value="0">
+    <div class="frame-badge" id="frame-badge">F 000 / 450</div>
+  </div>
+
+  <script>
+    // -------------------------------------------------------------
+    // SHOWREEL ENGINE CORE (Deterministic, 120 BPM, 30 FPS, 15 Sec)
+    // -------------------------------------------------------------
+    const TOTAL_FRAMES = 450;
+    const FPS = 30;
+    const BPM = 120;
+    const FRAMES_PER_BEAT = (60 / BPM) * FPS; // 15 frames per beat
+
+    let currentFrame = 0;
+    let isPlaying = true;
+    let animId = null;
+
+    // Viewport Scaler: scales 720x1280 stage to fit viewport container
+    const stage = document.getElementById('stage');
+    const viewport = document.getElementById('viewport');
+    function scaleStage() {
+      const scale = Math.min(viewport.clientWidth / 720, viewport.clientHeight / 1280);
+      stage.style.transform = `scale(${scale})`;
+    }
+    window.addEventListener('resize', scaleStage);
+    scaleStage();
+
+    // Scene definitions
+    const SCENES = [
+      { id: 'scene-init', name: '00/07 INIT', theme: 'theme-dark', start: 0, end: 45 },
+      { id: 'scene-type', name: '01/07 TYPE', theme: 'theme-red', start: 45, end: 105 },
+      { id: 'scene-form', name: '02/07 FORM', theme: 'theme-cream', start: 105, end: 165 },
+      { id: 'scene-systems', name: '03/07 SYSTEMS', theme: 'theme-dark', start: 165, end: 225 },
+      { id: 'scene-depth', name: '04/07 DEPTH', theme: 'theme-red', start: 225, end: 285 },
+      { id: 'scene-interface', name: '05/07 INTERFACE', theme: 'theme-cream', start: 285, end: 345 },
+      { id: 'scene-fluid', name: '06/07 FLUID', theme: 'theme-dark', start: 345, end: 405 },
+      { id: 'scene-rhythm', name: '07/07 RHYTHM', theme: 'theme-red', start: 405, end: 450 },
+    ];
+
+    // Build Compass ticks for Scene 0
+    const compassTicksGroup = document.getElementById('compass-ticks');
+    for (let i = 0; i < 36; i++) {
+      const angle = (i * 10) * Math.PI / 180;
+      const r1 = 152;
+      const r2 = (i % 3 === 0) ? 168 : 160;
+      const x1 = 190 + r1 * Math.cos(angle);
+      const y1 = 190 + r1 * Math.sin(angle);
+      const x2 = 190 + r2 * Math.cos(angle);
+      const y2 = 190 + r2 * Math.sin(angle);
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', x1);
+      line.setAttribute('y1', y1);
+      line.setAttribute('x2', x2);
+      line.setAttribute('y2', y2);
+      line.setAttribute('stroke', (i % 3 === 0) ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.4)');
+      line.setAttribute('stroke-width', (i % 3 === 0) ? '2' : '1');
+      compassTicksGroup.appendChild(line);
+    }
+
+    // Build 3D Cards for Scene 4
+    const carouselStage = document.getElementById('depth-carousel');
+    const CARD_ITEMS = [
+      { num: '01', title: 'DOT', glyph: '<circle cx="50" cy="50" r="30" fill="#fff"/>' },
+      { num: '02', title: 'LINE', glyph: '<line x1="20" y1="50" x2="80" y2="50" stroke="#fff" stroke-width="12" stroke-linecap="round"/>' },
+      { num: '03', title: 'TRIANGLE', glyph: '<polygon points="50,20 85,80 15,80" fill="#fff"/>' },
+      { num: '04', title: 'ARCH', glyph: '<path d="M20,80 A30,30 0 0,1 80,80 Z" fill="#111"/>', highlight: true },
+      { num: '05', title: 'PLUS', glyph: '<path d="M40,20 h20 v20 h20 v20 h-20 v20 h-20 v-20 h-20 v-20 h20 Z" fill="#fff"/>' },
+      { num: '06', title: 'CIRCLE', glyph: '<circle cx="50" cy="50" r="30" fill="none" stroke="#fff" stroke-width="12"/>' },
+      { num: '07', title: 'WAVE', glyph: '<path d="M15,50 Q32,20 50,50 T85,50" fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round"/>' },
+      { num: '08', title: 'RING', glyph: '<circle cx="50" cy="50" r="28" fill="none" stroke="#fff" stroke-width="8"/>' },
+      { num: '09', title: 'DIAMOND', glyph: '<polygon points="50,15 85,50 50,85 15,50" fill="#fff"/>' },
+      { num: '10', title: 'GRID', glyph: '<rect x="25" y="25" width="20" height="20" fill="#fff"/><rect x="55" y="25" width="20" height="20" fill="#fff"/><rect x="25" y="55" width="20" height="20" fill="#fff"/><rect x="55" y="55" width="20" height="20" fill="#fff"/>' }
+    ];
+    CARD_ITEMS.forEach((item, idx) => {
+      const card = document.createElement('div');
+      card.className = `depth-card ${item.highlight ? 'highlight' : ''}`;
+      card.id = `depth-card-${idx}`;
+      card.innerHTML = `
+        <div class="depth-card-header">${item.num}</div>
+        <div class="depth-card-glyph">
+          <svg viewBox="0 0 100 100" width="80" height="80">${item.glyph}</svg>
+        </div>
+        <div class="depth-card-footer">${item.title}</div>
+      `;
+      carouselStage.appendChild(card);
+    });
+
+    // Build Equalizer Bars for Scene 5
+    const bentoBars = document.getElementById('bento-bars');
+    for (let i = 0; i < 38; i++) {
+      const bar = document.createElement('div');
+      bar.className = 'bento-bar';
+      bar.id = `bento-bar-${i}`;
+      bentoBars.appendChild(bar);
+    }
+
+    // Build 8 Fluid Metaballs for Scene 6
+    const fluidContainer = document.getElementById('fluid-blobs');
+    for (let i = 0; i < 8; i++) {
+      const blob = document.createElement('div');
+      blob.className = 'fluid-blob';
+      blob.id = `fluid-blob-${i}`;
+      fluidContainer.appendChild(blob);
+    }
+
+    // Pre-generate 1,200 3D Points for Scene 3 (Systems)
+    const NUM_PARTICLES = 1200;
+    const particles = [];
+    for (let i = 0; i < NUM_PARTICLES; i++) {
+      const u = Math.random();
+      const v = Math.random();
+      const theta = u * 2.0 * Math.PI;
+      const phi = Math.acos(2.0 * v - 1.0);
+      const r = Math.cbrt(Math.random()) * 260; // sphere distribution
+      particles.push({
+        x: r * Math.sin(phi) * Math.cos(theta),
+        y: r * Math.sin(phi) * Math.sin(theta),
+        z: r * Math.cos(phi),
+        isRed: Math.random() < 0.15
+      });
+    }
+
+    const sysCanvas = document.getElementById('systems-canvas');
+    const sysCtx = sysCanvas.getContext('2d');
+
+    // -------------------------------------------------------------
+    // DETERMINISTIC FRAME RENDERER (Scrubbable frame: 0 to 449)
+    // -------------------------------------------------------------
+    function renderFrame(frame) {
+      const t = frame / FPS; // Time in seconds
+      const beat = (frame % FRAMES_PER_BEAT) / FRAMES_PER_BEAT; // 0..1 in current beat
+      const totalBeats = frame / FRAMES_PER_BEAT;
+
+      // 1. Timecode calculation
+      const sec = Math.floor(frame / FPS);
+      const fInSec = frame % FPS;
+      const timecodeStr = `00:00:${String(sec).padStart(2, '0')}:${String(fInSec).padStart(2, '0')}`;
+      document.getElementById('hud-timecode').textContent = timecodeStr;
+
+      // 2. Timeline Progress Bar
+      const progressPct = (frame / TOTAL_FRAMES) * 100;
+      document.getElementById('timeline-fill').style.width = `${progressPct}%`;
+
+      // 3. Beat pulse indicator
+      const bpmDot = document.getElementById('bpm-dot');
+      if (frame % FRAMES_PER_BEAT < 3) {
+        bpmDot.classList.add('pulse');
+      } else {
+        bpmDot.classList.remove('pulse');
+      }
+
+      // 4. Identify Active Scene
+      let activeScene = SCENES[0];
+      for (const sc of SCENES) {
+        if (frame >= sc.start && frame < sc.end) {
+          activeScene = sc;
+          break;
+        }
+      }
+
+      // Switch active class & theme
+      SCENES.forEach(sc => {
+        const el = document.getElementById(sc.id);
+        if (sc === activeScene) {
+          el.classList.add('active');
+        } else {
+          el.classList.remove('active');
+        }
+      });
+
+      const hud = document.getElementById('hud');
+      hud.className = `hud-layer ${activeScene.theme}`;
+      document.getElementById('hud-scene-name').textContent = activeScene.name;
+
+      // -----------------------------------------------------------
+      // SCENE SPECIFIC ANIMATIONS
+      // -----------------------------------------------------------
+
+      // SCENE 0: INIT
+      if (activeScene.id === 'scene-init') {
+        const localF = frame;
+        const rot = localF * 2.5;
+        document.getElementById('compass-svg').style.transform = `rotate(${rot}deg)`;
+        const pulse = 1.0 + 0.25 * Math.sin(beat * Math.PI);
+        document.getElementById('init-dot').style.transform = `translate(-50%, -50%) scale(${pulse})`;
+      }
+
+      // SCENE 1: TYPE (THE FOUR VERBS)
+      else if (activeScene.id === 'scene-type') {
+        const localF = frame - 45;
+        const subIndex = Math.min(3, Math.floor(localF / 15));
+        const verbs = ['MOVE', 'SCALE', 'ROTATE', 'EASE'];
+        const verbNum = document.getElementById('type-verb-num');
+        const verbWord = document.getElementById('type-word');
+
+        verbNum.textContent = `VERB 0${subIndex + 1} / 04`;
+        verbWord.textContent = verbs[subIndex];
+
+        // Kinetic snap transition on each beat
+        const subF = localF % 15;
+        if (subIndex === 0) {
+          // MOVE: slide in from left to center
+          const x = -100 + 100 * Math.min(1, subF / 4);
+          verbWord.style.transform = `translateX(${x}px)`;
+        } else if (subIndex === 1) {
+          // SCALE: pop scale
+          const s = 0.5 + 0.5 * Math.min(1, subF / 4);
+          verbWord.style.transform = `scale(${s})`;
+        } else if (subIndex === 2) {
+          // ROTATE: snap rotation
+          const r = -12 + 12 * Math.min(1, subF / 4);
+          verbWord.style.transform = `rotate(${r}deg)`;
+        } else {
+          // EASE: smooth glide
+          verbWord.style.transform = `translateY(0)`;
+        }
+      }
+
+      // SCENE 2: FORM (BAUHAUS COMPOSITION)
+      else if (activeScene.id === 'scene-form') {
+        const localF = frame - 105;
+        const rot = localF * 1.8;
+        document.getElementById('form-stage').style.transform = `translateX(-50%) rotate(${rot * 0.15}deg)`;
+        document.getElementById('form-circle').style.transform = `translate(-50%, -50%) scale(${1 + 0.1 * Math.sin(localF * 0.2)})`;
+        document.getElementById('form-semicircle').style.transform = `rotate(${70 + rot * 0.8}deg)`;
+        document.getElementById('form-square').style.transform = `rotate(${18 - rot * 0.6}deg)`;
+      }
+
+      // SCENE 3: SYSTEMS (3D PARTICLES)
+      else if (activeScene.id === 'scene-systems') {
+        const localF = frame - 165;
+        const rotY = (localF * 2.4) * Math.PI / 180;
+        const rotX = (localF * 0.8) * Math.PI / 180;
+
+        document.getElementById('systems-rot-y').textContent = `${(localF * 2.4).toFixed(1)}°`;
+
+        sysCtx.clearRect(0, 0, 720, 1280);
+        const cx = 360;
+        const cy = 600;
+        const fov = 450;
+
+        for (let i = 0; i < NUM_PARTICLES; i++) {
+          const p = particles[i];
+
+          // Rotate around X
+          let y1 = p.y * Math.cos(rotX) - p.z * Math.sin(rotX);
+          let z1 = p.y * Math.sin(rotX) + p.z * Math.cos(rotX);
+
+          // Rotate around Y
+          let x2 = p.x * Math.cos(rotY) + z1 * Math.sin(rotY);
+          let z2 = -p.x * Math.sin(rotY) + z1 * Math.cos(rotY);
+
+          // Perspective projection
+          const pz = z2 + 500;
+          if (pz > 50) {
+            const scale = fov / pz;
+            const sx = cx + x2 * scale;
+            const sy = cy + y1 * scale;
+            const size = Math.max(1, (p.isRed ? 3.5 : 2.0) * scale);
+
+            sysCtx.fillStyle = p.isRed ? '#F44F24' : 'rgba(255, 255, 255, ' + Math.min(1, scale * 0.8) + ')';
+            sysCtx.beginPath();
+            sysCtx.arc(sx, sy, size, 0, Math.PI * 2);
+            sysCtx.fill();
+          }
+        }
+      }
+
+      // SCENE 4: DEPTH (3D CYLINDER CAROUSEL)
+      else if (activeScene.id === 'scene-depth') {
+        const localF = frame - 225;
+        const rotDeg = -localF * 3.6;
+        document.getElementById('depth-rot-y').textContent = `${rotDeg.toFixed(0)}°`;
+
+        // 3D positioning of 10 cards around cylinder
+        const radius = 340;
+        CARD_ITEMS.forEach((_, idx) => {
+          const cardEl = document.getElementById(`depth-card-${idx}`);
+          const angle = (idx * 36) + rotDeg;
+          cardEl.style.transform = `rotateY(${angle}deg) translateZ(${radius}px)`;
+        });
+
+        // Background scrolling text
+        const textOffset = (localF * 8) % 600;
+        document.getElementById('depth-bg-top').style.transform = `translateX(-${textOffset}px)`;
+        document.getElementById('depth-bg-bottom').style.transform = `translateX(${textOffset - 300}px)`;
+      }
+
+      // SCENE 5: INTERFACE (SWISS BENTO DASHBOARD)
+      else if (activeScene.id === 'scene-interface') {
+        const localF = frame - 285;
+        // Count up counter to 450
+        const count = Math.min(450, Math.floor(localF * 7.5));
+        document.getElementById('bento-counter').textContent = count;
+
+        // Toggle switch state
+        const thumb = document.getElementById('bento-thumb');
+        const toggleText = document.getElementById('bento-toggle-text');
+        if (localF > 25) {
+          thumb.classList.add('active');
+          toggleText.textContent = 'AUTOMATED ON';
+        } else {
+          thumb.classList.remove('active');
+          toggleText.textContent = 'AUTOMATED OFF';
+        }
+
+        // Stepping ease blocks
+        const step = Math.floor(localF / 8) % 3;
+        const blocks = ['&block; _ _', '&block; &block; _', '&block; &block; &block;'];
+        document.getElementById('bento-blocks').innerHTML = blocks[step];
+
+        // Equalizer wave bars
+        for (let i = 0; i < 38; i++) {
+          const bar = document.getElementById(`bento-bar-${i}`);
+          const h = 10 + 75 * Math.abs(Math.sin((localF * 0.25) + i * 0.35));
+          bar.style.height = `${h}px`;
+        }
+      }
+
+      // SCENE 6: FLUID (GOOEY METABALLS)
+      else if (activeScene.id === 'scene-fluid') {
+        const localF = frame - 345;
+        const rad = 140;
+
+        for (let i = 0; i < 8; i++) {
+          const blob = document.getElementById(`fluid-blob-${i}`);
+          // Distinct orbital paths and frequencies
+          const angle = (localF * (0.04 + i * 0.015)) + (i * Math.PI / 4);
+          const r = (i % 2 === 0) ? (rad + 30 * Math.sin(localF * 0.1)) : (rad * 0.5);
+          const x = 290 + r * Math.cos(angle);
+          const y = 290 + r * Math.sin(angle);
+          const size = (i === 0) ? 140 : (45 + 25 * Math.sin(localF * 0.15 + i));
+
+          blob.style.width = `${size}px`;
+          blob.style.height = `${size}px`;
+          blob.style.left = `${x - size / 2}px`;
+          blob.style.top = `${y - size / 2}px`;
+        }
+      }
+
+      // SCENE 7: RHYTHM & FINALE
+      else if (activeScene.id === 'scene-rhythm') {
+        const localF = frame - 405;
+        const finaleLayer = document.getElementById('finale-layer');
+        const hud = document.getElementById('hud');
+
+        if (localF < 22) {
+          // Kinetic typography ticker ribbons
+          finaleLayer.classList.remove('show');
+          hud.style.opacity = '1';
+          for (let i = 0; i < 6; i++) {
+            const track = document.getElementById(`track-${i}`);
+            const dir = (i % 2 === 0) ? -1 : 1;
+            const shift = dir * localF * 26;
+            track.style.transform = `translateX(${shift}px)`;
+          }
+        } else {
+          // Outro Showreel Finale Identity Card
+          finaleLayer.classList.add('show');
+          hud.className = 'hud-layer theme-dark';
+        }
+      }
+
+      // Update Toolbar Controls
+      document.getElementById('scrubber').value = frame;
+      document.getElementById('frame-badge').textContent = `F ${String(frame).padStart(3, '0')} / ${TOTAL_FRAMES}`;
+    }
+
+    // -------------------------------------------------------------
+    // PLAYBACK & INTERACTIVE CONTROLS
+    // -------------------------------------------------------------
+    function tick() {
+      if (isPlaying) {
+        currentFrame = (currentFrame + 1) % TOTAL_FRAMES;
+        renderFrame(currentFrame);
+      }
+      animId = requestAnimationFrame(tick);
+    }
+
+    const playBtn = document.getElementById('play-btn');
+    playBtn.addEventListener('click', () => {
+      isPlaying = !isPlaying;
+      playBtn.textContent = isPlaying ? 'Pause' : 'Play';
+    });
+
+    const scrubber = document.getElementById('scrubber');
+    scrubber.addEventListener('input', (e) => {
+      currentFrame = parseInt(e.target.value, 10);
+      renderFrame(currentFrame);
+    });
+
+    // Keyboard Shortcuts: Space to Play/Pause, Left/Right Arrow to Step 1 Frame
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        isPlaying = !isPlaying;
+        playBtn.textContent = isPlaying ? 'Pause' : 'Play';
+      } else if (e.code === 'ArrowRight') {
+        e.preventDefault();
+        isPlaying = false;
+        playBtn.textContent = 'Play';
+        currentFrame = Math.min(TOTAL_FRAMES - 1, currentFrame + 1);
+        renderFrame(currentFrame);
+      } else if (e.code === 'ArrowLeft') {
+        e.preventDefault();
+        isPlaying = false;
+        playBtn.textContent = 'Play';
+        currentFrame = Math.max(0, currentFrame - 1);
+        renderFrame(currentFrame);
+      }
+    });
+
+    // Start playback
+    renderFrame(0);
+    animId = requestAnimationFrame(tick);
+  </script>
+</body>
+</html>
