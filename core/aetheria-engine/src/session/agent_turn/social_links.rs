@@ -35,7 +35,8 @@ fn unescape_html_basic(s: &str) -> String {
         .to_string()
 }
 
-fn find_first_url_with_ext(html: &str, prefixes: &[&str], exts: &[&str]) -> Option<String> {
+fn collect_urls_with_ext(html: &str, prefixes: &[&str], exts: &[&str]) -> Vec<String> {
+    let mut found = Vec::new();
     for &prefix in prefixes {
         let mut pos = 0;
         while let Some(rel) = html[pos..].find(prefix) {
@@ -53,12 +54,62 @@ fn find_first_url_with_ext(html: &str, prefixes: &[&str], exts: &[&str]) -> Opti
                 .unwrap_or(candidate)
                 .to_ascii_lowercase();
             if exts.iter().any(|ext| clean.ends_with(ext)) {
-                return Some(candidate.to_string());
+                found.push(candidate.to_string());
             }
             pos = start + prefix.len();
         }
     }
-    None
+    found
+}
+
+fn find_first_url_with_ext(html: &str, prefixes: &[&str], exts: &[&str]) -> Option<String> {
+    collect_urls_with_ext(html, prefixes, exts)
+        .into_iter()
+        .next()
+}
+
+pub(crate) fn select_best_pinterest_mp4_url(html: &str) -> Option<String> {
+    let candidates =
+        collect_urls_with_ext(html, &["https://v1.pinimg.com/", "https://v.pinimg.com/"], &[".mp4"]);
+    let mut best: Option<(i32, String)> = None;
+
+    for url in candidates {
+        let clean = url
+            .split(&['?', '#'][..])
+            .next()
+            .unwrap_or(&url)
+            .to_ascii_lowercase();
+
+        let mut score: i32 = 0;
+        if !clean.contains("hevc") && !clean.contains("h265") {
+            score += 1000;
+        }
+        if clean.contains("/expmp4/") || clean.contains("/720p/") || clean.contains("/1080p/") {
+            score += 100;
+        }
+        if clean.contains("1080") {
+            score += 500;
+        } else if clean.contains("720") {
+            score += 400;
+        } else if clean.contains("540") {
+            score += 300;
+        } else if clean.contains("480") {
+            score += 250;
+        } else if clean.contains("360") {
+            score += 200;
+        } else if clean.contains("240") {
+            score += 100;
+        }
+        if !clean.ends_with("_t1.mp4") && !clean.ends_with("_t2.mp4") {
+            score += 20;
+        }
+
+        if best.as_ref().is_none_or(|(best_score, _)| score > *best_score) {
+            best = Some((score, url));
+        }
+    }
+
+    best.map(|(_, url)| url)
 }
 
 pub(crate) fn extract_pinterest_media_from_html(
@@ -110,11 +161,7 @@ pub(crate) fn extract_pinterest_media_from_html(
     }
 
     if mp4_url.is_none() {
-        mp4_url = find_first_url_with_ext(
-            html,
-            &["https://v1.pinimg.com/", "https://v.pinimg.com/"],
-            &[".mp4"],
-        );
+        mp4_url = select_best_pinterest_mp4_url(html);
     }
 
     (title, image_url, mp4_url)
@@ -284,14 +331,14 @@ pub(crate) async fn extract_compact_contact_sheet_ffmpeg(
     } else {
         8.0
     };
-    let sample_fps = (12.0 / safe_dur).clamp(0.25, 12.0);
-    let vf = format!("fps={:.4},scale=240:-2,tile=4x3", sample_fps);
+    let sample_fps = (16.0 / safe_dur).clamp(0.25, 16.0);
+    let vf = format!("fps={:.4},scale=360:-2,tile=4x4", sample_fps);
 
     let mut cmd = tokio::process::Command::new(ff_cmd);
     crate::paths::configure_hidden_tokio_command(&mut cmd);
     cmd.args(["-y", "-hide_banner", "-loglevel", "error", "-i"])
         .arg(mp4_path)
-        .args(["-vf", &vf, "-frames:v", "1", "-q:v", "4"])
+        .args(["-vf", &vf, "-frames:v", "1", "-q:v", "3"])
         .arg(sheet_path);
 
     let ok = tokio::time::timeout(std::time::Duration::from_secs(20), cmd.output())
@@ -407,14 +454,14 @@ pub async fn process_social_links(
                         .map(|(w, h)| format!("{w}x{h}"))
                         .unwrap_or_else(|| "unknown".to_string());
                     let preview_note = if has_sheet {
-                        "Storyboard contact sheet attached: ref/ref_tiktok_contact_sheet.jpg."
+                        "4x4 storyboard contact sheet attached: ref/ref_tiktok_contact_sheet.jpg."
                     } else if has_mp4 {
                         "Sample frames extracted to ref/."
                     } else {
                         "Reference metadata only (video stream unavailable)."
                     };
                     ocr_transcriptions.push(format!(
-                        "[TikTok Reference Video Ready (@{}, {}, {:.1}s, title: \"{}\"): saved at ref/ref_tiktok.mp4. {} Inspect specific timestamps via `bash` (Python/OpenCV/FFmpeg) or `extract_video_reference` when needed — translate style procedurally, never paste ref media onto canvas.]",
+                        "[TikTok Reference Video Ready (@{}, {}, {:.1}s, title: \"{}\"): saved at ref/ref_tiktok.mp4. {} Inspect full-res frames via `inspect_ref_frame`, `extract_video_reference`, or `read`/`bash` (Python/OpenCV/FFmpeg); reconstruct visually in HTML/CSS/SVG/Canvas/WebGL without pasting ref media onto the stage.]",
                         author, dims_str, probed_dur, title, preview_note
                     ));
                 }
@@ -470,7 +517,7 @@ pub async fn process_social_links(
                         .await
                         {
                             image_urls.push(sheet_url);
-                            sheet_line = "\n- Storyboard Contact Sheet: ref/ref_youtube_contact_sheet.jpg".to_string();
+                            sheet_line = "\n- 4x4 Storyboard Contact Sheet: ref/ref_youtube_contact_sheet.jpg".to_string();
                         } else {
                             extract_sample_frames_ffmpeg(
                                 ffmpeg_bin,
@@ -487,7 +534,7 @@ pub async fn process_social_links(
                         ocr_transcriptions.push(format!(
                             "[YouTube Reference Video Extracted (ID: {}{}:\n\
                              - Reference Video Downloaded via yt-dlp: ref/ref_youtube.mp4{}\n\
-                             - Inspect exact timestamps via `bash` (Python/OpenCV/FFmpeg) or call `extract_video_reference` when needed.]",
+                             - Inspect full-res frames via `inspect_ref_frame`, `extract_video_reference`, or `read`/`bash` (Python/OpenCV/FFmpeg).]",
                             vid_id, dims_str, sheet_line
                         ));
                         continue;
@@ -654,7 +701,7 @@ pub async fn process_social_links(
                                     .map(|(w, h)| format!("{w}x{h}, "))
                                     .unwrap_or_default();
                                 ocr_transcriptions.push(format!(
-                                    "[Pinterest Reference Video Ready (title: \"{}\", {}{:.1}s, saved: [{}]): Storyboard contact sheet attached to vision context. Inspect individual frames/timestamps via `bash` (Python/OpenCV/FFmpeg) or `extract_video_reference` when needed; never paste ref media directly onto the stage.]",
+                                    "[Pinterest Reference Video Ready (title: \"{}\", {}{:.1}s, saved: [{}]): 4x4 storyboard contact sheet attached to vision context. Inspect full-res frames via `inspect_ref_frame`, `extract_video_reference`, or `read`/`bash` (Python/OpenCV/FFmpeg); reconstruct visually in HTML/CSS/SVG/Canvas/WebGL without pasting ref files onto the stage.]",
                                     title_str,
                                     dims_str,
                                     probed_dur,
@@ -755,6 +802,23 @@ mod tests {
                 (0.60, "00:00:06.00".to_string()),
                 (0.85, "00:00:08.50".to_string()),
             ]
+        );
+    }
+
+    #[test]
+    fn prefers_highest_res_h264_pinterest_mp4_over_first_lowres_hevc() {
+        let html = r#"
+            <script>
+            {"v1":"https://v1.pinimg.com/videos/iht/hevcMp4V3/bb/04/d9/bb04d9ff4860c241c31d0550d4db20f3_540w.mp4",
+             "v2":"https://v1.pinimg.com/videos/iht/h265-pt-mp4/bb/04/d9/bb04d9ff4860c241c31d0550d4db20f3_720w_t1.mp4",
+             "v3":"https://v1.pinimg.com/videos/iht/expMp4/bb/04/d9/bb04d9ff4860c241c31d0550d4db20f3_720w.mp4",
+             "v4":"https://v1.pinimg.com/videos/iht/hevcMp4V3/bb/04/d9/bb04d9ff4860c241c31d0550d4db20f3_360w.mp4"}
+            </script>
+        "#;
+        let (_, _, mp4) = extract_pinterest_media_from_html(html);
+        assert_eq!(
+            mp4.as_deref(),
+            Some("https://v1.pinimg.com/videos/iht/expMp4/bb/04/d9/bb04d9ff4860c241c31d0550d4db20f3_720w.mp4")
         );
     }
 }

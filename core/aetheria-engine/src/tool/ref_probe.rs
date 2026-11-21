@@ -199,6 +199,10 @@ pub async fn execute_inspect_ref_frame(workspace_dir: &str, arguments: &Value) -
                 if let Some(o) = val.as_object_mut() {
                     o.insert("_vision_images".to_string(), json!([data_url]));
                     o.insert(
+                        "_vision_image_labels".to_string(),
+                        json!([format!("inspect_ref_frame @ t={:.2}s", ts)]),
+                    );
+                    o.insert(
                         "nonVisionHint".to_string(),
                         json!("If your model lacks vision, call `sample_ref_region` on the same timestamp/box for exact hex colors and bounding boxes."),
                     );

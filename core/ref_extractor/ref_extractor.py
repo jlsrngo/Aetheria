@@ -827,6 +827,29 @@ def extract_scene_sub_beats(
     return phases
 
 
+def _write_vision_copy(
+    img: Optional[np.ndarray],
+    vision_dir: Path,
+    filename: str,
+    max_edge: int = 540,
+    quality: int = 78,
+) -> None:
+    if img is None or img.size == 0:
+        return
+    h, w = img.shape[:2]
+    if h <= 0 or w <= 0:
+        return
+    longest = max(h, w)
+    out = img
+    if longest > max_edge:
+        scale = max_edge / float(longest)
+        nw = max(1, int(round(w * scale)))
+        nh = max(1, int(round(h * scale)))
+        out = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_AREA)
+    vision_dir.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(vision_dir / filename), out, [cv2.IMWRITE_JPEG_QUALITY, int(quality)])
+
+
 def build_dense_contact_sheets(
     frame_lookup: Any,
     sample_timestamps: List[float],
@@ -863,6 +886,7 @@ def build_dense_contact_sheets(
             canvas[r * tile_h:(r + 1) * tile_h, c * tile_w:(c + 1) * tile_w] = tile
         name = f"contact_sheet_{sheet_idx}.jpg"
         cv2.imwrite(str(out_dir / name), canvas, [cv2.IMWRITE_JPEG_QUALITY, 86])
+        _write_vision_copy(canvas, out_dir / "vision", name, max_edge=1280, quality=76)
         sheet_rels.append(name)
     return sheet_rels
 
@@ -1342,10 +1366,13 @@ def extract_reference_blueprint(
                 return fr
         return None
 
+    vision_dir = frames_dir.parent / "vision"
     for idx, ts in enumerate(thumb_timestamps):
         frame = _frame_at(ts)
         if frame is not None:
-            cv2.imwrite(str(frames_dir / f"thumb_{idx:03d}.jpg"), frame, [cv2.IMWRITE_JPEG_QUALITY, 92])
+            thumb_name = f"thumb_{idx:03d}.jpg"
+            cv2.imwrite(str(frames_dir / thumb_name), frame, [cv2.IMWRITE_JPEG_QUALITY, 92])
+            _write_vision_copy(frame, vision_dir, thumb_name, max_edge=540, quality=78)
 
     # 3. Extract per-scene keyframes, true palettes, spatial layouts, clean plate & Motion AST layers
     scenes: List[Dict[str, Any]] = []
@@ -1398,12 +1425,14 @@ def extract_reference_blueprint(
         layout_info = analyze_frame_layout(fr_mid, ocr_engine)
         if fr_mid is not None:
             cv2.imwrite(str(scene_kf_path), fr_mid, [cv2.IMWRITE_JPEG_QUALITY, 94])
+            _write_vision_copy(fr_mid, vision_dir, scene_kf_name, max_edge=540, quality=78)
 
         # Also save start/q1/mid/q3/end sub-keyframes and a high-res per-scene beat storyboard strip
         sub_keyframes = [{"t": ts_mid, "path": f"frames/{scene_kf_name}"}]
         if fr_start is not None and dur >= 0.9:
             start_name = f"ref_scene_{i + 1:02d}_start.jpg"
             cv2.imwrite(str(frames_dir / start_name), fr_start, [cv2.IMWRITE_JPEG_QUALITY, 88])
+            _write_vision_copy(fr_start, vision_dir, start_name, max_edge=540, quality=78)
             sub_keyframes.append({"t": ts_start, "path": f"frames/{start_name}"})
         if dur >= 2.2 and len(sub_ts_list) >= 6:
             ts_q1 = sub_ts_list[2]  # ~28% into scene (captures opening morphs / marquees)
@@ -1413,14 +1442,17 @@ def extract_reference_blueprint(
             if fr_q1 is not None:
                 q1_name = f"ref_scene_{i + 1:02d}_q1.jpg"
                 cv2.imwrite(str(frames_dir / q1_name), fr_q1, [cv2.IMWRITE_JPEG_QUALITY, 90])
+                _write_vision_copy(fr_q1, vision_dir, q1_name, max_edge=540, quality=78)
                 sub_keyframes.append({"t": ts_q1, "path": f"frames/{q1_name}"})
             if fr_q3 is not None:
                 q3_name = f"ref_scene_{i + 1:02d}_q3.jpg"
                 cv2.imwrite(str(frames_dir / q3_name), fr_q3, [cv2.IMWRITE_JPEG_QUALITY, 90])
+                _write_vision_copy(fr_q3, vision_dir, q3_name, max_edge=540, quality=78)
                 sub_keyframes.append({"t": ts_q3, "path": f"frames/{q3_name}"})
         if fr_end is not None and dur >= 0.8:
             end_name = f"ref_scene_{i + 1:02d}_end.jpg"
             cv2.imwrite(str(frames_dir / end_name), fr_end, [cv2.IMWRITE_JPEG_QUALITY, 88])
+            _write_vision_copy(fr_end, vision_dir, end_name, max_edge=540, quality=78)
             sub_keyframes.append({"t": ts_end, "path": f"frames/{end_name}"})
         sub_keyframes.sort(key=lambda item: float(item.get("t", 0.0)))
 

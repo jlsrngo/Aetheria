@@ -12,7 +12,7 @@ use super::resolve_writable_isolated_path;
 use crate::session::message::emit_event;
 
 /// Default line limit for un-ranged `oldString` replacements without explicit `startLine`/`endLine`.
-pub const DEFAULT_MAX_UNRANGED_EDIT_LINES: usize = 200;
+pub const DEFAULT_MAX_UNRANGED_EDIT_LINES: usize = 800;
 
 fn resolve_max_unranged_edit_lines() -> usize {
     crate::provider::read_aetheria_config()
@@ -499,7 +499,7 @@ mod tests {
 
     #[test]
     fn test_validate_edit_strategy_rejects_large_unranged_old_string() {
-        let large_old = (1..=210)
+        let large_old = (1..=(DEFAULT_MAX_UNRANGED_EDIT_LINES + 10))
             .map(|i| format!("line {};", i))
             .collect::<Vec<_>>()
             .join("\n");

@@ -13,7 +13,7 @@ use std::path::Path;
 use std::time::{Duration, SystemTime};
 
 /// Maximum byte limit for a single tool response in the model context.
-pub const MAX_TOOL_OUTPUT_BYTES: usize = 50 * 1024; // 50 KiB
+pub const MAX_TOOL_OUTPUT_BYTES: usize = 100 * 1024; // 100 KiB
 
 /// Maximum lines allowed in a single tool response.
 pub const MAX_TOOL_OUTPUT_LINES: usize = 2_000;
@@ -220,6 +220,15 @@ pub fn format_tool_result_for_model(tool_name: &str, result: &Value) -> String {
                     lines.push(format!("\n[harness-note]\n{}", hint));
                 }
                 return lines.join("\n");
+            }
+        }
+        "extract_video_reference" => {
+            if let Some(output) = obj.get("output").and_then(Value::as_str) {
+                let mut out = output.to_string();
+                if let Some(hint) = intervention {
+                    out.push_str(&format!("\n\n[harness-note]\n{}", hint));
+                }
+                return out;
             }
         }
         "edit" | "write" | "apply_patch" | "multiedit" => {
@@ -591,5 +600,31 @@ mod tests {
         assert_eq!(spilled_full, raw);
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_extract_video_reference_uses_compact_multiline_output() {
+        let payload = serde_json::json!({
+            "ok": true,
+            "success": true,
+            "output": "Reference video extracted (720x1280 @ 30fps, 15.00s).\n  Scene 1 (init): 0.00s-1.50s | bg=#0d0d0d",
+            "blueprint": {
+                "huge": "x".repeat(8000)
+            }
+        });
+        let formatted = format_tool_result_for_model("extract_video_reference", &payload);
+        assert!(formatted.contains("Reference video extracted (720x1280 @ 30fps"));
+        assert!(formatted.contains("Scene 1 (init): 0.00s-1.50s"));
+        assert!(!formatted.contains("xxxx"));
+    }
+
+    #[test]
+    fn test_read_65kb_multiline_html_not_truncated() {
+        let line = "<div class=\"scene-layer\" style=\"opacity:1\">motion element 0123456789</div>\n";
+        let html = line.repeat(900);
+        assert!(html.len() > 60 * 1024 && html.len() < MAX_TOOL_OUTPUT_BYTES);
+        let (output, truncated) = bound_tool_output("read", &html);
+        assert!(!truncated);
+        assert_eq!(output, html);
     }
 }

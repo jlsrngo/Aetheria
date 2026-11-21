@@ -517,16 +517,38 @@ pub(crate) fn extract_tool_vision_images(tool_out: &mut Value, collected: &mut V
     }
 }
 
-/// Variant of `extract_tool_vision_images` that leaves an explicit non-silent diagnostic
-/// inside the serialized tool output when a text-only model strips visual frames.
-pub(crate) fn extract_tool_vision_images_with_notice(
+/// Removes `_vision_images` (and optional `_vision_image_labels`) from a tool result before
+/// serialization and appends `(data_url, optional_label)` pairs, emitting a text-only notice if needed.
+pub(crate) fn extract_tool_vision_images_labeled_with_notice(
     tool_out: &mut Value,
-    collected: &mut Vec<String>,
+    collected: &mut Vec<(String, Option<String>)>,
     model_supports_vision: bool,
 ) {
-    let before = collected.len();
-    extract_tool_vision_images(tool_out, collected);
-    let omitted = collected.len().saturating_sub(before);
+    let labels: Vec<Option<String>> = tool_out
+        .as_object_mut()
+        .and_then(|obj| obj.remove("_vision_image_labels"))
+        .and_then(|v| match v {
+            Value::Array(arr) => Some(
+                arr.into_iter()
+                    .map(|item| {
+                        item.as_str()
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_string)
+                    })
+                    .collect(),
+            ),
+            _ => None,
+        })
+        .unwrap_or_default();
+
+    let mut urls = Vec::new();
+    extract_tool_vision_images(tool_out, &mut urls);
+    let omitted = urls.len();
+    for (idx, url) in urls.into_iter().enumerate() {
+        let label = labels.get(idx).cloned().flatten();
+        collected.push((url, label));
+    }
     if omitted > 0 && !model_supports_vision {
         if let Some(obj) = tool_out.as_object_mut() {
             obj.insert("visionOmittedCount".to_string(), serde_json::json!(omitted));
@@ -540,21 +562,48 @@ pub(crate) fn extract_tool_vision_images_with_notice(
     }
 }
 
-/// Appends a multimodal user inspection message containing images returned by tools (e.g. `capture_film_preview`)
+/// Variant of `extract_tool_vision_images` that leaves an explicit non-silent diagnostic
+/// inside the serialized tool output when a text-only model strips visual frames.
+#[allow(dead_code)] // Retained for backward-compatible unit tests while runtime uses labeled extractor.
+pub(crate) fn extract_tool_vision_images_with_notice(
+    tool_out: &mut Value,
+    collected: &mut Vec<String>,
+    model_supports_vision: bool,
+) {
+    let mut labeled = Vec::new();
+    extract_tool_vision_images_labeled_with_notice(tool_out, &mut labeled, model_supports_vision);
+    collected.extend(labeled.into_iter().map(|(u, _)| u));
+}
+
+/// Appends a multimodal user inspection message containing labeled images returned by tools
 /// only when `model_supports_vision` is true.
-pub(crate) fn append_tool_vision_message(
+pub(crate) fn append_labeled_tool_vision_message(
     chat_messages: &mut Vec<Value>,
     model_supports_vision: bool,
-    images: Vec<String>,
+    items: Vec<(String, Option<String>)>,
 ) {
-    if !model_supports_vision || images.is_empty() {
+    if !model_supports_vision || items.is_empty() {
         return;
     }
+    let has_labels = items.iter().any(|(_, lbl)| lbl.is_some());
+    let header = if has_labels {
+        let manifest: Vec<String> = items
+            .iter()
+            .enumerate()
+            .map(|(i, (_, lbl))| format!("{}. {}", i + 1, lbl.as_deref().unwrap_or("image")))
+            .collect();
+        format!(
+            "[Tool visual output attached below in exact order:\n{}\n]",
+            manifest.join("\n")
+        )
+    } else {
+        "[Tool visual output attached below.]".to_string()
+    };
     let mut parts = vec![serde_json::json!({
         "type": "text",
-        "text": "[Tool visual output attached below.]"
+        "text": header
     })];
-    for url in images {
+    for (url, _) in items {
         parts.push(serde_json::json!({
             "type": "image_url",
             "image_url": { "url": url }
@@ -564,6 +613,21 @@ pub(crate) fn append_tool_vision_message(
         "role": "user",
         "content": parts
     }));
+}
+
+/// Appends a multimodal user inspection message containing images returned by tools (e.g. `capture_film_preview`)
+/// only when `model_supports_vision` is true.
+#[allow(dead_code)] // Retained for unit tests while runtime uses `append_labeled_tool_vision_message`.
+pub(crate) fn append_tool_vision_message(
+    chat_messages: &mut Vec<Value>,
+    model_supports_vision: bool,
+    images: Vec<String>,
+) {
+    append_labeled_tool_vision_message(
+        chat_messages,
+        model_supports_vision,
+        images.into_iter().map(|u| (u, None)).collect(),
+    );
 }
 
 pub use super::social_links::process_social_links;
@@ -700,6 +764,37 @@ mod tests {
         extract_tool_vision_images_with_notice(&mut out_vision, &mut collected2, true);
         assert!(out_vision.get("visionOmittedCount").is_none());
         assert!(out_vision.get("visionNotice").is_none());
+    }
+
+    #[test]
+    fn extracts_and_attaches_labeled_tool_vision_images() {
+        let mut tool_out = serde_json::json!({
+            "ok": true,
+            "_vision_images": [
+                "data:image/jpeg;base64,AAAA",
+                "data:image/jpeg;base64,BBBB"
+            ],
+            "_vision_image_labels": [
+                "ref/extracted/frames/ref_scene_01.jpg (Scene 1 init @ 0.75s)",
+                "preview_0.jpg @ t=0.73s"
+            ]
+        });
+        let mut collected = Vec::new();
+        extract_tool_vision_images_labeled_with_notice(&mut tool_out, &mut collected, true);
+        assert!(tool_out.get("_vision_images").is_none());
+        assert!(tool_out.get("_vision_image_labels").is_none());
+        assert_eq!(collected.len(), 2);
+
+        let mut msgs = Vec::new();
+        append_labeled_tool_vision_message(&mut msgs, true, collected);
+        assert_eq!(msgs.len(), 1);
+        let header = msgs[0].pointer("/content/0/text").and_then(|v| v.as_str()).unwrap();
+        assert!(header.contains("1. ref/extracted/frames/ref_scene_01.jpg (Scene 1 init @ 0.75s)"));
+        assert!(header.contains("2. preview_0.jpg @ t=0.73s"));
+        assert_eq!(
+            msgs[0].pointer("/content/1/image_url/url").and_then(|v| v.as_str()),
+            Some("data:image/jpeg;base64,AAAA")
+        );
     }
 }
 

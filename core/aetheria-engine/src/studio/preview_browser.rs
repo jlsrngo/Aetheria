@@ -13,7 +13,7 @@ use tokio::sync::Mutex;
 
 pub(crate) const WARM_BROWSER_IDLE_TIMEOUT_MS: u64 = 300_000;
 const REAPER_TICK_SECS: u64 = 15;
-const ERROR_HOOK_SOURCE: &str = "window.__aetheriaErrors = []; window.addEventListener('error', e => { const msg = String(e.message || e.error || 'Script error'); window.__aetheriaErrors.push(e.lineno ? `${msg} (line ${e.lineno}:${e.colno || 0})` : msg); }); window.addEventListener('unhandledrejection', e => window.__aetheriaErrors.push(String(e.reason || 'Unhandled promise rejection'))); (() => { const origErr = console.error; console.error = function(...args) { try { const txt = args.map(a => typeof a === 'object' && a && a.stack ? a.stack : String(a)).join(' ').slice(0, 320); if (txt && window.__aetheriaErrors.length < 16) window.__aetheriaErrors.push('console.error: ' + txt); } catch (_) {} return origErr.apply(console, args); }; })();";
+const ERROR_HOOK_SOURCE: &str = "window.__aetheriaHeadless = true; window.__aetheriaErrors = []; window.addEventListener('error', e => { const msg = String(e.message || e.error || 'Script error'); window.__aetheriaErrors.push(e.lineno ? `${msg} (line ${e.lineno}:${e.colno || 0})` : msg); }); window.addEventListener('unhandledrejection', e => window.__aetheriaErrors.push(String(e.reason || 'Unhandled promise rejection'))); (() => { const origErr = console.error; console.error = function(...args) { try { const txt = args.map(a => typeof a === 'object' && a && a.stack ? a.stack : String(a)).join(' ').slice(0, 320); if (txt && window.__aetheriaErrors.length < 16) window.__aetheriaErrors.push('console.error: ' + txt); } catch (_) {} return origErr.apply(console, args); }; })();";
 
 pub(crate) struct WarmPreviewBrowser {
     pub(crate) cdp: CdpWebSocket,
@@ -154,5 +154,10 @@ mod tests {
         ));
         // Clock skew backward should not panic or falsely expire immediately.
         assert!(!is_warm_browser_expired(2_000, 1_500, WARM_BROWSER_IDLE_TIMEOUT_MS));
+    }
+
+    #[test]
+    fn error_hook_marks_aetheria_headless_flag() {
+        assert!(ERROR_HOOK_SOURCE.contains("window.__aetheriaHeadless = true"));
     }
 }

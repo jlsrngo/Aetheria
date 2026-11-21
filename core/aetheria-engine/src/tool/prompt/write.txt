@@ -3,4 +3,5 @@ Writes a file inside the workspace.
 Usage:
 - This tool overwrites the existing file if one already exists at the provided path, creating parent directories automatically.
 - For targeted changes to existing files, prefer `edit` (or `apply_patch`); read the file first when modifying existing code so you don't lose working sections.
+- NEVER overwrite an entire existing large file (such as `index.html`) with `write` just to fix bugs or refine scenes — use `edit` or `apply_patch` instead.
 - Only create documentation files (*.md) or README files when requested by the user.

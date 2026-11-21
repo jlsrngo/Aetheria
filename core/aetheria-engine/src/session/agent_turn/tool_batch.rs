@@ -155,7 +155,12 @@ pub(crate) async fn execute_tool_batch(
     let serialize_heavy_calls = prepared_calls
         .iter()
         .filter(|pc| match pc.fn_name.as_str() {
-            "capture_film_preview" | "film_render" => true,
+            "capture_film_preview"
+            | "film_render"
+            | "edit"
+            | "write"
+            | "apply_patch"
+            | "multiedit" => true,
             // Allow concurrent background `task` launches; only serialize blocking sync subagents
             // (including `motion-designer`, which always runs synchronously).
             "task" | "subagent" => {
@@ -188,7 +193,7 @@ pub(crate) async fn execute_tool_batch(
             .iter()
             .all(|(out, _)| out.get("blocked").and_then(|v| v.as_bool()) == Some(true));
 
-    let mut collected_vision_images = Vec::new();
+    let mut collected_vision_images: Vec<(String, Option<String>)> = Vec::new();
     for (pc, (mut tool_out, is_failed)) in prepared_calls.into_iter().zip(results.into_iter()) {
         let call_id = pc.call_id;
         let display_name = pc.display_name;
@@ -207,7 +212,7 @@ pub(crate) async fn execute_tool_batch(
         if tool_out.get("aborted").and_then(|v| v.as_bool()) == Some(true) {
             was_interrupted = true;
         }
-        super::vision::extract_tool_vision_images_with_notice(
+        super::vision::extract_tool_vision_images_labeled_with_notice(
             &mut tool_out,
             &mut collected_vision_images,
             model_supports_vision,
@@ -318,7 +323,7 @@ pub(crate) async fn execute_tool_batch(
         }));
     }
 
-    super::vision::append_tool_vision_message(
+    super::vision::append_labeled_tool_vision_message(
         chat_messages,
         model_supports_vision,
         collected_vision_images,

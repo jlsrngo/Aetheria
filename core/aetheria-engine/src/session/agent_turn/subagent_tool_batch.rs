@@ -201,14 +201,14 @@ pub(crate) async fn execute_subagent_tool_calls(
     let results = futures_util::future::join_all(futures).await;
 
     let mut aborted_reason: Option<String> = None;
-    let mut collected_vision_images = Vec::new();
+    let mut collected_vision_images: Vec<(String, Option<String>)> = Vec::new();
     for (pc, (mut tool_result, was_executed)) in prepared.into_iter().zip(results.into_iter()) {
         if let Some(reason) = pc.loop_error {
             if aborted_reason.is_none() {
                 aborted_reason = Some(reason);
             }
         }
-        super::vision::extract_tool_vision_images_with_notice(
+        super::vision::extract_tool_vision_images_labeled_with_notice(
             &mut tool_result,
             &mut collected_vision_images,
             model_supports_vision,
@@ -269,7 +269,7 @@ pub(crate) async fn execute_subagent_tool_calls(
         }));
     }
 
-    super::vision::append_tool_vision_message(
+    super::vision::append_labeled_tool_vision_message(
         chat_messages,
         model_supports_vision,
         collected_vision_images,

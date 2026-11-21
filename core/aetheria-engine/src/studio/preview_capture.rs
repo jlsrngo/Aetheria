@@ -20,8 +20,18 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 const MAX_PREVIEW_FRAMES: usize = 16;
+const PREVIEW_VISION_MAX_EDGE: u32 = 960;
 pub(crate) const DEFAULT_REFERENCE_PASS_THRESHOLD: f64 = 0.85;
 pub const RELATIVE_PREVIEW_POSITIONS: [f64; 4] = [0.10, 0.35, 0.60, 0.85];
+
+pub(crate) fn compute_preview_capture_scale(width: u32, height: u32, max_edge: u32) -> f64 {
+    let max_dim = width.max(height);
+    if max_dim <= max_edge || max_dim == 0 || max_edge == 0 {
+        1.0
+    } else {
+        (max_edge as f64 / max_dim as f64).clamp(0.25, 1.0)
+    }
+}
 
 static PREVIOUS_PREVIEW_DIGESTS: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
 
@@ -423,11 +433,26 @@ async fn run_cdp_preview_capture(
             .map_err(CdpAttemptError::WarmTransport)?;
         validate_render_at_eval_response(&eval_resp, *ts).map_err(CdpAttemptError::FilmFailure)?;
 
+        let capture_scale =
+            compute_preview_capture_scale(meta.width, meta.height, PREVIEW_VISION_MAX_EDGE);
+        let shot_params = if capture_scale < 0.999 {
+            json!({
+                "format": "jpeg",
+                "quality": 84,
+                "optimizeForSpeed": true,
+                "clip": {
+                    "x": 0,
+                    "y": 0,
+                    "width": meta.width,
+                    "height": meta.height,
+                    "scale": capture_scale
+                }
+            })
+        } else {
+            json!({ "format": "jpeg", "quality": 84, "optimizeForSpeed": true })
+        };
         let shot = cdp
-            .call(
-                "Page.captureScreenshot",
-                json!({ "format": "jpeg", "quality": 88, "optimizeForSpeed": true }),
-            )
+            .call("Page.captureScreenshot", shot_params)
             .await
             .map_err(CdpAttemptError::WarmTransport)?;
         let b64 = shot
@@ -1085,5 +1110,12 @@ mod tests {
             classify_film_ready_error("CDP navigation did not leave about:blank within 15s".to_string()),
             CdpAttemptError::WarmTransport(_)
         ));
+    }
+
+    #[test]
+    fn compute_preview_capture_scale_bounds_large_stages() {
+        assert!((compute_preview_capture_scale(1080, 1920, 960) - 0.5).abs() < 1e-6);
+        assert!((compute_preview_capture_scale(720, 1280, 960) - 0.75).abs() < 1e-6);
+        assert!((compute_preview_capture_scale(360, 640, 960) - 1.0).abs() < 1e-6);
     }
 }

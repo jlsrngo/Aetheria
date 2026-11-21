@@ -240,7 +240,8 @@ pub fn execute_read(workspace_dir: &str, arguments: &Value) -> Value {
                             "isImage": true,
                             "mime": mime,
                             "bytes": bytes.len(),
-                            "_vision_images": [data_url]
+                            "_vision_images": [data_url],
+                            "_vision_image_labels": [fp]
                         })
                     }
                     Ok(bytes) => json!({

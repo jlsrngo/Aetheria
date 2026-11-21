@@ -40,19 +40,21 @@ pub fn capture_film_preview_tool_definition() -> Value {
     })
 }
 
-fn build_preview_vision_images(
+fn build_preview_vision_images_with_labels(
     frames: &[crate::studio::preview_capture::PreviewFrameCapture],
     comparison_strip_data_url: Option<String>,
     reference_comparison: Option<&Value>,
     story_contact_sheet_data_url: Option<String>,
     include_full_res_frames: bool,
-) -> Vec<Value> {
+) -> (Vec<Value>, Vec<Value>) {
     let mut vision_images: Vec<Value> = Vec::new();
+    let mut vision_labels: Vec<Value> = Vec::new();
     let mut attached_full_res = false;
     if let Some(strip_url) = comparison_strip_data_url {
         // Attach the unified side-by-side comparison strip (Ref | Preview | Diff Heatmap)
         // by default without duplicating raw frames unless `includeFullResFrames` is enabled.
         vision_images.push(Value::String(strip_url));
+        vision_labels.push(json!("comparison_strip.jpg (Ref | Preview | Diff Heatmap)"));
         if let Some(beat_strip_path) = reference_comparison
             .and_then(|c| c.get("primarySceneBeatStripPath"))
             .and_then(Value::as_str)
@@ -64,23 +66,45 @@ fn build_preview_vision_images(
                         "data:image/jpeg;base64,{}",
                         BASE64_STANDARD.encode(&bytes)
                     )));
+                    vision_labels.push(json!("primarySceneBeatStrip (beat-by-beat comparison)"));
                 }
             }
         }
     } else if let Some(sheet_url) = story_contact_sheet_data_url {
         vision_images.push(Value::String(sheet_url));
+        vision_labels.push(json!("story_contact_sheet.jpg"));
     } else {
         for f in frames {
             vision_images.push(Value::String(f.data_url.clone()));
+            vision_labels.push(json!(format!("{} @ t={:.2}s", f.saved_rel_path, f.timestamp)));
         }
         attached_full_res = true;
     }
     if include_full_res_frames && !attached_full_res {
         for f in frames {
             vision_images.push(Value::String(f.data_url.clone()));
+            vision_labels.push(json!(format!("{} @ t={:.2}s", f.saved_rel_path, f.timestamp)));
         }
     }
-    vision_images
+    (vision_images, vision_labels)
+}
+
+#[allow(dead_code)] // Retained for backward-compatible unit tests while runtime uses `build_preview_vision_images_with_labels`.
+fn build_preview_vision_images(
+    frames: &[crate::studio::preview_capture::PreviewFrameCapture],
+    comparison_strip_data_url: Option<String>,
+    reference_comparison: Option<&Value>,
+    story_contact_sheet_data_url: Option<String>,
+    include_full_res_frames: bool,
+) -> Vec<Value> {
+    build_preview_vision_images_with_labels(
+        frames,
+        comparison_strip_data_url,
+        reference_comparison,
+        story_contact_sheet_data_url,
+        include_full_res_frames,
+    )
+    .0
 }
 
 pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value) -> Value {
@@ -159,7 +183,7 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
                     })
                 })
                 .collect();
-            let vision_images = build_preview_vision_images(
+            let (vision_images, vision_labels) = build_preview_vision_images_with_labels(
                 &res.frames,
                 res.comparison_strip_data_url.clone(),
                 res.reference_comparison.as_ref(),
@@ -398,7 +422,8 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
                     extra_notices,
                     runtime_note
                 ),
-                "_vision_images": vision_images
+                "_vision_images": vision_images,
+                "_vision_image_labels": vision_labels
             });
             if !failure_reasons.is_empty() {
                 if let Some(obj) = result.as_object_mut() {

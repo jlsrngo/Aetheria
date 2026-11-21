@@ -117,17 +117,24 @@ pub(crate) fn select_extracted_vision_keyframes(
                 if let Some(scenes) = parsed.get("scenes").and_then(Value::as_array) {
                     let mut seen = std::collections::HashSet::new();
                     for sc in scenes {
+                        let scene_dur = sc
+                            .get("duration")
+                            .and_then(Value::as_f64)
+                            .or_else(|| {
+                                match (
+                                    sc.get("start").and_then(Value::as_f64),
+                                    sc.get("end").and_then(Value::as_f64),
+                                ) {
+                                    (Some(s), Some(e)) => Some((e - s).max(0.0)),
+                                    _ => None,
+                                }
+                            })
+                            .unwrap_or(0.0);
+                        let is_long_scene = scene_dur >= 2.5;
                         let mid_str = sc
                             .pointer("/keyframes/mid")
                             .and_then(Value::as_str)
                             .or_else(|| sc.get("keyframe").and_then(Value::as_str));
-                        if let Some(p) =
-                            mid_str.and_then(|s| resolve_style_frame_in_dir(frames_dir, s))
-                        {
-                            if seen.insert(p.clone()) {
-                                midpoints.push(p);
-                            }
-                        }
                         if let Some(kfs_arr) = sc.get("keyframes").and_then(Value::as_array) {
                             for item in kfs_arr {
                                 let Some(path_str) = item.get("path").and_then(Value::as_str) else {
@@ -143,15 +150,26 @@ pub(crate) fn select_extracted_vision_keyframes(
                                 if lower_path.contains("_beats.") {
                                     continue;
                                 }
-                                if lower_path.contains("_start.")
+                                if lower_path.contains("_q1.") || lower_path.contains("_q3.") {
+                                    if is_long_scene {
+                                        midpoints.push(p);
+                                    } else {
+                                        transitions.push(p);
+                                    }
+                                } else if lower_path.contains("_start.")
                                     || lower_path.contains("_end.")
-                                    || lower_path.contains("_q1.")
-                                    || lower_path.contains("_q3.")
                                 {
                                     transitions.push(p);
                                 } else {
                                     midpoints.push(p);
                                 }
+                            }
+                        }
+                        if let Some(p) =
+                            mid_str.and_then(|s| resolve_style_frame_in_dir(frames_dir, s))
+                        {
+                            if seen.insert(p.clone()) {
+                                midpoints.push(p);
                             }
                         }
                         for key in ["start", "end"] {
@@ -299,6 +317,135 @@ async fn python_has_cv2_and_numpy() -> bool {
         .unwrap_or(false)
 }
 
+pub(crate) fn build_compact_extraction_summary(
+    parsed: &Value,
+    frame_paths: &[String],
+) -> (String, Vec<String>) {
+    let bp = parsed.get("blueprint");
+    let width = bp
+        .and_then(|b| b.get("width"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let height = bp
+        .and_then(|b| b.get("height"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let fps = bp
+        .and_then(|b| b.get("fps"))
+        .and_then(Value::as_f64)
+        .unwrap_or(30.0);
+    let total_dur = bp
+        .and_then(|b| b.get("totalDuration"))
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    let ar = bp
+        .and_then(|b| b.get("aspectRatio"))
+        .and_then(Value::as_str)
+        .unwrap_or("9:16");
+    let bpm = bp
+        .and_then(|b| b.get("bpm"))
+        .and_then(Value::as_f64)
+        .unwrap_or(120.0);
+    let fast_mode = parsed
+        .get("fastMode")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let report_path = parsed
+        .get("reportPath")
+        .and_then(Value::as_str)
+        .unwrap_or("ref/extracted/ref_report.md");
+    let style_path = parsed
+        .get("stylePath")
+        .and_then(Value::as_str)
+        .unwrap_or("ref/extracted/style.json");
+
+    let mut lines = Vec::new();
+    lines.push(format!(
+        "Reference video extracted ({width}x{height} @ {fps:.0}fps, {total_dur:.2}s, {ar}, BPM={bpm:.0}, fastMode={fast_mode})."
+    ));
+    lines.push(format!("Artifacts: report={report_path}, style={style_path}"));
+
+    let scenes = bp
+        .and_then(|b| b.get("scenes"))
+        .and_then(Value::as_array)
+        .map(|s| s.as_slice())
+        .unwrap_or(&[]);
+
+    if !scenes.is_empty() {
+        lines.push(format!("Scenes ({} detected):", scenes.len()));
+        for s in scenes {
+            let idx = s.get("index").and_then(Value::as_u64).unwrap_or(0);
+            let id = s.get("id").and_then(Value::as_str).unwrap_or("scene");
+            let start = s.get("start").and_then(Value::as_f64).unwrap_or(0.0);
+            let end = s.get("end").and_then(Value::as_f64).unwrap_or(start);
+            let mid = (start + end) * 0.5;
+            let pal = s.pointer("/layout/palette");
+            let bg = pal
+                .and_then(|p| p.get("bgHex"))
+                .and_then(Value::as_str)
+                .unwrap_or("?");
+            let text = pal
+                .and_then(|p| p.get("textHex"))
+                .and_then(Value::as_str)
+                .unwrap_or("?");
+            let accent = pal
+                .and_then(|p| p.get("accentHex"))
+                .and_then(Value::as_str)
+                .unwrap_or("?");
+            let kf = s
+                .get("keyframe")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            lines.push(format!(
+                "  Scene {idx} ({id}): {start:.2}s-{end:.2}s (mid {mid:.2}s) | bg={bg} text={text} accent={accent} | keyframe={kf}"
+            ));
+        }
+    }
+
+    let mut labels = Vec::with_capacity(frame_paths.len());
+    for rel in frame_paths {
+        let base = Path::new(rel)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(rel.as_str());
+        if base.contains("contact_sheet") {
+            labels.push(format!("{rel} (full timeline storyboard contact sheet)"));
+            continue;
+        }
+        let matched = scenes.iter().find(|s| {
+            let kf = s.get("keyframe").and_then(Value::as_str).unwrap_or("");
+            let kf_mid = s
+                .pointer("/keyframes/mid")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            (!kf.is_empty() && Path::new(kf).file_name().and_then(|n| n.to_str()) == Some(base))
+                || (!kf_mid.is_empty()
+                    && Path::new(kf_mid).file_name().and_then(|n| n.to_str()) == Some(base))
+        });
+        if let Some(s) = matched {
+            let idx = s.get("index").and_then(Value::as_u64).unwrap_or(0);
+            let id = s.get("id").and_then(Value::as_str).unwrap_or("scene");
+            let start = s.get("start").and_then(Value::as_f64).unwrap_or(0.0);
+            let end = s.get("end").and_then(Value::as_f64).unwrap_or(start);
+            let mid = (start + end) * 0.5;
+            labels.push(format!(
+                "{rel} (Scene {idx} {id}: {start:.2}s-{end:.2}s, mid {mid:.2}s)"
+            ));
+        } else {
+            labels.push(rel.clone());
+        }
+    }
+
+    if !labels.is_empty() {
+        lines.push("Attached vision images (already loaded — proceed directly to coding unless an extra timestamp via `inspect_ref_frame` is needed):".to_string());
+        for (i, lbl) in labels.iter().enumerate() {
+            lines.push(format!("  {}. {}", i + 1, lbl));
+        }
+    }
+
+    (lines.join("\n"), labels)
+}
+
 pub(crate) fn collect_extracted_frames_response(
     ws: &Path,
     frames_dir: &Path,
@@ -311,6 +458,7 @@ pub(crate) fn collect_extracted_frames_response(
         select_extracted_vision_keyframes(frames_dir, None, MAX_EXTRACTED_VISION_FRAMES);
     let mut frame_paths = Vec::new();
     let mut vision_images = Vec::new();
+    let vision_dir = frames_dir.parent().map(|parent| parent.join("vision"));
     for p in selected_paths {
         let rel = p
             .strip_prefix(ws)
@@ -318,7 +466,13 @@ pub(crate) fn collect_extracted_frames_response(
             .to_string_lossy()
             .replace('\\', "/");
         frame_paths.push(rel);
-        if let Ok(bytes) = std::fs::read(&p) {
+        let vision_candidate = vision_dir
+            .as_ref()
+            .zip(p.file_name())
+            .map(|(vd, fname)| vd.join(fname))
+            .filter(|vp| vp.is_file());
+        let read_path = vision_candidate.as_deref().unwrap_or(&p);
+        if let Ok(bytes) = std::fs::read(read_path) {
             if !bytes.is_empty() {
                 let b64 = BASE64_STANDARD.encode(&bytes);
                 let mime = match p
@@ -585,6 +739,15 @@ pub async fn execute_ref_extractor(workspace_dir: &str, arguments: &Value) -> Va
                                     }
                                 }
                             }
+                            let frame_list: Vec<String> = vision_bundle
+                                .get("frames")
+                                .and_then(Value::as_array)
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(|v| v.as_str().map(str::to_string))
+                                        .collect()
+                                })
+                                .unwrap_or_default();
                             if let Some(imgs) = vision_bundle.get("_vision_images").cloned() {
                                 obj.insert("_vision_images".to_string(), imgs);
                             }
@@ -593,6 +756,12 @@ pub async fn execute_ref_extractor(workspace_dir: &str, arguments: &Value) -> Va
                             }
                             if let Some(total) = vision_bundle.get("totalExtractedFrames").cloned() {
                                 obj.insert("totalExtractedFrames".to_string(), total);
+                            }
+                            let (summary, labels) =
+                                build_compact_extraction_summary(&Value::Object(obj.clone()), &frame_list);
+                            obj.insert("output".to_string(), json!(summary));
+                            if !labels.is_empty() {
+                                obj.insert("_vision_image_labels".to_string(), json!(labels));
                             }
                         }
                         return parsed;
@@ -671,6 +840,7 @@ pub async fn execute_ref_extractor(workspace_dir: &str, arguments: &Value) -> Va
             obj.insert("stylePath".to_string(), json!(style_path.to_string_lossy()));
             obj.insert("temporalPath".to_string(), json!(temporal_path.to_string_lossy()));
             obj.insert("reportPath".to_string(), json!(report_path.to_string_lossy()));
+            obj.insert("_vision_image_labels".to_string(), json!(frame_rels));
         }
         return fallback_res;
     }
@@ -844,6 +1014,154 @@ mod tests {
             .collect();
         assert_eq!(names[0], "ref_scene_01.jpg");
         assert!(names.contains(&"contact_sheet_1.jpg".to_string()));
+
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn build_compact_extraction_summary_formats_scenes_and_labels() {
+        let parsed = json!({
+            "fastMode": true,
+            "reportPath": "ref/extracted/ref_report.md",
+            "stylePath": "ref/extracted/style.json",
+            "blueprint": {
+                "width": 720,
+                "height": 1280,
+                "fps": 30,
+                "totalDuration": 15.0,
+                "aspectRatio": "9:16",
+                "bpm": 120,
+                "scenes": [
+                    {
+                        "index": 1,
+                        "id": "init",
+                        "start": 0.0,
+                        "end": 1.5,
+                        "keyframe": "frames/ref_scene_01.jpg",
+                        "layout": {
+                            "palette": {
+                                "bgHex": "#0d0d0d",
+                                "textHex": "#eae6df",
+                                "accentHex": "#e63920"
+                            }
+                        }
+                    }
+                ]
+            }
+        });
+        let frames = vec![
+            "ref/extracted/frames/ref_scene_01.jpg".to_string(),
+            "ref/extracted/contact_sheet_1.jpg".to_string(),
+        ];
+        let (summary, labels) = build_compact_extraction_summary(&parsed, &frames);
+        assert!(summary.contains("720x1280 @ 30fps, 15.00s, 9:16, BPM=120"));
+        assert!(summary.contains("Scene 1 (init): 0.00s-1.50s (mid 0.75s) | bg=#0d0d0d"));
+        assert_eq!(labels.len(), 2);
+        assert!(labels[0].contains("Scene 1 init: 0.00s-1.50s"));
+        assert!(labels[1].contains("full timeline storyboard contact sheet"));
+    }
+
+    #[test]
+    fn select_extracted_vision_keyframes_prioritizes_q1_q3_for_long_scenes() {
+        let ws = std::env::temp_dir().join(format!(
+            "aetheria_long_scene_kfs_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let ext_dir = ws.join("ref").join("extracted");
+        let frames_dir = ext_dir.join("frames");
+        std::fs::create_dir_all(&frames_dir).expect("mkdir frames");
+        for name in [
+            "ref_scene_01_start.jpg",
+            "ref_scene_01_q1.jpg",
+            "ref_scene_01.jpg",
+            "ref_scene_01_q3.jpg",
+            "ref_scene_01_end.jpg",
+            "ref_scene_02.jpg",
+            "ref_scene_02_q1.jpg",
+        ] {
+            std::fs::write(frames_dir.join(name), b"img").expect("write frame");
+        }
+        let style = json!({
+            "scenes": [
+                {
+                    "index": 1,
+                    "duration": 3.6,
+                    "keyframe": "frames/ref_scene_01.jpg",
+                    "keyframes": [
+                        { "t": 0.05, "path": "frames/ref_scene_01_start.jpg" },
+                        { "t": 1.0, "path": "frames/ref_scene_01_q1.jpg" },
+                        { "t": 1.8, "path": "frames/ref_scene_01.jpg" },
+                        { "t": 2.6, "path": "frames/ref_scene_01_q3.jpg" },
+                        { "t": 3.55, "path": "frames/ref_scene_01_end.jpg" }
+                    ]
+                },
+                {
+                    "index": 2,
+                    "duration": 1.5,
+                    "keyframe": "frames/ref_scene_02.jpg",
+                    "keyframes": [
+                        { "t": 0.4, "path": "frames/ref_scene_02_q1.jpg" },
+                        { "t": 0.75, "path": "frames/ref_scene_02.jpg" }
+                    ]
+                }
+            ]
+        });
+        let style_path = ext_dir.join("style.json");
+        std::fs::write(&style_path, style.to_string()).expect("write style");
+
+        // Cap to 5 frames: contact sheets none -> 4 midpoints (s1_q1, s1_mid, s1_q3, s2_mid) + 1 transition.
+        let selected = select_extracted_vision_keyframes(&frames_dir, Some(&style_path), 5);
+        let names: Vec<String> = selected
+            .iter()
+            .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(str::to_string))
+            .collect();
+        assert_eq!(
+            &names[..4],
+            &[
+                "ref_scene_01_q1.jpg",
+                "ref_scene_01.jpg",
+                "ref_scene_01_q3.jpg",
+                "ref_scene_02.jpg",
+            ]
+        );
+        assert_ne!(names[4], "ref_scene_01_q1.jpg");
+
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn collect_extracted_frames_response_prefers_compact_vision_copy() {
+        let ws = std::env::temp_dir().join(format!(
+            "aetheria_vision_copy_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let ext_dir = ws.join("ref").join("extracted");
+        let frames_dir = ext_dir.join("frames");
+        let vision_dir = ext_dir.join("vision");
+        std::fs::create_dir_all(&frames_dir).expect("mkdir frames");
+        std::fs::create_dir_all(&vision_dir).expect("mkdir vision");
+        std::fs::write(frames_dir.join("ref_scene_01.jpg"), b"full-res-bytes")
+            .expect("write full res");
+        std::fs::write(vision_dir.join("ref_scene_01.jpg"), b"compact")
+            .expect("write compact vision");
+
+        let res = collect_extracted_frames_response(&ws, &frames_dir, "test");
+        let frames = res["frames"].as_array().expect("frames");
+        assert_eq!(frames[0], "ref/extracted/frames/ref_scene_01.jpg");
+        let imgs = res["_vision_images"].as_array().expect("vision");
+        let decoded = imgs[0].as_str().expect("data url");
+        assert!(decoded.starts_with("data:image/jpeg;base64,"));
+        let b64 = decoded.trim_start_matches("data:image/jpeg;base64,");
+        assert_eq!(
+            BASE64_STANDARD.decode(b64).expect("decode"),
+            b"compact"
+        );
 
         let _ = std::fs::remove_dir_all(&ws);
     }

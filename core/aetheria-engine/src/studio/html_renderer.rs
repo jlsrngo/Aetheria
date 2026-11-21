@@ -333,14 +333,17 @@ where
         .await?;
 
     let is_proxy = params.codec.eq_ignore_ascii_case("proxy");
-    if is_proxy {
-        let _ = cdp
-            .call(
-                "Page.addScriptToEvaluateOnNewDocument",
-                json!({ "source": "window.__AETHERIA_PREVIEW_STAGE__ = true;" }),
-            )
-            .await;
-    }
+    let init_script = if is_proxy {
+        "window.__aetheriaHeadless = true; window.__AETHERIA_PREVIEW_STAGE__ = true;"
+    } else {
+        "window.__aetheriaHeadless = true;"
+    };
+    let _ = cdp
+        .call(
+            "Page.addScriptToEvaluateOnNewDocument",
+            json!({ "source": init_script }),
+        )
+        .await;
 
     let target_url = format!("http://127.0.0.1:{}/index.html", http_port);
     let _ = cdp.call("Page.navigate", json!({ "url": target_url })).await?;
