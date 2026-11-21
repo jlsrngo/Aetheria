@@ -1702,13 +1702,13 @@
   }
 
   /**
-   * Strokes any path drawn by `drawPathFn(ctx)` with a 3-pass additive optical bloom
-   * (wide atmospheric glow + saturated mid stroke + crisp white-hot core).
+   * Strokes any path drawn by `drawPathFn(ctx)` with a smooth blurred additive optical bloom
+   * (never hard stepped stripes: uses Gaussian `ctx.filter = 'blur(...)'` + additive `lighter`).
    */
   function drawBloomStroke(ctx, drawPathFn, opts = {}) {
     if (!ctx || typeof drawPathFn !== "function") return;
     const color = opts.color || "#FF9922";
-    const coreColor = opts.coreColor || "#FFF9EB";
+    const coreColor = opts.coreColor || "#FFFDF5";
     const lineWidth = Number(opts.lineWidth ?? 4);
     const glowRadius = Number(opts.glowRadius ?? Math.max(18, lineWidth * 6));
     const intensity = clamp(Number(opts.intensity ?? 1.0), 0, 2.5);
@@ -1720,33 +1720,141 @@
     ctx.lineJoin = lineJoin;
     ctx.globalCompositeOperation = "lighter";
 
-    // Pass 1: Wide atmospheric bloom
-    ctx.strokeStyle = hexAlpha(color, Math.min(1, 0.42 * intensity));
-    ctx.lineWidth = lineWidth * 2.8;
-    ctx.shadowColor = color;
-    ctx.shadowBlur = glowRadius;
+    // Pass 1: Wide soft Gaussian atmospheric bloom (no hard edges)
+    ctx.save();
+    ctx.filter = `blur(${Math.max(4, Math.round(glowRadius * 0.75))}px)`;
+    ctx.strokeStyle = hexAlpha(color, Math.min(1, 0.55 * intensity));
+    ctx.lineWidth = lineWidth * 2.4;
     ctx.beginPath();
     drawPathFn(ctx);
     ctx.stroke();
+    ctx.restore();
 
-    // Pass 2: Saturated mid halo
-    ctx.strokeStyle = hexAlpha(color, Math.min(1, 0.78 * intensity));
-    ctx.lineWidth = lineWidth * 1.45;
-    ctx.shadowColor = color;
-    ctx.shadowBlur = glowRadius * 0.45;
+    // Pass 2: Medium soft Gaussian halo
+    ctx.save();
+    ctx.filter = `blur(${Math.max(2, Math.round(glowRadius * 0.25))}px)`;
+    ctx.strokeStyle = hexAlpha(color, Math.min(1, 0.85 * intensity));
+    ctx.lineWidth = lineWidth * 1.25;
     ctx.beginPath();
     drawPathFn(ctx);
     ctx.stroke();
+    ctx.restore();
 
-    // Pass 3: Crisp white-hot core
-    ctx.strokeStyle = hexAlpha(coreColor, Math.min(1, 0.95 * intensity));
+    // Pass 3: Crisp bright core
+    ctx.strokeStyle = hexAlpha(coreColor, Math.min(1, 0.96 * intensity));
     ctx.lineWidth = Math.max(1, lineWidth * 0.75);
-    ctx.shadowColor = coreColor;
-    ctx.shadowBlur = glowRadius * 0.15;
     ctx.beginPath();
     drawPathFn(ctx);
     ctx.stroke();
 
+    ctx.restore();
+  }
+
+  let _lensSrcCanvas = null;
+  let _lensDstCanvas = null;
+
+  /**
+   * Renders content drawn by `drawContentFn(offCtx, size)` through a deterministic
+   * spherical / water-bubble refractive glass lens (`strength` 0 = flat, 0.3..1.4 = convex bubble).
+   * Supports optional chromatic dispersion (`chromatic`, default 0.04) and specular rim highlight.
+   */
+  function drawSphericalLens(ctx, cx, cy, radius, strength, drawContentFn, opts = {}) {
+    if (!ctx || !(radius > 2) || typeof drawContentFn !== "function") return;
+    const size = Math.min(640, Math.max(32, Math.ceil(radius * 2)));
+    const k = clamp(Number(strength ?? 0.8), 0, 2.0);
+    const chromatic = clamp(Number(opts.chromatic ?? 0.04), 0, 0.25);
+    const rimAlpha = clamp(Number(opts.rimAlpha ?? 0.45), 0, 1);
+    const rimColor = opts.rimColor || "#FFD9A0";
+
+    if (typeof document === "undefined") {
+      ctx.save();
+      ctx.translate(cx - size * 0.5, cy - size * 0.5);
+      drawContentFn(ctx, size);
+      ctx.restore();
+      return;
+    }
+
+    if (!_lensSrcCanvas) _lensSrcCanvas = document.createElement("canvas");
+    if (!_lensDstCanvas) _lensDstCanvas = document.createElement("canvas");
+    if (_lensSrcCanvas.width !== size || _lensSrcCanvas.height !== size) {
+      _lensSrcCanvas.width = size;
+      _lensSrcCanvas.height = size;
+      _lensDstCanvas.width = size;
+      _lensDstCanvas.height = size;
+    }
+    const sCtx = _lensSrcCanvas.getContext("2d", { willReadFrequently: true });
+    const dCtx = _lensDstCanvas.getContext("2d", { willReadFrequently: true });
+    sCtx.clearRect(0, 0, size, size);
+    sCtx.save();
+    drawContentFn(sCtx, size);
+    sCtx.restore();
+
+    if (k <= 0.005) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, TAU);
+      ctx.clip();
+      ctx.drawImage(_lensSrcCanvas, cx - radius, cy - radius, radius * 2, radius * 2);
+      ctx.restore();
+      return;
+    }
+
+    const src = sCtx.getImageData(0, 0, size, size).data;
+    const dstImg = dCtx.createImageData(size, size);
+    const dst = dstImg.data;
+    const half = size * 0.5;
+    const invHalf = 1 / half;
+
+    for (let y = 0; y < size; y++) {
+      const ny = (y - half) * invHalf;
+      const ny2 = ny * ny;
+      for (let x = 0; x < size; x++) {
+        const nx = (x - half) * invHalf;
+        const r2 = nx * nx + ny2;
+        if (r2 > 1.0) continue;
+        // Spherical water-bubble refraction: edge pixels bend strongly outward/inward
+        const lensFactor = Math.pow(r2, 0.5 * k) * (1 - 0.35 * k * (1 - r2));
+        const scaleBase = r2 > 1e-6 ? lensFactor / Math.sqrt(r2) : 1 - 0.35 * k;
+        const outIdx = (y * size + x) * 4;
+
+        const channels = [
+          { ch: 0, s: scaleBase * (1 + chromatic * r2) },
+          { ch: 1, s: scaleBase },
+          { ch: 2, s: scaleBase * (1 - chromatic * r2) },
+        ];
+        let maxA = 0;
+        for (let c = 0; c < 3; c++) {
+          const sx = Math.round(half + nx * half * channels[c].s);
+          const sy = Math.round(half + ny * half * channels[c].s);
+          if (sx >= 0 && sx < size && sy >= 0 && sy < size) {
+            const si = (sy * size + sx) * 4;
+            dst[outIdx + channels[c].ch] = src[si + channels[c].ch];
+            if (src[si + 3] > maxA) maxA = src[si + 3];
+          }
+        }
+        dst[outIdx + 3] = maxA;
+      }
+    }
+
+    dCtx.putImageData(dstImg, 0, 0);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, TAU);
+    ctx.clip();
+    ctx.drawImage(_lensDstCanvas, cx - radius, cy - radius, radius * 2, radius * 2);
+
+    if (rimAlpha > 0.01) {
+      ctx.globalCompositeOperation = "lighter";
+      const rimGrad = ctx.createRadialGradient(cx, cy, radius * 0.72, cx, cy, radius);
+      rimGrad.addColorStop(0, hexAlpha(rimColor, 0));
+      rimGrad.addColorStop(0.84, hexAlpha(rimColor, rimAlpha * 0.45 * Math.min(1, k)));
+      rimGrad.addColorStop(0.96, hexAlpha("#FFFFFF", rimAlpha * 0.85 * Math.min(1, k)));
+      rimGrad.addColorStop(1, hexAlpha(rimColor, 0));
+      ctx.fillStyle = rimGrad;
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, TAU);
+      ctx.fill();
+    }
     ctx.restore();
   }
 
@@ -1811,6 +1919,7 @@
     drawImageFit,
     drawOpticalGlow,
     drawBloomStroke,
+    drawSphericalLens,
   };
 
   global.AetheriaMotion = API;

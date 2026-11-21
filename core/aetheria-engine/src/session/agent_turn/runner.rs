@@ -223,6 +223,7 @@ pub async fn run_agent_turn(
     let mut step = 0usize;
     let mut overflow_compacted_this_step = false;
     let mut consecutive_blocked_batches = 0usize;
+    let mut preview_captures_done = 0usize;
 
     while step < max_loop_steps {
         if crate::paths::now_ms().saturating_sub(started_ms) >= MAX_TURN_WALL_CLOCK_MS {
@@ -561,6 +562,12 @@ pub async fn run_agent_turn(
         let step_vision_enabled =
             model_supports_vision_from_config(Some(&cfg), &current_provider_id, &current_model_id);
         let tool_call_count = tool_calls.len();
+        let batch_had_preview = tool_calls.iter().any(|tc| {
+            tc.get("function")
+                .and_then(|f| f.get("name"))
+                .and_then(|n| n.as_str())
+                == Some("capture_film_preview")
+        });
         let tools_started_ms = now_ms();
         let batch = execute_tool_batch(
             session_id,
@@ -575,6 +582,15 @@ pub async fn run_agent_turn(
             &mut chat_messages,
         )
         .await;
+        if batch_had_preview && !batch.all_blocked {
+            preview_captures_done += 1;
+            let nudge = if preview_captures_done == 1 {
+                "SYSTEM BUDGET NOTE: First visual preview captured. Apply ALL remaining visual fixes in ONE parallel batch of `edit` calls (avoid sequential small `read` loops), then run ONE final `capture_film_preview` and finish."
+            } else {
+                "SYSTEM BUDGET NOTE: You have already verified your polish pass with `capture_film_preview`. Unless a critical blank-frame or JS runtime error remains, finalize your response to the user now without further `read`/`edit` loops."
+            };
+            chat_messages.push(json!({ "role": "user", "content": nudge }));
+        }
         let tools_elapsed_ms = now_ms().saturating_sub(tools_started_ms);
         {
             let (prompt_tok, cached_tok, comp_tok) = step_usage

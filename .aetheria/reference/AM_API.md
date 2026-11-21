@@ -52,7 +52,8 @@ Do NOT call `Math.random()`, `Date.now()`, `performance.now()`, `requestAnimatio
 - `AM.drawShapeWipe(ctx, t, tStart, dur = 0.65, colors?, originX = 540, originY = 660, W = 1080, H = 1920)`
 - `AM.drawElectricBolt(ctx, x1, y1, x2, y2, segments, jitterAmp, seed, color, width)`
 - `AM.drawOpticalGlow(ctx, x, y, radius, colorHex = "#FF8800", intensity = 1.0)` — 3-layer additive (`lighter`) optical bloom orb (wide atmospheric halo + saturated mid bloom + white-hot core)
-- `AM.drawBloomStroke(ctx, drawPathFn, opts?)` — 3-pass additive (`lighter`) glowing stroke (`{ color, coreColor, lineWidth, glowRadius, intensity, lineCap, lineJoin }`)
+- `AM.drawBloomStroke(ctx, drawPathFn, opts?)` — Gaussian-blurred additive (`lighter`) glowing stroke (`{ color, coreColor, lineWidth, glowRadius, intensity, lineCap, lineJoin }`)
+- `AM.drawSphericalLens(ctx, cx, cy, radius, strength, drawContentFn, opts?)` — deterministic pixel-level spherical/water-bubble lens refraction shader (`strength` `0..1.4`, `{ chromatic, rimAlpha, rimColor }`)
 - `AM.drawGridBackdrop(ctx, t, accentColor, bgTop, bgBottom, W = 1080, H = 1920)`
 - `AM.drawCharacterRig(ctx, t, opts?)` — `{ x, y, scale, coatColor, coatShade, skinColor, hairColor, hairStyle, glasses, reactTime, reachTime, lean, expression, collarColor, leftSh, ... }`
 - `AM.drawTopHeader(ctx, scene, localTimeOrIdx, globalTime)` — **OPTIONAL** top bar (omit unless active skill wants header bar)

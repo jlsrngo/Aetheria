@@ -292,6 +292,24 @@ pub fn execute_read(workspace_dir: &str, arguments: &Value) -> Value {
                 let lines: Vec<&str> = content.lines().collect();
                 let total_lines = lines.len();
 
+                // Prevent slow 15-turn sequential nibbling on large HTML/JS/TS/CSS files:
+                // when an agent requests a narrow 20..449 line slice of a >200-line code file,
+                // expand the window to 450 lines so it sees full scene blocks in 1-2 reads.
+                let is_large_code_file = total_lines > 200
+                    && matches!(
+                        p.extension()
+                            .and_then(|e| e.to_str())
+                            .unwrap_or("")
+                            .to_ascii_lowercase()
+                            .as_str(),
+                        "html" | "htm" | "js" | "mjs" | "ts" | "tsx" | "css"
+                    );
+                let lim = if is_large_code_file && lim >= 20 && lim < 450 {
+                    450.min(MAX_TOOL_OUTPUT_LINES)
+                } else {
+                    lim
+                };
+
                 if total_lines == 0 {
                     return json!({
                         "content": "(empty file)",
@@ -452,6 +470,27 @@ mod tests {
         let miss_err = miss_res["error"].as_str().unwrap();
         assert!(miss_err.contains("Did you mean"));
         assert!(miss_err.contains("scene1.js"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_read_expands_tiny_slice_on_large_html_file() {
+        let dir = std::env::temp_dir().join(format!("aetheria_read_expand_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let big_html = (1..=600)
+            .map(|i| format!("// line {}", i))
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(dir.join("index.html"), big_html).unwrap();
+
+        let res = execute_read(
+            &dir.to_string_lossy(),
+            &json!({ "filePath": "index.html", "offset": 1, "limit": 60 }),
+        );
+        assert_eq!(res.get("linesReturned"), Some(&json!(450)));
+        assert_eq!(res.get("hasMore"), Some(&json!(true)));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
