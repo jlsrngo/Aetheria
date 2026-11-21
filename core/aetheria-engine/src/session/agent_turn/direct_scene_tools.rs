@@ -33,12 +33,21 @@ pub(crate) struct SceneToolContext<'a> {
     pub default_scene_ts: &'a [f64],
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RenderedMetrics {
+    pub overall: f64,
+    pub ssim: f64,
+    pub color: f64,
+    pub edge: f64,
+}
+
 pub(crate) struct SceneToolOutcome {
     pub result_json: Value,
     pub vision_images: Vec<String>,
     pub vision_caption: Option<String>,
     pub script_modified: bool,
     pub rendered_score: Option<f64>,
+    pub rendered_metrics: Option<RenderedMetrics>,
     pub rendered_errors: Option<Vec<String>>,
 }
 
@@ -249,6 +258,7 @@ pub(crate) async fn execute_scene_micro_tool(
                     vision_caption: None,
                     script_modified: false,
                     rendered_score: None,
+                    rendered_metrics: None,
                     rendered_errors: None,
                 };
             };
@@ -285,6 +295,7 @@ pub(crate) async fn execute_scene_micro_tool(
                         vision_caption: caption,
                         script_modified: false,
                         rendered_score: None,
+                        rendered_metrics: None,
                         rendered_errors: None,
                     }
                 }
@@ -294,6 +305,7 @@ pub(crate) async fn execute_scene_micro_tool(
                     vision_caption: None,
                     script_modified: false,
                     rendered_score: None,
+                    rendered_metrics: None,
                     rendered_errors: None,
                 },
             }
@@ -306,6 +318,7 @@ pub(crate) async fn execute_scene_micro_tool(
                     vision_caption: None,
                     script_modified: false,
                     rendered_score: None,
+                    rendered_metrics: None,
                     rendered_errors: None,
                 };
             };
@@ -328,6 +341,7 @@ pub(crate) async fn execute_scene_micro_tool(
                         vision_caption: None,
                         script_modified: false,
                         rendered_score: None,
+                        rendered_metrics: None,
                         rendered_errors: None,
                     }
                 }
@@ -337,6 +351,7 @@ pub(crate) async fn execute_scene_micro_tool(
                     vision_caption: None,
                     script_modified: false,
                     rendered_score: None,
+                    rendered_metrics: None,
                     rendered_errors: None,
                 },
             }
@@ -386,6 +401,7 @@ pub(crate) async fn execute_scene_micro_tool(
                 vision_caption: caption,
                 script_modified: false,
                 rendered_score: None,
+                rendered_metrics: None,
                 rendered_errors: None,
             }
         }
@@ -412,6 +428,7 @@ pub(crate) async fn execute_scene_micro_tool(
                 vision_caption: None,
                 script_modified: modified_via_bash,
                 rendered_score: None,
+                rendered_metrics: None,
                 rendered_errors: None,
             }
         }
@@ -430,6 +447,7 @@ pub(crate) async fn execute_scene_micro_tool(
                     vision_caption: None,
                     script_modified: false,
                     rendered_score: None,
+                    rendered_metrics: None,
                     rendered_errors: None,
                 };
             };
@@ -440,6 +458,7 @@ pub(crate) async fn execute_scene_micro_tool(
                     vision_caption: None,
                     script_modified: false,
                     rendered_score: None,
+                    rendered_metrics: None,
                     rendered_errors: None,
                 };
             }
@@ -450,6 +469,7 @@ pub(crate) async fn execute_scene_micro_tool(
                     vision_caption: None,
                     script_modified: false,
                     rendered_score: None,
+                    rendered_metrics: None,
                     rendered_errors: None,
                 };
             }
@@ -465,6 +485,7 @@ pub(crate) async fn execute_scene_micro_tool(
                     vision_caption: None,
                     script_modified: false,
                     rendered_score: None,
+                    rendered_metrics: None,
                     rendered_errors: None,
                 };
             }
@@ -482,6 +503,7 @@ pub(crate) async fn execute_scene_micro_tool(
                 vision_caption: None,
                 script_modified: true,
                 rendered_score: None,
+                rendered_metrics: None,
                 rendered_errors: None,
             }
         }
@@ -507,6 +529,7 @@ pub(crate) async fn execute_scene_micro_tool(
                     vision_caption: None,
                     script_modified: false,
                     rendered_score: None,
+                    rendered_metrics: None,
                     rendered_errors: None,
                 };
             }
@@ -519,6 +542,7 @@ pub(crate) async fn execute_scene_micro_tool(
                         vision_caption: None,
                         script_modified: false,
                         rendered_score: None,
+                        rendered_metrics: None,
                         rendered_errors: None,
                     };
                 }
@@ -532,6 +556,7 @@ pub(crate) async fn execute_scene_micro_tool(
                             vision_caption: None,
                             script_modified: false,
                             rendered_score: None,
+                            rendered_metrics: None,
                             rendered_errors: None,
                         };
                     }
@@ -548,6 +573,7 @@ pub(crate) async fn execute_scene_micro_tool(
                         vision_caption: None,
                         script_modified: true,
                         rendered_score: None,
+                        rendered_metrics: None,
                         rendered_errors: None,
                     }
                 }
@@ -557,6 +583,7 @@ pub(crate) async fn execute_scene_micro_tool(
                     vision_caption: None,
                     script_modified: false,
                     rendered_score: None,
+                    rendered_metrics: None,
                     rendered_errors: None,
                 },
             }
@@ -663,6 +690,21 @@ pub(crate) async fn execute_scene_micro_tool(
                         score,
                         res.runtime_errors.len()
                     ));
+                    let ssim_mean = res
+                        .reference_comparison
+                        .as_ref()
+                        .and_then(|c| c.get("ssimMean").and_then(Value::as_f64))
+                        .unwrap_or(0.0);
+                    let color_mean = res
+                        .reference_comparison
+                        .as_ref()
+                        .and_then(|c| c.get("colorMatchMean").and_then(Value::as_f64))
+                        .unwrap_or(0.0);
+                    let edge_mean = res
+                        .reference_comparison
+                        .as_ref()
+                        .and_then(|c| c.get("edgeMatchMean").and_then(Value::as_f64))
+                        .unwrap_or(0.0);
                     SceneToolOutcome {
                         result_json: json!({
                             "ok": true,
@@ -676,6 +718,12 @@ pub(crate) async fn execute_scene_micro_tool(
                         vision_caption: caption,
                         script_modified: false,
                         rendered_score: Some(score),
+                        rendered_metrics: Some(RenderedMetrics {
+                            overall: score,
+                            ssim: ssim_mean,
+                            color: color_mean,
+                            edge: edge_mean,
+                        }),
                         rendered_errors: Some(res.runtime_errors),
                     }
                 }
@@ -685,6 +733,12 @@ pub(crate) async fn execute_scene_micro_tool(
                     vision_caption: None,
                     script_modified: false,
                     rendered_score: Some(0.0),
+                    rendered_metrics: Some(RenderedMetrics {
+                        overall: 0.0,
+                        ssim: 0.0,
+                        color: 0.0,
+                        edge: 0.0,
+                    }),
                     rendered_errors: Some(vec![err]),
                 },
             }
@@ -695,6 +749,7 @@ pub(crate) async fn execute_scene_micro_tool(
             vision_caption: None,
             script_modified: false,
             rendered_score: None,
+            rendered_metrics: None,
             rendered_errors: None,
         },
     }

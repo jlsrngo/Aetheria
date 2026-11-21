@@ -18,6 +18,7 @@
 
 use base64::prelude::*;
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::paths::now_ms;
@@ -25,9 +26,17 @@ use crate::session::message::emit_event;
 
 use super::direct_scene_prompt::{
     build_scene_hard_facts_prompt, detect_scene_collision_hazards, DIRECT_SCENE_SYSTEM_PROMPT,
+    DIRECT_SCENE_SYSTEM_PROMPT_MINIMAL,
+};
+use super::direct_scene_switches::{
+    extract_cross_scene_summary, CrossContextMode, DirectSceneSwitches, PromptMode,
 };
 use super::direct_scene_tools::{
-    build_scene_tool_definitions, execute_scene_micro_tool, SceneToolContext,
+    build_scene_tool_definitions, execute_scene_micro_tool, RenderedMetrics, SceneToolContext,
+};
+use super::direct_scene_trace::{
+    resolve_effective_model_and_thinking, DirectRemakeTracer, RenderTraceRecord,
+    SceneSummaryTraceRecord, StepTraceRecord, ToolCallTraceRecord,
 };
 use super::resilience::send_resilient_chat_completion_with_tool_choice;
 use crate::tool::json_repair::parse_or_repair_tool_args;
@@ -50,14 +59,22 @@ pub(crate) struct DirectRemakeSummary {
 }
 
 /// Checks whether the active turn should run the zero-subagent Direct Per-Scene Remake Compiler.
-/// Triggered after `film_scaffold` creates a multi-scene (`>= 4` scenes) project matching an
-/// extracted video reference (`ref/extracted/style.json`), unless `AETHERIA_REMAKE_MODE=subagent`.
+/// Strictly opt-in via `AETHERIA_REMAKE_MODE=direct`; by default the single-session coordinator
+/// retains full OpenCode-style context continuity and stage freedom.
 pub(crate) fn should_run_direct_scene_remake(workspace_dir: &str) -> bool {
-    if let Ok(mode) = std::env::var("AETHERIA_REMAKE_MODE") {
-        let m = mode.trim().to_ascii_lowercase();
-        if m == "subagent" || m == "legacy" || m == "off" {
-            return false;
-        }
+    let mode_env = std::env::var("AETHERIA_REMAKE_MODE").ok();
+    should_run_direct_scene_remake_with_mode(workspace_dir, mode_env.as_deref())
+}
+
+pub(crate) fn should_run_direct_scene_remake_with_mode(
+    workspace_dir: &str,
+    mode: Option<&str>,
+) -> bool {
+    let force_direct = mode
+        .map(|v| v.trim().eq_ignore_ascii_case("direct"))
+        .unwrap_or(false);
+    if !force_direct {
+        return false;
     }
     let ws = Path::new(workspace_dir);
     let style_path = ws.join("ref").join("extracted").join("style.json");
@@ -81,13 +98,17 @@ pub(crate) fn should_run_direct_scene_remake(workspace_dir: &str) -> bool {
     let Ok(film_val) = serde_json::from_str::<Value>(&raw_film) else {
         return false;
     };
+    if film_val
+        .get("stageMode")
+        .and_then(Value::as_str)
+        .is_some_and(|s| s.eq_ignore_ascii_case("hybrid"))
+    {
+        return false;
+    }
     let Some(scenes) = film_val.get("scenes").and_then(Value::as_array) else {
         return false;
     };
-    let force_direct = std::env::var("AETHERIA_REMAKE_MODE")
-        .map(|v| v.trim().eq_ignore_ascii_case("direct"))
-        .unwrap_or(false);
-    if !force_direct && scenes.len() < 4 {
+    if scenes.is_empty() {
         return false;
     }
     // Only trigger when scene scripts are still scaffold stubs (not already authored).
@@ -243,6 +264,22 @@ fn collect_scene_keyframe_timestamps(
     ]
 }
 
+/// Pure end-of-scene safety-restore predicate (baseline rule P4).
+pub(crate) fn should_restore_best_checkpoint(
+    best_score: f64,
+    best_code: &str,
+    best_errs: &[String],
+    best_hazards: usize,
+    latest_score: f64,
+    latest_errs: &[String],
+    final_hazards: usize,
+) -> bool {
+    best_score >= 0.0
+        && !best_code.is_empty()
+        && ((best_errs.is_empty() && !latest_errs.is_empty())
+            || (latest_score + 0.03 < best_score && final_hazards >= best_hazards))
+}
+
 /// Runs the Zero-Subagent Direct Per-Scene Vision-First Remake Compiler end-to-end.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_direct_per_scene_remake(
@@ -254,6 +291,33 @@ pub(crate) async fn run_direct_per_scene_remake(
     api_key: &mut String,
     model_id: &mut String,
     content_parts: &mut Vec<Value>,
+) -> Result<DirectRemakeSummary, String> {
+    let switches = DirectSceneSwitches::from_env();
+    run_direct_per_scene_remake_with_switches(
+        session_id,
+        workspace_dir,
+        user_brief,
+        client,
+        base_url,
+        api_key,
+        model_id,
+        content_parts,
+        switches,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn run_direct_per_scene_remake_with_switches(
+    session_id: &str,
+    workspace_dir: &str,
+    user_brief: &str,
+    client: &reqwest::Client,
+    base_url: &mut String,
+    api_key: &mut String,
+    model_id: &mut String,
+    content_parts: &mut Vec<Value>,
+    switches: DirectSceneSwitches,
 ) -> Result<DirectRemakeSummary, String> {
     let started = now_ms();
     let ws_root = PathBuf::from(workspace_dir);
@@ -337,11 +401,21 @@ pub(crate) async fn run_direct_per_scene_remake(
         Some(0.35)
     };
     let max_tokens = 32_768u64;
-    let max_scene_steps: usize = std::env::var("AETHERIA_SCENE_MAX_STEPS")
-        .ok()
-        .and_then(|v| v.trim().parse::<usize>().ok())
-        .map(|n| n.clamp(3, 18))
-        .unwrap_or(12);
+    let max_scene_steps: usize = switches.max_steps;
+    let system_prompt = match switches.prompt_mode {
+        PromptMode::Current => DIRECT_SCENE_SYSTEM_PROMPT,
+        PromptMode::Minimal => DIRECT_SCENE_SYSTEM_PROMPT_MINIMAL,
+    };
+    let mut tracer = DirectRemakeTracer::new(
+        &ws_root,
+        session_id,
+        base_url,
+        model_id,
+        &switches,
+        system_prompt,
+        started,
+    );
+    let mut completed_scenes: Vec<(usize, String, String)> = Vec::new();
     let scene_tools = build_scene_tool_definitions();
     let write_only_tools: Vec<Value> = scene_tools
         .iter()
@@ -365,6 +439,10 @@ pub(crate) async fn run_direct_per_scene_remake(
 
     for (idx, film_sc) in film_scenes.iter().enumerate() {
         let scene_num = idx + 1;
+        if !switches.should_run_scene(scene_num) {
+            continue;
+        }
+        let scene_started = now_ms();
         let scene_id = film_sc
             .get("id")
             .and_then(Value::as_str)
@@ -399,7 +477,7 @@ pub(crate) async fn run_direct_per_scene_remake(
         );
 
         let pass1_images = collect_scene_pass1_images(&ws_root, scene_num);
-        let hard_facts = build_scene_hard_facts_prompt(
+        let mut hard_facts = build_scene_hard_facts_prompt(
             style_sc,
             film_sc,
             scene_num,
@@ -410,6 +488,12 @@ pub(crate) async fn run_direct_per_scene_remake(
             bpm,
             user_brief,
         );
+        if matches!(switches.cross_context, CrossContextMode::Summary) {
+            if let Some(summary_block) = extract_cross_scene_summary(&completed_scenes) {
+                hard_facts.push_str("\n\n");
+                hard_facts.push_str(&summary_block);
+            }
+        }
         let scene_ts = collect_scene_keyframe_timestamps(
             &ws_root,
             &film_root,
@@ -429,6 +513,10 @@ pub(crate) async fn run_direct_per_scene_remake(
         let mut dirty_since_render = false;
         let mut rolled_back = false;
         let mut passes_run = 0usize;
+        let mut first_write_step: Option<usize> = None;
+        let mut probe_calls_before_write: usize = 0;
+        let mut tool_histogram: BTreeMap<String, usize> = BTreeMap::new();
+        let mut render_records: Vec<RenderTraceRecord> = Vec::new();
 
         let tool_ctx = SceneToolContext {
             session_id,
@@ -447,22 +535,18 @@ pub(crate) async fn run_direct_per_scene_remake(
         };
 
         let mut scene_msgs = vec![
-            json!({ "role": "system", "content": DIRECT_SCENE_SYSTEM_PROMPT }),
+            json!({ "role": "system", "content": system_prompt }),
             build_vision_user_message(hard_facts.clone(), &pass1_images),
         ];
 
         // Interactive Antigravity-grade per-scene tool loop (inspect -> sample -> write -> render -> surgical patch).
-        // Anti-analysis-paralysis gate: allow up to 2 probe steps before writing; on step >= 3 with no
-        // code written yet, expose ONLY `write_scene_script` with grammar-enforced `tool_choice` AND
-        // reject non-write calls in the dispatcher so the model writes its initial draft immediately,
-        // then restore all 6 tools for render/compare/surgical-patch polish!
         let force_write_choice = json!({
             "type": "function",
             "function": { "name": "write_scene_script" }
         });
         for step_idx in 0..max_scene_steps {
             let enforce_write_now =
-                !has_written && step_idx >= 2 && !write_only_tools.is_empty();
+                switches.should_enforce_write_gate(has_written, step_idx, !write_only_tools.is_empty());
             let active_tools: &[Value] = if enforce_write_now {
                 &write_only_tools
             } else {
@@ -482,7 +566,7 @@ pub(crate) async fn run_direct_per_scene_remake(
                 active_tools,
                 temperature,
                 max_tokens,
-                None,
+                switches.reasoning_effort.as_deref(),
                 active_tool_choice,
             )
             .await
@@ -504,6 +588,11 @@ pub(crate) async fn run_direct_per_scene_remake(
                 }
             };
             passes_run += 1;
+            let (step_upstream_model, step_thinking_level) = resolve_effective_model_and_thinking(
+                base_url,
+                model_id,
+                switches.reasoning_effort.as_deref(),
+            );
 
             if !comp.tool_calls.is_empty() {
                 scene_msgs.push(json!({
@@ -514,8 +603,11 @@ pub(crate) async fn run_direct_per_scene_remake(
 
                 let mut step_images: Vec<String> = Vec::new();
                 let mut step_captions: Vec<String> = Vec::new();
+                let mut step_tool_records: Vec<ToolCallTraceRecord> = Vec::new();
+                let mut step_blocked_by_gate: Vec<String> = Vec::new();
 
                 for (tc_idx, tc) in comp.tool_calls.iter().enumerate() {
+                    let tool_started = now_ms();
                     let cid = tc
                         .get("id")
                         .and_then(Value::as_str)
@@ -531,12 +623,14 @@ pub(crate) async fn run_direct_per_scene_remake(
                         .or_else(|| tc.get("arguments"))
                         .and_then(Value::as_str)
                         .unwrap_or("{}");
+                    *tool_histogram.entry(fn_name.to_string()).or_insert(0) += 1;
 
                     let (parsed_args, arg_err) = match parse_or_repair_tool_args(raw_args) {
                         Ok(v) => (v, None),
                         Err(e) => (json!({}), Some(e)),
                     };
 
+                    let mut blocked_this_call = false;
                     let outcome = if let Some(err) = arg_err {
                         super::direct_scene_tools::SceneToolOutcome {
                             result_json: json!({ "ok": false, "error": format!("Malformed JSON tool args: {}", err) }),
@@ -544,6 +638,7 @@ pub(crate) async fn run_direct_per_scene_remake(
                             vision_caption: None,
                             script_modified: false,
                             rendered_score: None,
+                            rendered_metrics: None,
                             rendered_errors: None,
                         }
                     } else if enforce_write_now
@@ -557,6 +652,8 @@ pub(crate) async fn run_direct_per_scene_remake(
                                 | "replace_file_content"
                         )
                     {
+                        blocked_this_call = true;
+                        step_blocked_by_gate.push(fn_name.to_string());
                         crate::paths::log_engine(
                             "direct_remake",
                             &format!(
@@ -571,15 +668,13 @@ pub(crate) async fn run_direct_per_scene_remake(
                         super::direct_scene_tools::SceneToolOutcome {
                             result_json: json!({
                                 "ok": false,
-                                "error": format!(
-                                    "Probing phase ended at step 2; `{}` is temporarily disabled until you write the initial script. Call `write_scene_script({{ code }})` NOW for `{}` — right after writing, all 6 tools return for render_and_compare_scene and polish.",
-                                    fn_name, script_rel
-                                )
+                                "error": switches.build_gate_block_error(fn_name, &script_rel)
                             }),
                             vision_images: Vec::new(),
                             vision_caption: None,
                             script_modified: false,
                             rendered_score: None,
+                            rendered_metrics: None,
                             rendered_errors: None,
                         }
                     } else {
@@ -619,9 +714,19 @@ pub(crate) async fn run_direct_per_scene_remake(
                         out
                     };
 
+                    let call_ok = outcome.result_json.get("ok").and_then(Value::as_bool) != Some(false)
+                        && outcome.result_json.get("error").is_none();
+                    let img_count = outcome.vision_images.len();
+                    let img_bytes: usize = outcome.vision_images.iter().map(|s| s.len()).sum();
+
                     if outcome.script_modified {
+                        if !has_written && first_write_step.is_none() {
+                            first_write_step = Some(step_idx + 1);
+                        }
                         has_written = true;
                         dirty_since_render = true;
+                    } else if !has_written && !blocked_this_call {
+                        probe_calls_before_write += 1;
                     }
                     if let Some(sc_val) = outcome.rendered_score {
                         dirty_since_render = false;
@@ -632,6 +737,21 @@ pub(crate) async fn run_direct_per_scene_remake(
                             .await
                             .unwrap_or_default();
                         let cur_haz = detect_scene_collision_hazards(&cur_code).len();
+                        let metrics = outcome.rendered_metrics.unwrap_or(RenderedMetrics {
+                            overall: sc_val,
+                            ssim: 0.0,
+                            color: 0.0,
+                            edge: 0.0,
+                        });
+                        render_records.push(RenderTraceRecord {
+                            step: step_idx + 1,
+                            overall: metrics.overall,
+                            ssim: metrics.ssim,
+                            color: metrics.color,
+                            edge: metrics.edge,
+                            runtime_errors: errs.len(),
+                            hazards: cur_haz,
+                        });
                         // Non-destructive best-checkpoint tracking: NEVER overwrites working file mid-loop!
                         let better_checkpoint = best_score < 0.0
                             || (!best_errs.is_empty() && errs.is_empty())
@@ -678,6 +798,34 @@ pub(crate) async fn run_direct_per_scene_remake(
                             Some(&cid),
                             direction,
                         );
+                    let probe_tag = if fn_name == "inspect_ref_frame" {
+                        parsed_args
+                            .get("timestampSec")
+                            .and_then(Value::as_f64)
+                            .map(|t| format!("t={:.3}", t))
+                    } else if matches!(fn_name, "bash" | "shell" | "terminal") {
+                        let cmd = parsed_args
+                            .get("command")
+                            .and_then(Value::as_str)
+                            .unwrap_or("");
+                        if cmd.contains("cv2") || cmd.contains("VideoCapture") {
+                            Some("cv2".to_string())
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    step_tool_records.push(ToolCallTraceRecord {
+                        name: fn_name.to_string(),
+                        ok: call_ok,
+                        ms: now_ms().saturating_sub(tool_started),
+                        arg_bytes: raw_args.len(),
+                        result_bytes: bounded_text.len(),
+                        image_count: img_count,
+                        image_bytes: img_bytes,
+                        probe_tag,
+                    });
                     scene_msgs.push(json!({
                         "role": "tool",
                         "tool_call_id": cid,
@@ -686,27 +834,28 @@ pub(crate) async fn run_direct_per_scene_remake(
                     }));
                 }
 
-                let budget_nudge = if !has_written && step_idx + 1 < max_scene_steps {
-                    if step_idx >= 1 {
-                        Some(format!(
-                            "Step {}/{} complete — probing is finished. Call `write_scene_script` NOW with your complete, studio-grade Canvas 2D implementation for Scene {}/{} (`{}`). Right after writing, all 6 tools return so you can call `render_and_compare_scene` and polish surgically with `patch_scene_script`.",
-                            step_idx + 1,
-                            max_scene_steps,
-                            scene_num,
-                            total_scenes,
-                            script_rel
-                        ))
-                    } else {
-                        Some(format!(
-                            "Step {}/{} complete. Finish any needed probe in at most 1 more step, then call `write_scene_script` to author `{}` and verify via `render_and_compare_scene`.",
-                            step_idx + 1,
-                            max_scene_steps,
-                            script_rel
-                        ))
-                    }
-                } else {
-                    None
-                };
+                tracer.record_step(&StepTraceRecord {
+                    record_type: "step",
+                    scene: scene_num,
+                    scene_id: scene_id.clone(),
+                    step: step_idx + 1,
+                    upstream_model: step_upstream_model,
+                    thinking_level: step_thinking_level,
+                    tool_calls: step_tool_records,
+                    blocked_by_gate: step_blocked_by_gate,
+                    assistant_text_chars: comp.assistant_text.len(),
+                    finish_reason: comp.finish_reason.clone(),
+                    input_tokens: comp.input_tokens,
+                    output_tokens: comp.output_tokens,
+                });
+
+                let budget_nudge = switches.build_probe_budget_nudge(
+                    has_written,
+                    step_idx,
+                    scene_num,
+                    total_scenes,
+                    &script_rel,
+                );
 
                 if !step_images.is_empty() {
                     let mut caption = if step_captions.is_empty() {
@@ -728,9 +877,27 @@ pub(crate) async fn run_direct_per_scene_remake(
                 continue;
             }
 
+            tracer.record_step(&StepTraceRecord {
+                record_type: "step",
+                scene: scene_num,
+                scene_id: scene_id.clone(),
+                step: step_idx + 1,
+                upstream_model: step_upstream_model,
+                thinking_level: step_thinking_level,
+                tool_calls: Vec::new(),
+                blocked_by_gate: Vec::new(),
+                assistant_text_chars: comp.assistant_text.len(),
+                finish_reason: comp.finish_reason.clone(),
+                input_tokens: comp.input_tokens,
+                output_tokens: comp.output_tokens,
+            });
+
             // Graceful fallback for models that return a raw ```javascript``` block without tool calls
             if let Some(code_block) = extract_js_code_block(&comp.assistant_text) {
                 let _ = tokio::fs::write(&script_path, &code_block).await;
+                if !has_written && first_write_step.is_none() {
+                    first_write_step = Some(step_idx + 1);
+                }
                 has_written = true;
                 dirty_since_render = false;
                 scene_msgs.push(json!({ "role": "assistant", "content": comp.assistant_text }));
@@ -746,6 +913,21 @@ pub(crate) async fn run_direct_per_scene_remake(
                 latest_score = sc_val;
                 latest_errs = errs.clone();
                 let cur_haz = detect_scene_collision_hazards(&code_block).len();
+                let metrics = render_out.rendered_metrics.unwrap_or(RenderedMetrics {
+                    overall: sc_val,
+                    ssim: 0.0,
+                    color: 0.0,
+                    edge: 0.0,
+                });
+                render_records.push(RenderTraceRecord {
+                    step: step_idx + 1,
+                    overall: metrics.overall,
+                    ssim: metrics.ssim,
+                    color: metrics.color,
+                    edge: metrics.edge,
+                    runtime_errors: errs.len(),
+                    hazards: cur_haz,
+                });
                 let better = best_score < 0.0
                     || (!best_errs.is_empty() && errs.is_empty())
                     || (best_errs.is_empty() && errs.is_empty() && sc_val >= best_score - 0.002);
@@ -800,12 +982,30 @@ pub(crate) async fn run_direct_per_scene_remake(
                 execute_scene_micro_tool(&tool_ctx, "render_and_compare_scene", &json!({})).await;
             latest_score = final_out.rendered_score.unwrap_or(0.0);
             latest_errs = final_out.rendered_errors.unwrap_or_default();
+            let final_dirty_code = tokio::fs::read_to_string(&script_path)
+                .await
+                .unwrap_or_default();
+            let final_dirty_haz = detect_scene_collision_hazards(&final_dirty_code).len();
+            let metrics = final_out.rendered_metrics.unwrap_or(RenderedMetrics {
+                overall: latest_score,
+                ssim: 0.0,
+                color: 0.0,
+                edge: 0.0,
+            });
+            render_records.push(RenderTraceRecord {
+                step: passes_run,
+                overall: metrics.overall,
+                ssim: metrics.ssim,
+                color: metrics.color,
+                edge: metrics.edge,
+                runtime_errors: latest_errs.len(),
+                hazards: final_dirty_haz,
+            });
             if best_score < 0.0 {
-                best_code = tokio::fs::read_to_string(&script_path)
-                    .await
-                    .unwrap_or_default();
+                best_code = final_dirty_code;
                 best_score = latest_score;
                 best_errs = latest_errs.clone();
+                best_hazards = final_dirty_haz;
             }
         }
 
@@ -815,11 +1015,17 @@ pub(crate) async fn run_direct_per_scene_remake(
             .await
             .unwrap_or_default();
         let final_haz = detect_scene_collision_hazards(&final_code_now).len();
-        let should_restore_best = best_score >= 0.0
-            && !best_code.is_empty()
-            && ((best_errs.is_empty() && !latest_errs.is_empty())
-                || (latest_score + 0.03 < best_score && final_haz >= best_hazards));
-        let (final_score, final_errs) = if should_restore_best {
+        let should_restore_best = switches.restore_best
+            && should_restore_best_checkpoint(
+                best_score,
+                &best_code,
+                &best_errs,
+                best_hazards,
+                latest_score,
+                &latest_errs,
+                final_haz,
+            );
+        let (final_score, final_errs, persisted_code) = if should_restore_best {
             let _ = tokio::fs::write(&script_path, &best_code).await;
             rolled_back = true;
             crate::paths::log_engine(
@@ -829,12 +1035,27 @@ pub(crate) async fn run_direct_per_scene_remake(
                     scene_num, total_scenes, scene_id, latest_score, best_score
                 ),
             );
-            (best_score, best_errs)
+            (best_score, best_errs, best_code)
         } else if has_written {
-            (latest_score.max(0.0), latest_errs)
+            (latest_score.max(0.0), latest_errs, final_code_now)
         } else {
-            (best_score.max(0.0), best_errs)
+            (best_score.max(0.0), best_errs, final_code_now)
         };
+
+        completed_scenes.push((scene_num, scene_id.clone(), persisted_code));
+        tracer.record_scene_summary(&SceneSummaryTraceRecord {
+            record_type: "scene_summary",
+            scene: scene_num,
+            scene_id: scene_id.clone(),
+            steps_used: passes_run,
+            first_write_step,
+            probe_calls_before_write,
+            tool_histogram,
+            renders: render_records,
+            restored_best: rolled_back,
+            final_score,
+            wall_ms: now_ms().saturating_sub(scene_started),
+        });
 
         outcomes.push(DirectSceneOutcome {
             scene_id,
@@ -946,6 +1167,8 @@ pub(crate) fn format_direct_remake_report(summary: &DirectRemakeSummary) -> Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{routing::post, Json, Router};
+    use std::sync::{Arc, Mutex as StdMutex};
 
     #[test]
     fn extracts_fenced_and_raw_javascript_scene_blocks() {
@@ -957,5 +1180,676 @@ mod tests {
         let raw = "(function(){ AM.registerScene('s2', function(){}); })();";
         assert!(extract_js_code_block(raw).is_some());
         assert!(extract_js_code_block("plain text without code").is_none());
+    }
+
+    #[test]
+    fn restore_predicate_tracks_errors_and_score_drops() {
+        assert!(!should_restore_best_checkpoint(
+            0.80,
+            "good",
+            &[],
+            0,
+            0.78,
+            &[],
+            0
+        ));
+        assert!(should_restore_best_checkpoint(
+            0.80,
+            "good",
+            &[],
+            0,
+            0.0,
+            &["ReferenceError".to_string()],
+            0
+        ));
+        assert!(should_restore_best_checkpoint(
+            0.82,
+            "good",
+            &[],
+            0,
+            0.75,
+            &[],
+            0
+        ));
+    }
+
+    fn setup_test_remake_workspace(tag: &str, num_scenes: usize) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "aetheria_remake_unit_{}_{}",
+            tag,
+            crate::paths::now_ms()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let proj = root.join("projects").join("demo");
+        let script_dir = proj.join("script");
+        let audio_dir = proj.join("audio");
+        let ref_frames = root.join("ref").join("extracted").join("frames");
+        let aetheria_dir = root.join(".aetheria");
+        std::fs::create_dir_all(&script_dir).expect("script dir");
+        std::fs::create_dir_all(&audio_dir).expect("audio dir");
+        std::fs::create_dir_all(&ref_frames).expect("ref frames dir");
+        std::fs::create_dir_all(&aetheria_dir).expect("aetheria dir");
+
+        std::fs::write(
+            aetheria_dir.join("active-project.json"),
+            json!({ "activeProject": "projects/demo" }).to_string(),
+        )
+        .expect("active project");
+
+        // Dummy WAV header so showreel BGM generation does not spawn audio tool
+        let mut scenes_json = Vec::new();
+        let mut style_scenes = Vec::new();
+        let mut script_tags = String::new();
+        let mut map_entries = Vec::new();
+        for i in 1..=num_scenes {
+            let sid = format!("scene{}_unit", i);
+            let rel = format!("script/scene{}.js", i);
+            let start = (i - 1) as f64 * 1.0;
+            scenes_json.push(json!({
+                "id": sid,
+                "start": start,
+                "duration": 1.0,
+                "script": rel,
+            }));
+            style_scenes.push(json!({
+                "id": sid,
+                "start": start,
+                "duration": 1.0,
+                "cleanPlate": { "fillHex": "#FFFFFF", "hasGradient": false }
+            }));
+            std::fs::write(
+                script_dir.join(format!("scene{}.js", i)),
+                format!("(function(){{ window.AM.registerScene(\"{}\", function(ctx,t){{}}); }})();\n", sid),
+            )
+            .expect("stub scene");
+            std::fs::write(audio_dir.join(format!("bgm_{}.wav", sid)), b"RIFF").expect("dummy bgm");
+            script_tags.push_str(&format!("<script src=\"{}\"></script>\n", rel));
+            map_entries.push(format!("{{ id: \"{}\", start: {}, dur: 1.0 }}", sid, start));
+        }
+
+        let total_dur = num_scenes as f64;
+        std::fs::write(
+            proj.join("film.json"),
+            json!({
+                "title": "Unit Test Film",
+                "width": 320,
+                "height": 180,
+                "fps": 30,
+                "duration": total_dur,
+                "scenes": scenes_json,
+            })
+            .to_string(),
+        )
+        .expect("film json");
+
+        std::fs::write(
+            root.join("ref").join("extracted").join("style.json"),
+            json!({
+                "bpm": 120.0,
+                "audioProfile": { "mode": "silent" },
+                "scenes": style_scenes,
+            })
+            .to_string(),
+        )
+        .expect("style json");
+
+        let index_html = format!(
+            "<!doctype html><html><body style=\"margin:0\"><canvas id=\"c\" width=\"320\" height=\"180\"></canvas>\n\
+             <script>\n\
+             window.__filmMeta = {{ width: 320, height: 180, fps: 30, duration: {} }};\n\
+             var _scenes = [{}];\n\
+             window.AM = {{\n\
+               _fns: {{}},\n\
+               registerScene: function(id, fn) {{ this._fns[id] = fn; }},\n\
+               clamp: function(v,a,b){{ return Math.max(a, Math.min(b, v)); }},\n\
+               ease: {{ outCubic: function(x){{ return 1 - Math.pow(1 - x, 3); }} }},\n\
+               rng: function(seed){{ return function(){{ return ((seed * 9301 + 49297) % 233280) / 233280; }}; }}\n\
+             }};\n\
+             window.renderAt = function(t) {{\n\
+               var ctx = document.getElementById('c').getContext('2d');\n\
+               for (var i = _scenes.length - 1; i >= 0; i--) {{\n\
+                 if (t >= _scenes[i].start) {{\n\
+                   var fn = window.AM._fns[_scenes[i].id];\n\
+                   if (fn) fn(ctx, t - _scenes[i].start, _scenes[i].dur, _scenes[i], window.AM);\n\
+                   break;\n\
+                 }}\n\
+               }}\n\
+             }};\n\
+             </script>\n\
+             {}</body></html>\n",
+            total_dur,
+            map_entries.join(", "),
+            script_tags
+        );
+        std::fs::write(proj.join("index.html"), index_html).expect("index html");
+        root
+    }
+
+    async fn start_scripted_mock_llm<F>(handler: F) -> (String, Arc<StdMutex<Vec<Value>>>, tokio::task::JoinHandle<()>)
+    where
+        F: Fn(usize, &Value) -> Value + Send + Sync + 'static,
+    {
+        let captured = Arc::new(StdMutex::new(Vec::<Value>::new()));
+        let cap_srv = Arc::clone(&captured);
+        let handler = Arc::new(handler);
+
+        let app = Router::new().route(
+            "/v1/chat/completions",
+            post(move |Json(payload): Json<Value>| {
+                let cap = Arc::clone(&cap_srv);
+                let h = Arc::clone(&handler);
+                async move {
+                    let idx = {
+                        let mut g = cap.lock().expect("capture lock");
+                        let idx = g.len();
+                        g.push(payload.clone());
+                        idx
+                    };
+                    Json(h(idx, &payload))
+                }
+            }),
+        );
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock llm");
+        let addr = listener.local_addr().expect("mock addr");
+        let srv = tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (format!("http://{}/v1", addr), captured, srv)
+    }
+
+    fn read_jsonl_lines(path: &Path) -> Vec<Value> {
+        std::fs::read_to_string(path)
+            .expect("trace readable")
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| serde_json::from_str(l).expect("valid trace jsonl"))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn default_switches_preserve_baseline_payloads_and_write_trace() {
+        let ws = setup_test_remake_workspace("default_snapshot", 1);
+        let good_js = "(function(){ var AM=window.AM; AM.registerScene(\"scene1_unit\", function(ctx,t){ ctx.fillStyle='#FFFFFF'; ctx.fillRect(0,0,320,180); ctx.fillStyle='#111111'; ctx.fillRect(20+t*80,40,50,50); }); })();\n";
+        let (mut base_url, captured, srv) = start_scripted_mock_llm(move |idx, payload| {
+            match idx {
+                0 => json!({
+                    "choices": [{
+                        "finish_reason": "tool_calls",
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [{
+                                "id": "tc_probe_0",
+                                "type": "function",
+                                "function": { "name": "bash", "arguments": "{\"command\":\"Write-Output P0\"}" }
+                            }]
+                        }
+                    }],
+                    "usage": { "prompt_tokens": 111, "completion_tokens": 22 }
+                }),
+                1 => json!({
+                    "choices": [{
+                        "finish_reason": "tool_calls",
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [{
+                                "id": "tc_probe_1",
+                                "type": "function",
+                                "function": { "name": "bash", "arguments": "{\"command\":\"Write-Output P1\"}" }
+                            }]
+                        }
+                    }],
+                    "usage": { "prompt_tokens": 122, "completion_tokens": 24 }
+                }),
+                2 => {
+                    // Gate fired: non-write call here must be rejected cleanly by gate
+                    json!({
+                        "choices": [{
+                            "finish_reason": "tool_calls",
+                            "message": {
+                                "role": "assistant",
+                                "content": "",
+                                "tool_calls": [{
+                                    "id": "tc_blocked_2",
+                                    "type": "function",
+                                    "function": { "name": "bash", "arguments": "{\"command\":\"Write-Output BLOCKED\"}" }
+                                }]
+                            }
+                        }]
+                    })
+                }
+                3 => {
+                    let _ = payload;
+                    json!({
+                        "choices": [{
+                            "finish_reason": "tool_calls",
+                            "message": {
+                                "role": "assistant",
+                                "content": "",
+                                "tool_calls": [{
+                                    "id": "tc_write_3",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "write_scene_script",
+                                        "arguments": json!({ "code": good_js }).to_string()
+                                    }
+                                }]
+                            }
+                        }]
+                    })
+                }
+                _ => json!({
+                    "choices": [{
+                        "finish_reason": "stop",
+                        "message": { "role": "assistant", "content": "Done." }
+                    }]
+                }),
+            }
+        })
+        .await;
+
+        let client = reqwest::Client::new();
+        let mut api_key = "sk-test-secret".to_string();
+        let mut model_id = "gemini-3.8-flash-medium".to_string();
+        let mut content_parts = Vec::new();
+        let sid = "sess_default_snap";
+
+        let _summary = run_direct_per_scene_remake_with_switches(
+            sid,
+            &ws.to_string_lossy(),
+            "Unit test default snapshot",
+            &client,
+            &mut base_url,
+            &mut api_key,
+            &mut model_id,
+            &mut content_parts,
+            DirectSceneSwitches::default(),
+        )
+        .await
+        .expect("remake completed");
+
+        srv.abort();
+        let reqs = captured.lock().expect("lock").clone();
+        assert_eq!(reqs.len(), 5);
+
+        // Step 0 & 1: exact baseline system prompt, all 7 tools, no tool_choice, no reasoning_effort
+        assert_eq!(
+            reqs[0].pointer("/messages/0/content").and_then(Value::as_str),
+            Some(DIRECT_SCENE_SYSTEM_PROMPT)
+        );
+        assert!(reqs[0].get("temperature").is_none());
+        assert!(reqs[0].get("reasoning_effort").is_none());
+        assert_eq!(reqs[0]["tools"].as_array().map(|a| a.len()), Some(7));
+        assert!(reqs[0].get("tool_choice").is_none());
+
+        let step1_last_user = reqs[1]["messages"]
+            .as_array()
+            .and_then(|m| m.last())
+            .and_then(|m| m.get("content"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        assert_eq!(
+            step1_last_user,
+            "Step 1/12 complete. Finish any needed probe in at most 1 more step, then call `write_scene_script` to author `script/scene1.js` and verify via `render_and_compare_scene`."
+        );
+
+        // Step 2: gate active (1 write tool + forced tool_choice + exact baseline nudge)
+        let step2_last_user = reqs[2]["messages"]
+            .as_array()
+            .and_then(|m| m.last())
+            .and_then(|m| m.get("content"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        assert_eq!(
+            step2_last_user,
+            "Step 2/12 complete — probing is finished. Call `write_scene_script` NOW with your complete, studio-grade Canvas 2D implementation for Scene 1/1 (`script/scene1.js`). Right after writing, all 6 tools return so you can call `render_and_compare_scene` and polish surgically with `patch_scene_script`."
+        );
+        assert_eq!(reqs[2]["tools"].as_array().map(|a| a.len()), Some(1));
+        assert_eq!(
+            reqs[2].pointer("/tool_choice/function/name").and_then(Value::as_str),
+            Some("write_scene_script")
+        );
+
+        // Step 3: blocked bash call received exact baseline error string
+        let blocked_tool_msg = reqs[3]["messages"]
+            .as_array()
+            .and_then(|arr| arr.iter().rev().find(|m| m["role"] == "tool"))
+            .and_then(|m| m.get("content"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        assert!(blocked_tool_msg.contains("Probing phase ended at step 2; `bash` is temporarily disabled until you write the initial script."));
+
+        // Step 4: after write, all 7 tools return and tool_choice is omitted
+        assert_eq!(reqs[4]["tools"].as_array().map(|a| a.len()), Some(7));
+        assert!(reqs[4].get("tool_choice").is_none());
+
+        // Verify X0 JSONL trace exists, has schema fields, and zero secrets
+        let trace_path = ws
+            .join(".aetheria")
+            .join("trace")
+            .join(format!("direct_remake_{}.jsonl", sid));
+        assert!(trace_path.is_file());
+        let raw_trace = std::fs::read_to_string(&trace_path).expect("trace txt");
+        assert!(!raw_trace.contains("sk-test-secret"));
+        assert!(!raw_trace.contains("data:image"));
+
+        let recs = read_jsonl_lines(&trace_path);
+        assert_eq!(recs[0]["type"], "run_header");
+        assert_eq!(recs[0]["upstreamModel"], "gemini-3-flash");
+        assert_eq!(recs[0]["thinkingLevel"], "medium");
+        let step3_rec = recs.iter().find(|r| r["type"] == "step" && r["step"] == 3).expect("step 3");
+        assert_eq!(step3_rec["blockedByGate"], json!(["bash"]));
+        let step1_rec = recs.iter().find(|r| r["type"] == "step" && r["step"] == 1).expect("step 1");
+        assert_eq!(step1_rec["inputTokens"], 111);
+        assert_eq!(step1_rec["outputTokens"], 22);
+        let sc_sum = recs.iter().find(|r| r["type"] == "scene_summary").expect("summary");
+        assert_eq!(sc_sum["firstWriteStep"], 4);
+        assert_eq!(sc_sum["probeCallsBeforeWrite"], 2);
+
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[tokio::test]
+    async fn switches_control_probe_off_cross_context_minimal_prompt_reasoning_and_only_scenes() {
+        let ws = setup_test_remake_workspace("switches_matrix", 2);
+        let s1_js = "(function(){ var AM=window.AM; function customOrb(c,x){ c.fillRect(x,20,30,30); } AM.registerScene(\"scene1_unit\", function(ctx,t){ ctx.fillStyle='#FFFFFF'; ctx.fillRect(0,0,320,180); ctx.fillStyle='#3A7AFE'; customOrb(ctx, t*80); AM.ease.outCubic(t); }); })();\n";
+        let s2_js = "(function(){ var AM=window.AM; AM.registerScene(\"scene2_unit\", function(ctx,t){ ctx.fillStyle='#FFFFFF'; ctx.fillRect(0,0,320,180); ctx.fillStyle='#10B981'; ctx.fillRect(40+t*70,40,60,60); }); })();\n";
+
+        let s1_clone = s1_js.to_string();
+        let s2_clone = s2_js.to_string();
+        let (mut base_url, captured, srv) = start_scripted_mock_llm(move |idx, _payload| match idx {
+            // Scene 1: probe step 0, 1, 2 (step 2 must NOT be blocked when PROBE_STEPS=off!), step 3 write, step 4 done
+            0 | 1 | 2 => json!({
+                "choices": [{
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": format!("tc_{}", idx),
+                            "type": "function",
+                            "function": { "name": "bash", "arguments": "{\"command\":\"Write-Output PROBE_OK\"}" }
+                        }]
+                    }
+                }]
+            }),
+            3 => json!({
+                "choices": [{
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "tc_s1_w",
+                            "type": "function",
+                            "function": { "name": "write_scene_script", "arguments": json!({ "code": s1_clone }).to_string() }
+                        }]
+                    }
+                }]
+            }),
+            4 => json!({
+                "choices": [{ "finish_reason": "stop", "message": { "role": "assistant", "content": "S1 done" } }]
+            }),
+            5 => json!({
+                "choices": [{
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "tc_s2_w",
+                            "type": "function",
+                            "function": { "name": "write_scene_script", "arguments": json!({ "code": s2_clone }).to_string() }
+                        }]
+                    }
+                }]
+            }),
+            _ => json!({
+                "choices": [{ "finish_reason": "stop", "message": { "role": "assistant", "content": "S2 done" } }]
+            }),
+        })
+        .await;
+
+        let switches = DirectSceneSwitches {
+            probe_steps: None,
+            cross_context: CrossContextMode::Summary,
+            restore_best: false,
+            reasoning_effort: Some("high".to_string()),
+            prompt_mode: PromptMode::Minimal,
+            only_scenes: None,
+            max_steps: 10,
+        };
+        let client = reqwest::Client::new();
+        let mut api_key = "k".to_string();
+        let mut model_id = "mock-smart-v".to_string();
+        let mut parts = Vec::new();
+        let _ = run_direct_per_scene_remake_with_switches(
+            "sess_sw_on",
+            &ws.to_string_lossy(),
+            "Switch check",
+            &client,
+            &mut base_url,
+            &mut api_key,
+            &mut model_id,
+            &mut parts,
+            switches,
+        )
+        .await
+        .expect("switches run ok");
+        srv.abort();
+
+        let reqs = captured.lock().expect("lock").clone();
+        // Check Minimal prompt & reasoning_effort forwarded & probe gate disabled at step 2 (idx=2)
+        assert_eq!(
+            reqs[0].pointer("/messages/0/content").and_then(Value::as_str),
+            Some(DIRECT_SCENE_SYSTEM_PROMPT_MINIMAL)
+        );
+        assert_eq!(
+            reqs[0].get("reasoning_effort").and_then(Value::as_str),
+            Some("high")
+        );
+        assert_eq!(reqs[2]["tools"].as_array().map(|a| a.len()), Some(7));
+        assert!(reqs[2].get("tool_choice").is_none());
+        let step3_bash_out = reqs[3]["messages"]
+            .as_array()
+            .and_then(|arr| arr.iter().rev().find(|m| m["role"] == "tool"))
+            .and_then(|m| m.get("content"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        assert!(step3_bash_out.contains("PROBE_OK"));
+
+        // Check Scene 2 initial prompt (idx=5) received deterministic factual summary from Scene 1 code
+        let s2_init_text = reqs[5]
+            .pointer("/messages/1/content/0/text")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        assert!(s2_init_text.contains("PREVIOUS SCENES CODE SUMMARY"));
+        assert!(s2_init_text.contains("#3A7AFE"));
+        assert!(s2_init_text.contains("customOrb()"));
+        assert!(s2_init_text.contains("AM.ease.outCubic"));
+
+        // Now verify `only_scenes = Some(vec![2])` runs ONLY scene 2
+        let ws_only = setup_test_remake_workspace("only_scene2", 2);
+        let (mut url2, cap2, srv2) = start_scripted_mock_llm(|_idx, _p| {
+            json!({ "choices": [{ "finish_reason": "stop", "message": { "role": "assistant", "content": "Done" } }] })
+        })
+        .await;
+        let sw_only = DirectSceneSwitches {
+            only_scenes: Some(vec![2]),
+            max_steps: 3,
+            ..Default::default()
+        };
+        let mut k2 = "k".to_string();
+        let mut m2 = "mock-only".to_string();
+        let mut p2 = Vec::new();
+        let sum2 = run_direct_per_scene_remake_with_switches(
+            "sess_only2",
+            &ws_only.to_string_lossy(),
+            "Only s2",
+            &client,
+            &mut url2,
+            &mut k2,
+            &mut m2,
+            &mut p2,
+            sw_only,
+        )
+        .await
+        .expect("only scene 2 ok");
+        srv2.abort();
+        assert_eq!(sum2.scenes.len(), 1);
+        assert_eq!(sum2.scenes[0].scene_id, "scene2_unit");
+        let reqs2 = cap2.lock().expect("lock").clone();
+        assert!(reqs2.iter().all(|r| {
+            let txt = r.pointer("/messages/1/content/0/text").and_then(Value::as_str).unwrap_or("");
+            txt.contains("TARGET SCENE 2/2") && !txt.contains("PREVIOUS SCENES CODE SUMMARY")
+        }));
+
+        let _ = std::fs::remove_dir_all(&ws);
+        let _ = std::fs::remove_dir_all(&ws_only);
+    }
+
+    #[tokio::test]
+    async fn restore_switch_controls_real_checkpoint_rollback_on_regression() {
+        let good_js = "(function(){ var AM=window.AM; AM.registerScene(\"scene1_unit\", function(ctx,t){ ctx.fillStyle='#FFFFFF'; ctx.fillRect(0,0,320,180); ctx.fillStyle='#2255EE'; ctx.fillRect(20+t*80,30,60,60); }); })();\n";
+        let broken_js = "(function(){ var AM=window.AM; AM.registerScene(\"scene1_unit\", function(ctx,t){ throw new Error('intentional_regression'); }); })();\n";
+
+        for restore_enabled in [true, false] {
+            let ws = setup_test_remake_workspace(
+                if restore_enabled { "restore_on" } else { "restore_off" },
+                1,
+            );
+            let good = good_js.to_string();
+            let bad = broken_js.to_string();
+            let (mut base_url, _captured, srv) = start_scripted_mock_llm(move |idx, _| match idx {
+                0 => json!({
+                    "choices": [{
+                        "finish_reason": "tool_calls",
+                        "message": {
+                            "role": "assistant", "content": "",
+                            "tool_calls": [{
+                                "id": "w_good", "type": "function",
+                                "function": { "name": "write_scene_script", "arguments": json!({ "code": good }).to_string() }
+                            }]
+                        }
+                    }]
+                }),
+                1 => json!({
+                    "choices": [{
+                        "finish_reason": "tool_calls",
+                        "message": {
+                            "role": "assistant", "content": "",
+                            "tool_calls": [{
+                                "id": "r_good", "type": "function",
+                                "function": { "name": "render_and_compare_scene", "arguments": "{}" }
+                            }]
+                        }
+                    }]
+                }),
+                2 => json!({
+                    "choices": [{
+                        "finish_reason": "tool_calls",
+                        "message": {
+                            "role": "assistant", "content": "",
+                            "tool_calls": [{
+                                "id": "w_bad", "type": "function",
+                                "function": { "name": "write_scene_script", "arguments": json!({ "code": bad }).to_string() }
+                            }]
+                        }
+                    }]
+                }),
+                3 => json!({
+                    "choices": [{
+                        "finish_reason": "tool_calls",
+                        "message": {
+                            "role": "assistant", "content": "",
+                            "tool_calls": [{
+                                "id": "r_bad", "type": "function",
+                                "function": { "name": "render_and_compare_scene", "arguments": "{}" }
+                            }]
+                        }
+                    }]
+                }),
+                _ => json!({
+                    "choices": [{ "finish_reason": "stop", "message": { "role": "assistant", "content": "Finished" } }]
+                }),
+            })
+            .await;
+
+            let switches = DirectSceneSwitches {
+                restore_best: restore_enabled,
+                ..Default::default()
+            };
+            let client = reqwest::Client::new();
+            let mut api_key = "k".to_string();
+            let mut model_id = "mock-restore".to_string();
+            let mut parts = Vec::new();
+            let sid = if restore_enabled { "sess_rst_on" } else { "sess_rst_off" };
+            let sum = run_direct_per_scene_remake_with_switches(
+                sid,
+                &ws.to_string_lossy(),
+                "Restore switch test",
+                &client,
+                &mut base_url,
+                &mut api_key,
+                &mut model_id,
+                &mut parts,
+                switches,
+            )
+            .await
+            .expect("restore test ok");
+            srv.abort();
+
+            let disk_code = std::fs::read_to_string(ws.join("projects").join("demo").join("script").join("scene1.js"))
+                .expect("scene1 on disk");
+            assert_eq!(sum.scenes[0].rolled_back, restore_enabled);
+            if restore_enabled {
+                assert!(disk_code.contains("#2255EE"), "expected restored good code, got: {}", disk_code);
+            } else {
+                assert!(disk_code.contains("intentional_regression"), "expected broken code kept when restore=off, got: {}", disk_code);
+            }
+
+            let trace_lines = read_jsonl_lines(&ws.join(".aetheria").join("trace").join(format!("direct_remake_{}.jsonl", sid)));
+            let sc_sum = trace_lines.iter().find(|r| r["type"] == "scene_summary").expect("scene summary");
+            assert_eq!(sc_sum["restoredBest"], restore_enabled);
+
+            let _ = std::fs::remove_dir_all(&ws);
+        }
+    }
+
+    #[test]
+    fn direct_scene_remake_is_opt_in_by_default() {
+        let ws = setup_test_remake_workspace("opt_in_check", 4);
+        let script_dir = ws.join("projects").join("demo").join("script");
+        for i in 1..=4 {
+            std::fs::write(
+                script_dir.join(format!("scene{}.js", i)),
+                format!(
+                    "// TODO: Write deterministic motion design beats here\nwindow.AM.registerScene(\"scene{}_unit\", function(ctx,t){{}});\n",
+                    i
+                ),
+            )
+            .expect("write stub");
+        }
+        let ws_str = ws.to_string_lossy().to_string();
+        assert!(
+            !should_run_direct_scene_remake_with_mode(&ws_str, None),
+            "default remake mode must not hijack turn into direct_scene_remake"
+        );
+        assert!(
+            !should_run_direct_scene_remake_with_mode(&ws_str, Some("")),
+            "empty mode must not trigger direct_scene_remake"
+        );
+        assert!(
+            should_run_direct_scene_remake_with_mode(&ws_str, Some("direct")),
+            "explicit AETHERIA_REMAKE_MODE=direct must opt in when stub scenes + style.json exist"
+        );
+        if std::env::var_os("AETHERIA_REMAKE_MODE").is_none() {
+            assert!(!should_run_direct_scene_remake(&ws_str));
+        }
+        let _ = std::fs::remove_dir_all(&ws);
     }
 }

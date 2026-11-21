@@ -57,6 +57,33 @@ COMPACT `window.AM` RUNTIME API (already loaded globally before your script):
 - `AM.loadImage('/img/asset.png')` -> preloaded `HTMLImageElement` (automatically awaited before Frame 0); `AM.drawImageFit(ctx, img, x, y, w, h, 'contain')`
 - Safe Canvas 2D: keep `ctx.save()`/`ctx.restore()` balanced and never reference undeclared variables.";
 
+/// Compact "minimal / IDE-like" system prompt (`<= 2500` bytes) for Phase X2 ablation.
+/// Keeps only: target goal, 1-sentence determinism contract, tool list, and compact AM API.
+pub(crate) const DIRECT_SCENE_SYSTEM_PROMPT_MINIMAL: &str = "\
+Reconstruct the target scene procedurally in HTML5 Canvas 2D (`script/sceneK.js`) matching the attached reference images and measured scene facts; never copy pixels or load `ref/*` paths.
+
+SCRIPT CONTRACT:
+Wrap the script in `(function () { var AM = window.AM; ... AM.registerScene(\"<sceneId>\", function (ctx, t, dur, scene, AM) { ... }); })();`. Every frame must be deterministic from local scene time `t` (`0 <= t <= dur`) and `AM.rng(seed)`, never calling `Math.random()`, `Date.now()`, `requestAnimationFrame`, `setTimeout`, `<video>`, or `ref/*` URLs. Preloaded fonts: `'Playfair Display'`, `'Anton'`, `'Inter'`, `'Montserrat'`. Keep `ctx.save()`/`ctx.restore()` balanced.
+
+TOOLS:
+- `inspect_ref_frame({ timestampSec, crop? })` — view full-res reference frame or zoom crop `{x,y,w,h}`.
+- `sample_ref_region({ timestampSec, box? })` — measure hex colors, luminance, and foreground bbox.
+- `fetch_web_image({ query, outputPath, removeBackground? })` — download an image/asset into `/img/<name>.png`.
+- `bash({ command, workdir? })` — run workspace-isolated shell/Python commands.
+- `write_scene_script({ code })` — write `script/sceneK.js`.
+- `patch_scene_script({ oldText, newText })` — exact search-and-replace edit on `script/sceneK.js`.
+- `render_and_compare_scene({ timestamps?, fullResTimestamp? })` — render headless preview and return comparison strip, worst full-res frame, and scores/errors.
+
+COMPACT `window.AM` API:
+- `AM.registerScene(id, fn)` — `fn(ctx, t, dur, scene, AM)`
+- `AM.applyCamera(ctx, { s, cx, cy, rot }, W, H)` — global zoom/pan/rotation (`rot` in deg)
+- `AM.clamp(v, lo, hi)`, `AM.lerp(a, b, p)`, `AM.invLerp(a, b, v)`, `AM.remap(v, a, b, c, d)`
+- `AM.ease.{inCubic,outCubic,inOutCubic,outBack,outExpo,inOutQuart}(p)`
+- `AM.spring(tSec, { stiffness, damping, mass })`
+- `AM.rng(seed)` -> deterministic PRNG (`r()`, `r.range(min, max)`, `r.pick(arr)`)
+- `AM.drawCursor(ctx, x, y, opts)`, `AM.drawExtrudedArrow3D(ctx, cx, cy, r, opts)`, `AM.drawLaptopFrame(ctx, rect, fn)`, `AM.drawWordWheel(ctx, opts)`, `AM.drawSVGPath(ctx, d, opts)`
+- `AM.loadImage('/img/asset.png')`, `AM.drawImageFit(ctx, img, x, y, w, h, 'contain')`";
+
 /// Converts `t=6.72s:box=[64,292,423x272] -> ...` from global timestamps into explicit
 /// scene-local timestamps plus computed centers `(cx, cy)` and sizes `w×h`.
 pub(crate) fn format_trajectory_local_time(raw: &str, scene_start: f64) -> String {
@@ -682,20 +709,51 @@ mod tests {
 
     #[test]
     fn direct_system_prompt_is_style_agnostic_without_benchmark_fingerprints() {
+        for (label, prompt) in [
+            ("DIRECT_SCENE_SYSTEM_PROMPT", DIRECT_SCENE_SYSTEM_PROMPT),
+            ("DIRECT_SCENE_SYSTEM_PROMPT_MINIMAL", DIRECT_SCENE_SYSTEM_PROMPT_MINIMAL),
+        ] {
+            for forbidden in [
+                "#6E44FF",
+                "#6D28D9",
+                "#DCD9E4",
+                "crescent moon",
+                "concave-tail",
+                "Showreel",
+                "Labs Studio",
+            ] {
+                assert!(
+                    !prompt.contains(forbidden),
+                    "{} must stay 100% style-agnostic (found '{}')",
+                    label,
+                    forbidden
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn minimal_system_prompt_meets_size_and_structure_constraints() {
+        assert!(
+            DIRECT_SCENE_SYSTEM_PROMPT_MINIMAL.len() <= 2500,
+            "minimal prompt {} bytes exceeded 2500 bytes",
+            DIRECT_SCENE_SYSTEM_PROMPT_MINIMAL.len()
+        );
         for forbidden in [
-            "#6E44FF",
-            "#6D28D9",
-            "#DCD9E4",
-            "crescent moon",
-            "concave-tail",
-            "Showreel",
-            "Labs Studio",
+            "ANTIGRAVITY-GRADE",
+            "FIVE UNIVERSAL",
+            "METHODOLOGY",
+            "Step 1",
+            "Step 2",
         ] {
             assert!(
-                !DIRECT_SCENE_SYSTEM_PROMPT.contains(forbidden),
-                "DIRECT_SCENE_SYSTEM_PROMPT must stay 100% style-agnostic (found '{}')",
+                !DIRECT_SCENE_SYSTEM_PROMPT_MINIMAL.contains(forbidden),
+                "minimal prompt must omit '{}'",
                 forbidden
             );
         }
+        assert!(DIRECT_SCENE_SYSTEM_PROMPT_MINIMAL.contains("AM.rng(seed)"));
+        assert!(DIRECT_SCENE_SYSTEM_PROMPT_MINIMAL.contains("write_scene_script"));
+        assert!(DIRECT_SCENE_SYSTEM_PROMPT_MINIMAL.contains("render_and_compare_scene"));
     }
 }

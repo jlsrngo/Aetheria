@@ -464,7 +464,7 @@ async function main() {
   try {
     stack = await startLiveStack({
       startWeb: false,
-      env: { AETHERIA_DISABLE_OCR: "1" },
+      env: { AETHERIA_DISABLE_OCR: "1", AETHERIA_REMAKE_MODE: "direct" },
       aetheriaConfig: {
         provider: {
           "mock-smart": {
@@ -546,9 +546,31 @@ async function main() {
     const h2 = await api(baseUrl, "/api/health", { authHeader });
     assert(h2.ok && h2.json?.healthy === true, `Engine unhealthy after run: ${h2.text}`);
 
+    // Verify Phase X0 telemetry trace file exists, has valid JSONL schema across all 4 scenes, and zero secrets
+    const traceFile = path.join(wsDir, ".aetheria", "trace", `direct_remake_${sessId.replace(/[^a-zA-Z0-9_-]/g, "_")}.jsonl`);
+    assert(fs.existsSync(traceFile), `Missing X0 trace file at ${traceFile}`);
+    const traceRaw = fs.readFileSync(traceFile, "utf8");
+    assert(!traceRaw.includes("data:image"), "X0 trace must not contain base64 images");
+    assert(!traceRaw.includes("sk-mock"), "X0 trace must not contain API keys");
+    const traceRows = traceRaw
+      .split(/\r?\n/)
+      .filter((l) => l.trim().length > 0)
+      .map((l) => JSON.parse(l));
+    assert(traceRows.length >= 9, `Expected >= 9 trace JSONL lines, got ${traceRows.length}`);
+    assert(traceRows[0].type === "run_header", "Line 0 must be run_header");
+    assert(traceRows[0].systemPromptBytes > 2500 && typeof traceRows[0].systemPromptHash === "string", "run_header missing prompt metadata");
+    const stepRows = traceRows.filter((r) => r.type === "step");
+    const summaryRows = traceRows.filter((r) => r.type === "scene_summary");
+    assert(stepRows.length >= 4, "Expected step trace entries");
+    assert(summaryRows.length === 4, `Expected 4 scene_summary entries, got ${summaryRows.length}`);
+    assert(summaryRows[0].firstWriteStep === 2, `Expected scene 1 firstWriteStep=2, got ${summaryRows[0].firstWriteStep}`);
+    assert(summaryRows[0].probeCallsBeforeWrite === 3, `Expected scene 1 3 probe calls before write, got ${summaryRows[0].probeCallsBeforeWrite}`);
+
     const stats = mockLlm.getStats();
     const summary = {
       ...stats,
+      traceLines: traceRows.length,
+      traceFile,
       surgicalPatchPreservedCode,
       rawCodeBlockFallbackWorked,
     };
