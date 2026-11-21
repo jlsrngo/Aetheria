@@ -187,6 +187,7 @@
   }
 
   ease.pop = bezier(0.34, 1.56, 0.64, 1);
+  ease.snap = bezier(0.85, 0, 0.15, 1);
 
   // Shorthand easing table E (compatible with 01-flat-vector / aetheria-motion demos)
   const E = {
@@ -205,6 +206,7 @@
       return (s + 1) * x * x * x - s * x * x;
     },
     pop: ease.pop,
+    snap: ease.snap,
   };
 
   /**
@@ -1653,6 +1655,101 @@
     return true;
   }
 
+  /**
+   * Renders a physically inspired 3-layer additive optical glow/bloom orb
+   * (wide atmospheric halo + saturated mid bloom + over-exposed white hot core).
+   */
+  function drawOpticalGlow(ctx, x, y, radius, colorHex = "#FF8800", intensity = 1.0) {
+    if (!ctx || !(radius > 0) || !(intensity > 0)) return;
+    const inten = clamp(intensity, 0, 2.5);
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+
+    // Layer 1: Wide atmospheric bloom
+    const rOuter = radius * 2.35;
+    const gOuter = ctx.createRadialGradient(x, y, 0, x, y, rOuter);
+    gOuter.addColorStop(0, hexAlpha(colorHex, Math.min(1, 0.48 * inten)));
+    gOuter.addColorStop(0.42, hexAlpha(colorHex, Math.min(1, 0.2 * inten)));
+    gOuter.addColorStop(1, hexAlpha(colorHex, 0));
+    ctx.fillStyle = gOuter;
+    ctx.beginPath();
+    ctx.arc(x, y, rOuter, 0, TAU);
+    ctx.fill();
+
+    // Layer 2: Saturated mid halo
+    const rMid = radius * 1.15;
+    const gMid = ctx.createRadialGradient(x, y, 0, x, y, rMid);
+    gMid.addColorStop(0, hexAlpha("#FFF4DC", Math.min(1, 0.82 * inten)));
+    gMid.addColorStop(0.38, hexAlpha(colorHex, Math.min(1, 0.65 * inten)));
+    gMid.addColorStop(1, hexAlpha(colorHex, 0));
+    ctx.fillStyle = gMid;
+    ctx.beginPath();
+    ctx.arc(x, y, rMid, 0, TAU);
+    ctx.fill();
+
+    // Layer 3: Over-exposed white hot core
+    const rCore = Math.max(2, radius * 0.42);
+    const gCore = ctx.createRadialGradient(x, y, 0, x, y, rCore);
+    gCore.addColorStop(0, hexAlpha("#FFFFFF", Math.min(1, 0.96 * inten)));
+    gCore.addColorStop(0.55, hexAlpha("#FFFDF5", Math.min(1, 0.55 * inten)));
+    gCore.addColorStop(1, hexAlpha("#FFFFFF", 0));
+    ctx.fillStyle = gCore;
+    ctx.beginPath();
+    ctx.arc(x, y, rCore, 0, TAU);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  /**
+   * Strokes any path drawn by `drawPathFn(ctx)` with a 3-pass additive optical bloom
+   * (wide atmospheric glow + saturated mid stroke + crisp white-hot core).
+   */
+  function drawBloomStroke(ctx, drawPathFn, opts = {}) {
+    if (!ctx || typeof drawPathFn !== "function") return;
+    const color = opts.color || "#FF9922";
+    const coreColor = opts.coreColor || "#FFF9EB";
+    const lineWidth = Number(opts.lineWidth ?? 4);
+    const glowRadius = Number(opts.glowRadius ?? Math.max(18, lineWidth * 6));
+    const intensity = clamp(Number(opts.intensity ?? 1.0), 0, 2.5);
+    const lineCap = opts.lineCap || "round";
+    const lineJoin = opts.lineJoin || "round";
+
+    ctx.save();
+    ctx.lineCap = lineCap;
+    ctx.lineJoin = lineJoin;
+    ctx.globalCompositeOperation = "lighter";
+
+    // Pass 1: Wide atmospheric bloom
+    ctx.strokeStyle = hexAlpha(color, Math.min(1, 0.42 * intensity));
+    ctx.lineWidth = lineWidth * 2.8;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = glowRadius;
+    ctx.beginPath();
+    drawPathFn(ctx);
+    ctx.stroke();
+
+    // Pass 2: Saturated mid halo
+    ctx.strokeStyle = hexAlpha(color, Math.min(1, 0.78 * intensity));
+    ctx.lineWidth = lineWidth * 1.45;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = glowRadius * 0.45;
+    ctx.beginPath();
+    drawPathFn(ctx);
+    ctx.stroke();
+
+    // Pass 3: Crisp white-hot core
+    ctx.strokeStyle = hexAlpha(coreColor, Math.min(1, 0.95 * intensity));
+    ctx.lineWidth = Math.max(1, lineWidth * 0.75);
+    ctx.shadowColor = coreColor;
+    ctx.shadowBlur = glowRadius * 0.15;
+    ctx.beginPath();
+    drawPathFn(ctx);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
   const API = {
     TAU,
     clamp,
@@ -1712,6 +1809,8 @@
     loadImage,
     whenImagesReady,
     drawImageFit,
+    drawOpticalGlow,
+    drawBloomStroke,
   };
 
   global.AetheriaMotion = API;

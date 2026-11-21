@@ -29,8 +29,8 @@ Do NOT call `Math.random()`, `Date.now()`, `performance.now()`, `requestAnimatio
 
 ## Easing & Spring Physics
 - `AM.bezier(x1, y1, x2, y2)` — returns cubic-bezier easing `(u) => y`
-- `AM.ease` — `{ linear, inQuad, outQuad, inOutQuad, inCubic, outCubic, inOutCubic, outQuart, outExpo, inOutExpo, outBack, outElastic, outBounce, pop }`
-- `AM.E` — shorthand aliases `{ inQ, outQ, ioQ, inC, outC, ioC, outQt, ioQt, outX, outB, inB, pop }`
+- `AM.ease` — `{ linear, inQuad, outQuad, inOutQuad, inCubic, outCubic, inOutCubic, outQuart, outExpo, inOutExpo, outBack, outElastic, outBounce, pop, snap }`
+- `AM.E` — shorthand aliases `{ inQ, outQ, ioQ, inC, outC, ioC, outQt, ioQt, outX, outB, inB, pop, snap }`
 - `AM.spring(t, fOrOpts = 2, z = 0.4)` — damped spring `0 -> 1` (accepts `(t, fHz, zeta)` or `(t, { stiffness, damping, mass })`)
 - `AM.springV(t, f = 2, z = 0.4)` — closed-form spring derivative (velocity)
 - `AM.kick(t, t0 = 0, f = 3, z = 0.35)` — damped impulse wave (`0 -> peak -> 0`) starting at `t0`
@@ -51,6 +51,8 @@ Do NOT call `Math.random()`, `Date.now()`, `performance.now()`, `requestAnimatio
 - `AM.drawShockRing(ctx, cx, cy, t, t0, r0, r1, w0 = 16, dur = 0.4, color = "#FF5A4E")`
 - `AM.drawShapeWipe(ctx, t, tStart, dur = 0.65, colors?, originX = 540, originY = 660, W = 1080, H = 1920)`
 - `AM.drawElectricBolt(ctx, x1, y1, x2, y2, segments, jitterAmp, seed, color, width)`
+- `AM.drawOpticalGlow(ctx, x, y, radius, colorHex = "#FF8800", intensity = 1.0)` — 3-layer additive (`lighter`) optical bloom orb (wide atmospheric halo + saturated mid bloom + white-hot core)
+- `AM.drawBloomStroke(ctx, drawPathFn, opts?)` — 3-pass additive (`lighter`) glowing stroke (`{ color, coreColor, lineWidth, glowRadius, intensity, lineCap, lineJoin }`)
 - `AM.drawGridBackdrop(ctx, t, accentColor, bgTop, bgBottom, W = 1080, H = 1920)`
 - `AM.drawCharacterRig(ctx, t, opts?)` — `{ x, y, scale, coatColor, coatShade, skinColor, hairColor, hairStyle, glasses, reactTime, reachTime, lean, expression, collarColor, leftSh, ... }`
 - `AM.drawTopHeader(ctx, scene, localTimeOrIdx, globalTime)` — **OPTIONAL** top bar (omit unless active skill wants header bar)
