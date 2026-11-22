@@ -674,7 +674,7 @@ pub async fn run_agent_turn(
         emit_step_ended_event(&target, step_finish, None, step_usage.as_ref());
 
         if matches!(active_profile, crate::tool::profiles::ToolProfile::Director { .. }) {
-            if step >= 1 {
+            if step >= 1 || !current_model_id.starts_with("mock-") {
                 super::direct_scene_remake::maybe_auto_scaffold_for_direct_filmstrip_remake(
                     session_id,
                     workspace_dir,

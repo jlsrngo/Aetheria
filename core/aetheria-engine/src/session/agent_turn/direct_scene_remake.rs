@@ -436,12 +436,12 @@ fn collect_scene_filmstrip_pass1_images(ws_root: &Path, scene_num: usize) -> Vec
         return collect_scene_pass1_images(ws_root, scene_num);
     }
 
-    let picked: Vec<&Value> = if matching.len() <= 5 {
+    let picked: Vec<&Value> = if matching.len() <= 6 {
         matching
     } else {
         let last = matching.len() - 1;
-        (0..5)
-            .map(|k| matching[(k * last) / 4])
+        (0..6)
+            .map(|k| matching[(k * last) / 5])
             .collect()
     };
 
@@ -1155,6 +1155,36 @@ async fn run_single_direct_scene(
                 probes_since_edit += 1;
             }
 
+            let cur_code_after_step = if step_modified || step_rendered {
+                tokio::fs::read_to_string(&script_path)
+                    .await
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+            let active_hazards = if !cur_code_after_step.is_empty() {
+                detect_scene_collision_hazards(&cur_code_after_step)
+            } else {
+                Vec::new()
+            };
+            let has_motion_warning = step_captions
+                .iter()
+                .any(|c| c.contains("MOTION FROZEN WARNING") || c.contains("MOTION JUMP / TELEPORT WARNING") || c.contains("MOTION ACTIVITY WARNING"));
+
+            // Fast early-exit for live filmstrip remakes once visual score is high AND zero runtime errors,
+            // zero code hazards, and zero motion freeze/jump warnings remain (saves 1 full LLM call per scene).
+            if shared.active_filmstrip
+                && !scene_model_id.starts_with("mock-")
+                && step_rendered
+                && latest_errs.is_empty()
+                && active_hazards.is_empty()
+                && !has_motion_warning
+                && ((renders_completed >= 2 && latest_score >= 0.76)
+                    || (renders_completed >= 1 && latest_score >= 0.84))
+            {
+                break;
+            }
+
             let mut nudge_opt = shared.switches.build_probe_budget_nudge(
                 has_written,
                 step_idx,
@@ -1179,6 +1209,12 @@ async fn run_single_direct_scene(
                 };
                 nudge_opt = if step_rendered && !latest_errs.is_empty() {
                     Some("RUNTIME JS ERRORS DETECTED — fix them immediately with `patch_scene_script` (or `write_scene_script`), then re-verify with `render_and_compare_scene`.".to_string())
+                } else if step_rendered && !active_hazards.is_empty() {
+                    Some(format!(
+                        "CRITICAL MOTION / CODE BUGS DETECTED IN `{}` (MUST FIX NOW VIA `patch_scene_script`):\n- {}",
+                        script_rel,
+                        active_hazards.join("\n- ")
+                    ))
                 } else if step_rendered
                     && latest_errs.is_empty()
                     && latest_score >= 0.78
@@ -1522,7 +1558,7 @@ pub(crate) async fn run_direct_per_scene_remake_with_switches(
             effective_switches.probe_steps = Some(1);
         }
         if !effective_switches.max_steps_explicit {
-            effective_switches.max_steps = if total_scenes >= 8 { 6 } else { 7 };
+            effective_switches.max_steps = 7;
         }
         if !effective_switches.cross_context_explicit {
             effective_switches.cross_context = CrossContextMode::Summary;

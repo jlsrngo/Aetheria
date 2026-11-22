@@ -37,10 +37,13 @@ UNIVERSAL PROCEDURAL CRAFT METHODOLOGY:
 
 FIVE UNIVERSAL ZERO-COLLISION & MOTION HYGIENE LAWS:
 1. DYNAMIC `measureText` FLOW LAYOUT: In any horizontal text row, marquee, or pill row, NEVER use a hardcoded fixed horizontal stride (`i * spacingX`). Always measure each item with `ctx.measureText(text).width` and advance `cursorX += itemWidth + gap` so words and pills never collide.
-2. MUTUAL-EXCLUSION PHASE & MORPH HANDOFFS: When an element morphs (shape -> letter) or a scene switches from Phase A to Phase B in the same screen region, smoothly fade/scale the outgoing element out (`1 - p`) as the incoming element enters (`p`) so two layers never crash on top of each other at full opacity. Never use an early `if (t < X) { ... return; }` mid-scene that deletes objects in 1 frame — keep persistent object tracks `(x, y, scale, alpha)` and interpolate continuously across phases!
-3. SMOOTH MONOTONIC MOTION, ENVELOPED OSCILLATIONS & REELS: Scrolling lists, carousels, and word wheels must advance continuously and monotonically from a single ordered list (e.g., `AM.drawWordWheel` or continuous offset `y = cy + (idx - activeFloat) * spacing`) — never swap text arrays mid-transition (`f < 0.5 ? a : b`) or jump backwards. Whenever you apply a windowed wave/sine oscillation `if (t >= t0 && t < t1)`, ALWAYS multiply its amplitude by a smooth window envelope `var env = Math.sin(AM.clamp((t - t0) / (t1 - t0), 0, 1) * Math.PI);` (`0` at `t0` and `t1`) so elements NEVER snap/jump in 1 frame at `t = t0`!
-4. SURFACE CONTRAST & LUMINANCE FIDELITY: Match the reference's actual surface brightness and gradient glow, and always invert inner ink/icon contrast on light vs dark cards/tiles so active or dark surfaces never appear empty.
-5. CLEAN BOUNDARY FRAMES & CROSS-SCENE CONTINUITY: Render a valid visual frame at both `t = 0` and `t = dur` matching `BOUNDARY CONTINUITY LOCK` (`OPENING FRAME local_t=0.00s` and `CLOSING FRAME local_t=dur`) so positions, scales, and backgrounds hand off seamlessly across cuts without 1-frame teleports.
+2. MUTUAL-EXCLUSION PHASE & MORPH HANDOFFS: When an element morphs (shape -> letter, or big capsule -> small capsule -> banner) or a scene switches from Phase A to Phase B, NEVER draw two disjoint static sizes in separate `if (t < X)` blocks without lerping `w`, `h`, `x`, `y` between them, and NEVER use an early `if (t < X) { ... return; }` mid-scene that deletes objects in 1 frame. Keep a SINGLE persistent object track `(cx, cy, w, h, radius, alpha)` and interpolate continuously with `AM.lerp`!
+3. SMOOTH MONOTONIC MOTION, PROGRESSIVE CURVE TRACING & ENVELOPED OSCILLATIONS:
+   - Whenever a helper accepts a `progress` / `traceProgress` / `p` parameter (e.g. a hopping arc or a dot tracing a capsule perimeter or tether curve), you MUST actually use `progress` inside the drawing loop (e.g. `var u = (step / 32) * progress;` or `ctx.setLineDash([perim * progress, perim]);`) so the curve/arc/outline grows progressively with the moving tip — NEVER draw a 100% static full-length wire/arc/pill at `t=0` and slide a dot on top of it!
+   - Whenever you apply a windowed wave/sine oscillation `if (t >= t0 && t < t1)`, ALWAYS multiply its amplitude by a smooth window envelope `var env = Math.sin(AM.clamp((t - t0) / (t1 - t0), 0, 1) * Math.PI);` (`0` at `t0` and `t1`) so elements NEVER snap/jump in 1 frame at `t = t0`!
+   - During any 'hold' phase where a card/pill/logo stays near center, keep subtle continuous floating/breathing drift alive (`cx + Math.sin(t * 2.2) * 5`, `cy + Math.cos(t * 1.7) * 4`, or gentle `AM.applyCamera` breathing) so the scene never freezes dead-still for 30+ frames.
+4. SOFT VOLUMETRIC CAUSTICS & SURFACE CONTRAST: Draw background light streaks/caustics/metaballs with `ctx.filter = 'blur(28px)'` (resetting `ctx.filter = 'none'`) or wide multi-stop radial gradients — NEVER draw unblurred sharp diagonal bars or hard concentric bullseye circles.
+5. CLEAN BOUNDARY FRAMES & STRICT SCENE SCOPE: Render a valid visual frame at both `t = 0` and `t = dur` matching `BOUNDARY CONTINUITY LOCK` (`OPENING FRAME local_t=0.00s` and `CLOSING FRAME local_t=dur`). Never re-animate an already-exited card from the previous scene at a different Y position, and never prematurely draw the next scene's hero logo/text unless it is visibly present in THIS scene's final filmstrip tile.
 
 OPTICAL MATERIAL & LIVING MOTION CRAFT:
 - **Zero dead static holds:** Never freeze on flat solid colors (`staticFramesPct` kills cinematic feel). Keep subtle continuous ambient radial glow/light-ray drift, gentle camera breathing (`AM.applyCamera`), or spring settling motion alive across `0..dur`, with crisp fast transitions (`AM.ease.snap` / `AM.spring`).
@@ -182,9 +185,10 @@ pub(crate) fn build_scene_hard_facts_prompt(
             width, height, fps, bpm_label, start, end, dur
         ),
         format!(
-            "IMPORTANT TIME MAPPING: The timestamp labels printed on `ref_scene_{:02}_beats.jpg` are GLOBAL seconds (`global_t`). Inside `AM.registerScene(\"{}\", function(ctx, t, dur, scene, AM))`, `t` is LOCAL seconds (`t = global_t - {:.3}`). For example, global {:.2}s = local t={:.2}s (early), global {:.2}s = local t={:.2}s (mid), global {:.2}s = local t={:.2}s (late).",
-            scene_num,
+            "IMPORTANT TIME MAPPING: Each 1/1 filmstrip tile is stamped `t=<local_t>s (<global_t>s) d<delta>` — the FIRST number `t=<local_t>s` (`0.00s .. {:.2}s`) is ALREADY your exact local `t` variable inside `AM.registerScene(\"{}\", function(ctx, t, dur, scene, AM))`! (Whereas `ref_scene_{:02}_beats.jpg` and comparison strips show global seconds `global_t = t + {:.3}`: global {:.2}s = local t={:.2}s early, global {:.2}s = local t={:.2}s mid, global {:.2}s = local t={:.2}s late).",
+            dur,
             scene_id,
+            scene_num,
             start,
             start + dur * 0.15,
             dur * 0.15,
@@ -677,7 +681,186 @@ pub(crate) fn detect_scene_collision_hazards(code: &str) -> Vec<String> {
         );
     }
 
+    // 4. Unused animation/progress parameter in a helper function (e.g. `function drawHoppingArc(..., progress, ...)` where `progress` is never used inside `{ ... }`)
+    for (fn_name, param_name) in find_unused_progress_params(code) {
+        hazards.push(format!(
+            "FROZEN ANIMATION BUG (Unused Progress Parameter): Helper `function {}(..., {}, ...)` accepts animation parameter `{}` but NEVER uses `{}` inside its body — causing the shape to freeze statically and then teleport! Use `{}` inside `{}` (e.g. `var u = (step / 32) * {};` or `ctx.setLineDash([len * {}, len]);`) so the stroke/arc animates continuously.",
+            fn_name, param_name, param_name, param_name, param_name, fn_name, param_name, param_name
+        ));
+    }
+
+    // 5. Unused time-progress local variable (e.g. `var traceProgress = ...` computed from `t` and never read anywhere else)
+    for var_name in find_unused_progress_vars(code) {
+        hazards.push(format!(
+            "FROZEN ANIMATION BUG (Unused Progress Variable): Variable `{}` is computed from time `t` but NEVER read in any drawing call — your shape is drawn 100% static instead of animating! Pass or apply `{}` to animate position, scale, arc span, or `ctx.setLineDash([perim * {}, perim])`.",
+            var_name, var_name, var_name
+        ));
+    }
+
+    // 6. Duplicate function declarations in the same script (from sloppy partial overwrites)
+    for dup_fn in find_duplicate_function_declarations(code) {
+        hazards.push(format!(
+            "DUPLICATE CODE HAZARD: `function {}` is declared more than once in this script (dead overwritten code) — remove the duplicate declaration so only one clean definition exists.",
+            dup_fn
+        ));
+    }
+
     hazards
+}
+
+fn is_ident_char(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b == b'$'
+}
+
+fn count_ident_occurrences(haystack: &str, ident: &str) -> usize {
+    if ident.is_empty() {
+        return 0;
+    }
+    let hb = haystack.as_bytes();
+    let ib = ident.as_bytes();
+    if ib.len() > hb.len() {
+        return 0;
+    }
+    let mut count = 0usize;
+    let mut i = 0usize;
+    while i + ib.len() <= hb.len() {
+        if &hb[i..i + ib.len()] == ib {
+            let left_ok = i == 0 || !is_ident_char(hb[i - 1]);
+            let right_ok = i + ib.len() == hb.len() || !is_ident_char(hb[i + ib.len()]);
+            if left_ok && right_ok {
+                count += 1;
+                i += ib.len();
+                continue;
+            }
+        }
+        i += 1;
+    }
+    count
+}
+
+fn find_unused_progress_params(code: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut cursor = code;
+    while let Some(idx) = cursor.find("function ") {
+        let after_kw = &cursor[idx + "function ".len()..];
+        let Some(open_p) = after_kw.find('(') else {
+            break;
+        };
+        let fn_name = after_kw[..open_p].trim();
+        let after_open = &after_kw[open_p + 1..];
+        let Some(close_p) = after_open.find(')') else {
+            break;
+        };
+        let params_str = &after_open[..close_p];
+        let after_close = &after_open[close_p + 1..];
+        let Some(open_b) = after_close.find('{') else {
+            cursor = after_close;
+            continue;
+        };
+        let body_start = &after_close[open_b + 1..];
+        let mut depth = 1i32;
+        let mut end_offset = None;
+        for (bi, ch) in body_start.char_indices() {
+            if ch == '{' {
+                depth += 1;
+            } else if ch == '}' {
+                depth -= 1;
+                if depth == 0 {
+                    end_offset = Some(bi);
+                    break;
+                }
+            }
+        }
+        let Some(body_end) = end_offset else {
+            break;
+        };
+        let body = &body_start[..body_end];
+        if !fn_name.is_empty() && fn_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            for raw_p in params_str.split(',') {
+                let p = raw_p.trim();
+                let lower = p.to_ascii_lowercase();
+                let is_progress_param = lower == "progress"
+                    || lower == "prog"
+                    || lower.ends_with("progress")
+                    || lower.ends_with("prog");
+                if is_progress_param && count_ident_occurrences(body, p) == 0 {
+                    out.push((fn_name.to_string(), p.to_string()));
+                }
+            }
+        }
+        cursor = &body_start[body_end + 1..];
+    }
+    out
+}
+
+fn find_unused_progress_vars(code: &str) -> Vec<String> {
+    let mut candidates = Vec::new();
+    for stmt in code.split(['\n', ';']) {
+        let trimmed = stmt.trim();
+        for kw in ["var ", "let ", "const "] {
+            if let Some(rest) = trimmed.strip_prefix(kw) {
+                let name: String = rest
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                    .collect();
+                let lower = name.to_ascii_lowercase();
+                if (lower.ends_with("progress") || lower == "traceprog" || lower == "arcp")
+                    && !candidates.contains(&name)
+                {
+                    candidates.push(name);
+                }
+            }
+        }
+    }
+    let mut unused = Vec::new();
+    for name in candidates {
+        // Count how many statements read `name` on the right-hand side or inside function args
+        let mut rhs_reads = 0usize;
+        for stmt in code.split(['\n', ';']) {
+            if count_ident_occurrences(stmt, &name) == 0 {
+                continue;
+            }
+            let t = stmt.trim();
+            // Skip pure declaration `var traceProgress = 0` or pure assignment `traceProgress = ...` where `name` only appears on LHS
+            let is_decl_lhs = ["var ", "let ", "const "]
+                .iter()
+                .any(|kw| t.starts_with(&format!("{}{}", kw, name)));
+            let is_assign_lhs = t.starts_with(&name)
+                && t[name.len()..].trim_start().starts_with('=')
+                && !t[name.len()..].trim_start().starts_with("==");
+            if is_decl_lhs || is_assign_lhs {
+                if let Some((_, rhs)) = t.split_once('=') {
+                    if count_ident_occurrences(rhs, &name) > 0 {
+                        rhs_reads += 1;
+                    }
+                }
+            } else {
+                rhs_reads += 1;
+            }
+        }
+        if rhs_reads == 0 {
+            unused.push(name);
+        }
+    }
+    unused
+}
+
+fn find_duplicate_function_declarations(code: &str) -> Vec<String> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut dups = Vec::new();
+    for line in code.lines() {
+        let t = line.trim();
+        if let Some(rest) = t.strip_prefix("function ") {
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect();
+            if !name.is_empty() && !seen.insert(name.clone()) && !dups.contains(&name) {
+                dups.push(name);
+            }
+        }
+    }
+    dups
 }
 
 #[cfg(test)]
@@ -824,6 +1007,15 @@ mod tests {
         let bad_wheel = "const stateRows = [['A','B']]; const word = f < 0.5 ? word0 : word1; ctx.fillText(word, cx, y);";
         let h2 = detect_scene_collision_hazards(bad_wheel);
         assert!(h2.iter().any(|s| s.contains("Non-Monotonic Scrolling List")));
+
+        let bad_arc = "function drawHoppingArc(ctx, x1, x2, progress) { ctx.moveTo(x1, 0); ctx.lineTo(x2, 0); }\nvar traceProgress = 0; traceProgress = AM.clamp(t / 0.75, 0, 1); ctx.stroke();";
+        let h3 = detect_scene_collision_hazards(bad_arc);
+        assert!(h3.iter().any(|s| s.contains("Unused Progress Parameter") && s.contains("drawHoppingArc")));
+        assert!(h3.iter().any(|s| s.contains("Unused Progress Variable") && s.contains("traceProgress")));
+
+        let dup_fn = "function draw3DStar(cx, cy) { ctx.fill(); }\nfunction draw3DStar(cx, cy) { ctx.stroke(); }";
+        let h4 = detect_scene_collision_hazards(dup_fn);
+        assert!(h4.iter().any(|s| s.contains("DUPLICATE CODE HAZARD") && s.contains("draw3DStar")));
     }
 
     #[test]
