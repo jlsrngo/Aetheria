@@ -123,3 +123,56 @@ Meskipun `Exp R5` mencatat `compositeScore = 0.6611`, inspeksi visual rapat menu
 - **Exp F2 Sc1–4 (`Opsi A raw 1/1`):** [exp_F2_probe4_raw.mp4](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_F2_probe4_raw/exp_F2_probe4_raw.mp4) · [compare_strip.jpg](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_F2_probe4_raw/compare_strip.jpg)
 - **Exp F3 Full 13 Winner (`Opsi A Paralel 3-Scene raw 1/1`, `0.7174`):** [exp_F3_full13_winner.mp4](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_F3_full13_winner/exp_F3_full13_winner.mp4) · [strip_scene1_dense.jpg](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_F3_full13_winner/eval/strip_scene1_dense.jpg) · [strip_scene2_dense.jpg](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_F3_full13_winner/eval/strip_scene2_dense.jpg) · [strip_10scenes.jpg](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_F3_full13_winner/eval/strip_10scenes.jpg)
 - **Exp GEN2 `16:9` Anti-Overfit (Default Produksi, `0.7870`, 8/8 scene):** [exp_GEN2_16x9.mp4](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_GEN2_16x9/exp_GEN2_16x9.mp4) · [compare_strip.jpg](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_GEN2_16x9/compare_strip.jpg) · [comparison_strip.jpg](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_GEN2_16x9/previews/comparison_strip.jpg)
+
+---
+
+## 5. Fase 3 — Audit Logika Ganda ("Double"), Eliminasi Lompatan Gerak 380px ("Loncat-Loncat"), & Pemulihan Ketajaman Visual (`exp_F4_smooth_visual_winner`)
+
+Walaupun `Exp F3_full13_winner` mencetak skor gabungan tinggi, pengamatan langsung pada video hasil render memperlihatkan dua cacat nyata: **(1) gerakan masih terasa "loncat-loncat" (teleportasi posisi antar-scene & patah 1-frame di dalam scene)**, dan **(2) detail visual sub-beat awal/akhir di beberapa scene menurun ketajamannya**. Audit kode menyeluruh atas perubahan Fase 2 mengungkap **5 bug duplikasi ("double") dan fragmentasi** yang saling bertabrakan:
+
+### A. 5 Akar Masalah yang Ditemukan dalam Audit Kode
+
+1. **Bug 1 — "Double" Strip Perbandingan & Salah Pasang Timestamp di `render_and_compare_scene` (`direct_scene_tools.rs` + `reference_compare.rs` + `ref_compare.py`):**
+   - Saat `use_filmstrip = true`, `render_and_compare_scene` mengganti daftar `default_scene_ts` (3–5 timestamp keyframe `.jpg` yang benar-benar ada di disk) menjadi **8 timestamp rata (`0..7`)**.
+   - Padahal `pair_preview_with_reference` hanya mencocokkan ke 3–5 file JPEG statis yang tersimpan di `ref/extracted/frames/`. Akibatnya, dalam `scene_XX_compare_6beats.jpg` (`Row 1 REF | Row 2 RENDER | Row 3 DIFF`), **Row 1 mengulang gambar referensi statis yang sama 2–3 kali berturut-turut** sementara Row 2 bergerak, lalu diagnostik `SCALE/POSITION MISMATCH` justru memarahi frame transisi yang sedang bergerak karena tidak sama dengan pose statis hero! Itu memaksa LLM membuat objek **meloncat cepat ke pose tengah**.
+   - Setelah itu, `render_and_compare_scene` masih memanggil subprocess Python **kedua** (`build_visual_ref_vs_preview_motion_strip`) dan mengirim **2 strip sekaligus** yang saling bertentangan ke model di setiap langkah render.
+   - **Perbaikan:** `ref_compare.py` kini menerima `refVideoPath` dan `videoTimestamp` hasil pemetaan proporsional `map_film_ts_to_reference_video_ts` (`reference_compare.rs`), sehingga ketika timestamp render berada di antara keyframe statis (`|ts - ref_ts| > 0.04s`), `ref_compare.py` langsung men-decode frame video referensi pada timestamp yang **100% presisi** (sekaligus bekerja dinamis untuk video referensi lain maupun proyek dengan durasi scene adaptif/narasi voiceover). Diagnostik `motionDiagnostics` (`frozenIntervals` + `jumpIntervals` untuk mendeteksi loncatan 1-frame) dihitung langsung di dalam `ref_compare.py`, dan panggilan subprocess Python kedua yang duplikat di `render_and_compare_scene` dihapus.
+
+2. **Bug 2 — Hilangnya 2 Keyframe Full-Res Sub-Beat (`_q1`/`_start` & `_q3`/`_end`) serta Duplikasi Prompt di Pass 1 (`direct_scene_remake.rs` + `direct_scene_prompt.rs`):**
+   - `collect_scene_filmstrip_pass1_images` sebelumnya membuang keyframe full-res awal (`_q1`/`_start`) dan akhir (`_q3`/`_end`), hanya menyisakan 1 frame full-res (`ref_scene_XX.jpg`) ditambah hingga 8 lembar filmstrip versi `visionRelPath` yang sudah diperkecil (`160×284` per tile). Akibatnya sub-beat awal dan akhir scene hanya terlihat pada resolusi thumbnail kecil.
+   - Di saat yang sama, `direct_scene_remake.rs` menambahkan paragraf `1/1 FILMSTRIP PASS-1 MODE` di akhir prompt yang bertabrakan dengan teks `build_scene_hard_facts_prompt` yang masih menyebut `ref_scene_XX_beats.jpg`.
+   - **Perbaikan:** `collect_scene_filmstrip_pass1_images` kini melampirkan hingga **5 lembar filmstrip `relPath` resolusi penuh (`240×426` / `384×216` per tile)** **ditambah ketiga keyframe full-res (`early`, `mid`, `late`)**, dan instruksi Pass 1 disatukan bersih di `build_scene_hard_facts_prompt` (termasuk larangan mengganti teks judul asli video referensi dengan kata `"Aetheria"` dari brief).
+
+3. **Bug 3 — Over-Fragmentasi Cut pada Pan Kamera Berlatar Sama di `ref_temporal_cuts.py` (Penyebab Teleportasi 380px di `16.80s`, `18.00s`, `20.67s`):**
+   - Di `ref_temporal_cuts.py`, variabel `is_dark_layout_shift` (`edge_overlap < 0.14 and fg_iou < 0.14`) lupa memeriksa apakah frame benar-benar gelap (`max(med_a, med_b) < 75.0`).
+   - Akibatnya, pada sekuens latar krem terang (`14.47s..22.37s`, `#FDFAF6`, `luma ~ 250`: *"Build structure" → "Create rhythm" → "Shape meaning"*), translasi kapsul oranye di atas kanvas krem yang sama terpotong menjadi **4 scene terpisah (Scene 7, 8, 9, 10)**.
+   - Karena dipotong di tengah gerakan kamera dan dikerjakan paralel oleh 3 task berbeda, pemeriksaan `script/scene7.js..scene10.js` pada `Exp F3` membuktikan kapsul oranye **meloncat 380px dalam 1 frame** di setiap batas cut (`16.80s`: `cy 640 → 260`; `18.00s`: `cy 220 → 600`; `20.67s`: `cy 240 → 616`).
+   - **Perbaikan:** Membatasi `is_dark_layout_shift` hanya pada latar gelap (`max(med_a, med_b) < 75.0`) dan menolak structural cut palsu ketika kedua frame berbagi clean-plate terang yang sama (`min(med_a, med_b) >= 90.0`, `|med_a - med_b| < 16.0`, `win_delta < 0.14`). Hasilnya: `labs-showreel-remake.mp4` (`16:9`) tetap menghasilkan tepat **8 scene**, sedangkan `ref_original.mp4` (`9:16`) menggabungkan sekuens kapsul krem `14.467s..22.367s` menjadi **1 scene kontinyu (`Scene 07`, 10 scene total)**.
+
+4. **Bug 4 — Tidak Adanya Kunci Posisi Frame Pertama (`t = 0`) & Frame Terakhir (`t = dur`) Lintas-Scene (`ref_motion_clues.py` + `direct_scene_prompt.rs`):**
+   - Menambahkan ekstraksi `boundaryAnchors` (`entry` pada `start + 0.02s` dan `exit` pada `end - 0.03s`: `bgHex`, `fgHex`, `center`, `box`) di `ref_motion_clues.py`, menginjeksikannya sebagai `BOUNDARY CONTINUITY LOCK (OPENING | CLOSING)` di `build_scene_hard_facts_prompt`, dan memastikan `render_and_compare_scene` selalu merender frame batas awal (`scene_start + 0.02s`) serta batas akhir (`scene_start + scene_dur - 0.03s`).
+
+5. **Bug 5 — Patah Gerak 1-Frame di Dalam Scene Akibat Osilasi Tanpa Amplop (`if (t >= t0) Math.sin(i * phase - waveT)`):**
+   - Pada `Exp F3` `scene6.js`, blok `if (t >= 2.7 && t < 4.2) { dy = baseDotY + 38 * Math.sin(i * 0.9 - waveT); }` membuat 5 titik meloncat `30–37px` dalam 1 frame tepat pada `t = 2.70s` karena `Math.sin(i * 0.9) != 0` saat `waveT = 0`.
+   - **Perbaikan:** Menambahkan aturan **Smooth Window Envelope** (`var env = Math.sin(AM.clamp((t - t0) / (t1 - t0), 0, 1) * Math.PI);`) di `DIRECT_SCENE_SYSTEM_PROMPT` serta detektor statis `MOTION JUMP HAZARD (Un-Enveloped Wave Oscillation)` di `detect_scene_collision_hazards` (`direct_scene_prompt.rs`).
+
+### B. Hasil Verifikasi `exp_F4_smooth_visual_winner` (`9:16`, 10 Scene Utuh, 0 Stub)
+
+| Metrik | `Exp F3_full13_winner` (Sebelum Audit Fase 3) | **`Exp F4_smooth_visual_winner` (Setelah Fix Fase 3)** | Manual `AG5` (Acuan Craft) | `REF` (`ref_original.mp4`) | Perubahan `F3 → F4` |
+|---|---:|---:|---:|---:|---|
+| **Scene Selesai (Tanpa Stub)** | 12/13 (1 stub rollback) | **10/10 (0 stub, 100% utuh)** | 8/8 | 10/10 | **0 stub (`scene1..10.js` = `6.8–20.5 KB`)** |
+| **Visual Score** | 0.5789* / 0.6849 | **0.6814** | 0.6317 | 1.0000 | **Melampaui `AG5` (`+0.0497` vs `AG5`)** |
+| **Mean SSIM** | 0.6254* / 0.7885 | **0.7671** | 0.6978 | 1.0000 | **`+0.0693` di atas `AG5`** |
+| **Mean Color Similarity** | 0.8190* / 0.8920 | **0.8758** | 0.8482 | 1.0000 | **`+0.0276` di atas `AG5`** |
+| **Mean Edge Overlap** | 0.3027* / 0.3592 | **0.3328** | 0.2759 | 1.0000 | **`+0.0569` di atas `AG5`** |
+| **Composite Score** | 0.6596* / 0.7174 | **0.6784** | 0.7239 | 1.0000 | Konsisten tinggi dengan 0 stub |
+| **Waktu Eksekusi Total** | 1426.5s (`23.8m`) | **801.0s (`13.3m`)** | — | — | **43,8% lebih cepat (`-625.5 detik`)** |
+| **Delta Lompatan `t = 16.80s`** | `8.31` (loncat 380px!) | **`1.32` (mulus)** | `1.45` | `2.53` | **Teleportasi 380px hilang total** |
+| **Delta Lompatan `t = 18.00s`** | `13.87` (loncat 380px!) | **`0.07` (mulus)** | `1.12` | `2.21` | **Teleportasi 380px hilang total** |
+| **Delta Gerak Scene 07 (`14.47..22.37s`)** | `1.24` (terpotong 4 scene) | **`1.93` (1 scene kontinyu 586 baris)** | `1.76` | **`1.83`** | **Kurva kecepatan identik dengan `REF` (`1.93` vs `1.83`)** |
+
+\* Nilai `Exp F3` kiri adalah evaluasi ulang 19-beat ketat setelah `scene12.js` terkena rollback stub; pada `Exp F4`, seluruh 10/10 scene terisi penuh termasuk Scene 9 (*Thought in motion*, `11.5 KB`) dan Scene 10 (*Logo*, `7.4 KB`), dengan waktu build + remake turun dari `23.8 menit` menjadi **`13.3 menit`** berkat penghapusan subprocess Python ganda di `render_and_compare_scene`.
+
+### C. Tautan Artefak Visual & MP4 Fase 3
+
+- **Exp F4 Smooth Visual Winner (`10/10` scene, `801s`, 0 teleportasi lintas-scene):** [exp_F4_smooth_visual_winner.mp4](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_F4_smooth_visual_winner/exp_F4_smooth_visual_winner.mp4) · [strip_10scenes.jpg](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_F4_smooth_visual_winner/eval/strip_10scenes.jpg) · [strip_scene1_dense.jpg](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_F4_smooth_visual_winner/eval/strip_scene1_dense.jpg) · [strip_scene2_dense.jpg](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_F4_smooth_visual_winner/eval/strip_scene2_dense.jpg) · [scene7.js](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_F4_smooth_visual_winner/script/scene7.js)
