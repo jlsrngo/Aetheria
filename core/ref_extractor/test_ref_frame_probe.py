@@ -65,6 +65,44 @@ class RefFrameProbeTests(unittest.TestCase):
             self.assertFalse(bad["ok"])
             self.assertTrue(bad.get("error"))
 
+    def test_motion_compare_strip_detects_frozen_render_vs_moving_ref(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="p9_mstrip_") as tmp:
+            td = Path(tmp)
+            mp4 = td / "moving.mp4"
+            w = cv2.VideoWriter(str(mp4), cv2.VideoWriter_fourcc(*"mp4v"), 30.0, (180, 320))
+            self.assertTrue(w.isOpened())
+            pair_items_frozen = []
+            pair_items_moving = []
+            for i in range(18):
+                fr = np.full((320, 180, 3), 12, dtype=np.uint8)
+                x = 20 + i * 7
+                cv2.rectangle(fr, (min(140, x), 90), (min(175, x + 36), 210), (30, 160, 250), -1)
+                w.write(fr)
+                if i % 3 == 0:
+                    p_mv = td / f"mv_{i}.jpg"
+                    p_fz = td / f"fz_{i}.jpg"
+                    cv2.imwrite(str(p_mv), fr)
+                    if i == 0:
+                        fz = fr.copy()
+                    cv2.imwrite(str(p_fz), fz)
+                    t = round(i / 30.0, 3)
+                    pair_items_moving.append(f"{t}|{p_mv}")
+                    pair_items_frozen.append(f"{t}|{p_fz}")
+            w.release()
+
+            res_fz = ref_frame_probe.build_motion_compare_strip(
+                mp4, ";".join(pair_items_frozen), save_path=td / "strip_fz.jpg"
+            )
+            self.assertTrue(res_fz["ok"], res_fz)
+            self.assertIsNotNone(res_fz["motionWarning"])
+            self.assertGreaterEqual(res_fz["candStaticPct"], 80.0)
+
+            res_mv = ref_frame_probe.build_motion_compare_strip(
+                mp4, ";".join(pair_items_moving), save_path=td / "strip_mv.jpg"
+            )
+            self.assertTrue(res_mv["ok"], res_mv)
+            self.assertIsNone(res_mv["motionWarning"])
+
 
 if __name__ == "__main__":
     unittest.main()

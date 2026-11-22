@@ -331,6 +331,114 @@ def build_side_by_side_preview_strip(
     }
 
 
+def build_motion_compare_strip(
+    video_path: Path,
+    pairs_spec: str,
+    save_path: Optional[Path] = None,
+    max_edge: int = 1400,
+) -> Dict[str, Any]:
+    """Builds a 2-row 10-frame motion comparison filmstrip (`REF` vs `RND`) with step deltas and static%."""
+    entries: List[Tuple[float, Path]] = []
+    for item in (pairs_spec or "").split(";"):
+        item = item.strip()
+        if not item or "|" not in item:
+            continue
+        ts_s, p_s = item.split("|", 1)
+        try:
+            entries.append((float(ts_s), Path(p_s)))
+        except Exception:
+            continue
+    entries.sort(key=lambda x: x[0])
+    entries = entries[:10]
+    if not entries:
+        return {"ok": False, "error": "No valid timestamp|path pairs provided for motion strip"}
+
+    decoded: List[Tuple[float, np.ndarray, np.ndarray]] = []
+    for ts, prv_path in entries:
+        ref_fr, _ = _read_frame_at_sec(video_path, ts)
+        prv_fr = cv2.imread(str(prv_path)) if prv_path.is_file() else None
+        if ref_fr is None or prv_fr is None:
+            continue
+        decoded.append((ts, ref_fr, prv_fr))
+
+    if len(decoded) < 2:
+        return {"ok": False, "error": "Need at least 2 valid frames for motion comparison strip"}
+
+    n = len(decoded)
+    h, w = decoded[0][1].shape[:2]
+    tw = max(96, min(180 if h >= w else 220, max_edge // max(1, n)))
+    th = max(84, min(280, int(round(tw * (h / float(max(1, w)))))))
+
+    ref_tiles: List[np.ndarray] = []
+    rnd_tiles: List[np.ndarray] = []
+    ref_step_deltas: List[float] = []
+    rnd_step_deltas: List[float] = []
+    prev_rg: Optional[np.ndarray] = None
+    prev_pg: Optional[np.ndarray] = None
+
+    for ts, ref_fr, prv_fr in decoded:
+        rg = cv2.cvtColor(cv2.resize(ref_fr, (160, 160), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2GRAY).astype(np.float32)
+        pg = cv2.cvtColor(cv2.resize(prv_fr, (160, 160), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2GRAY).astype(np.float32)
+        rd = float(np.mean(np.abs(rg - prev_rg))) if prev_rg is not None else 0.0
+        pd = float(np.mean(np.abs(pg - prev_pg))) if prev_pg is not None else 0.0
+        if prev_rg is not None:
+            ref_step_deltas.append(rd)
+            rnd_step_deltas.append(pd)
+        prev_rg = rg
+        prev_pg = pg
+
+        r_im = cv2.resize(ref_fr, (tw, th), interpolation=cv2.INTER_AREA)
+        p_im = cv2.resize(prv_fr, (tw, th), interpolation=cv2.INTER_AREA)
+        r_lbl = f"REF {ts:.2f}s d{rd:.1f}" if len(ref_step_deltas) > 0 else f"REF {ts:.2f}s"
+        p_lbl = f"RND {ts:.2f}s d{pd:.1f}" if len(rnd_step_deltas) > 0 else f"RND {ts:.2f}s"
+        p_col = (120, 140, 255) if (len(rnd_step_deltas) > 0 and rd >= 1.2 and pd < 0.35) else (120, 210, 255)
+        cv2.rectangle(r_im, (0, 0), (tw, 20), (8, 8, 12), -1)
+        cv2.putText(r_im, r_lbl[:20], (3, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (120, 255, 160), 1, cv2.LINE_AA)
+        cv2.rectangle(p_im, (0, 0), (tw, 20), (8, 8, 12), -1)
+        cv2.putText(p_im, p_lbl[:20], (3, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.36, p_col, 1, cv2.LINE_AA)
+        ref_tiles.append(r_im)
+        rnd_tiles.append(p_im)
+
+    grid = np.vstack([np.hstack(ref_tiles), np.hstack(rnd_tiles)])
+    ok_enc, buf = cv2.imencode(".jpg", grid, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
+    if not ok_enc:
+        return {"ok": False, "error": "Failed encoding motion comparison strip"}
+    jpeg_bytes = buf.tobytes()
+    if save_path is not None:
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        save_path.write_bytes(jpeg_bytes)
+
+    r_arr = np.asarray(ref_step_deltas if ref_step_deltas else [0.0], dtype=np.float32)
+    c_arr = np.asarray(rnd_step_deltas if rnd_step_deltas else [0.0], dtype=np.float32)
+    ref_mean = round(float(np.mean(r_arr)), 3)
+    cand_mean = round(float(np.mean(c_arr)), 3)
+    ref_static_pct = round(float(np.mean(r_arr < 0.8) * 100.0), 1)
+    cand_static_pct = round(float(np.mean(c_arr < 0.8) * 100.0), 1)
+
+    motion_warning: Optional[str] = None
+    if len(decoded) >= 4 and (
+        cand_static_pct > ref_static_pct + 25.0
+        or (ref_mean >= 0.8 and cand_mean < ref_mean * 0.45)
+    ):
+        motion_warning = (
+            f"MOTION FROZEN WARNING: Render appears overly static vs REF "
+            f"(candStatic={cand_static_pct:.1f}% vs refStatic={ref_static_pct:.1f}%, "
+            f"candDelta={cand_mean:.2f} vs refDelta={ref_mean:.2f}). "
+            f"Animate transforms continuously matching REF motion strip!"
+        )
+
+    return {
+        "ok": True,
+        "pairsCount": len(decoded),
+        "refMeanDelta": ref_mean,
+        "candMeanDelta": cand_mean,
+        "refStaticPct": ref_static_pct,
+        "candStaticPct": cand_static_pct,
+        "motionWarning": motion_warning,
+        "dataUrl": "data:image/jpeg;base64," + base64.b64encode(jpeg_bytes).decode("ascii"),
+    }
+
+
 def _parse_box(raw: Optional[str]) -> Optional[Tuple[int, int, int, int]]:
     if not raw or not raw.strip():
         return None
@@ -342,7 +450,7 @@ def _parse_box(raw: Optional[str]) -> Optional[Tuple[int, int, int, int]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="On-demand reference frame & pixel probe")
-    parser.add_argument("mode", choices=["inspect", "sample", "compare-strip"])
+    parser.add_argument("mode", choices=["inspect", "sample", "compare-strip", "motion-compare-strip"])
     parser.add_argument("--video", required=True, type=str)
     parser.add_argument("--t", required=False, default=0.0, type=float)
     parser.add_argument("--end-t", type=float, default=None, help="Optional end timestamp for multi-frame motion micro-strip")
@@ -356,6 +464,12 @@ def main() -> None:
         box = _parse_box(args.box)
         if args.mode == "compare-strip":
             res = build_side_by_side_preview_strip(
+                Path(args.video),
+                args.pairs or "",
+                save_path=Path(args.out) if args.out else None,
+            )
+        elif args.mode == "motion-compare-strip":
+            res = build_motion_compare_strip(
                 Path(args.video),
                 args.pairs or "",
                 save_path=Path(args.out) if args.out else None,

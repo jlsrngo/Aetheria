@@ -1354,6 +1354,59 @@ def _classify_motion_cadence(energy: float) -> str:
     return "minimal-hold"
 
 
+def select_best_hero_frame(
+    start_sec: float,
+    end_sec: float,
+    fps: float,
+    total_frames: int,
+    frame_lookup: Any,
+    frame_diffs: Optional[List[float]] = None,
+) -> Tuple[float, Optional[np.ndarray]]:
+    """Selects the cleanest, sharpest settled interior frame for `HERO` / scene analysis."""
+    dur = max(0.05, float(end_sec) - float(start_sec))
+    fallback_ts = round(float(start_sec) + dur * 0.50, 3)
+    fallback_fr = frame_lookup(fallback_ts)
+    if dur < 0.25:
+        return fallback_ts, fallback_fr
+
+    ratios = [0.22, 0.34, 0.44, 0.52, 0.62, 0.72, 0.82]
+    best_ts = fallback_ts
+    best_fr = fallback_fr
+    best_score = -1.0
+    safe_fps = max(1.0, float(fps))
+    safe_total = max(1, int(total_frames))
+
+    for r in ratios:
+        cand_ts = round(float(start_sec) + dur * r, 3)
+        fr = frame_lookup(cand_ts)
+        if fr is None or fr.size == 0:
+            continue
+        sm = cv2.resize(fr, (160, 160), interpolation=cv2.INTER_AREA)
+        gray = cv2.cvtColor(sm, cv2.COLOR_BGR2GRAY)
+        mean_luma = float(np.mean(gray))
+        contrast = float(np.percentile(gray, 95) - np.percentile(gray, 5))
+        edges = cv2.Canny(cv2.GaussianBlur(gray, (3, 3), 0), 30, 100) > 0
+        edge_density = float(np.mean(edges))
+
+        f_idx = max(0, min(safe_total - 1, int(round(cand_ts * safe_fps))))
+        local_diff = 0.0
+        if frame_diffs and 0 <= f_idx < len(frame_diffs):
+            local_diff = float(frame_diffs[f_idx])
+
+        score = (edge_density + 0.002) * max(8.0, contrast) / (1.0 + local_diff / 18.0)
+        score *= 1.0 - 0.15 * abs(r - 0.52)
+        if mean_luma < 8.0 and contrast < 28.0:
+            score *= 0.05
+        elif mean_luma > 242.0 and edge_density < 0.012:
+            score *= 0.08
+        if score > best_score:
+            best_score = score
+            best_ts = cand_ts
+            best_fr = fr
+
+    return best_ts, best_fr
+
+
 def extract_reference_blueprint(
     video_path_str: str,
     out_dir_str: Optional[str] = None,
@@ -1530,15 +1583,21 @@ def extract_reference_blueprint(
         motion_energy = round(max(span_delta, float(np.mean(scene_deltas)) if scene_deltas else 0.04), 4)
         cadence = _classify_motion_cadence(motion_energy)
 
+        ts_hero, fr_hero = select_best_hero_frame(
+            start, end, fps, total_frames, _frame_at, temporal.get("frameDiffs")
+        )
+        if fr_hero is None:
+            ts_hero, fr_hero = ts_mid, fr_mid
+
         scene_kf_name = f"ref_scene_{i + 1:02d}.jpg"
         scene_kf_path = frames_dir / scene_kf_name
-        layout_info = analyze_frame_layout(fr_mid, ocr_engine)
-        if fr_mid is not None:
-            cv2.imwrite(str(scene_kf_path), fr_mid, [cv2.IMWRITE_JPEG_QUALITY, 94])
-            _write_vision_copy(fr_mid, vision_dir, scene_kf_name, max_edge=540, quality=78)
+        layout_info = analyze_frame_layout(fr_hero, ocr_engine)
+        if fr_hero is not None:
+            cv2.imwrite(str(scene_kf_path), fr_hero, [cv2.IMWRITE_JPEG_QUALITY, 94])
+            _write_vision_copy(fr_hero, vision_dir, scene_kf_name, max_edge=540, quality=78)
 
-        # Also save start/q1/mid/q3/end sub-keyframes and a high-res per-scene beat storyboard strip
-        sub_keyframes = [{"t": ts_mid, "path": f"frames/{scene_kf_name}"}]
+        # Also save start/q1/hero/q3/end sub-keyframes and a high-res per-scene beat storyboard strip
+        sub_keyframes = [{"t": ts_hero, "path": f"frames/{scene_kf_name}"}]
         if fr_start is not None and dur >= 0.9:
             start_name = f"ref_scene_{i + 1:02d}_start.jpg"
             cv2.imwrite(str(frames_dir / start_name), fr_start, [cv2.IMWRITE_JPEG_QUALITY, 88])
@@ -1591,8 +1650,8 @@ def extract_reference_blueprint(
         beats_strip_rel = f"frames/{beats_strip_name}" if beats_strip_name else None
         card_name = build_scene_composite_card(
             _frame_at,
-            fr_mid,
-            ts_mid,
+            fr_hero,
+            ts_hero,
             beat_strip_ts,
             width,
             height,
@@ -1600,12 +1659,12 @@ def extract_reference_blueprint(
         )
         card_rel = f"frames/{card_name}" if card_name else None
 
-        grid_tilt_deg = detect_grid_tilt_deg(fr_mid)
-        contrast_tiles = detect_bimodal_contrast_tiles(fr_mid)
+        grid_tilt_deg = detect_grid_tilt_deg(fr_hero)
+        contrast_tiles = detect_bimodal_contrast_tiles(fr_hero)
         if grid_tilt_deg is not None:
             layout_info["gridTiltDeg"] = grid_tilt_deg
         if contrast_tiles is not None:
-            tile_grid = measure_contrast_tile_grid(fr_mid, grid_tilt_deg)
+            tile_grid = measure_contrast_tile_grid(fr_hero, grid_tilt_deg)
             if tile_grid is not None:
                 contrast_tiles["grid"] = tile_grid
             layout_info["contrastTiles"] = contrast_tiles
@@ -1614,7 +1673,7 @@ def extract_reference_blueprint(
         if contrast_tiles is not None:
             fr_early_cut = _frame_at(beat_strip_ts[0]) if beat_strip_ts else fr_start
             clean_plate = extract_tile_wall_clean_plate(
-                fr_early_cut, fr_mid, contrast_tiles, grid_tilt_deg, pal["bgHex"]
+                fr_early_cut, fr_hero, contrast_tiles, grid_tilt_deg, pal["bgHex"]
             )
         else:
             clean_plate = extract_clean_plate_background(scene_sub_frames, pal["bgHex"])
@@ -1721,7 +1780,7 @@ def extract_reference_blueprint(
             "durationFrames": max(1, int(round(dur * fps))),
             "motion": cadence,
             "motionEnergy": motion_energy,
-            "keyframeTimestamp": ts_mid,
+            "keyframeTimestamp": ts_hero,
             "keyframe": f"frames/{scene_kf_name}",
             "compositeCard": card_rel,
             "beatsStrip": beats_strip_rel,
@@ -1766,6 +1825,45 @@ def extract_reference_blueprint(
 
     contact_sheets = build_dense_contact_sheets(_frame_at, sheet_timestamps, width, height, out_dir)
     cap.release()
+
+    filmstrip_info: Optional[Dict[str, Any]] = None
+    if os.environ.get("AETHERIA_DISABLE_FILMSTRIP") != "1":
+        try:
+            import ref_filmstrip
+
+            fs_mode = os.environ.get("AETHERIA_FILMSTRIP_MODE", "raw")
+            try:
+                fs_eps = float(os.environ.get("AETHERIA_FILMSTRIP_HOLD_EPS", "0.15"))
+            except ValueError:
+                fs_eps = 0.15
+            fs_res = ref_filmstrip.generate_filmstrips(
+                v_path, out_dir, scenes, mode=fs_mode, frames_per_sheet=10, hold_eps=fs_eps
+            )
+            if fs_res.get("ok"):
+                filmstrip_info = {
+                    "indexPath": "ref/extracted/filmstrip_index.json",
+                    "mode": fs_res["mode"],
+                    "framesPerSheet": fs_res["framesPerSheet"],
+                    "holdEps": fs_res["holdEps"],
+                    "totalFrames": fs_res["totalFrames"],
+                    "keptTiles": fs_res["keptTiles"],
+                    "sheetCount": fs_res["sheetCount"],
+                    "videoMotionStats": fs_res["videoMotionStats"],
+                }
+                fs_by_idx = {sc["index"]: sc for sc in (fs_res.get("scenes") or [])}
+                for s in scenes:
+                    sc_fs = fs_by_idx.get(s["index"])
+                    if sc_fs:
+                        s["filmstripSheets"] = sc_fs["sheetPaths"]
+                        s["motionProfile"] = {
+                            "meanDelta": sc_fs["meanDelta"],
+                            "medianDelta": sc_fs["medianDelta"],
+                            "staticPct": sc_fs["staticPct"],
+                            "nearZeroPct": sc_fs["nearZeroPct"],
+                            "activeBursts": sc_fs["activeBursts"],
+                        }
+        except Exception:
+            filmstrip_info = None
 
     # Global dominant palette from the first / most representative scene
     lead_palette = scene_palettes[0] if scene_palettes else extract_true_scene_palette(None)
@@ -1862,6 +1960,7 @@ def extract_reference_blueprint(
         "ocrWarning": ocr_warning,
         "extractorBackend": extractor_backend,
         "astPath": "ref/extracted/style_ast.json" if ast_json_path is not None else None,
+        "filmstrip": filmstrip_info,
         "scenes": scenes,
     }
 
@@ -1889,15 +1988,27 @@ def extract_reference_blueprint(
         for c in aligned_cuts
     )
     sheets_line = ", ".join(f"ref/extracted/{cs}" for cs in contact_sheets) if contact_sheets else "none"
+    filmstrip_line = (
+        f"**1/1 Filmstrip Index:** `{filmstrip_info['indexPath']}` "
+        f"(`{filmstrip_info['sheetCount']}` sheets, `{filmstrip_info['keptTiles']}/{filmstrip_info['totalFrames']}` tiles, "
+        f"mode=`{filmstrip_info['mode']}`, 10 frames/sheet — call `read_filmstrip({{ sceneIndex }})`)\n"
+        if filmstrip_info
+        else ""
+    )
+    ast_line = (
+        "**Decompiled Motion AST:** `ref/extracted/style_ast.json` (version 3)"
+        if ast_json_path is not None
+        else "**Extraction Mode:** Fast visual mode (no CPU OCR / no AST skeleton; use `filmstrips/` + `_card.jpg` as ground truth)"
+    )
     md = f"""# Reference Video Analysis Report (MotionClone Blueprint)
 **Source:** `{v_path.name}`
 **Duration:** {duration:.2f}s | **FPS:** {int(round(fps))} | **BPM:** {bpm_display} | **Resolution:** {width}x{height} ({aspect_ratio})
 **Audio Profile:** `{audio_mode_line}`
 **Dense Contact Sheets:** `{sheets_line}`
-**Detected Tone:** {theme_label} (Mean Luma: {avg_luma:.1f})
+{filmstrip_line}**Detected Tone:** {theme_label} (Mean Luma: {avg_luma:.1f})
 **Detected Scene Cuts:** {len(cut_timestamps)} scenes (`{cuts_display}`)
 **Extractor Backend:** `{style_spec['extractorBackend']}` (`ocrAvailable={ocr_available}`)
-**Decompiled Motion AST:** `ref/extracted/style_ast.json` (version 3)
+{ast_line}
 {ocr_banner}
 
 ## Measured Color Tokens (From Reference Pixels)
@@ -1924,8 +2035,22 @@ def extract_reference_blueprint(
         pal = ly["palette"]
         cp = s.get("cleanPlate") or {"fillHex": pal["bgHex"], "hasGradient": False}
         md += f"\n### Scene {s['index']}: `{s['id']}` ({s['start']:.2f}s - {s['end']:.2f}s, {s['duration']:.2f}s)\n"
-        if s.get("beatsStrip"):
-            md += f"- **High-Res Beat Strip:** `ref/extracted/{s['beatsStrip']}`\n"
+        if s.get("compositeCard"):
+            md += f"- **Hero + 6-Beat Card:** `ref/extracted/{s['compositeCard']}`\n"
+        if s.get("filmstripSheets"):
+            fs_sheets = s["filmstripSheets"]
+            fs_span = fs_sheets[0] if len(fs_sheets) == 1 else f"{fs_sheets[0]}..{fs_sheets[-1]}"
+            mp = s.get("motionProfile") or {}
+            burst_str = ", ".join(
+                f"{b['tStart']:.2f}-{b['tEnd']:.2f}s(p={b['peakDelta']:.1f})"
+                for b in (mp.get("activeBursts") or [])[:5]
+            )
+            md += (
+                f"- **1/1 Filmstrip ({len(fs_sheets)} sheets):** `ref/extracted/{fs_span}` | "
+                f"meanDelta=`{mp.get('meanDelta', 0):.2f}`, static=`{mp.get('staticPct', 0):.1f}%`"
+                + (f", bursts=`[{burst_str}]`" if burst_str else "")
+                + "\n"
+            )
         cp_extra = ""
         if cp.get("kind"):
             cp_extra += f", kind=`{cp.get('kind')}`"
@@ -1933,7 +2058,8 @@ def extract_reference_blueprint(
             cp_extra += f", confidence=`{cp.get('confidence')}`"
         md += f"- **Clean Plate Background:** fill=`{cp.get('fillHex')}`, hasGradient=`{cp.get('hasGradient')}`{cp_extra}\n"
         md += f"- **Measured Palette:** bg=`{pal['bgHex']}`, surface=`{pal['surfaceHex']}`, text=`{pal['textHex']}`, accent=`{pal['accentHex']}`\n"
-        md += f"- **Visual Archetype:** `{ly.get('visual_archetype')}`\n"
+        if not fast_mode:
+            md += f"- **Visual Archetype:** `{ly.get('visual_archetype')}`\n"
         md += f"- **Density:** `{ly.get('card_count', 0)}` cards, `{ly.get('pill_count', 0)}` pills, `{ly.get('scatter_count', 0)}` scatter elements | **Motion Energy:** `{s['motionEnergy']:.3f}` (`{s['motion']}`)\n"
         if ly.get("top"):
             md += f"- **Top Text Zone:** {', '.join([json.dumps(t) for t in ly['top'][:4]])}\n"
@@ -1941,7 +2067,7 @@ def extract_reference_blueprint(
             md += f"- **Hero Text Zone:** {', '.join([json.dumps(t) for t in ly['hero'][:8]])}\n"
         if ly.get("bottom"):
             md += f"- **Bottom Text Zone:** {', '.join([json.dumps(t) for t in ly['bottom'][:3]])}\n"
-        if ly.get("regions"):
+        if ly.get("regions") and not fast_mode:
             reg_summaries = []
             for r in ly["regions"][:6]:
                 mot = r.get("motion") or {}
@@ -1967,9 +2093,12 @@ def extract_reference_blueprint(
             tilt_rad = round(math.radians(tilt_val), 4)
             md += f"- **Detected Grid/Layout Tilt:** `{tilt_val:+.1f} deg` (rotate scene grid by `ctx.rotate({tilt_rad})` around canvas center — check top-left cell polarity vs `ref_scene_XX.jpg`)\n"
         cm = s.get("cameraMotion")
-        if cm and cm.get("segments"):
+        confident_segs = [
+            seg for seg in (cm.get("segments") or []) if seg.get("confidence") != "low"
+        ] if cm else []
+        if confident_segs:
             seg_parts = []
-            for seg in cm["segments"]:
+            for seg in confident_segs:
                 seg_parts.append(
                     f"local {seg['t0']:.2f}s->{seg['t1']:.2f}s "
                     f"scale={seg['scaleFrom']:.3f}->{seg['scaleTo']:.3f} "

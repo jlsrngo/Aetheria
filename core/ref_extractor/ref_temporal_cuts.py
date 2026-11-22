@@ -196,9 +196,16 @@ def scan_motion_timeline_accurate(
             win_delta = float(np.abs(a_small - b_small).mean() / 255.0)
             local_step = float(deltas[i - 1]["score"]) if (i - 1) < len(deltas) else 0.0
             is_fade_pause = (ea_sum >= 80 and eb_sum == 0) or (ea_sum == 0 and eb_sum >= 80)
-            if edge_overlap < 0.22 and fg_iou < 0.18 and (
-                local_step > 0.032 or win_delta > 0.035 or is_fade_pause
-            ):
+            is_dark_layout_shift = (
+                edge_overlap < 0.14
+                and fg_iou < 0.14
+                and (win_delta > 0.020 or local_step > 0.020 or is_fade_pause)
+            )
+            if (
+                edge_overlap < 0.22
+                and fg_iou < 0.18
+                and (local_step > 0.032 or win_delta > 0.035 or is_fade_pause)
+            ) or is_dark_layout_shift:
                 # Refine structural candidate within [cur_f - stride, cur_f + stride] using exact frame_diffs
                 refined_f = cur_f
                 evidence_kind = "structural"
@@ -245,9 +252,12 @@ def scan_motion_timeline_accurate(
 
     combined.sort(key=lambda x: x["frame"])
 
-    # If > 7 cuts (8 scenes): preserve ALL hard cuts first, then strongest structural cuts up to 7 total
-    # (unless there are > 7 actual hard cuts, in which case keep all hard cuts up to 12)
-    max_total_cuts = max(7, min(12, sum(1 for c in combined if c["evidence"] == "hard")))
+    # Scale cut ceiling smoothly with duration (~1 scene per ~2.6s, clamped 8..16)
+    # while keeping ALL actual hard cuts first.
+    hard_count = sum(1 for c in combined if c["evidence"] == "hard")
+    dur_cap = max(8, int(round(actual_duration / 2.6)))
+    max_total_cuts = max(dur_cap, min(16, max(hard_count, dur_cap)))
+    max_total_cuts = min(16, max_total_cuts)
     if len(combined) > max_total_cuts:
         hard_only = [c for c in combined if c["evidence"] == "hard"]
         non_hard = sorted(
