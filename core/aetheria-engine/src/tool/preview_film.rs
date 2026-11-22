@@ -33,6 +33,16 @@ pub fn capture_film_preview_tool_definition() -> Value {
                     "includeFullResFrames": {
                         "type": "boolean",
                         "description": "Optional flag to attach every captured full-resolution .aetheria/preview/preview_*.jpg image to vision context even when a comparison strip is also produced (defaults to true in visual inspection mode)."
+                    },
+                    "motionStrip": {
+                        "type": "object",
+                        "description": "Optional chronological 10-frame REF-vs-RENDER motion verification strip across a scene or time span (detects frozen/stiff animations automatically).",
+                        "properties": {
+                            "sceneIndex": { "type": "integer", "description": "Optional 1-based scene number from filmstrip_index.json / style.json." },
+                            "startSec": { "type": "number", "description": "Optional start timestamp in seconds." },
+                            "endSec": { "type": "number", "description": "Optional end timestamp in seconds." },
+                            "frames": { "type": "integer", "description": "Optional sample frame count (`4..10`, default `10`)." }
+                        }
                     }
                 }
             }
@@ -43,6 +53,7 @@ pub fn capture_film_preview_tool_definition() -> Value {
 fn build_preview_vision_images_with_labels(
     frames: &[crate::studio::preview_capture::PreviewFrameCapture],
     comparison_strip_data_url: Option<String>,
+    comparison_strip_label: Option<&str>,
     reference_comparison: Option<&Value>,
     story_contact_sheet_data_url: Option<String>,
     include_full_res_frames: bool,
@@ -52,9 +63,9 @@ fn build_preview_vision_images_with_labels(
     let mut attached_full_res = false;
     if let Some(strip_url) = comparison_strip_data_url {
         // Attach the unified side-by-side comparison strip (Ref | Preview | Diff Heatmap)
-        // by default without duplicating raw frames unless `includeFullResFrames` is enabled.
+        // or chronological REF-vs-RENDER motion strip cleanly.
         vision_images.push(Value::String(strip_url));
-        vision_labels.push(json!("comparison_strip.jpg (Ref | Preview | Diff Heatmap)"));
+        vision_labels.push(json!(comparison_strip_label.unwrap_or("comparison_strip.jpg (Ref | Preview | Diff Heatmap)")));
         if let Some(beat_strip_path) = reference_comparison
             .and_then(|c| c.get("primarySceneBeatStripPath"))
             .and_then(Value::as_str)
@@ -100,6 +111,7 @@ fn build_preview_vision_images(
     build_preview_vision_images_with_labels(
         frames,
         comparison_strip_data_url,
+        None,
         reference_comparison,
         story_contact_sheet_data_url,
         include_full_res_frames,
@@ -113,6 +125,51 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
         .and_then(|v| v.as_array())
         .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect())
         .unwrap_or_default();
+    let mut motion_strip_req = arguments.get("motionStrip").and_then(Value::as_object);
+    if timestamps.is_empty() {
+        if let Some(ms) = motion_strip_req {
+            let mut s0 = ms.get("startSec").and_then(Value::as_f64);
+            let mut s1 = ms.get("endSec").and_then(Value::as_f64);
+            let sc_idx = ms.get("sceneIndex").and_then(Value::as_u64).map(|n| n as usize);
+            let film_meta_opt = crate::studio::motion::resolve_active_html_film_path(Some(workspace_dir))
+                .map(|hp| (hp.clone(), crate::studio::film_inspector::inspect_workspace_film(&hp)));
+            if s0.is_none() || s1.is_none() {
+                if let Some(idx_1based) = sc_idx {
+                    if let Some((ref hp, ref meta)) = film_meta_opt {
+                        if let Some(sc) = meta.scenes.get(idx_1based.saturating_sub(1)) {
+                            s0 = s0.or(Some(sc.start));
+                            s1 = s1.or(Some(sc.start + sc.duration));
+                        } else if let Some(fr) = hp.parent() {
+                            let st_p = std::path::Path::new(workspace_dir).join("ref").join("extracted").join("style.json");
+                            let st_p2 = fr.join("ref").join("extracted").join("style.json");
+                            let chosen = if st_p.is_file() { st_p } else { st_p2 };
+                            if let Ok(raw) = std::fs::read_to_string(chosen) {
+                                if let Ok(v) = serde_json::from_str::<Value>(&raw) {
+                                    if let Some(sc) = v.get("scenes").and_then(Value::as_array).and_then(|arr| arr.get(idx_1based.saturating_sub(1))) {
+                                        s0 = s0.or(sc.get("start").and_then(Value::as_f64));
+                                        s1 = s1.or(sc.get("end").and_then(Value::as_f64));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            let total_d = film_meta_opt.as_ref().map(|(_, m)| m.duration).unwrap_or(5.0).max(0.5);
+            let start_sec = s0.unwrap_or(0.0).clamp(0.0, (total_d - 0.1).max(0.0));
+            let end_sec = s1.unwrap_or((start_sec + 3.0).min(total_d)).clamp(start_sec + 0.08, total_d);
+            let n = ms.get("frames").and_then(Value::as_u64).unwrap_or(10).clamp(4, 10) as usize;
+            let max_end = (end_sec - 0.03).max(start_sec);
+            for i in 0..n {
+                let ratio = if n <= 1 { 0.0 } else { i as f64 / (n - 1) as f64 };
+                timestamps.push(((start_sec + (max_end - start_sec) * ratio) * 1000.0).round() / 1000.0);
+            }
+        }
+    } else if motion_strip_req.is_none() && arguments.get("motionStrip").and_then(Value::as_bool) == Some(true) {
+        motion_strip_req = None;
+    }
+    let build_motion_strip = motion_strip_req.is_some()
+        || arguments.get("motionStrip").and_then(Value::as_bool) == Some(true);
     if timestamps.is_empty() {
         let target_scenes: Vec<usize> = arguments
             .get("targetSceneIndices")
@@ -166,12 +223,15 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
             pass_threshold,
             visual_inspect_only,
             include_full_res_frames,
+            disable_auto_rollback: false,
         },
     )
     .await
     {
         Ok(mut res) => {
-            if res.comparison_strip_data_url.is_none() && !res.frames.is_empty() {
+            let mut motion_check_val: Option<Value> = None;
+            let mut custom_strip_label: Option<&str> = None;
+            if !res.frames.is_empty() && (build_motion_strip || res.comparison_strip_data_url.is_none()) {
                 let ws_root = std::path::Path::new(workspace_dir);
                 let ref_vid = super::ref_probe::locate_reference_video(ws_root, None).or_else(|| {
                     crate::studio::motion::resolve_active_html_film_path(Some(workspace_dir))
@@ -179,14 +239,37 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
                         .and_then(|fr| super::ref_probe::locate_reference_video(&fr, None))
                 });
                 if let Some(video_path) = ref_vid {
-                    if let Some(strip_url) = super::ref_probe::build_visual_ref_vs_preview_strip(
-                        ws_root,
-                        &video_path,
-                        &res.frames,
-                    )
-                    .await
-                    {
-                        res.comparison_strip_data_url = Some(strip_url);
+                    if build_motion_strip {
+                        if let Some(mut ms_val) = super::ref_probe::build_visual_ref_vs_preview_motion_strip(
+                            ws_root,
+                            &video_path,
+                            &res.frames,
+                            "motion_strip.jpg",
+                        )
+                        .await
+                        {
+                            if let Some(ms_url) = ms_val
+                                .as_object_mut()
+                                .and_then(|o| o.remove("dataUrl"))
+                                .and_then(|v| v.as_str().map(str::to_string))
+                            {
+                                res.comparison_strip_data_url = Some(ms_url);
+                                custom_strip_label = Some(
+                                    "motion_strip.jpg (TOP: REF | BOTTOM: RND + frame step deltas)",
+                                );
+                            }
+                            motion_check_val = Some(ms_val);
+                        }
+                    } else if res.comparison_strip_data_url.is_none() {
+                        if let Some(strip_url) = super::ref_probe::build_visual_ref_vs_preview_strip(
+                            ws_root,
+                            &video_path,
+                            &res.frames,
+                        )
+                        .await
+                        {
+                            res.comparison_strip_data_url = Some(strip_url);
+                        }
                     }
                 }
             }
@@ -209,6 +292,7 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
             let (vision_images, vision_labels) = build_preview_vision_images_with_labels(
                 &res.frames,
                 res.comparison_strip_data_url.clone(),
+                custom_strip_label,
                 res.reference_comparison.as_ref(),
                 res.story_contact_sheet_data_url.clone(),
                 attach_full_res,
@@ -291,10 +375,15 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
                 }
                 _ => String::new(),
             };
+            let motion_warning_owned = motion_check_val
+                .as_ref()
+                .and_then(|v| v.get("motionWarning").and_then(Value::as_str))
+                .map(str::to_string);
             let extra_notices: String = [
                 unchanged_warning,
                 ref_override_note,
                 res.identical_frames_warning.as_deref(),
+                motion_warning_owned.as_deref(),
             ]
                 .into_iter()
                 .flatten()
@@ -448,6 +537,11 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
                 "_vision_images": vision_images,
                 "_vision_image_labels": vision_labels
             });
+            if let Some(mc) = motion_check_val {
+                if let Some(obj) = result.as_object_mut() {
+                    obj.insert("motionCheck".to_string(), mc);
+                }
+            }
             if !failure_reasons.is_empty() {
                 if let Some(obj) = result.as_object_mut() {
                     obj.insert("error".to_string(), json!(failure_reasons.join(" | ")));

@@ -228,12 +228,31 @@ pub fn reconcile_per_scene_snapshots_and_rollback(
     let mut rolled_back = Vec::new();
 
     if !runtime_errors_empty {
+        let evaluated_scenes: HashSet<usize> = comparison
+            .get("sceneScores")
+            .and_then(Value::as_object)
+            .map(|scores| {
+                scores
+                    .keys()
+                    .filter_map(|sid| parse_scene_number_from_id(sid))
+                    .collect()
+            })
+            .unwrap_or_default();
         let prefix = format!("{root_key}#");
         for (k, (best_score, script_rel, best_code)) in guard.iter() {
             if !k.starts_with(&prefix) {
                 continue;
             }
             let sid = k.trim_start_matches(&prefix);
+            if !evaluated_scenes.is_empty()
+                && parse_scene_number_from_id(sid)
+                    .is_some_and(|n| !evaluated_scenes.contains(&n))
+            {
+                continue;
+            }
+            if crate::tool::film_state::is_scaffold_stub_content(best_code) {
+                continue;
+            }
             let disk_path = film_root.join(script_rel);
             if let Ok(cur_code) = std::fs::read_to_string(&disk_path) {
                 if cur_code != *best_code && std::fs::write(&disk_path, best_code).is_ok() {
@@ -265,6 +284,9 @@ pub fn reconcile_per_scene_snapshots_and_rollback(
         let Ok(cur_code) = std::fs::read_to_string(&disk_path) else {
             continue;
         };
+        if crate::tool::film_state::is_scaffold_stub_content(&cur_code) {
+            continue;
+        }
         let snap_key = format!("{root_key}#scene{scene_num}");
         match guard.get(&snap_key).cloned() {
             None => {
@@ -275,7 +297,10 @@ pub fn reconcile_per_scene_snapshots_and_rollback(
                     if overall_mean >= best_score {
                         guard.insert(snap_key, (overall_mean, script_rel, cur_code));
                     }
-                } else if cur_code != best_code && std::fs::write(&disk_path, &best_code).is_ok() {
+                } else if cur_code != best_code
+                    && !crate::tool::film_state::is_scaffold_stub_content(&best_code)
+                    && std::fs::write(&disk_path, &best_code).is_ok()
+                {
                     rolled_back.push(json!({
                         "sceneId": sid,
                         "script": script_rel,
@@ -678,6 +703,70 @@ mod tests {
         assert_eq!(rb2.len(), 1);
         assert_eq!(rb2[0]["script"], "script/scene1.js");
         assert_eq!(std::fs::read_to_string(&s1_path).unwrap(), good_code);
+
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn reconcile_never_snapshots_or_restores_scaffold_stub_and_scopes_runtime_rollback() {
+        let ws = std::env::temp_dir().join(format!("aetheria_fg_stub_{}", crate::paths::now_ms()));
+        let script_dir = ws.join("script");
+        std::fs::create_dir_all(&script_dir).unwrap();
+
+        let s1_path = script_dir.join("scene1.js");
+        let s2_path = script_dir.join("scene2.js");
+        let s12_path = script_dir.join("scene12.js");
+
+        let stub_12 = "// Scene: scene12_beat_12 (4.27s) — managed stub by film_scaffold\n\
+            (function () {\n\
+              window.AM.registerScene(\"scene12_beat_12\", function (ctx) {\n\
+                // TODO: Write deterministic motion design beats here\n\
+              });\n\
+            })();\n";
+        std::fs::write(&s12_path, stub_12).unwrap();
+
+        let real_1 = "window.AM.registerScene('scene1_hook', function(ctx,t){ ctx.fillRect(0,0,10,10); });";
+        let real_2 = "window.AM.registerScene('scene2_ctx', function(ctx,t){ ctx.fillRect(0,0,20,20); });";
+        std::fs::write(&s1_path, real_1).unwrap();
+        std::fs::write(&s2_path, real_2).unwrap();
+
+        // Evaluating the project while scene12 is still a stub must NOT snapshot scene12 as a "good" rollback target.
+        let cmp_init = json!({
+            "sceneScores": {
+                "scene1_hook": { "overallMean": 0.72 },
+                "scene2_ctx": { "overallMean": 0.75 },
+                "scene12_beat_12": { "overallMean": 0.86 }
+            }
+        });
+        assert!(reconcile_per_scene_snapshots_and_rollback(&ws, true, &cmp_init).is_empty());
+
+        let authored_12 = "window.AM.registerScene('scene12_beat_12', function(ctx,t){ ctx.fillRect(t*10,0,50,50); });";
+        std::fs::write(&s12_path, authored_12).unwrap();
+        let cmp_12_low = json!({
+            "sceneScores": {
+                "scene12_beat_12": { "overallMean": 0.45 }
+            }
+        });
+        let rb_stub = reconcile_per_scene_snapshots_and_rollback(&ws, true, &cmp_12_low);
+        assert!(rb_stub.is_empty(), "must never roll back authored code to scaffold stub");
+        assert_eq!(std::fs::read_to_string(&s12_path).unwrap(), authored_12);
+
+        // Concurrent scene edit safety: runtime error during Scene 1 evaluation must NOT clobber modified Scene 2.
+        let broken_1 = "window.AM.registerScene('scene1_hook', function(ctx,t){ throw new Error('s1'); });";
+        let newer_2 = "window.AM.registerScene('scene2_ctx', function(ctx,t){ ctx.fillRect(5,5,40,40); });";
+        std::fs::write(&s1_path, broken_1).unwrap();
+        std::fs::write(&s2_path, newer_2).unwrap();
+
+        let cmp_s1_err = json!({
+            "sceneScores": {
+                "scene1_hook": { "overallMean": 0.10 }
+            }
+        });
+        let rb_err = reconcile_per_scene_snapshots_and_rollback(&ws, false, &cmp_s1_err);
+        assert_eq!(rb_err.len(), 1);
+        assert_eq!(rb_err[0]["script"], "script/scene1.js");
+        assert_eq!(std::fs::read_to_string(&s1_path).unwrap(), real_1);
+        assert_eq!(std::fs::read_to_string(&s2_path).unwrap(), newer_2);
 
         let _ = std::fs::remove_dir_all(&ws);
     }

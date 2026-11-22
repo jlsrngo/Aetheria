@@ -312,3 +312,59 @@ pub(crate) async fn build_visual_ref_vs_preview_strip(
     let parsed: Value = serde_json::from_str(&stdout).ok()?;
     parsed.get("dataUrl").and_then(Value::as_str).map(str::to_string)
 }
+
+/// Builds a 2-row up-to-10-frame motion comparison filmstrip (`REF` top row vs `RND` bottom row)
+/// with per-step frame delta & frozen-render warning via `ref_frame_probe.py motion-compare-strip`.
+pub(crate) async fn build_visual_ref_vs_preview_motion_strip(
+    ws_root: &Path,
+    video_path: &Path,
+    frames: &[crate::studio::preview_capture::PreviewFrameCapture],
+    out_filename: &str,
+) -> Option<Value> {
+    let script = locate_probe_script()?;
+    let film_root = crate::studio::motion::resolve_active_html_film_path(Some(&ws_root.to_string_lossy()))
+        .and_then(|p| p.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| ws_root.to_path_buf());
+    let mut pairs = Vec::new();
+    for f in frames.iter().take(10) {
+        let p_ws = ws_root.join(&f.saved_rel_path);
+        let p_fr = film_root.join(&f.saved_rel_path);
+        let resolved = if p_ws.is_file() {
+            Some(p_ws)
+        } else if p_fr.is_file() {
+            Some(p_fr)
+        } else {
+            None
+        };
+        if let Some(p) = resolved {
+            pairs.push(format!("{:.3}|{}", f.timestamp.max(0.0), p.to_string_lossy()));
+        }
+    }
+    if pairs.len() < 2 {
+        return None;
+    }
+    let out_strip = film_root.join(".aetheria").join("preview").join(out_filename);
+    let mut cmd = tokio::process::Command::new("python");
+    crate::paths::configure_hidden_tokio_command(&mut cmd);
+    cmd.arg(&script)
+        .arg("motion-compare-strip")
+        .arg("--video")
+        .arg(video_path)
+        .arg("--pairs")
+        .arg(pairs.join(";"))
+        .arg("--out")
+        .arg(&out_strip);
+    let out = tokio::time::timeout(std::time::Duration::from_secs(20), cmd.output())
+        .await
+        .ok()?
+        .ok()?;
+    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let mut parsed: Value = serde_json::from_str(&stdout).ok()?;
+    if parsed.get("ok").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    if let Some(obj) = parsed.as_object_mut() {
+        obj.insert("savedPath".to_string(), json!(out_strip.to_string_lossy()));
+    }
+    Some(parsed)
+}

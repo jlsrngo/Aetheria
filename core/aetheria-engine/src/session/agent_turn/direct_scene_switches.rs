@@ -32,6 +32,16 @@ pub(crate) struct DirectSceneSwitches {
     pub prompt_mode: PromptMode,
     pub only_scenes: Option<Vec<usize>>,
     pub max_steps: usize,
+    pub filmstrip_pass1: bool,
+    pub concurrency: usize,
+    #[serde(skip)]
+    pub concurrency_explicit: bool,
+    #[serde(skip)]
+    pub probe_steps_explicit: bool,
+    #[serde(skip)]
+    pub cross_context_explicit: bool,
+    #[serde(skip)]
+    pub max_steps_explicit: bool,
 }
 
 impl Default for DirectSceneSwitches {
@@ -44,6 +54,12 @@ impl Default for DirectSceneSwitches {
             prompt_mode: PromptMode::Current,
             only_scenes: None,
             max_steps: 12,
+            filmstrip_pass1: true,
+            concurrency: 1,
+            concurrency_explicit: false,
+            probe_steps_explicit: false,
+            cross_context_explicit: false,
+            max_steps_explicit: false,
         }
     }
 }
@@ -59,25 +75,34 @@ impl DirectSceneSwitches {
     where
         F: Fn(&str) -> Option<String>,
     {
-        let probe_steps = match lookup("AETHERIA_SCENE_PROBE_STEPS") {
+        let (probe_steps, probe_steps_explicit) = match lookup("AETHERIA_SCENE_PROBE_STEPS") {
             Some(raw) => {
                 let s = raw.trim().to_ascii_lowercase();
                 if s.is_empty() {
-                    Some(2)
+                    (Some(2), false)
                 } else if matches!(s.as_str(), "off" | "none" | "false" | "disabled") {
-                    None
+                    (None, true)
                 } else if let Ok(n) = s.parse::<usize>() {
-                    Some(n)
+                    (Some(n), true)
                 } else {
-                    Some(2)
+                    (Some(2), true)
                 }
             }
-            None => Some(2),
+            None => (Some(2), false),
         };
 
-        let cross_context = match lookup("AETHERIA_SCENE_CROSS_CONTEXT") {
-            Some(raw) if raw.trim().eq_ignore_ascii_case("summary") => CrossContextMode::Summary,
-            _ => CrossContextMode::Off,
+        let (cross_context, cross_context_explicit) = match lookup("AETHERIA_SCENE_CROSS_CONTEXT") {
+            Some(raw) => {
+                let s = raw.trim();
+                if s.is_empty() {
+                    (CrossContextMode::Off, false)
+                } else if s.eq_ignore_ascii_case("summary") {
+                    (CrossContextMode::Summary, true)
+                } else {
+                    (CrossContextMode::Off, true)
+                }
+            }
+            None => (CrossContextMode::Off, false),
         };
 
         let restore_best = match lookup("AETHERIA_SCENE_RESTORE") {
@@ -110,10 +135,29 @@ impl DirectSceneSwitches {
             }
         });
 
-        let max_steps = lookup("AETHERIA_SCENE_MAX_STEPS")
+        let parsed_max_steps = lookup("AETHERIA_SCENE_MAX_STEPS")
+            .and_then(|v| v.trim().parse::<usize>().ok());
+        let max_steps_explicit = parsed_max_steps.is_some();
+        let max_steps = parsed_max_steps.map(|n| n.clamp(3, 18)).unwrap_or(12);
+
+        let filmstrip_pass1 = match lookup("AETHERIA_DIRECT_FILMSTRIP") {
+            Some(raw) => {
+                let s = raw.trim().to_ascii_lowercase();
+                if s.is_empty() {
+                    true
+                } else {
+                    !matches!(s.as_str(), "0" | "false" | "off" | "no" | "disabled")
+                }
+            }
+            None => true,
+        };
+
+        let (concurrency, concurrency_explicit) = match lookup("AETHERIA_DIRECT_CONCURRENCY")
             .and_then(|v| v.trim().parse::<usize>().ok())
-            .map(|n| n.clamp(3, 18))
-            .unwrap_or(12);
+        {
+            Some(n) => (n.clamp(1, 4), true),
+            None => (1, false),
+        };
 
         Self {
             probe_steps,
@@ -123,6 +167,12 @@ impl DirectSceneSwitches {
             prompt_mode,
             only_scenes,
             max_steps,
+            filmstrip_pass1,
+            concurrency,
+            concurrency_explicit,
+            probe_steps_explicit,
+            cross_context_explicit,
+            max_steps_explicit,
         }
     }
 
@@ -442,6 +492,8 @@ mod tests {
             ("AETHERIA_SCENE_PROMPT", "minimal"),
             ("AETHERIA_REMAKE_ONLY_SCENES", "6, 2, 2, 3"),
             ("AETHERIA_SCENE_MAX_STEPS", "99"),
+            ("AETHERIA_DIRECT_FILMSTRIP", "0"),
+            ("AETHERIA_DIRECT_CONCURRENCY", "9"),
         ];
         let sw = DirectSceneSwitches::from_lookup(lookup_from(&pairs));
         assert_eq!(sw.probe_steps, None);
@@ -451,6 +503,12 @@ mod tests {
         assert_eq!(sw.prompt_mode, PromptMode::Minimal);
         assert_eq!(sw.only_scenes, Some(vec![2, 3, 6]));
         assert_eq!(sw.max_steps, 18);
+        assert!(!sw.filmstrip_pass1);
+        assert_eq!(sw.concurrency, 4);
+        assert!(sw.concurrency_explicit);
+        assert!(sw.probe_steps_explicit);
+        assert!(sw.cross_context_explicit);
+        assert!(sw.max_steps_explicit);
 
         assert!(!sw.should_run_scene(1));
         assert!(sw.should_run_scene(2));

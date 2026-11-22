@@ -98,6 +98,7 @@ pub fn is_tool_allowed_in_role(role: &str, name: &str, include_render: bool) -> 
                     | "question"
                     | "task"
                     | "extract_video_reference"
+                    | "read_filmstrip"
                     | "inspect_ref_frame"
                     | "sample_ref_region"
                     | "fetch_web_image"
@@ -117,6 +118,7 @@ pub fn is_tool_allowed_in_role(role: &str, name: &str, include_render: bool) -> 
                 | "bash"
                 | "codemode"
                 | "extract_video_reference"
+                | "read_filmstrip"
                 | "inspect_ref_frame"
                 | "sample_ref_region"
                 | "fetch_web_image"
@@ -130,6 +132,7 @@ pub fn is_tool_allowed_in_role(role: &str, name: &str, include_render: bool) -> 
                 | "bash"
                 | "codemode"
                 | "capture_film_preview"
+                | "read_filmstrip"
                 | "inspect_ref_frame"
                 | "sample_ref_region"
                 | "edit"
@@ -565,6 +568,7 @@ mod tests {
                 "inspect_ref_frame",
                 "question",
                 "read",
+                "read_filmstrip",
                 "sample_ref_region",
                 "task",
                 "webfetch",
@@ -595,6 +599,7 @@ mod tests {
                 "inspect_ref_frame",
                 "question",
                 "read",
+                "read_filmstrip",
                 "render_video",
                 "sample_ref_region",
                 "task",
@@ -622,6 +627,7 @@ mod tests {
                 "grep",
                 "inspect_ref_frame",
                 "read",
+                "read_filmstrip",
                 "sample_ref_region",
                 "write",
             ]
@@ -643,6 +649,7 @@ mod tests {
                 "grep",
                 "inspect_ref_frame",
                 "read",
+                "read_filmstrip",
                 "sample_ref_region",
                 "write",
             ]

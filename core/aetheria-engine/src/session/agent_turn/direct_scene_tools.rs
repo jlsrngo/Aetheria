@@ -31,6 +31,7 @@ pub(crate) struct SceneToolContext<'a> {
     pub width: u32,
     pub height: u32,
     pub default_scene_ts: &'a [f64],
+    pub use_filmstrip: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -171,6 +172,56 @@ pub(crate) fn build_scene_tool_definitions() -> Vec<Value> {
             }
         }),
     ]
+}
+
+pub(crate) fn build_scene_tool_definitions_with_filmstrip(include_filmstrip: bool) -> Vec<Value> {
+    let mut defs = build_scene_tool_definitions();
+    if include_filmstrip {
+        defs.push(crate::tool::ref_filmstrip::read_filmstrip_tool_definition());
+    }
+    defs
+}
+
+/// Rejects solid-background or empty stub placeholders written only to bypass the write gate.
+pub(crate) fn is_trivial_static_placeholder(code: &str) -> bool {
+    if crate::tool::film_state::is_scaffold_stub_content(code) {
+        return true;
+    }
+    if code.contains("throw ") {
+        return false;
+    }
+    let lower = code.to_ascii_lowercase();
+    let code_lines: Vec<&str> = code
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with("//") && !l.starts_with("/*") && !l.starts_with('*'))
+        .collect();
+    const DRAW_PATTERNS: &[&str] = &[
+        "fillrect(",
+        "strokerect(",
+        "arc(",
+        "ellipse(",
+        "moveto(",
+        "lineto(",
+        "beziercurveto(",
+        "quadraticcurveto(",
+        "filltext(",
+        "stroketext(",
+        "drawimage(",
+        "drawopticalglow(",
+        "drawbloomstroke(",
+        "drawsphericallens(",
+        "drawtaperedribbon(",
+        "drawextrudedarrow3d(",
+        "drawwordwheel(",
+        "drawsvgpath(",
+        "drawlaptopframe(",
+        "fillroundrect(",
+        "strokeroundrect(",
+        "drawcursor(",
+    ];
+    let draw_hits: usize = DRAW_PATTERNS.iter().map(|pat| lower.matches(pat).count()).sum();
+    draw_hits <= 1 && (code_lines.len() <= 20 || lower.contains("placeholder"))
 }
 
 /// Normalizes a model-supplied timestamp (which may be local `0..dur` OR global `start..end`)
@@ -462,6 +513,20 @@ pub(crate) async fn execute_scene_micro_tool(
                     rendered_errors: None,
                 };
             }
+            if is_trivial_static_placeholder(code) {
+                return SceneToolOutcome {
+                    result_json: json!({
+                        "ok": false,
+                        "error": "Rejected static placeholder stub: write the complete time-driven animated scene (using local time t and real vector/text/glow layers from the attached 1/1 filmstrips), never a solid-color placeholder."
+                    }),
+                    vision_images: Vec::new(),
+                    vision_caption: None,
+                    script_modified: false,
+                    rendered_score: None,
+                    rendered_metrics: None,
+                    rendered_errors: None,
+                };
+            }
             if !crate::paths::contains_path(ctx.ws_root, ctx.script_path) {
                 return SceneToolOutcome {
                     result_json: json!({ "ok": false, "error": "Scene script path resolved outside workspace." }),
@@ -595,7 +660,7 @@ pub(crate) async fn execute_scene_micro_tool(
                 .map(|arr| {
                     arr.iter()
                         .filter_map(Value::as_f64)
-                        .take(6)
+                        .take(8)
                         .map(|t| {
                             normalize_scene_timestamp(
                                 t,
@@ -608,7 +673,17 @@ pub(crate) async fn execute_scene_micro_tool(
                 })
                 .unwrap_or_default();
             if ts_list.is_empty() {
-                ts_list = ctx.default_scene_ts.to_vec();
+                if ctx.use_filmstrip {
+                    let max_t = (ctx.scene_start + ctx.scene_dur - 0.03)
+                        .min((ctx.film_duration - 0.03).max(0.0))
+                        .max(ctx.scene_start);
+                    for i in 0..8 {
+                        let r = i as f64 / 7.0;
+                        ts_list.push(((ctx.scene_start + (max_t - ctx.scene_start) * r) * 1000.0).round() / 1000.0);
+                    }
+                } else {
+                    ts_list = ctx.default_scene_ts.to_vec();
+                }
             }
             let full_res_t = args
                 .get("fullResTimestamp")
@@ -617,22 +692,27 @@ pub(crate) async fn execute_scene_micro_tool(
                     normalize_scene_timestamp(t, ctx.scene_start, ctx.scene_dur, ctx.film_duration)
                 });
             if let Some(ft) = full_res_t {
-                if !ts_list.iter().any(|x| (*x - ft).abs() < 0.04) && ts_list.len() < 6 {
+                if !ts_list.iter().any(|x| (*x - ft).abs() < 0.04) && ts_list.len() < 8 {
                     ts_list.push(ft);
                     ts_list.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
                 }
             }
 
-            match crate::studio::preview_capture::capture_film_preview_with_options(
+            match crate::studio::preview_capture::capture_film_preview_with_full_options(
                 ctx.workspace_dir,
                 ts_list,
-                Some(true),
-                Some(0.65),
+                crate::studio::preview_capture::PreviewCaptureOptions {
+                    compare_to_reference: Some(true),
+                    pass_threshold: Some(0.65),
+                    visual_inspect_only: Some(false),
+                    include_full_res_frames: Some(false),
+                    disable_auto_rollback: true,
+                },
             )
             .await
             {
                 Ok(res) => {
-                    let (score, feedback, strip_path) = format_comparison_feedback(
+                    let (score, mut feedback, strip_path) = format_comparison_feedback(
                         res.reference_comparison.as_ref(),
                         ctx.scene_start,
                         &res.runtime_errors,
@@ -642,6 +722,36 @@ pub(crate) async fn execute_scene_micro_tool(
                     if let Some(ref sp) = strip_path {
                         if let Some(url) = encode_file_jpeg_data_url(sp) {
                             imgs.push(url);
+                        }
+                    }
+                    let mut motion_check: Option<Value> = None;
+                    if ctx.use_filmstrip {
+                        if let Some(video_path) = locate_reference_video(ctx.ws_root, None) {
+                            let strip_name = format!("scene_{:02}_motion_strip.jpg", ctx.scene_num);
+                            if let Some(mut ms_val) =
+                                crate::tool::ref_probe::build_visual_ref_vs_preview_motion_strip(
+                                    ctx.ws_root,
+                                    &video_path,
+                                    &res.frames,
+                                    &strip_name,
+                                )
+                                .await
+                            {
+                                if let Some(ms_url) = ms_val
+                                    .as_object_mut()
+                                    .and_then(|o| o.remove("dataUrl"))
+                                    .and_then(|v| v.as_str().map(str::to_string))
+                                {
+                                    imgs.push(ms_url);
+                                }
+                                if let Some(warn) = ms_val.get("motionWarning").and_then(Value::as_str) {
+                                    if !feedback.is_empty() {
+                                        feedback.push('\n');
+                                    }
+                                    feedback.push_str(warn);
+                                }
+                                motion_check = Some(ms_val);
+                            }
                         }
                     }
                     // Attach a full-resolution rendered frame: explicit `fullResTimestamp` if requested,
@@ -686,7 +796,7 @@ pub(crate) async fn execute_scene_micro_tool(
                     let caption = Some(format!(
                         "Visual render comparison for Scene {} (`Row 1 = REFERENCE | Row 2 = YOUR RENDER | Row 3 = DIFF HEATMAP`{}). Measured overall={:.3}, runtimeErrors={}.",
                         ctx.scene_num,
-                        if imgs.len() > 1 { " + full-res preview frame" } else { "" },
+                        if imgs.len() > 1 { " + motion strip / full-res frame" } else { "" },
                         score,
                         res.runtime_errors.len()
                     ));
@@ -705,15 +815,19 @@ pub(crate) async fn execute_scene_micro_tool(
                         .as_ref()
                         .and_then(|c| c.get("edgeMatchMean").and_then(Value::as_f64))
                         .unwrap_or(0.0);
+                    let mut rj = json!({
+                        "ok": true,
+                        "overallFidelity": (score * 1000.0).round() / 1000.0,
+                        "runtimeErrors": res.runtime_errors,
+                        "diagnostics": feedback,
+                        "canvas": format!("{}x{}", ctx.width, ctx.height),
+                        "filmRoot": ctx.film_root.file_name().and_then(|s| s.to_str()).unwrap_or("")
+                    });
+                    if let Some(mc) = motion_check {
+                        rj["motionCheck"] = mc;
+                    }
                     SceneToolOutcome {
-                        result_json: json!({
-                            "ok": true,
-                            "overallFidelity": (score * 1000.0).round() / 1000.0,
-                            "runtimeErrors": res.runtime_errors,
-                            "diagnostics": feedback,
-                            "canvas": format!("{}x{}", ctx.width, ctx.height),
-                            "filmRoot": ctx.film_root.file_name().and_then(|s| s.to_str()).unwrap_or("")
-                        }),
+                        result_json: rj,
                         vision_images: imgs,
                         vision_caption: caption,
                         script_modified: false,
@@ -741,6 +855,35 @@ pub(crate) async fn execute_scene_micro_tool(
                     }),
                     rendered_errors: Some(vec![err]),
                 },
+            }
+        }
+        "read_filmstrip" => {
+            let mut val = crate::tool::ref_filmstrip::execute_read_filmstrip(ctx.workspace_dir, args);
+            let mut imgs = Vec::new();
+            let mut cap = None;
+            if let Some(obj) = val.as_object_mut() {
+                if let Some(Value::Array(arr)) = obj.remove("_vision_images") {
+                    for u in arr {
+                        if let Some(s) = u.as_str() {
+                            imgs.push(s.to_string());
+                        }
+                    }
+                }
+                if let Some(Value::Array(lbls)) = obj.remove("_vision_image_labels") {
+                    let strs: Vec<&str> = lbls.iter().filter_map(Value::as_str).collect();
+                    if !strs.is_empty() {
+                        cap = Some(strs.join("\n"));
+                    }
+                }
+            }
+            SceneToolOutcome {
+                result_json: val,
+                vision_images: imgs,
+                vision_caption: cap,
+                script_modified: false,
+                rendered_score: None,
+                rendered_metrics: None,
+                rendered_errors: None,
             }
         }
         other => SceneToolOutcome {
@@ -800,5 +943,20 @@ mod tests {
                 "render_and_compare_scene",
             ]
         );
+    }
+
+    #[test]
+    fn trivial_static_placeholder_check_blocks_solid_stubs_but_allows_real_animated_scripts() {
+        let s4_placeholder = "// scene4 placeholder to enable inspection and comparison tools\n(function () {\n  var AM = window.AM;\n  AM.registerScene(\"scene4_cta\", function (ctx, t, dur, scene, AM) {\n    ctx.fillStyle = \"#93632F\";\n    ctx.fillRect(0, 0, scene.width, scene.height);\n  });\n})();\n";
+        assert!(is_trivial_static_placeholder(s4_placeholder));
+
+        let s1_stub = "// VISUAL PLAN:\n// Phase 1..3\n(function () {\n  var AM = window.AM;\n  AM.registerScene(\"scene1_hook\", function (ctx, t, dur, scene, AM) {\n    var W = 720, H = 1280;\n    ctx.fillStyle = \"#0C0804\";\n    ctx.fillRect(0, 0, W, H);\n  });\n})();\n";
+        assert!(is_trivial_static_placeholder(s1_stub));
+
+        let real_compact = "(function () {\n  var AM = window.AM;\n  AM.registerScene(\"scene1_unit\", function (ctx, t, dur, scene, AM) {\n    var p = AM.ease.outCubic(AM.clamp(t / Math.max(0.2, dur), 0, 1));\n    ctx.fillStyle = '#14161A';\n    ctx.fillRect(0, 0, 640, 360);\n    ctx.fillStyle = '#F58C28';\n    ctx.fillRect(140 + 40 * p, 95, 220, 150);\n  });\n})();\n";
+        assert!(!is_trivial_static_placeholder(real_compact));
+
+        let rollback_broken = "(function(){ var AM=window.AM; AM.registerScene(\"scene1_unit\", function(ctx,t){ throw new Error('intentional_regression'); }); })();\n";
+        assert!(!is_trivial_static_placeholder(rollback_broken));
     }
 }

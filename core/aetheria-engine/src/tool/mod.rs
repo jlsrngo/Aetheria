@@ -23,6 +23,7 @@ pub mod profiles;
 pub mod question;
 pub mod read;
 pub mod ref_extractor;
+pub mod ref_filmstrip;
 pub mod ref_probe;
 pub mod render;
 pub mod render_command;
@@ -252,6 +253,7 @@ async fn execute_tool_call_inner(
         "extract_video_reference" | "extract_reference" | "ref_extract" => {
             ref_extractor::execute_ref_extractor(workspace_dir, arguments).await
         }
+        "read_filmstrip" => ref_filmstrip::execute_read_filmstrip(workspace_dir, arguments),
         "inspect_ref_frame" | "probe_ref_frame" => {
             ref_probe::execute_inspect_ref_frame(workspace_dir, arguments).await
         }

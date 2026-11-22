@@ -381,6 +381,38 @@ pub(crate) fn build_scene_hard_facts_prompt(
                 ));
             }
         }
+        if let Some(mp) = sc.get("motionProfile") {
+            let mean_d = mp.get("meanDelta").and_then(Value::as_f64).unwrap_or(0.0);
+            let static_pct = mp.get("staticPct").and_then(Value::as_f64).unwrap_or(0.0);
+            let sheet_count = sc
+                .get("filmstripSheets")
+                .and_then(Value::as_array)
+                .map(|a| a.len())
+                .unwrap_or(0);
+            let bursts: Vec<String> = mp
+                .get("activeBursts")
+                .and_then(Value::as_array)
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|b| {
+                            let bt0 = (b.get("tStart")?.as_f64()? - start).max(0.0);
+                            let bt1 = (b.get("tEnd")?.as_f64()? - start).max(bt0);
+                            let pk = b.get("peakDelta").and_then(Value::as_f64).unwrap_or(0.0);
+                            Some(format!("{bt0:.2}..{bt1:.2}s(p={pk:.1})"))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            lines.push(format!(
+                "MEASURED 1/1 MOTION PROFILE: meanDelta={mean_d:.2}, staticPct={static_pct:.1}%, activeLocalBursts=[{}], filmstripSheets={sheet_count}{}",
+                bursts.join(", "),
+                if sheet_count > 8 {
+                    " (first 8 attached above; call `read_filmstrip({ sceneIndex, startSheet })` for remaining sheets)"
+                } else {
+                    ""
+                }
+            ));
+        }
     }
 
     let clean_brief: String = user_brief

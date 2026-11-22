@@ -386,6 +386,23 @@ pub(crate) fn build_compact_extraction_summary(
         "Reference video extracted ({width}x{height} @ {fps:.0}fps, {total_dur:.2}s, {ar}, BPM={bpm:.0}, fastMode={fast_mode})."
     ));
     lines.push(format!("Artifacts: report={report_path}, style={style_path}"));
+    if let Some(fs_meta) = bp.and_then(|b| b.get("filmstrip")).filter(|v| !v.is_null()) {
+        let sheets = fs_meta.get("sheetCount").and_then(Value::as_u64).unwrap_or(0);
+        let tiles = fs_meta.get("keptTiles").and_then(Value::as_u64).unwrap_or(0);
+        let tot_f = fs_meta.get("totalFrames").and_then(Value::as_u64).unwrap_or(0);
+        let fs_mode = fs_meta.get("mode").and_then(Value::as_str).unwrap_or("smart");
+        let stat_pct = fs_meta
+            .pointer("/videoMotionStats/staticFramesPct")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        let med_d = fs_meta
+            .pointer("/videoMotionStats/medianDelta")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        lines.push(format!(
+            "1/1 Filmstrip Index: ref/extracted/filmstrip_index.json ({sheets} sheets, {tiles}/{tot_f} tiles, mode={fs_mode}, videoMedianDelta={med_d:.2}, videoStaticPct={stat_pct:.1}%). Call `read_filmstrip({{ sceneIndex }})` per scene for complete frame-by-frame timing."
+        ));
+    }
 
     let scenes = bp
         .and_then(|b| b.get("scenes"))
@@ -450,6 +467,21 @@ pub(crate) fn build_compact_extraction_summary(
                 if !tags.is_empty() {
                     scene_line.push_str(&format!(" | beats=[{}]", tags.join(", ")));
                 }
+            }
+            if let Some(fs_sheets) = s.get("filmstripSheets").and_then(Value::as_array).filter(|a| !a.is_empty()) {
+                let first_s = fs_sheets.first().and_then(Value::as_str).unwrap_or("");
+                let last_s = fs_sheets.last().and_then(Value::as_str).unwrap_or(first_s);
+                let stat_pct = s
+                    .pointer("/motionProfile/staticPct")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0);
+                scene_line.push_str(&format!(
+                    " | filmstrip={}..{} ({}sh, static={:.0}%)",
+                    first_s,
+                    last_s,
+                    fs_sheets.len(),
+                    stat_pct
+                ));
             }
             lines.push(scene_line);
         }

@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 
 use super::{
     apply_patch, bash, codemode, edit, fetch_web_image, film_audio, film_scaffold, glob, grep, lsp,
-    preview_film, question, read, ref_extractor, ref_probe, render, sfx, skill_manager, snapshot,
+    preview_film, question, read, ref_extractor, ref_filmstrip, ref_probe, render, sfx, skill_manager, snapshot,
     storyboard, tasks, todo, voicebox, webfetch, websearch, write,
 };
 
@@ -69,6 +69,7 @@ pub fn build_tool_definitions() -> Vec<Value> {
         voicebox::voicebox_tool_definition(),
         sfx::sfx_tool_definition(),
         ref_extractor::ref_extractor_tool_definition(),
+        ref_filmstrip::read_filmstrip_tool_definition(),
         ref_probe::inspect_ref_frame_tool_definition(),
         ref_probe::sample_ref_region_tool_definition(),
         fetch_web_image::fetch_web_image_tool_definition(),

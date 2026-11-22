@@ -298,6 +298,34 @@ fn is_preview_vision_message(msg: &Value) -> bool {
     has_inline_img && mentions_preview && !mentions_ref_only
 }
 
+/// Detects whether a multimodal user message carries a temporary `[FILMSTRIP_BATCH ...]`
+/// sheet window attached by `read_filmstrip`, so moving to the next scene cleanly replaces
+/// the previous scene's 1/1 filmstrip sheets without overflowing the 16-image active cap.
+fn is_filmstrip_batch_message(msg: &Value) -> bool {
+    if msg.get("role").and_then(Value::as_str) != Some("user") {
+        return false;
+    }
+    let Some(arr) = msg.get("content").and_then(Value::as_array) else {
+        return false;
+    };
+    let mut has_inline_img = false;
+    let mut mentions_filmstrip_batch = false;
+    for part in arr {
+        if part
+            .pointer("/image_url/url")
+            .and_then(Value::as_str)
+            .is_some_and(|u| u.starts_with("data:image/"))
+        {
+            has_inline_img = true;
+        } else if let Some(txt) = part.get("text").and_then(Value::as_str) {
+            if txt.to_ascii_lowercase().contains("[filmstrip_batch") {
+                mentions_filmstrip_batch = true;
+            }
+        }
+    }
+    has_inline_img && mentions_filmstrip_batch
+}
+
 /// Counts active inline `data:image/` attachments currently present across `chat_messages`.
 pub fn count_active_inline_images(chat_messages: &[Value]) -> usize {
     let mut count = 0usize;
@@ -368,6 +396,38 @@ pub fn bound_inline_images_with_count_and_bytes(
                         *part = json!({
                             "type": "text",
                             "text": "[Superseded preview image removed; inspect the latest capture_film_preview batch instead.]"
+                        });
+                        removed += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    // 1b. Sliding-window pruning for superseded `[FILMSTRIP_BATCH ...]` calls from `read_filmstrip`:
+    // only evict older batches once active images exceed `max_count`, preserving prompt-cache prefixes
+    // on early/moderate turns while still preventing long multi-scene videos from overflowing 16 images.
+    let filmstrip_msg_indices: Vec<usize> = chat_messages
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, msg)| is_filmstrip_batch_message(msg).then_some(idx))
+        .collect();
+    if filmstrip_msg_indices.len() > 1 && count_active_inline_images(chat_messages) > max_count {
+        for &old_idx in &filmstrip_msg_indices[..filmstrip_msg_indices.len() - 1] {
+            if let Some(arr) = chat_messages
+                .get_mut(old_idx)
+                .and_then(|m| m.get_mut("content"))
+                .and_then(|c| c.as_array_mut())
+            {
+                for part in arr.iter_mut() {
+                    let is_img = part
+                        .pointer("/image_url/url")
+                        .and_then(Value::as_str)
+                        .is_some_and(|u| u.starts_with("data:image/"));
+                    if is_img {
+                        *part = json!({
+                            "type": "text",
+                            "text": "[Superseded filmstrip batch removed; call read_filmstrip again to revisit earlier sheets.]"
                         });
                         removed += 1;
                     }
@@ -1125,7 +1185,7 @@ mod tests {
                 { "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,P2A" } }
             ]
         });
-        let mut msgs = vec![ref_msg, prev_round1, prev_round2];
+        let mut msgs = vec![ref_msg.clone(), prev_round1, prev_round2];
         let removed = bound_inline_images(&mut msgs);
         assert_eq!(removed, 2, "old preview round images must be pruned");
         assert_eq!(count_active_inline_images(&msgs), 2, "ref keyframe + latest preview kept");
@@ -1167,6 +1227,41 @@ mod tests {
         let count_removed2 = bound_inline_images(&mut many);
         assert_eq!(count_removed2, 3);
         assert_eq!(count_active_inline_images(&many), IMAGE_BUDGET_TARGET_COUNT);
+
+        // Sliding-window pruning: old `[FILMSTRIP_BATCH ...]` messages are replaced when a newer
+        // filmstrip batch arrives, while keeping initial overview keyframes intact.
+        let mut fs_msgs = vec![
+            ref_msg,
+            json!({
+                "role": "user",
+                "content": [
+                    { "type": "text", "text": "[Tool visual output attached below in exact order:\n1. [FILMSTRIP_BATCH scene=1 sheets=1..5] filmstrips/sheet_001.jpg\n]" },
+                    { "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,FS1" } }
+                ]
+            }),
+            json!({
+                "role": "user",
+                "content": [
+                    { "type": "text", "text": "[Tool visual output attached below in exact order:\n1. [FILMSTRIP_BATCH scene=2 sheets=6..9] filmstrips/sheet_006.jpg\n]" },
+                    { "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,FS2" } }
+                ]
+            }),
+        ];
+        let fs_removed = bound_inline_images_with_count_and_bytes(
+            &mut fs_msgs,
+            IMAGE_BUDGET_TRIGGER_BYTES,
+            IMAGE_BUDGET_TARGET_BYTES,
+            2,
+            2,
+        );
+        assert_eq!(fs_removed, 1);
+        assert_eq!(count_active_inline_images(&fs_msgs), 2);
+        assert!(fs_msgs[0].pointer("/content/1/image_url/url").is_some());
+        assert!(fs_msgs[2].pointer("/content/1/image_url/url").is_some());
+        assert!(fs_msgs[1]
+            .pointer("/content/1/text")
+            .and_then(Value::as_str)
+            .is_some_and(|s| s.contains("Superseded filmstrip batch removed")));
     }
 
     #[test]

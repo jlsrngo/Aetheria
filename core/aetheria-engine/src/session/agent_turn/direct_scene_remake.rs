@@ -20,6 +20,7 @@ use base64::prelude::*;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::paths::now_ms;
 use crate::session::message::emit_event;
@@ -32,7 +33,8 @@ use super::direct_scene_switches::{
     extract_cross_scene_summary, CrossContextMode, DirectSceneSwitches, PromptMode,
 };
 use super::direct_scene_tools::{
-    build_scene_tool_definitions, execute_scene_micro_tool, RenderedMetrics, SceneToolContext,
+    build_scene_tool_definitions_with_filmstrip, execute_scene_micro_tool, RenderedMetrics,
+    SceneToolContext,
 };
 use super::direct_scene_trace::{
     resolve_effective_model_and_thinking, DirectRemakeTracer, RenderTraceRecord,
@@ -59,8 +61,8 @@ pub(crate) struct DirectRemakeSummary {
 }
 
 /// Checks whether the active turn should run the zero-subagent Direct Per-Scene Remake Compiler.
-/// Strictly opt-in via `AETHERIA_REMAKE_MODE=direct`; by default the single-session coordinator
-/// retains full OpenCode-style context continuity and stage freedom.
+/// Triggers automatically for multi-scene (`>= 2`) non-hybrid modular remakes when 1/1 filmstrips
+/// exist (`filmstrip_index.json`), or explicitly via `AETHERIA_REMAKE_MODE=direct`; opt out via `standard`.
 pub(crate) fn should_run_direct_scene_remake(workspace_dir: &str) -> bool {
     let mode_env = std::env::var("AETHERIA_REMAKE_MODE").ok();
     should_run_direct_scene_remake_with_mode(workspace_dir, mode_env.as_deref())
@@ -70,10 +72,13 @@ pub(crate) fn should_run_direct_scene_remake_with_mode(
     workspace_dir: &str,
     mode: Option<&str>,
 ) -> bool {
-    let force_direct = mode
-        .map(|v| v.trim().eq_ignore_ascii_case("direct"))
-        .unwrap_or(false);
-    if !force_direct {
+    let norm_mode = mode.map(|v| v.trim().to_ascii_lowercase()).unwrap_or_default();
+    if matches!(norm_mode.as_str(), "standard" | "off" | "false" | "0" | "disabled") {
+        return false;
+    }
+    let explicit_direct = norm_mode == "direct";
+    let auto_mode = norm_mode.is_empty() || norm_mode == "auto";
+    if !explicit_direct && !auto_mode {
         return false;
     }
     let ws = Path::new(workspace_dir);
@@ -111,6 +116,12 @@ pub(crate) fn should_run_direct_scene_remake_with_mode(
     if scenes.is_empty() {
         return false;
     }
+    if !explicit_direct {
+        let filmstrip_idx = ws.join("ref").join("extracted").join("filmstrip_index.json");
+        if !filmstrip_idx.is_file() || scenes.len() < 2 {
+            return false;
+        }
+    }
     // Only trigger when scene scripts are still scaffold stubs (not already authored).
     let mut stub_count = 0usize;
     for (idx, sc) in scenes.iter().enumerate() {
@@ -129,6 +140,157 @@ pub(crate) fn should_run_direct_scene_remake_with_mode(
         }
     }
     stub_count * 2 >= scenes.len().max(1)
+}
+
+/// Automatically scaffolds a modular Canvas project from `ref/extracted/style.json` once
+/// `filmstrip_index.json` (>= 2 scenes) exists on disk so multi-scene video remakes never get stuck
+/// in repetitive exploratory probe loops before entering the parallel 1/1 per-scene compiler.
+pub(crate) async fn maybe_auto_scaffold_for_direct_filmstrip_remake(
+    session_id: &str,
+    workspace_dir: &str,
+    prompt_text: &str,
+) -> bool {
+    let mode_env = std::env::var("AETHERIA_REMAKE_MODE").ok();
+    maybe_auto_scaffold_for_direct_filmstrip_remake_with_mode(
+        session_id,
+        workspace_dir,
+        prompt_text,
+        mode_env.as_deref(),
+    )
+    .await
+}
+
+pub(crate) async fn maybe_auto_scaffold_for_direct_filmstrip_remake_with_mode(
+    session_id: &str,
+    workspace_dir: &str,
+    prompt_text: &str,
+    mode: Option<&str>,
+) -> bool {
+    let norm_mode = mode.map(|v| v.trim().to_ascii_lowercase()).unwrap_or_default();
+    if matches!(norm_mode.as_str(), "standard" | "off" | "false" | "0" | "disabled") {
+        return false;
+    }
+    let explicit_direct = norm_mode == "direct";
+    let auto_mode = norm_mode.is_empty() || norm_mode == "auto";
+    if !explicit_direct && !auto_mode {
+        return false;
+    }
+    if crate::studio::project_registry::is_hypothetical_or_planning_question(prompt_text) {
+        return false;
+    }
+    let lower_prompt = prompt_text.to_ascii_lowercase();
+    if lower_prompt.contains("hybrid")
+        || lower_prompt.contains("css3d")
+        || lower_prompt.contains("single html")
+        || lower_prompt.contains("single-file")
+    {
+        return false;
+    }
+
+    let ws = PathBuf::from(workspace_dir);
+    let style_path = ws.join("ref").join("extracted").join("style.json");
+    let filmstrip_path = ws.join("ref").join("extracted").join("filmstrip_index.json");
+    if !style_path.is_file() || !filmstrip_path.is_file() {
+        return false;
+    }
+    if crate::studio::motion::resolve_active_html_film_path(Some(workspace_dir)).is_some() {
+        return false;
+    }
+
+    let Ok(raw_style) = tokio::fs::read_to_string(&style_path).await else {
+        return false;
+    };
+    let Ok(style_val) = serde_json::from_str::<Value>(&raw_style) else {
+        return false;
+    };
+    let Some(style_scenes) = style_val.get("scenes").and_then(Value::as_array) else {
+        return false;
+    };
+    if style_scenes.len() < 2 {
+        return false;
+    }
+
+    let mut width = style_val
+        .get("width")
+        .and_then(Value::as_u64)
+        .unwrap_or(1080) as u32;
+    let mut height = style_val
+        .get("height")
+        .and_then(Value::as_u64)
+        .unwrap_or(1920) as u32;
+    if width.max(height) < 640 && width >= 16 && height >= 16 {
+        width *= 2;
+        height *= 2;
+    }
+    let fps = style_val
+        .get("fps")
+        .and_then(Value::as_u64)
+        .unwrap_or(30)
+        .max(1) as u32;
+    let background = style_val
+        .pointer("/palette/primary")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("#0f1115")
+        .to_string();
+
+    let scaffold_scenes: Vec<Value> = style_scenes
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let sid = s
+                .get("id")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("scene{}", i + 1));
+            let dur = s
+                .get("duration")
+                .and_then(Value::as_f64)
+                .filter(|d| d.is_finite() && *d > 0.05)
+                .unwrap_or(2.0);
+            json!({ "id": sid, "duration": dur })
+        })
+        .collect();
+    let title = style_val
+        .get("title")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Reference Remake")
+        .to_string();
+    let args = json!({
+        "title": title,
+        "width": width,
+        "height": height,
+        "fps": fps,
+        "background": background,
+        "scenes": scaffold_scenes,
+    });
+    let sid_owned = session_id.to_string();
+    let ws_owned = workspace_dir.to_string();
+    let scene_len = style_scenes.len();
+    let res = tokio::task::spawn_blocking(move || {
+        crate::tool::film_scaffold::execute_film_scaffold(&sid_owned, &ws_owned, &args)
+    })
+    .await
+    .ok();
+    let ok = res
+        .as_ref()
+        .and_then(|v| v.get("ok").and_then(Value::as_bool))
+        .unwrap_or(false);
+    if ok {
+        crate::paths::log_engine(
+            "direct_remake",
+            &format!(
+                "Auto-scaffolded {} modular scenes ({}x{} @ {}fps) from ref/extracted/style.json + filmstrip_index.json",
+                scene_len, width, height, fps
+            ),
+        );
+    }
+    ok
 }
 
 /// Extracts clean JavaScript source from a markdown-fenced or raw LLM response.
@@ -225,6 +387,94 @@ fn collect_scene_pass1_images(ws_root: &Path, scene_num: usize) -> Vec<String> {
         .collect()
 }
 
+/// Loads up to 8 evenly spaced 1/1 filmstrip sheets spanning `scene_num` from start to end
+/// (plus settled scene hero JPEG) when `AETHERIA_DIRECT_FILMSTRIP=1` is active;
+/// falls back cleanly to `collect_scene_pass1_images`.
+fn collect_scene_filmstrip_pass1_images(ws_root: &Path, scene_num: usize) -> Vec<String> {
+    let extracted_dir = ws_root.join("ref").join("extracted");
+    let idx_path = extracted_dir.join("filmstrip_index.json");
+    let Ok(raw) = std::fs::read_to_string(&idx_path) else {
+        return collect_scene_pass1_images(ws_root, scene_num);
+    };
+    let Ok(idx_val) = serde_json::from_str::<Value>(&raw) else {
+        return collect_scene_pass1_images(ws_root, scene_num);
+    };
+    let all_sheets = idx_val
+        .get("sheets")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let wanted: std::collections::HashSet<u64> = idx_val
+        .get("scenes")
+        .and_then(Value::as_array)
+        .and_then(|arr| {
+            arr.iter()
+                .find(|s| s.get("index").and_then(Value::as_u64) == Some(scene_num as u64))
+        })
+        .and_then(|sc| sc.get("sheetIndices"))
+        .and_then(Value::as_array)
+        .map(|arr| arr.iter().filter_map(Value::as_u64).collect())
+        .unwrap_or_default();
+
+    let matching: Vec<&Value> = if !wanted.is_empty() {
+        all_sheets
+            .iter()
+            .filter(|sh| {
+                sh.get("sheetIndex")
+                    .and_then(Value::as_u64)
+                    .is_some_and(|si| wanted.contains(&si))
+            })
+            .collect()
+    } else {
+        crate::tool::ref_filmstrip::select_filmstrip_sheets(
+            &idx_val,
+            &json!({ "sceneIndex": scene_num, "maxSheets": 10 }),
+        )
+        .0
+    };
+    if matching.is_empty() {
+        return collect_scene_pass1_images(ws_root, scene_num);
+    }
+
+    let picked: Vec<&Value> = if matching.len() <= 8 {
+        matching
+    } else {
+        let last = matching.len() - 1;
+        (0..8)
+            .map(|k| matching[(k * last) / 7])
+            .collect()
+    };
+
+    let mut urls = Vec::with_capacity(picked.len() + 1);
+    for sh in picked {
+        let rel_vis = sh.get("visionRelPath").and_then(Value::as_str).unwrap_or("");
+        let rel_raw = sh.get("relPath").and_then(Value::as_str).unwrap_or("");
+        let vis_p = extracted_dir.join(rel_vis);
+        let raw_p = extracted_dir.join(rel_raw);
+        let chosen = if !rel_vis.is_empty() && vis_p.is_file() {
+            Some(vis_p)
+        } else if !rel_raw.is_empty() && raw_p.is_file() {
+            Some(raw_p)
+        } else {
+            None
+        };
+        if let Some(p) = chosen {
+            if let Some(url) = encode_jpeg_data_url(&p) {
+                urls.push(url);
+            }
+        }
+    }
+    let hero_p = extracted_dir.join("frames").join(format!("ref_scene_{scene_num:02}.jpg"));
+    if let Some(hero_url) = encode_jpeg_data_url(&hero_p) {
+        urls.push(hero_url);
+    }
+    if urls.is_empty() {
+        collect_scene_pass1_images(ws_root, scene_num)
+    } else {
+        urls
+    }
+}
+
 fn collect_scene_keyframe_timestamps(
     ws_root: &Path,
     film_root: &Path,
@@ -276,6 +526,7 @@ pub(crate) fn should_restore_best_checkpoint(
 ) -> bool {
     best_score >= 0.0
         && !best_code.is_empty()
+        && !crate::tool::film_state::is_scaffold_stub_content(best_code)
         && ((best_errs.is_empty() && !latest_errs.is_empty())
             || (latest_score + 0.03 < best_score && final_hazards >= best_hazards))
 }
@@ -334,6 +585,811 @@ pub(crate) async fn run_direct_per_scene_remake(
         switches,
     )
     .await
+}
+
+struct DirectSceneRunCtx {
+    session_id: String,
+    workspace_dir: String,
+    user_brief: String,
+    client: reqwest::Client,
+    base_url: String,
+    api_key: String,
+    model_id: String,
+    ws_root: PathBuf,
+    film_root: PathBuf,
+    switches: DirectSceneSwitches,
+    active_filmstrip: bool,
+    system_prompt: &'static str,
+    temperature: Option<f64>,
+    max_tokens: u64,
+    width: u32,
+    height: u32,
+    fps: u32,
+    bpm: f64,
+    total_dur: f64,
+    total_scenes: usize,
+    scene_tools: Vec<Value>,
+    write_only_tools: Vec<Value>,
+    patch_or_write_tools: Vec<Value>,
+    render_only_tools: Vec<Value>,
+    render_lock: Arc<tokio::sync::Mutex<()>>,
+    tracer: Arc<tokio::sync::Mutex<DirectRemakeTracer>>,
+    completed_scenes: Arc<tokio::sync::Mutex<Vec<(usize, String, String)>>>,
+}
+
+async fn run_single_direct_scene(
+    shared: Arc<DirectSceneRunCtx>,
+    idx: usize,
+    film_sc: Value,
+    style_sc_owned: Option<Value>,
+) -> (DirectSceneOutcome, SceneSummaryTraceRecord) {
+    let scene_num = idx + 1;
+    let scene_started = now_ms();
+    let max_scene_steps = shared.switches.max_steps;
+    let total_scenes = shared.total_scenes;
+    let mut scene_base_url = shared.base_url.clone();
+    let mut scene_api_key = shared.api_key.clone();
+    let mut scene_model_id = shared.model_id.clone();
+
+    let scene_id = film_sc
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or("scene")
+        .to_string();
+    let script_rel = film_sc
+        .get("script")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("script/scene{}.js", scene_num));
+    let script_path = shared.film_root.join(&script_rel);
+    let sc_start = film_sc.get("start").and_then(Value::as_f64).unwrap_or(0.0);
+    let sc_dur = film_sc.get("duration").and_then(Value::as_f64).unwrap_or(2.0);
+    let style_sc = style_sc_owned.as_ref();
+
+    emit_event(
+        &shared.workspace_dir,
+        "session.tool.called",
+        json!({
+            "sessionID": shared.session_id,
+            "tool": "direct_scene_remake",
+            "label": format!("Direct Vision-First Scene {}/{}: {}", scene_num, total_scenes, scene_id),
+            "timestamp": now_ms()
+        }),
+    );
+
+    let pass1_images = if shared.active_filmstrip {
+        collect_scene_filmstrip_pass1_images(&shared.ws_root, scene_num)
+    } else {
+        collect_scene_pass1_images(&shared.ws_root, scene_num)
+    };
+    let mut hard_facts = build_scene_hard_facts_prompt(
+        style_sc,
+        &film_sc,
+        scene_num,
+        total_scenes,
+        shared.width,
+        shared.height,
+        shared.fps,
+        shared.bpm,
+        &shared.user_brief,
+    );
+    if matches!(shared.switches.cross_context, CrossContextMode::Summary) {
+        let completed_snapshot = {
+            let guard = shared.completed_scenes.lock().await;
+            guard.clone()
+        };
+        if let Some(summary_block) = extract_cross_scene_summary(&completed_snapshot) {
+            hard_facts.push_str("\n\n");
+            hard_facts.push_str(&summary_block);
+        }
+    }
+    if shared.active_filmstrip {
+        hard_facts.push_str(
+            "\n\n1/1 FILMSTRIP PASS-1 MODE: The attached images are chronological 1/1 filmstrip sheets (10 frames/sheet labeled fNNNN t.tts dX.X) spanning this scene from start to end, plus the Hero keyframe. Do NOT write empty/solid-color placeholder stubs to unlock tools — if you need exact hex colors, do at most 1 batched sample_ref_region call first, then write the COMPLETE time-driven animated script reproducing every sub-beat across tiles continuously (never freeze shapes when tile delta d > 0.3!). After write_scene_script, render_and_compare_scene will also return an 8-frame REF-vs-RND motion strip — immediately fix any MOTION FROZEN WARNING or shape mismatch via patch_scene_script.",
+        );
+    }
+    let scene_ts = collect_scene_keyframe_timestamps(
+        &shared.ws_root,
+        &shared.film_root,
+        shared.total_dur,
+        scene_num,
+        sc_start,
+        sc_dur,
+    );
+
+    let mut best_code = std::fs::read_to_string(&script_path).unwrap_or_default();
+    let mut best_score = -1.0f64;
+    let mut best_errs: Vec<String> = Vec::new();
+    let mut best_hazards = usize::MAX;
+    let mut latest_score = 0.0f64;
+    let mut latest_errs: Vec<String> = Vec::new();
+    let mut has_written = false;
+    let mut dirty_since_render = false;
+    let mut probes_since_edit: usize = 0;
+    let mut renders_completed: usize = 0;
+    let mut rolled_back = false;
+    let mut passes_run = 0usize;
+    let mut first_write_step: Option<usize> = None;
+    let mut probe_calls_before_write: usize = 0;
+    let mut tool_histogram: BTreeMap<String, usize> = BTreeMap::new();
+    let mut render_records: Vec<RenderTraceRecord> = Vec::new();
+
+    let tool_ctx = SceneToolContext {
+        session_id: &shared.session_id,
+        workspace_dir: &shared.workspace_dir,
+        ws_root: &shared.ws_root,
+        film_root: &shared.film_root,
+        script_path: &script_path,
+        script_rel: &script_rel,
+        scene_num,
+        scene_start: sc_start,
+        scene_dur: sc_dur,
+        film_duration: shared.total_dur,
+        width: shared.width,
+        height: shared.height,
+        default_scene_ts: &scene_ts,
+        use_filmstrip: shared.active_filmstrip,
+    };
+
+    let mut scene_msgs = vec![
+        json!({ "role": "system", "content": shared.system_prompt }),
+        build_vision_user_message(hard_facts, &pass1_images),
+    ];
+
+    let force_write_choice = json!({
+        "type": "function",
+        "function": { "name": "write_scene_script" }
+    });
+    for step_idx in 0..max_scene_steps {
+        let enforce_write_now = shared.switches.should_enforce_write_gate(
+            has_written,
+            step_idx,
+            !shared.write_only_tools.is_empty(),
+        );
+        let post_phase = if enforce_write_now {
+            PostWriteToolPhase::AllTools
+        } else if shared.active_filmstrip
+            && has_written
+            && !dirty_since_render
+            && renders_completed >= 1
+            && step_idx + 2 >= max_scene_steps
+        {
+            PostWriteToolPhase::ApplyPolishOrFinish
+        } else if step_idx + 1 == max_scene_steps && has_written && !dirty_since_render {
+            PostWriteToolPhase::ApplyPolishOrFinish
+        } else {
+            select_post_write_tool_phase(
+                has_written,
+                dirty_since_render,
+                !latest_errs.is_empty(),
+                probes_since_edit,
+            )
+        };
+        let active_tools: &[Value] = if enforce_write_now {
+            &shared.write_only_tools
+        } else {
+            match post_phase {
+                PostWriteToolPhase::FixRuntimeErrorsNow
+                | PostWriteToolPhase::ApplyPolishOrFinish
+                    if !shared.patch_or_write_tools.is_empty() =>
+                {
+                    &shared.patch_or_write_tools
+                }
+                PostWriteToolPhase::VerifyDirtyScriptNow
+                    if !shared.render_only_tools.is_empty() =>
+                {
+                    &shared.render_only_tools
+                }
+                _ => &shared.scene_tools,
+            }
+        };
+        let active_tool_choice = if enforce_write_now {
+            Some(&force_write_choice)
+        } else {
+            None
+        };
+        let comp = match send_resilient_chat_completion_with_tool_choice(
+            &shared.client,
+            &mut scene_base_url,
+            &mut scene_api_key,
+            &mut scene_model_id,
+            &mut scene_msgs,
+            active_tools,
+            shared.temperature,
+            shared.max_tokens,
+            shared.switches.reasoning_effort.as_deref(),
+            active_tool_choice,
+        )
+        .await
+        {
+            Ok(c) => c,
+            Err(err) => {
+                crate::paths::log_engine(
+                    "direct_remake",
+                    &format!(
+                        "⚠️ Scene {}/{} ({}) step {} LLM error: {}",
+                        scene_num, total_scenes, scene_id, step_idx + 1, err
+                    ),
+                );
+                break;
+            }
+        };
+        passes_run += 1;
+        let (step_upstream_model, step_thinking_level) = resolve_effective_model_and_thinking(
+            &scene_base_url,
+            &scene_model_id,
+            shared.switches.reasoning_effort.as_deref(),
+        );
+
+        if !comp.tool_calls.is_empty() {
+            scene_msgs.push(json!({
+                "role": "assistant",
+                "content": if comp.assistant_text.trim().is_empty() { Value::Null } else { json!(comp.assistant_text) },
+                "tool_calls": comp.tool_calls,
+            }));
+
+            let mut step_images: Vec<String> = Vec::new();
+            let mut step_captions: Vec<String> = Vec::new();
+            let mut step_tool_records: Vec<ToolCallTraceRecord> = Vec::new();
+            let mut step_blocked_by_gate: Vec<String> = Vec::new();
+            let mut step_modified = false;
+            let mut step_rendered = false;
+            let mut step_probed = false;
+
+            for (tc_idx, tc) in comp.tool_calls.iter().enumerate() {
+                let tool_started = now_ms();
+                let cid = tc
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("sc{}_{}_{}", scene_num, step_idx, tc_idx));
+                let fn_name = tc
+                    .pointer("/function/name")
+                    .or_else(|| tc.get("name"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let raw_args = tc
+                    .pointer("/function/arguments")
+                    .or_else(|| tc.get("arguments"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("{}");
+                *tool_histogram.entry(fn_name.to_string()).or_insert(0) += 1;
+
+                let (parsed_args, arg_err) = match parse_or_repair_tool_args(raw_args) {
+                    Ok(v) => (v, None),
+                    Err(e) => (json!({}), Some(e)),
+                };
+
+                let mut blocked_this_call = false;
+                let outcome = if let Some(err) = arg_err {
+                    super::direct_scene_tools::SceneToolOutcome {
+                        result_json: json!({ "ok": false, "error": format!("Malformed JSON tool args: {}", err) }),
+                        vision_images: Vec::new(),
+                        vision_caption: None,
+                        script_modified: false,
+                        rendered_score: None,
+                        rendered_metrics: None,
+                        rendered_errors: None,
+                    }
+                } else if enforce_write_now
+                    && !matches!(
+                        fn_name,
+                        "write_scene_script"
+                            | "write"
+                            | "write_to_file"
+                            | "patch_scene_script"
+                            | "edit"
+                            | "replace_file_content"
+                    )
+                {
+                    blocked_this_call = true;
+                    step_blocked_by_gate.push(fn_name.to_string());
+                    crate::paths::log_engine(
+                        "direct_remake",
+                        &format!(
+                            "🚧 Scene {}/{} ({}) step {} blocked probe tool='{}' while write_scene_script is required",
+                            scene_num, total_scenes, scene_id, step_idx + 1, fn_name
+                        ),
+                    );
+                    super::direct_scene_tools::SceneToolOutcome {
+                        result_json: json!({
+                            "ok": false,
+                            "error": shared.switches.build_gate_block_error(fn_name, &script_rel)
+                        }),
+                        vision_images: Vec::new(),
+                        vision_caption: None,
+                        script_modified: false,
+                        rendered_score: None,
+                        rendered_metrics: None,
+                        rendered_errors: None,
+                    }
+                } else if post_phase == PostWriteToolPhase::VerifyDirtyScriptNow
+                    && fn_name != "render_and_compare_scene"
+                {
+                    blocked_this_call = true;
+                    step_blocked_by_gate.push(fn_name.to_string());
+                    super::direct_scene_tools::SceneToolOutcome {
+                        result_json: json!({
+                            "ok": false,
+                            "error": format!("You modified `{}` — call `render_and_compare_scene` NOW to inspect your pixels before further probing.", script_rel)
+                        }),
+                        vision_images: Vec::new(),
+                        vision_caption: None,
+                        script_modified: false,
+                        rendered_score: None,
+                        rendered_metrics: None,
+                        rendered_errors: None,
+                    }
+                } else if matches!(
+                    post_phase,
+                    PostWriteToolPhase::FixRuntimeErrorsNow
+                        | PostWriteToolPhase::ApplyPolishOrFinish
+                ) && !matches!(
+                    fn_name,
+                    "write_scene_script"
+                        | "write"
+                        | "write_to_file"
+                        | "patch_scene_script"
+                        | "edit"
+                        | "replace_file_content"
+                ) {
+                    blocked_this_call = true;
+                    step_blocked_by_gate.push(fn_name.to_string());
+                    let msg = if post_phase == PostWriteToolPhase::FixRuntimeErrorsNow {
+                        format!("Runtime JS errors are active — fix `{}` NOW with `patch_scene_script` or `write_scene_script` before probing further.", script_rel)
+                    } else {
+                        format!("Post-render probing limit reached — call `patch_scene_script` or `write_scene_script` on `{}` to apply fixes, or reply briefly in text if done.", script_rel)
+                    };
+                    super::direct_scene_tools::SceneToolOutcome {
+                        result_json: json!({ "ok": false, "error": msg }),
+                        vision_images: Vec::new(),
+                        vision_caption: None,
+                        script_modified: false,
+                        rendered_score: None,
+                        rendered_metrics: None,
+                        rendered_errors: None,
+                    }
+                } else {
+                    emit_event(
+                        &shared.workspace_dir,
+                        "session.tool.called",
+                        json!({
+                            "sessionID": shared.session_id,
+                            "tool": fn_name,
+                            "label": format!("Scene {}/{}: {}", scene_num, total_scenes, fn_name),
+                            "timestamp": now_ms()
+                        }),
+                    );
+                    let out = if fn_name == "render_and_compare_scene" {
+                        let _render_guard = shared.render_lock.lock().await;
+                        execute_scene_micro_tool(&tool_ctx, fn_name, &parsed_args).await
+                    } else {
+                        execute_scene_micro_tool(&tool_ctx, fn_name, &parsed_args).await
+                    };
+                    let tool_ok = out.result_json.get("ok").and_then(Value::as_bool) != Some(false)
+                        && out.result_json.get("error").is_none();
+                    let err_preview = out
+                        .result_json
+                        .get("error")
+                        .and_then(Value::as_str)
+                        .map(|s| format!(" err={}", s.chars().take(120).collect::<String>()))
+                        .unwrap_or_default();
+                    crate::paths::log_engine(
+                        "direct_remake",
+                        &format!(
+                            "🔧 Scene {}/{} ({}) step {} tool='{}' ok={} modified={}{}",
+                            scene_num,
+                            total_scenes,
+                            scene_id,
+                            step_idx + 1,
+                            fn_name,
+                            tool_ok,
+                            out.script_modified,
+                            err_preview
+                        ),
+                    );
+                    out
+                };
+
+                let call_ok = outcome.result_json.get("ok").and_then(Value::as_bool) != Some(false)
+                    && outcome.result_json.get("error").is_none();
+                let img_count = outcome.vision_images.len();
+                let img_bytes: usize = outcome.vision_images.iter().map(|s| s.len()).sum();
+
+                if outcome.script_modified {
+                    if !has_written && first_write_step.is_none() {
+                        first_write_step = Some(step_idx + 1);
+                    }
+                    has_written = true;
+                    dirty_since_render = true;
+                    step_modified = true;
+                } else if !blocked_this_call && outcome.rendered_score.is_none() {
+                    step_probed = true;
+                    if !has_written {
+                        probe_calls_before_write += 1;
+                    }
+                }
+                if let Some(sc_val) = outcome.rendered_score {
+                    dirty_since_render = false;
+                    step_rendered = true;
+                    renders_completed += 1;
+                    let errs = outcome.rendered_errors.clone().unwrap_or_default();
+                    latest_score = sc_val;
+                    latest_errs = errs.clone();
+                    let cur_code = tokio::fs::read_to_string(&script_path)
+                        .await
+                        .unwrap_or_default();
+                    let cur_haz = detect_scene_collision_hazards(&cur_code).len();
+                    let metrics = outcome.rendered_metrics.unwrap_or(RenderedMetrics {
+                        overall: sc_val,
+                        ssim: 0.0,
+                        color: 0.0,
+                        edge: 0.0,
+                    });
+                    render_records.push(RenderTraceRecord {
+                        step: step_idx + 1,
+                        overall: metrics.overall,
+                        ssim: metrics.ssim,
+                        color: metrics.color,
+                        edge: metrics.edge,
+                        runtime_errors: errs.len(),
+                        hazards: cur_haz,
+                    });
+                    let better_checkpoint = best_score < 0.0
+                        || (!best_errs.is_empty() && errs.is_empty())
+                        || (best_errs.is_empty()
+                            && errs.is_empty()
+                            && (sc_val >= best_score - 0.002
+                                || (cur_haz < best_hazards && sc_val >= best_score - 0.04)));
+                    if better_checkpoint {
+                        best_code = cur_code;
+                        best_score = sc_val;
+                        best_errs = errs;
+                        best_hazards = cur_haz;
+                    }
+                    crate::paths::log_engine(
+                        "direct_remake",
+                        &format!(
+                            "Scene {}/{} ({}) step {} render -> score={:.3} (best={:.3}), errs={}",
+                            scene_num,
+                            total_scenes,
+                            scene_id,
+                            step_idx + 1,
+                            sc_val,
+                            best_score.max(0.0),
+                            latest_errs.len()
+                        ),
+                    );
+                }
+
+                step_images.extend(outcome.vision_images);
+                if let Some(cap) = outcome.vision_caption {
+                    step_captions.push(cap);
+                }
+
+                let model_text =
+                    crate::tool::truncator::format_tool_result_for_model(fn_name, &outcome.result_json);
+                let direction = crate::tool::truncator::preferred_direction_for_tool(fn_name);
+                let (bounded_text, _, _) = crate::tool::truncator::bound_tool_output_with_spill(
+                    fn_name,
+                    &model_text,
+                    Some(&shared.workspace_dir),
+                    Some(&cid),
+                    direction,
+                );
+                let probe_tag = if fn_name == "inspect_ref_frame" {
+                    parsed_args
+                        .get("timestampSec")
+                        .and_then(Value::as_f64)
+                        .map(|t| format!("t={:.3}", t))
+                } else if matches!(fn_name, "bash" | "shell" | "terminal") {
+                    let cmd = parsed_args.get("command").and_then(Value::as_str).unwrap_or("");
+                    if cmd.contains("cv2") || cmd.contains("VideoCapture") {
+                        Some("cv2".to_string())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                step_tool_records.push(ToolCallTraceRecord {
+                    name: fn_name.to_string(),
+                    ok: call_ok,
+                    ms: now_ms().saturating_sub(tool_started),
+                    arg_bytes: raw_args.len(),
+                    result_bytes: bounded_text.len(),
+                    image_count: img_count,
+                    image_bytes: img_bytes,
+                    probe_tag,
+                });
+                scene_msgs.push(json!({
+                    "role": "tool",
+                    "tool_call_id": cid,
+                    "name": fn_name,
+                    "content": bounded_text,
+                }));
+            }
+
+            {
+                let mut tr = shared.tracer.lock().await;
+                tr.record_step(&StepTraceRecord {
+                    record_type: "step",
+                    scene: scene_num,
+                    scene_id: scene_id.clone(),
+                    step: step_idx + 1,
+                    upstream_model: step_upstream_model,
+                    thinking_level: step_thinking_level,
+                    tool_calls: step_tool_records,
+                    blocked_by_gate: step_blocked_by_gate,
+                    assistant_text_chars: comp.assistant_text.len(),
+                    finish_reason: comp.finish_reason.clone(),
+                    input_tokens: comp.input_tokens,
+                    output_tokens: comp.output_tokens,
+                });
+            }
+
+            if step_modified || step_rendered {
+                probes_since_edit = 0;
+            } else if has_written && step_probed {
+                probes_since_edit += 1;
+            }
+
+            let mut nudge_opt = shared.switches.build_probe_budget_nudge(
+                has_written,
+                step_idx,
+                scene_num,
+                total_scenes,
+                &script_rel,
+            );
+            if nudge_opt.is_none() && has_written && step_idx + 1 < max_scene_steps {
+                let next_post_phase = if shared.active_filmstrip
+                    && !dirty_since_render
+                    && renders_completed >= 1
+                    && step_idx + 3 >= max_scene_steps
+                {
+                    PostWriteToolPhase::ApplyPolishOrFinish
+                } else {
+                    select_post_write_tool_phase(
+                        has_written,
+                        dirty_since_render,
+                        !latest_errs.is_empty(),
+                        probes_since_edit,
+                    )
+                };
+                nudge_opt = if step_rendered && !latest_errs.is_empty() {
+                    Some("RUNTIME JS ERRORS DETECTED — fix them immediately with `patch_scene_script` (or `write_scene_script`), then re-verify with `render_and_compare_scene`.".to_string())
+                } else if step_rendered
+                    && latest_errs.is_empty()
+                    && latest_score >= 0.78
+                    && renders_completed >= 2
+                {
+                    Some("Score is >= 0.78 with 0 runtime errors. Reply briefly in text to finalize this scene and move on, unless a glaring visual/motion defect remains.".to_string())
+                } else {
+                    match next_post_phase {
+                        PostWriteToolPhase::VerifyDirtyScriptNow => Some(
+                            "Script was modified — call `render_and_compare_scene` NOW to visually inspect your rendered pixels against Row 1.".to_string(),
+                        ),
+                        PostWriteToolPhase::FixRuntimeErrorsNow => Some(
+                            "Probe complete — call `patch_scene_script` or `write_scene_script` NOW to fix the runtime JS errors, then re-verify with `render_and_compare_scene`.".to_string(),
+                        ),
+                        PostWriteToolPhase::ApplyPolishOrFinish => Some(
+                            "Probing window complete after render. Apply your fixes NOW via `patch_scene_script` (or `write_scene_script`), or reply briefly in text if this scene is already complete.".to_string(),
+                        ),
+                        PostWriteToolPhase::AllTools => None,
+                    }
+                };
+            }
+
+            if !step_images.is_empty() {
+                let mut caption = if step_captions.is_empty() {
+                    "Visual tool output attached above. Inspect closely and patch surgically if anything mismatches.".to_string()
+                } else {
+                    step_captions.join("\n")
+                };
+                if let Some(nudge) = nudge_opt {
+                    caption.push_str("\n\n");
+                    caption.push_str(&nudge);
+                }
+                scene_msgs.push(build_vision_user_message(caption, &step_images));
+            } else if let Some(nudge) = nudge_opt {
+                scene_msgs.push(json!({
+                    "role": "user",
+                    "content": nudge
+                }));
+            }
+            continue;
+        }
+
+        {
+            let mut tr = shared.tracer.lock().await;
+            tr.record_step(&StepTraceRecord {
+                record_type: "step",
+                scene: scene_num,
+                scene_id: scene_id.clone(),
+                step: step_idx + 1,
+                upstream_model: step_upstream_model,
+                thinking_level: step_thinking_level,
+                tool_calls: Vec::new(),
+                blocked_by_gate: Vec::new(),
+                assistant_text_chars: comp.assistant_text.len(),
+                finish_reason: comp.finish_reason.clone(),
+                input_tokens: comp.input_tokens,
+                output_tokens: comp.output_tokens,
+            });
+        }
+
+        // Graceful fallback for models that return a raw ```javascript``` block without tool calls
+        if let Some(code_block) = extract_js_code_block(&comp.assistant_text) {
+            let _ = tokio::fs::write(&script_path, &code_block).await;
+            if !has_written && first_write_step.is_none() {
+                first_write_step = Some(step_idx + 1);
+            }
+            has_written = true;
+            dirty_since_render = false;
+            scene_msgs.push(json!({ "role": "assistant", "content": comp.assistant_text }));
+
+            let render_out = {
+                let _render_guard = shared.render_lock.lock().await;
+                execute_scene_micro_tool(&tool_ctx, "render_and_compare_scene", &json!({})).await
+            };
+            let sc_val = render_out.rendered_score.unwrap_or(0.0);
+            let errs = render_out.rendered_errors.unwrap_or_default();
+            latest_score = sc_val;
+            latest_errs = errs.clone();
+            let cur_haz = detect_scene_collision_hazards(&code_block).len();
+            let metrics = render_out.rendered_metrics.unwrap_or(RenderedMetrics {
+                overall: sc_val,
+                ssim: 0.0,
+                color: 0.0,
+                edge: 0.0,
+            });
+            render_records.push(RenderTraceRecord {
+                step: step_idx + 1,
+                overall: metrics.overall,
+                ssim: metrics.ssim,
+                color: metrics.color,
+                edge: metrics.edge,
+                runtime_errors: errs.len(),
+                hazards: cur_haz,
+            });
+            let better = best_score < 0.0
+                || (!best_errs.is_empty() && errs.is_empty())
+                || (best_errs.is_empty() && errs.is_empty() && sc_val >= best_score - 0.002);
+            if better {
+                best_code = code_block;
+                best_score = sc_val;
+                best_errs = errs;
+                best_hazards = cur_haz;
+            }
+            if latest_errs.is_empty() && latest_score >= 0.86 && cur_haz == 0 {
+                break;
+            }
+            if step_idx + 1 < max_scene_steps {
+                let diag = render_out
+                    .result_json
+                    .get("diagnostics")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let follow_txt = format!(
+                    "Auto-rendered your script for Scene {}/{} (overall={:.3}, errors={}).\n{}\nInspect the comparison strip above; use `patch_scene_script` (or `inspect_ref_frame` / `sample_ref_region`) to fix any remaining mismatch, then call `render_and_compare_scene`, or reply briefly if done.",
+                    scene_num, total_scenes, latest_score, latest_errs.len(), diag
+                );
+                scene_msgs.push(build_vision_user_message(follow_txt, &render_out.vision_images));
+                continue;
+            }
+            break;
+        }
+
+        if has_written {
+            break;
+        }
+        if step_idx + 1 < max_scene_steps {
+            scene_msgs.push(json!({ "role": "assistant", "content": comp.assistant_text }));
+            scene_msgs.push(json!({
+                "role": "user",
+                "content": format!("Please call `write_scene_script` now to author `{}` and verify it with `render_and_compare_scene`.", script_rel)
+            }));
+            continue;
+        }
+        break;
+    }
+
+    // If the model edited the script on its last step without rendering, run one final verification capture
+    if has_written && dirty_since_render {
+        let final_out = {
+            let _render_guard = shared.render_lock.lock().await;
+            execute_scene_micro_tool(&tool_ctx, "render_and_compare_scene", &json!({})).await
+        };
+        latest_score = final_out.rendered_score.unwrap_or(0.0);
+        latest_errs = final_out.rendered_errors.unwrap_or_default();
+        let final_dirty_code = tokio::fs::read_to_string(&script_path)
+            .await
+            .unwrap_or_default();
+        let final_dirty_haz = detect_scene_collision_hazards(&final_dirty_code).len();
+        let metrics = final_out.rendered_metrics.unwrap_or(RenderedMetrics {
+            overall: latest_score,
+            ssim: 0.0,
+            color: 0.0,
+            edge: 0.0,
+        });
+        render_records.push(RenderTraceRecord {
+            step: passes_run,
+            overall: metrics.overall,
+            ssim: metrics.ssim,
+            color: metrics.color,
+            edge: metrics.edge,
+            runtime_errors: latest_errs.len(),
+            hazards: final_dirty_haz,
+        });
+        if best_score < 0.0 {
+            best_code = final_dirty_code;
+            best_score = latest_score;
+            best_errs = latest_errs.clone();
+            best_hazards = final_dirty_haz;
+        }
+    }
+
+    let final_code_now = tokio::fs::read_to_string(&script_path)
+        .await
+        .unwrap_or_default();
+    let final_haz = detect_scene_collision_hazards(&final_code_now).len();
+    let should_restore_best = shared.switches.restore_best
+        && should_restore_best_checkpoint(
+            best_score,
+            &best_code,
+            &best_errs,
+            best_hazards,
+            latest_score,
+            &latest_errs,
+            final_haz,
+        );
+    let (final_score, final_errs, persisted_code) = if should_restore_best {
+        let _ = tokio::fs::write(&script_path, &best_code).await;
+        rolled_back = true;
+        crate::paths::log_engine(
+            "direct_remake",
+            &format!(
+                "Scene {}/{} ({}) end-of-scene safety restore ({:.3} -> best {:.3})",
+                scene_num, total_scenes, scene_id, latest_score, best_score
+            ),
+        );
+        (best_score, best_errs, best_code)
+    } else if has_written {
+        (latest_score.max(0.0), latest_errs, final_code_now)
+    } else {
+        (best_score.max(0.0), best_errs, final_code_now)
+    };
+
+    {
+        let mut done = shared.completed_scenes.lock().await;
+        done.push((scene_num, scene_id.clone(), persisted_code));
+        done.sort_by_key(|entry| entry.0);
+    }
+    let summary_rec = SceneSummaryTraceRecord {
+        record_type: "scene_summary",
+        scene: scene_num,
+        scene_id: scene_id.clone(),
+        steps_used: passes_run,
+        first_write_step,
+        probe_calls_before_write,
+        tool_histogram,
+        renders: render_records,
+        restored_best: rolled_back,
+        final_score,
+        wall_ms: now_ms().saturating_sub(scene_started),
+    };
+
+    (
+        DirectSceneOutcome {
+            scene_id,
+            script_rel,
+            passes_run,
+            best_score: final_score,
+            rolled_back,
+            runtime_errors: final_errs,
+        },
+        summary_rec,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -422,30 +1478,54 @@ pub(crate) async fn run_direct_per_scene_remake_with_switches(
         .await;
     }
 
-    // OpenCode pattern: omit `temperature` for all Gemini models (2.5 & 3.x) so native sampling
-    // is preserved; use 0.35 only for non-Gemini models.
     let temperature = if model_id.to_ascii_lowercase().contains("gemini") {
         None
     } else {
         Some(0.35)
     };
     let max_tokens = 32_768u64;
-    let max_scene_steps: usize = switches.max_steps;
     let system_prompt = match switches.prompt_mode {
         PromptMode::Current => DIRECT_SCENE_SYSTEM_PROMPT,
         PromptMode::Minimal => DIRECT_SCENE_SYSTEM_PROMPT_MINIMAL,
     };
-    let mut tracer = DirectRemakeTracer::new(
+    let has_filmstrip_index = ws_root
+        .join("ref")
+        .join("extracted")
+        .join("filmstrip_index.json")
+        .is_file();
+    let active_filmstrip = switches.filmstrip_pass1 && has_filmstrip_index;
+    let total_scenes = film_scenes.len();
+    let mut effective_switches = switches.clone();
+    if active_filmstrip && total_scenes >= 2 {
+        if !effective_switches.probe_steps_explicit {
+            effective_switches.probe_steps = Some(1);
+        }
+        if !effective_switches.max_steps_explicit {
+            effective_switches.max_steps = if total_scenes >= 8 { 6 } else { 7 };
+        }
+        if !effective_switches.cross_context_explicit {
+            effective_switches.cross_context = CrossContextMode::Summary;
+        }
+    }
+    let max_scene_steps: usize = effective_switches.max_steps;
+    let effective_concurrency = if effective_switches.concurrency_explicit {
+        effective_switches.concurrency
+    } else if active_filmstrip && total_scenes >= 2 {
+        3
+    } else {
+        1
+    };
+
+    let tracer = DirectRemakeTracer::new(
         &ws_root,
         session_id,
         base_url,
         model_id,
-        &switches,
+        &effective_switches,
         system_prompt,
         started,
     );
-    let mut completed_scenes: Vec<(usize, String, String)> = Vec::new();
-    let scene_tools = build_scene_tool_definitions();
+    let scene_tools = build_scene_tool_definitions_with_filmstrip(active_filmstrip);
     let write_only_tools: Vec<Value> = scene_tools
         .iter()
         .filter(|t| {
@@ -473,36 +1553,51 @@ pub(crate) async fn run_direct_per_scene_remake_with_switches(
         })
         .cloned()
         .collect();
-    let total_scenes = film_scenes.len();
-    let mut outcomes = Vec::with_capacity(total_scenes);
 
     crate::paths::log_engine(
         "direct_remake",
         &format!(
-            "🚀 Starting Smart Per-Scene Agentic Remake (ZERO subagents, {} micro-tools, max {} steps/scene): {} scenes on model={}",
-            scene_tools.len(), max_scene_steps, total_scenes, model_id
+            "🚀 Starting Smart Per-Scene Agentic Remake (ZERO subagents, {} micro-tools, max {} steps/scene, concurrency={}): {} scenes on model={}",
+            scene_tools.len(), max_scene_steps, effective_concurrency, total_scenes, model_id
         ),
     );
 
-    for (idx, film_sc) in film_scenes.iter().enumerate() {
+    let shared = Arc::new(DirectSceneRunCtx {
+        session_id: session_id.to_string(),
+        workspace_dir: workspace_dir.to_string(),
+        user_brief: user_brief.to_string(),
+        client: client.clone(),
+        base_url: base_url.clone(),
+        api_key: api_key.clone(),
+        model_id: model_id.clone(),
+        ws_root,
+        film_root,
+        switches: effective_switches.clone(),
+        active_filmstrip,
+        system_prompt,
+        temperature,
+        max_tokens,
+        width,
+        height,
+        fps,
+        bpm,
+        total_dur,
+        total_scenes,
+        scene_tools,
+        write_only_tools,
+        patch_or_write_tools,
+        render_only_tools,
+        render_lock: Arc::new(tokio::sync::Mutex::new(())),
+        tracer: Arc::new(tokio::sync::Mutex::new(tracer)),
+        completed_scenes: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+    });
+
+    let mut scene_jobs: Vec<(usize, Value, Option<Value>)> = Vec::with_capacity(total_scenes);
+    for (idx, film_sc) in film_scenes.into_iter().enumerate() {
         let scene_num = idx + 1;
-        if !switches.should_run_scene(scene_num) {
+        if !effective_switches.should_run_scene(scene_num) {
             continue;
         }
-        let scene_started = now_ms();
-        let scene_id = film_sc
-            .get("id")
-            .and_then(Value::as_str)
-            .unwrap_or("scene")
-            .to_string();
-        let script_rel = film_sc
-            .get("script")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .unwrap_or_else(|| format!("script/scene{}.js", scene_num));
-        let script_path = film_root.join(&script_rel);
-        let sc_start = film_sc.get("start").and_then(Value::as_f64).unwrap_or(0.0);
-        let sc_dur = film_sc.get("duration").and_then(Value::as_f64).unwrap_or(2.0);
         let style_sc_owned = style_scenes.get(idx).cloned().map(|mut sc_val| {
             if let (Some(obj), Some(src)) = (sc_val.as_object_mut(), root_bpm_source.as_ref()) {
                 obj.entry("bpmSource".to_string())
@@ -510,731 +1605,64 @@ pub(crate) async fn run_direct_per_scene_remake_with_switches(
             }
             sc_val
         });
-        let style_sc = style_sc_owned.as_ref();
+        scene_jobs.push((idx, film_sc, style_sc_owned));
+    }
 
-        emit_event(
-            workspace_dir,
-            "session.tool.called",
-            json!({
-                "sessionID": session_id,
-                "tool": "direct_scene_remake",
-                "label": format!("Direct Vision-First Scene {}/{}: {}", scene_num, total_scenes, scene_id),
-                "timestamp": now_ms()
-            }),
-        );
-
-        let pass1_images = collect_scene_pass1_images(&ws_root, scene_num);
-        let mut hard_facts = build_scene_hard_facts_prompt(
-            style_sc,
-            film_sc,
-            scene_num,
-            total_scenes,
-            width,
-            height,
-            fps,
-            bpm,
-            user_brief,
-        );
-        if matches!(switches.cross_context, CrossContextMode::Summary) {
-            if let Some(summary_block) = extract_cross_scene_summary(&completed_scenes) {
-                hard_facts.push_str("\n\n");
-                hard_facts.push_str(&summary_block);
-            }
+    let mut indexed: Vec<(usize, DirectSceneOutcome, SceneSummaryTraceRecord)> =
+        Vec::with_capacity(scene_jobs.len());
+    if effective_concurrency <= 1 {
+        for (idx, film_sc, style_sc) in scene_jobs {
+            let (outcome, sum_rec) =
+                run_single_direct_scene(Arc::clone(&shared), idx, film_sc, style_sc).await;
+            indexed.push((idx, outcome, sum_rec));
         }
-        let scene_ts = collect_scene_keyframe_timestamps(
-            &ws_root,
-            &film_root,
-            total_dur,
-            scene_num,
-            sc_start,
-            sc_dur,
-        );
-
-        let mut best_code = std::fs::read_to_string(&script_path).unwrap_or_default();
-        let mut best_score = -1.0f64;
-        let mut best_errs: Vec<String> = Vec::new();
-        let mut best_hazards = usize::MAX;
-        let mut latest_score = 0.0f64;
-        let mut latest_errs: Vec<String> = Vec::new();
-        let mut has_written = false;
-        let mut dirty_since_render = false;
-        let mut probes_since_edit: usize = 0;
-        let mut renders_completed: usize = 0;
-        let mut rolled_back = false;
-        let mut passes_run = 0usize;
-        let mut first_write_step: Option<usize> = None;
-        let mut probe_calls_before_write: usize = 0;
-        let mut tool_histogram: BTreeMap<String, usize> = BTreeMap::new();
-        let mut render_records: Vec<RenderTraceRecord> = Vec::new();
-
-        let tool_ctx = SceneToolContext {
-            session_id,
-            workspace_dir,
-            ws_root: &ws_root,
-            film_root: &film_root,
-            script_path: &script_path,
-            script_rel: &script_rel,
-            scene_num,
-            scene_start: sc_start,
-            scene_dur: sc_dur,
-            film_duration: total_dur,
-            width,
-            height,
-            default_scene_ts: &scene_ts,
-        };
-
-        let mut scene_msgs = vec![
-            json!({ "role": "system", "content": system_prompt }),
-            build_vision_user_message(hard_facts.clone(), &pass1_images),
-        ];
-
-        // Interactive Antigravity-grade per-scene tool loop (inspect -> sample -> write -> render -> surgical patch).
-        let force_write_choice = json!({
-            "type": "function",
-            "function": { "name": "write_scene_script" }
-        });
-        for step_idx in 0..max_scene_steps {
-            let enforce_write_now =
-                switches.should_enforce_write_gate(has_written, step_idx, !write_only_tools.is_empty());
-            let post_phase = if enforce_write_now {
-                PostWriteToolPhase::AllTools
-            } else {
-                select_post_write_tool_phase(
-                    has_written,
-                    dirty_since_render,
-                    !latest_errs.is_empty(),
-                    probes_since_edit,
-                )
-            };
-            let active_tools: &[Value] = if enforce_write_now {
-                &write_only_tools
-            } else {
-                match post_phase {
-                    PostWriteToolPhase::FixRuntimeErrorsNow
-                    | PostWriteToolPhase::ApplyPolishOrFinish
-                        if !patch_or_write_tools.is_empty() =>
-                    {
-                        &patch_or_write_tools
-                    }
-                    PostWriteToolPhase::VerifyDirtyScriptNow if !render_only_tools.is_empty() => {
-                        &render_only_tools
-                    }
-                    _ => &scene_tools,
-                }
-            };
-            let active_tool_choice = if enforce_write_now {
-                Some(&force_write_choice)
-            } else {
-                None
-            };
-            let comp = match send_resilient_chat_completion_with_tool_choice(
-                client,
-                base_url,
-                api_key,
-                model_id,
-                &mut scene_msgs,
-                active_tools,
-                temperature,
-                max_tokens,
-                switches.reasoning_effort.as_deref(),
-                active_tool_choice,
-            )
-            .await
-            {
-                Ok(c) => c,
-                Err(err) => {
+    } else {
+        let sem = Arc::new(tokio::sync::Semaphore::new(effective_concurrency));
+        let mut join_set = tokio::task::JoinSet::new();
+        for (idx, film_sc, style_sc) in scene_jobs {
+            let sem_c = Arc::clone(&sem);
+            let shared_c = Arc::clone(&shared);
+            join_set.spawn(async move {
+                let _permit = sem_c.acquire_owned().await.ok();
+                let (outcome, sum_rec) =
+                    run_single_direct_scene(shared_c, idx, film_sc, style_sc).await;
+                (idx, outcome, sum_rec)
+            });
+        }
+        while let Some(res) = join_set.join_next().await {
+            match res {
+                Ok(item) => indexed.push(item),
+                Err(join_err) => {
                     crate::paths::log_engine(
                         "direct_remake",
-                        &format!(
-                            "⚠️ Scene {}/{} ({}) step {} LLM error: {}",
-                            scene_num,
-                            total_scenes,
-                            scene_id,
-                            step_idx + 1,
-                            err
-                        ),
+                        &format!("Scene task join error: {}", join_err),
                     );
-                    break;
                 }
-            };
-            passes_run += 1;
-            let (step_upstream_model, step_thinking_level) = resolve_effective_model_and_thinking(
-                base_url,
-                model_id,
-                switches.reasoning_effort.as_deref(),
-            );
-
-            if !comp.tool_calls.is_empty() {
-                scene_msgs.push(json!({
-                    "role": "assistant",
-                    "content": if comp.assistant_text.trim().is_empty() { Value::Null } else { json!(comp.assistant_text) },
-                    "tool_calls": comp.tool_calls,
-                }));
-
-                let mut step_images: Vec<String> = Vec::new();
-                let mut step_captions: Vec<String> = Vec::new();
-                let mut step_tool_records: Vec<ToolCallTraceRecord> = Vec::new();
-                let mut step_blocked_by_gate: Vec<String> = Vec::new();
-                let mut step_modified = false;
-                let mut step_rendered = false;
-                let mut step_probed = false;
-
-                for (tc_idx, tc) in comp.tool_calls.iter().enumerate() {
-                    let tool_started = now_ms();
-                    let cid = tc
-                        .get("id")
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
-                        .unwrap_or_else(|| format!("sc{}_{}_{}", scene_num, step_idx, tc_idx));
-                    let fn_name = tc
-                        .pointer("/function/name")
-                        .or_else(|| tc.get("name"))
-                        .and_then(Value::as_str)
-                        .unwrap_or("");
-                    let raw_args = tc
-                        .pointer("/function/arguments")
-                        .or_else(|| tc.get("arguments"))
-                        .and_then(Value::as_str)
-                        .unwrap_or("{}");
-                    *tool_histogram.entry(fn_name.to_string()).or_insert(0) += 1;
-
-                    let (parsed_args, arg_err) = match parse_or_repair_tool_args(raw_args) {
-                        Ok(v) => (v, None),
-                        Err(e) => (json!({}), Some(e)),
-                    };
-
-                    let mut blocked_this_call = false;
-                    let outcome = if let Some(err) = arg_err {
-                        super::direct_scene_tools::SceneToolOutcome {
-                            result_json: json!({ "ok": false, "error": format!("Malformed JSON tool args: {}", err) }),
-                            vision_images: Vec::new(),
-                            vision_caption: None,
-                            script_modified: false,
-                            rendered_score: None,
-                            rendered_metrics: None,
-                            rendered_errors: None,
-                        }
-                    } else if enforce_write_now
-                        && !matches!(
-                            fn_name,
-                            "write_scene_script"
-                                | "write"
-                                | "write_to_file"
-                                | "patch_scene_script"
-                                | "edit"
-                                | "replace_file_content"
-                        )
-                    {
-                        blocked_this_call = true;
-                        step_blocked_by_gate.push(fn_name.to_string());
-                        crate::paths::log_engine(
-                            "direct_remake",
-                            &format!(
-                                "🚧 Scene {}/{} ({}) step {} blocked probe tool='{}' while write_scene_script is required",
-                                scene_num,
-                                total_scenes,
-                                scene_id,
-                                step_idx + 1,
-                                fn_name
-                            ),
-                        );
-                        super::direct_scene_tools::SceneToolOutcome {
-                            result_json: json!({
-                                "ok": false,
-                                "error": switches.build_gate_block_error(fn_name, &script_rel)
-                            }),
-                            vision_images: Vec::new(),
-                            vision_caption: None,
-                            script_modified: false,
-                            rendered_score: None,
-                            rendered_metrics: None,
-                            rendered_errors: None,
-                        }
-                    } else if post_phase == PostWriteToolPhase::VerifyDirtyScriptNow
-                        && fn_name != "render_and_compare_scene"
-                    {
-                        blocked_this_call = true;
-                        step_blocked_by_gate.push(fn_name.to_string());
-                        super::direct_scene_tools::SceneToolOutcome {
-                            result_json: json!({
-                                "ok": false,
-                                "error": format!("You modified `{}` — call `render_and_compare_scene` NOW to inspect your pixels before further probing.", script_rel)
-                            }),
-                            vision_images: Vec::new(),
-                            vision_caption: None,
-                            script_modified: false,
-                            rendered_score: None,
-                            rendered_metrics: None,
-                            rendered_errors: None,
-                        }
-                    } else if matches!(
-                        post_phase,
-                        PostWriteToolPhase::FixRuntimeErrorsNow
-                            | PostWriteToolPhase::ApplyPolishOrFinish
-                    ) && !matches!(
-                        fn_name,
-                        "write_scene_script"
-                            | "write"
-                            | "write_to_file"
-                            | "patch_scene_script"
-                            | "edit"
-                            | "replace_file_content"
-                    ) {
-                        blocked_this_call = true;
-                        step_blocked_by_gate.push(fn_name.to_string());
-                        let msg = if post_phase == PostWriteToolPhase::FixRuntimeErrorsNow {
-                            format!("Runtime JS errors are active — fix `{}` NOW with `patch_scene_script` or `write_scene_script` before probing further.", script_rel)
-                        } else {
-                            format!("Post-render probing limit reached — call `patch_scene_script` or `write_scene_script` on `{}` to apply fixes, or reply briefly in text if done.", script_rel)
-                        };
-                        super::direct_scene_tools::SceneToolOutcome {
-                            result_json: json!({ "ok": false, "error": msg }),
-                            vision_images: Vec::new(),
-                            vision_caption: None,
-                            script_modified: false,
-                            rendered_score: None,
-                            rendered_metrics: None,
-                            rendered_errors: None,
-                        }
-                    } else {
-                        emit_event(
-                            workspace_dir,
-                            "session.tool.called",
-                            json!({
-                                "sessionID": session_id,
-                                "tool": fn_name,
-                                "label": format!("Scene {}/{}: {}", scene_num, total_scenes, fn_name),
-                                "timestamp": now_ms()
-                            }),
-                        );
-                        let out = execute_scene_micro_tool(&tool_ctx, fn_name, &parsed_args).await;
-                        let tool_ok = out.result_json.get("ok").and_then(Value::as_bool) != Some(false)
-                            && out.result_json.get("error").is_none();
-                        let err_preview = out
-                            .result_json
-                            .get("error")
-                            .and_then(Value::as_str)
-                            .map(|s| format!(" err={}", s.chars().take(120).collect::<String>()))
-                            .unwrap_or_default();
-                        crate::paths::log_engine(
-                            "direct_remake",
-                            &format!(
-                                "🔧 Scene {}/{} ({}) step {} tool='{}' ok={} modified={}{}",
-                                scene_num,
-                                total_scenes,
-                                scene_id,
-                                step_idx + 1,
-                                fn_name,
-                                tool_ok,
-                                out.script_modified,
-                                err_preview
-                            ),
-                        );
-                        out
-                    };
-
-                    let call_ok = outcome.result_json.get("ok").and_then(Value::as_bool) != Some(false)
-                        && outcome.result_json.get("error").is_none();
-                    let img_count = outcome.vision_images.len();
-                    let img_bytes: usize = outcome.vision_images.iter().map(|s| s.len()).sum();
-
-                    if outcome.script_modified {
-                        if !has_written && first_write_step.is_none() {
-                            first_write_step = Some(step_idx + 1);
-                        }
-                        has_written = true;
-                        dirty_since_render = true;
-                        step_modified = true;
-                    } else if !blocked_this_call && outcome.rendered_score.is_none() {
-                        step_probed = true;
-                        if !has_written {
-                            probe_calls_before_write += 1;
-                        }
-                    }
-                    if let Some(sc_val) = outcome.rendered_score {
-                        dirty_since_render = false;
-                        step_rendered = true;
-                        renders_completed += 1;
-                        let errs = outcome.rendered_errors.clone().unwrap_or_default();
-                        latest_score = sc_val;
-                        latest_errs = errs.clone();
-                        let cur_code = tokio::fs::read_to_string(&script_path)
-                            .await
-                            .unwrap_or_default();
-                        let cur_haz = detect_scene_collision_hazards(&cur_code).len();
-                        let metrics = outcome.rendered_metrics.unwrap_or(RenderedMetrics {
-                            overall: sc_val,
-                            ssim: 0.0,
-                            color: 0.0,
-                            edge: 0.0,
-                        });
-                        render_records.push(RenderTraceRecord {
-                            step: step_idx + 1,
-                            overall: metrics.overall,
-                            ssim: metrics.ssim,
-                            color: metrics.color,
-                            edge: metrics.edge,
-                            runtime_errors: errs.len(),
-                            hazards: cur_haz,
-                        });
-                        // Non-destructive best-checkpoint tracking: NEVER overwrites working file mid-loop!
-                        let better_checkpoint = best_score < 0.0
-                            || (!best_errs.is_empty() && errs.is_empty())
-                            || (best_errs.is_empty()
-                                && errs.is_empty()
-                                && (sc_val >= best_score - 0.002
-                                    || (cur_haz < best_hazards && sc_val >= best_score - 0.04)));
-                        if better_checkpoint {
-                            best_code = cur_code;
-                            best_score = sc_val;
-                            best_errs = errs;
-                            best_hazards = cur_haz;
-                        }
-                        crate::paths::log_engine(
-                            "direct_remake",
-                            &format!(
-                                "Scene {}/{} ({}) step {} render -> score={:.3} (best={:.3}), errs={}",
-                                scene_num,
-                                total_scenes,
-                                scene_id,
-                                step_idx + 1,
-                                sc_val,
-                                best_score.max(0.0),
-                                latest_errs.len()
-                            ),
-                        );
-                    }
-
-                    step_images.extend(outcome.vision_images);
-                    if let Some(cap) = outcome.vision_caption {
-                        step_captions.push(cap);
-                    }
-
-                    let model_text = crate::tool::truncator::format_tool_result_for_model(
-                        fn_name,
-                        &outcome.result_json,
-                    );
-                    let direction = crate::tool::truncator::preferred_direction_for_tool(fn_name);
-                    let (bounded_text, _, _) =
-                        crate::tool::truncator::bound_tool_output_with_spill(
-                            fn_name,
-                            &model_text,
-                            Some(workspace_dir),
-                            Some(&cid),
-                            direction,
-                        );
-                    let probe_tag = if fn_name == "inspect_ref_frame" {
-                        parsed_args
-                            .get("timestampSec")
-                            .and_then(Value::as_f64)
-                            .map(|t| format!("t={:.3}", t))
-                    } else if matches!(fn_name, "bash" | "shell" | "terminal") {
-                        let cmd = parsed_args
-                            .get("command")
-                            .and_then(Value::as_str)
-                            .unwrap_or("");
-                        if cmd.contains("cv2") || cmd.contains("VideoCapture") {
-                            Some("cv2".to_string())
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
-                    step_tool_records.push(ToolCallTraceRecord {
-                        name: fn_name.to_string(),
-                        ok: call_ok,
-                        ms: now_ms().saturating_sub(tool_started),
-                        arg_bytes: raw_args.len(),
-                        result_bytes: bounded_text.len(),
-                        image_count: img_count,
-                        image_bytes: img_bytes,
-                        probe_tag,
-                    });
-                    scene_msgs.push(json!({
-                        "role": "tool",
-                        "tool_call_id": cid,
-                        "name": fn_name,
-                        "content": bounded_text,
-                    }));
-                }
-
-                tracer.record_step(&StepTraceRecord {
-                    record_type: "step",
-                    scene: scene_num,
-                    scene_id: scene_id.clone(),
-                    step: step_idx + 1,
-                    upstream_model: step_upstream_model,
-                    thinking_level: step_thinking_level,
-                    tool_calls: step_tool_records,
-                    blocked_by_gate: step_blocked_by_gate,
-                    assistant_text_chars: comp.assistant_text.len(),
-                    finish_reason: comp.finish_reason.clone(),
-                    input_tokens: comp.input_tokens,
-                    output_tokens: comp.output_tokens,
-                });
-
-                if step_modified || step_rendered {
-                    probes_since_edit = 0;
-                } else if has_written && step_probed {
-                    probes_since_edit += 1;
-                }
-
-                let mut nudge_opt = switches.build_probe_budget_nudge(
-                    has_written,
-                    step_idx,
-                    scene_num,
-                    total_scenes,
-                    &script_rel,
-                );
-                if nudge_opt.is_none() && has_written && step_idx + 1 < max_scene_steps {
-                    let next_post_phase = select_post_write_tool_phase(
-                        has_written,
-                        dirty_since_render,
-                        !latest_errs.is_empty(),
-                        probes_since_edit,
-                    );
-                    nudge_opt = if step_rendered && !latest_errs.is_empty() {
-                        Some("RUNTIME JS ERRORS DETECTED — fix them immediately with `patch_scene_script` (or `write_scene_script`), then re-verify with `render_and_compare_scene`.".to_string())
-                    } else if step_rendered
-                        && latest_errs.is_empty()
-                        && latest_score >= 0.78
-                        && renders_completed >= 2
-                    {
-                        Some("Score is >= 0.78 with 0 runtime errors. Reply briefly in text to finalize this scene and move on, unless a glaring visual/motion defect remains.".to_string())
-                    } else {
-                        match next_post_phase {
-                            PostWriteToolPhase::VerifyDirtyScriptNow => Some(
-                                "Script was modified — call `render_and_compare_scene` NOW to visually inspect your rendered pixels against Row 1.".to_string(),
-                            ),
-                            PostWriteToolPhase::FixRuntimeErrorsNow => Some(
-                                "Probe complete — call `patch_scene_script` or `write_scene_script` NOW to fix the runtime JS errors, then re-verify with `render_and_compare_scene`.".to_string(),
-                            ),
-                            PostWriteToolPhase::ApplyPolishOrFinish => Some(
-                                "Probing window complete after render. Apply your fixes NOW via `patch_scene_script` (or `write_scene_script`), or reply briefly in text if this scene is already complete.".to_string(),
-                            ),
-                            PostWriteToolPhase::AllTools => None,
-                        }
-                    };
-                }
-
-                if !step_images.is_empty() {
-                    let mut caption = if step_captions.is_empty() {
-                        "Visual tool output attached above. Inspect closely and patch surgically if anything mismatches.".to_string()
-                    } else {
-                        step_captions.join("\n")
-                    };
-                    if let Some(nudge) = nudge_opt {
-                        caption.push_str("\n\n");
-                        caption.push_str(&nudge);
-                    }
-                    scene_msgs.push(build_vision_user_message(caption, &step_images));
-                } else if let Some(nudge) = nudge_opt {
-                    scene_msgs.push(json!({
-                        "role": "user",
-                        "content": nudge
-                    }));
-                }
-                continue;
-            }
-
-            tracer.record_step(&StepTraceRecord {
-                record_type: "step",
-                scene: scene_num,
-                scene_id: scene_id.clone(),
-                step: step_idx + 1,
-                upstream_model: step_upstream_model,
-                thinking_level: step_thinking_level,
-                tool_calls: Vec::new(),
-                blocked_by_gate: Vec::new(),
-                assistant_text_chars: comp.assistant_text.len(),
-                finish_reason: comp.finish_reason.clone(),
-                input_tokens: comp.input_tokens,
-                output_tokens: comp.output_tokens,
-            });
-
-            // Graceful fallback for models that return a raw ```javascript``` block without tool calls
-            if let Some(code_block) = extract_js_code_block(&comp.assistant_text) {
-                let _ = tokio::fs::write(&script_path, &code_block).await;
-                if !has_written && first_write_step.is_none() {
-                    first_write_step = Some(step_idx + 1);
-                }
-                has_written = true;
-                dirty_since_render = false;
-                scene_msgs.push(json!({ "role": "assistant", "content": comp.assistant_text }));
-
-                let render_out = execute_scene_micro_tool(
-                    &tool_ctx,
-                    "render_and_compare_scene",
-                    &json!({}),
-                )
-                .await;
-                let sc_val = render_out.rendered_score.unwrap_or(0.0);
-                let errs = render_out.rendered_errors.unwrap_or_default();
-                latest_score = sc_val;
-                latest_errs = errs.clone();
-                let cur_haz = detect_scene_collision_hazards(&code_block).len();
-                let metrics = render_out.rendered_metrics.unwrap_or(RenderedMetrics {
-                    overall: sc_val,
-                    ssim: 0.0,
-                    color: 0.0,
-                    edge: 0.0,
-                });
-                render_records.push(RenderTraceRecord {
-                    step: step_idx + 1,
-                    overall: metrics.overall,
-                    ssim: metrics.ssim,
-                    color: metrics.color,
-                    edge: metrics.edge,
-                    runtime_errors: errs.len(),
-                    hazards: cur_haz,
-                });
-                let better = best_score < 0.0
-                    || (!best_errs.is_empty() && errs.is_empty())
-                    || (best_errs.is_empty() && errs.is_empty() && sc_val >= best_score - 0.002);
-                if better {
-                    best_code = code_block;
-                    best_score = sc_val;
-                    best_errs = errs;
-                    best_hazards = cur_haz;
-                }
-                if latest_errs.is_empty() && latest_score >= 0.86 && cur_haz == 0 {
-                    break;
-                }
-                if step_idx + 1 < max_scene_steps {
-                    let diag = render_out
-                        .result_json
-                        .get("diagnostics")
-                        .and_then(Value::as_str)
-                        .unwrap_or("");
-                    let follow_txt = format!(
-                        "Auto-rendered your script for Scene {}/{} (overall={:.3}, errors={}).\n{}\nInspect the comparison strip above; use `patch_scene_script` (or `inspect_ref_frame` / `sample_ref_region`) to fix any remaining mismatch, then call `render_and_compare_scene`, or reply briefly if done.",
-                        scene_num,
-                        total_scenes,
-                        latest_score,
-                        latest_errs.len(),
-                        diag
-                    );
-                    scene_msgs.push(build_vision_user_message(follow_txt, &render_out.vision_images));
-                    continue;
-                }
-                break;
-            }
-
-            // Model finished cleanly with text response (no tool calls)
-            if has_written {
-                break;
-            }
-            // If model answered with prose before writing any code, nudge once to write the scene script
-            if step_idx + 1 < max_scene_steps {
-                scene_msgs.push(json!({ "role": "assistant", "content": comp.assistant_text }));
-                scene_msgs.push(json!({
-                    "role": "user",
-                    "content": format!("Please call `write_scene_script` now to author `{}` and verify it with `render_and_compare_scene`.", script_rel)
-                }));
-                continue;
-            }
-            break;
-        }
-
-        // If the model edited the script on its last step without rendering, run one final verification capture
-        if has_written && dirty_since_render {
-            let final_out =
-                execute_scene_micro_tool(&tool_ctx, "render_and_compare_scene", &json!({})).await;
-            latest_score = final_out.rendered_score.unwrap_or(0.0);
-            latest_errs = final_out.rendered_errors.unwrap_or_default();
-            let final_dirty_code = tokio::fs::read_to_string(&script_path)
-                .await
-                .unwrap_or_default();
-            let final_dirty_haz = detect_scene_collision_hazards(&final_dirty_code).len();
-            let metrics = final_out.rendered_metrics.unwrap_or(RenderedMetrics {
-                overall: latest_score,
-                ssim: 0.0,
-                color: 0.0,
-                edge: 0.0,
-            });
-            render_records.push(RenderTraceRecord {
-                step: passes_run,
-                overall: metrics.overall,
-                ssim: metrics.ssim,
-                color: metrics.color,
-                edge: metrics.edge,
-                runtime_errors: latest_errs.len(),
-                hazards: final_dirty_haz,
-            });
-            if best_score < 0.0 {
-                best_code = final_dirty_code;
-                best_score = latest_score;
-                best_errs = latest_errs.clone();
-                best_hazards = final_dirty_haz;
             }
         }
-
-        // End-of-scene safety net ONLY (never rolls back mid-investigation!):
-        // Restore best checkpoint only if final script has runtime errors or regressed significantly (> 0.03).
-        let final_code_now = tokio::fs::read_to_string(&script_path)
-            .await
-            .unwrap_or_default();
-        let final_haz = detect_scene_collision_hazards(&final_code_now).len();
-        let should_restore_best = switches.restore_best
-            && should_restore_best_checkpoint(
-                best_score,
-                &best_code,
-                &best_errs,
-                best_hazards,
-                latest_score,
-                &latest_errs,
-                final_haz,
-            );
-        let (final_score, final_errs, persisted_code) = if should_restore_best {
-            let _ = tokio::fs::write(&script_path, &best_code).await;
-            rolled_back = true;
-            crate::paths::log_engine(
-                "direct_remake",
-                &format!(
-                    "Scene {}/{} ({}) end-of-scene safety restore ({:.3} -> best {:.3})",
-                    scene_num, total_scenes, scene_id, latest_score, best_score
-                ),
-            );
-            (best_score, best_errs, best_code)
-        } else if has_written {
-            (latest_score.max(0.0), latest_errs, final_code_now)
-        } else {
-            (best_score.max(0.0), best_errs, final_code_now)
-        };
-
-        completed_scenes.push((scene_num, scene_id.clone(), persisted_code));
-        tracer.record_scene_summary(&SceneSummaryTraceRecord {
-            record_type: "scene_summary",
-            scene: scene_num,
-            scene_id: scene_id.clone(),
-            steps_used: passes_run,
-            first_write_step,
-            probe_calls_before_write,
-            tool_histogram,
-            renders: render_records,
-            restored_best: rolled_back,
-            final_score,
-            wall_ms: now_ms().saturating_sub(scene_started),
-        });
-
-        outcomes.push(DirectSceneOutcome {
-            scene_id,
-            script_rel,
-            passes_run,
-            best_score: final_score,
-            rolled_back,
-            runtime_errors: final_errs,
-        });
+        indexed.sort_by_key(|(idx, _, _)| *idx);
+    }
+    let mut outcomes = Vec::with_capacity(indexed.len());
+    {
+        let mut tr = shared.tracer.lock().await;
+        for (_, outcome, sum_rec) in indexed {
+            tr.record_scene_summary(&sum_rec);
+            outcomes.push(outcome);
+        }
     }
 
     // Final full-film preview capture across all scenes
     let final_comparison =
-        match crate::studio::preview_capture::capture_film_preview_with_options(
+        match crate::studio::preview_capture::capture_film_preview_with_full_options(
             workspace_dir,
             Vec::new(),
-            Some(true),
-            Some(0.65),
+            crate::studio::preview_capture::PreviewCaptureOptions {
+                compare_to_reference: Some(true),
+                pass_threshold: Some(0.65),
+                visual_inspect_only: Some(false),
+                include_full_res_frames: Some(false),
+                disable_auto_rollback: true,
+            },
         )
         .await
         {
@@ -1370,6 +1798,15 @@ mod tests {
             0,
             0.75,
             &[],
+            0
+        ));
+        assert!(!should_restore_best_checkpoint(
+            0.82,
+            "// Scene: scene12 (4.0s) — managed stub by film_scaffold\n// TODO: Write deterministic motion design beats here",
+            &[],
+            0,
+            0.20,
+            &["ReferenceError".to_string()],
             0
         ));
     }
@@ -1783,6 +2220,8 @@ mod tests {
             prompt_mode: PromptMode::Minimal,
             only_scenes: None,
             max_steps: 10,
+            filmstrip_pass1: false,
+            ..Default::default()
         };
         let client = reqwest::Client::new();
         let mut api_key = "k".to_string();
@@ -2011,6 +2450,59 @@ mod tests {
         if std::env::var_os("AETHERIA_REMAKE_MODE").is_none() {
             assert!(!should_run_direct_scene_remake(&ws_str));
         }
+
+        // When filmstrip_index.json exists with >= 2 modular stub scenes, auto/unset triggers direct mode
+        // while explicit `standard` opts out cleanly.
+        std::fs::write(
+            ws.join("ref").join("extracted").join("filmstrip_index.json"),
+            "{}",
+        )
+        .expect("write filmstrip index");
+        assert!(should_run_direct_scene_remake_with_mode(&ws_str, None));
+        assert!(should_run_direct_scene_remake_with_mode(&ws_str, Some("auto")));
+        assert!(!should_run_direct_scene_remake_with_mode(&ws_str, Some("standard")));
+
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[tokio::test]
+    async fn auto_scaffold_prepares_modular_scenes_when_filmstrip_exists_and_skips_hybrid_or_missing() {
+        let ws = std::env::temp_dir().join(format!("aetheria_auto_scaf_{}", crate::paths::now_ms()));
+        let _ = std::fs::remove_dir_all(&ws);
+        let ext = ws.join("ref").join("extracted");
+        std::fs::create_dir_all(&ext).expect("ext dir");
+        std::fs::write(
+            ext.join("style.json"),
+            json!({
+                "title": "Auto Scaffold Unit",
+                "width": 720,
+                "height": 1280,
+                "fps": 30,
+                "palette": { "primary": "#0C0805" },
+                "scenes": [
+                    { "id": "scene1_hook", "duration": 1.67 },
+                    { "id": "scene2_context", "duration": 1.13 }
+                ]
+            })
+            .to_string(),
+        )
+        .expect("style json");
+        let ws_str = ws.to_string_lossy().to_string();
+
+        // Missing filmstrip_index.json -> no-op
+        assert!(!maybe_auto_scaffold_for_direct_filmstrip_remake_with_mode(&"s1", &ws_str, "remake video", Some("auto")).await);
+
+        std::fs::write(ext.join("filmstrip_index.json"), "{}").expect("filmstrip idx");
+        // Explicit hybrid request -> no-op
+        assert!(!maybe_auto_scaffold_for_direct_filmstrip_remake_with_mode(&"s1", &ws_str, "build using hybrid CSS3D stage", Some("auto")).await);
+        // Explicit standard opt-out -> no-op
+        assert!(!maybe_auto_scaffold_for_direct_filmstrip_remake_with_mode(&"s1", &ws_str, "remake video", Some("standard")).await);
+        // Normal auto remake -> scaffolds 2 modular stub scenes cleanly and enables should_run_direct_scene_remake
+        assert!(maybe_auto_scaffold_for_direct_filmstrip_remake_with_mode(&"s1", &ws_str, "remake video ref/reference.mp4", Some("auto")).await);
+        assert!(should_run_direct_scene_remake_with_mode(&ws_str, Some("auto")));
+        // Second call sees existing index.html -> idempotent false
+        assert!(!maybe_auto_scaffold_for_direct_filmstrip_remake_with_mode(&"s1", &ws_str, "remake video", Some("auto")).await);
+
         let _ = std::fs::remove_dir_all(&ws);
     }
 
