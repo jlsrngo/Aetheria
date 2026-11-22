@@ -674,13 +674,35 @@ pub(crate) async fn execute_scene_micro_tool(
                 .unwrap_or_default();
             if ts_list.is_empty() {
                 if ctx.use_filmstrip {
-                    let max_t = (ctx.scene_start + ctx.scene_dur - 0.03)
+                    let min_t = ((ctx.scene_start + 0.02) * 1000.0).round() / 1000.0;
+                    let max_t = (((ctx.scene_start + ctx.scene_dur - 0.03)
                         .min((ctx.film_duration - 0.03).max(0.0))
-                        .max(ctx.scene_start);
-                    for i in 0..8 {
-                        let r = i as f64 / 7.0;
-                        ts_list.push(((ctx.scene_start + (max_t - ctx.scene_start) * r) * 1000.0).round() / 1000.0);
+                        .max(min_t))
+                        * 1000.0)
+                        .round()
+                        / 1000.0;
+                    // Include exact entry boundary, saved sub-beat keyframe timestamps, evenly spaced beats, and exact exit boundary
+                    ts_list.push(min_t);
+                    for &kt in ctx.default_scene_ts {
+                        if kt >= min_t && kt <= max_t && !ts_list.iter().any(|x| (*x - kt).abs() < 0.04) {
+                            ts_list.push(kt);
+                        }
                     }
+                    for i in 1..6 {
+                        if ts_list.len() >= 7 {
+                            break;
+                        }
+                        let r = i as f64 / 6.0;
+                        let cand = ((min_t + (max_t - min_t) * r) * 1000.0).round() / 1000.0;
+                        if !ts_list.iter().any(|x| (*x - cand).abs() < 0.05) {
+                            ts_list.push(cand);
+                        }
+                    }
+                    if !ts_list.iter().any(|x| (*x - max_t).abs() < 0.04) {
+                        ts_list.push(max_t);
+                    }
+                    ts_list.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                    ts_list.truncate(8);
                 } else {
                     ts_list = ctx.default_scene_ts.to_vec();
                 }
@@ -712,7 +734,7 @@ pub(crate) async fn execute_scene_micro_tool(
             .await
             {
                 Ok(res) => {
-                    let (score, mut feedback, strip_path) = format_comparison_feedback(
+                    let (score, feedback, strip_path) = format_comparison_feedback(
                         res.reference_comparison.as_ref(),
                         ctx.scene_start,
                         &res.runtime_errors,
@@ -724,36 +746,11 @@ pub(crate) async fn execute_scene_micro_tool(
                             imgs.push(url);
                         }
                     }
-                    let mut motion_check: Option<Value> = None;
-                    if ctx.use_filmstrip {
-                        if let Some(video_path) = locate_reference_video(ctx.ws_root, None) {
-                            let strip_name = format!("scene_{:02}_motion_strip.jpg", ctx.scene_num);
-                            if let Some(mut ms_val) =
-                                crate::tool::ref_probe::build_visual_ref_vs_preview_motion_strip(
-                                    ctx.ws_root,
-                                    &video_path,
-                                    &res.frames,
-                                    &strip_name,
-                                )
-                                .await
-                            {
-                                if let Some(ms_url) = ms_val
-                                    .as_object_mut()
-                                    .and_then(|o| o.remove("dataUrl"))
-                                    .and_then(|v| v.as_str().map(str::to_string))
-                                {
-                                    imgs.push(ms_url);
-                                }
-                                if let Some(warn) = ms_val.get("motionWarning").and_then(Value::as_str) {
-                                    if !feedback.is_empty() {
-                                        feedback.push('\n');
-                                    }
-                                    feedback.push_str(warn);
-                                }
-                                motion_check = Some(ms_val);
-                            }
-                        }
-                    }
+                    let motion_check: Option<Value> = res
+                        .reference_comparison
+                        .as_ref()
+                        .and_then(|c| c.get("motionDiagnostics"))
+                        .cloned();
                     // Attach a full-resolution rendered frame: explicit `fullResTimestamp` if requested,
                     // otherwise automatically attach the worst-scoring rendered frame so fine typography,
                     // borders, and icons stay 1:1 readable instead of tiny strip thumbnails!

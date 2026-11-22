@@ -37,10 +37,10 @@ UNIVERSAL PROCEDURAL CRAFT METHODOLOGY:
 
 FIVE UNIVERSAL ZERO-COLLISION & MOTION HYGIENE LAWS:
 1. DYNAMIC `measureText` FLOW LAYOUT: In any horizontal text row, marquee, or pill row, NEVER use a hardcoded fixed horizontal stride (`i * spacingX`). Always measure each item with `ctx.measureText(text).width` and advance `cursorX += itemWidth + gap` so words and pills never collide.
-2. MUTUAL-EXCLUSION PHASE & MORPH HANDOFFS: When an element morphs (shape -> letter) or a scene switches from Phase A to Phase B in the same screen region, smoothly fade/scale the outgoing element out (`1 - p`) as the incoming element enters (`p`) so two layers never crash on top of each other at full opacity.
-3. SMOOTH MONOTONIC MOTION & REELS: Scrolling lists, carousels, and word wheels must advance continuously and monotonically from a single ordered list (e.g., `AM.drawWordWheel` or continuous offset `y = cy + (idx - activeFloat) * spacing`) — never swap text arrays mid-transition (`f < 0.5 ? a : b`) or jump backwards.
+2. MUTUAL-EXCLUSION PHASE & MORPH HANDOFFS: When an element morphs (shape -> letter) or a scene switches from Phase A to Phase B in the same screen region, smoothly fade/scale the outgoing element out (`1 - p`) as the incoming element enters (`p`) so two layers never crash on top of each other at full opacity. Never use an early `if (t < X) { ... return; }` mid-scene that deletes objects in 1 frame — keep persistent object tracks `(x, y, scale, alpha)` and interpolate continuously across phases!
+3. SMOOTH MONOTONIC MOTION, ENVELOPED OSCILLATIONS & REELS: Scrolling lists, carousels, and word wheels must advance continuously and monotonically from a single ordered list (e.g., `AM.drawWordWheel` or continuous offset `y = cy + (idx - activeFloat) * spacing`) — never swap text arrays mid-transition (`f < 0.5 ? a : b`) or jump backwards. Whenever you apply a windowed wave/sine oscillation `if (t >= t0 && t < t1)`, ALWAYS multiply its amplitude by a smooth window envelope `var env = Math.sin(AM.clamp((t - t0) / (t1 - t0), 0, 1) * Math.PI);` (`0` at `t0` and `t1`) so elements NEVER snap/jump in 1 frame at `t = t0`!
 4. SURFACE CONTRAST & LUMINANCE FIDELITY: Match the reference's actual surface brightness and gradient glow, and always invert inner ink/icon contrast on light vs dark cards/tiles so active or dark surfaces never appear empty.
-5. CLEAN BOUNDARY FRAMES: Render a valid visual frame at both `t = 0` and `t = dur` (never leave unguarded blank/black flashes at scene boundaries).
+5. CLEAN BOUNDARY FRAMES & CROSS-SCENE CONTINUITY: Render a valid visual frame at both `t = 0` and `t = dur` matching `BOUNDARY CONTINUITY LOCK` (`OPENING FRAME local_t=0.00s` and `CLOSING FRAME local_t=dur`) so positions, scales, and backgrounds hand off seamlessly across cuts without 1-frame teleports.
 
 OPTICAL MATERIAL & LIVING MOTION CRAFT:
 - **Zero dead static holds:** Never freeze on flat solid colors (`staticFramesPct` kills cinematic feel). Keep subtle continuous ambient radial glow/light-ray drift, gentle camera breathing (`AM.applyCamera`), or spring settling motion alive across `0..dur`, with crisp fast transitions (`AM.ease.snap` / `AM.spring`).
@@ -380,6 +380,36 @@ pub(crate) fn build_scene_hard_facts_prompt(
                     local_traj
                 ));
             }
+            if let Some(ba) = mc.get("boundaryAnchors") {
+                let fmt_anchor = |a: Option<&Value>, fallback_lt: f64| -> Option<String> {
+                    let obj = a?;
+                    let lt = obj.get("localT").and_then(Value::as_f64).unwrap_or(fallback_lt);
+                    let bg = obj.get("bgHex").and_then(Value::as_str).unwrap_or("#0C0B0E");
+                    let fg = obj.get("fgHex").and_then(Value::as_str);
+                    let b_str = fmt_box(obj.get("box"));
+                    let c_str = obj
+                        .get("center")
+                        .and_then(Value::as_array)
+                        .filter(|c| c.len() >= 2)
+                        .and_then(|c| Some(format!("({},{})", c[0].as_i64()?, c[1].as_i64()?)));
+                    match (fg, b_str, c_str) {
+                        (Some(f_hex), Some(bx), Some(cx_cy)) => Some(format!(
+                            "local_t={:.2}s: bg={} fg={} center={} box={}",
+                            lt, bg, f_hex, cx_cy, bx
+                        )),
+                        _ => Some(format!("local_t={:.2}s: bg={} (clean/minimal stage)", lt, bg)),
+                    }
+                };
+                let entry_s = fmt_anchor(ba.get("entry"), 0.0);
+                let exit_s = fmt_anchor(ba.get("exit"), dur);
+                if entry_s.is_some() || exit_s.is_some() {
+                    lines.push(format!(
+                        "BOUNDARY CONTINUITY LOCK (CRITICAL — match exact opening & closing pose so scene cuts never teleport!): OPENING [{}] | CLOSING [{}]",
+                        entry_s.unwrap_or_else(|| "local_t=0.00s".to_string()),
+                        exit_s.unwrap_or_else(|| format!("local_t={:.2}s", dur))
+                    ));
+                }
+            }
         }
         if let Some(mp) = sc.get("motionProfile") {
             let mean_d = mp.get("meanDelta").and_then(Value::as_f64).unwrap_or(0.0);
@@ -406,10 +436,10 @@ pub(crate) fn build_scene_hard_facts_prompt(
             lines.push(format!(
                 "MEASURED 1/1 MOTION PROFILE: meanDelta={mean_d:.2}, staticPct={static_pct:.1}%, activeLocalBursts=[{}], filmstripSheets={sheet_count}{}",
                 bursts.join(", "),
-                if sheet_count > 8 {
-                    " (first 8 attached above; call `read_filmstrip({ sceneIndex, startSheet })` for remaining sheets)"
+                if sheet_count > 5 {
+                    " (5 key sheets + 3 full-res early/mid/late keyframes attached above; call `read_filmstrip({ sceneIndex, startSheet })` for remaining sheets)"
                 } else {
-                    ""
+                    " (chronological 1/1 filmstrip sheets + 3 full-res early/mid/late keyframes attached above)"
                 }
             ));
         }
@@ -426,13 +456,13 @@ pub(crate) fn build_scene_hard_facts_prompt(
         .collect();
     if !clean_brief.is_empty() {
         lines.push(format!(
-            "USER BRIEF: \"{}\" (Preserve the EXACT visual structure, layout, palette, iconography, on-screen text language, and sub-beat motion of the reference frames; adapt only what is explicitly requested without translating reference micro-labels or breaking proportions.)",
+            "USER BRIEF: \"{}\" (Preserve the EXACT visual structure, layout, palette, iconography, on-screen words/titles, and sub-beat motion visibly shown in the attached reference frames — NEVER substitute words from the brief such as 'Aetheria' in place of the reference video's actual on-screen text unless the brief explicitly says 'change text X to Y'.)",
             clean_brief
         ));
     }
 
     lines.push(
-        "TASK: Study ALL attached images (the adaptive 6-panel storyboard strip + full-resolution reference keyframes). Use `inspect_ref_frame` / `sample_ref_region` whenever you need exact zoom detail or colors, author `script/sceneK.js` via `write_scene_script`, verify visually via `render_and_compare_scene`, and refine surgically via `patch_scene_script` until every beat matches cleanly with 0 runtime errors."
+        "TASK: Study ALL attached images (the chronological 1/1 filmstrip sheets + the 3 full-resolution early/mid/late keyframes). Do NOT write empty placeholder stubs — if you need exact pixel colors, do at most 1 batched `sample_ref_region` call first, then author the complete, smooth time-driven `script/sceneK.js` via `write_scene_script`, verify visually via `render_and_compare_scene` (which compares every timestamp against the exact reference video frame), and refine surgically via `patch_scene_script` until every beat and boundary matches cleanly with 0 runtime errors."
             .to_string(),
     );
     lines.join("\n")
@@ -509,6 +539,13 @@ pub(crate) fn format_comparison_feedback(
                     ));
                 }
             }
+        }
+        if let Some(m_warn) = cmp
+            .pointer("/motionDiagnostics/motionWarning")
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+        {
+            lines.push(m_warn.to_string());
         }
         if let Some(p) = cmp
             .get("primarySceneBeatStripPath")
@@ -625,6 +662,17 @@ pub(crate) fn detect_scene_collision_hazards(code: &str) -> Vec<String> {
     {
         hazards.push(
             "MOTION JUMP HAZARD (Non-Monotonic Scrolling List): Switching word arrays mid-scroll (`stateRows` / `f < 0.5 ?`) causes text to teleport or jump backwards! Replace with `AM.drawWordWheel(ctx, { words: [...], activeFloat, ... })` (or a single ordered `words[]` array) with strictly monotonic `activeFloat`."
+                .to_string(),
+        );
+    }
+
+    // 3. Un-enveloped phase-offset sine wave inside a time window (`Math.sin(i * ... - waveT)` without `* Math.PI` envelope)
+    let has_indexed_wave = (code.contains("Math.sin(i *") || code.contains("Math.sin(idx *") || code.contains("Math.sin(phase)"))
+        && (code.contains("if (t >=") || code.contains("if (t >"));
+    let has_window_envelope = code.contains("* Math.PI)") || code.contains("env *") || code.contains("* env");
+    if has_indexed_wave && !has_window_envelope {
+        hazards.push(
+            "MOTION JUMP HAZARD (Un-Enveloped Wave Oscillation): `Math.sin(i * phase - ...)` inside an `if (t >= t0)` window jumps discontinuously at `t = t0` because `sin(i * phase) != 0`! Multiply wave amplitude by a smooth window envelope `var env = Math.sin(AM.clamp((t - t0) / (t1 - t0), 0, 1) * Math.PI);` so displacement starts and ends smoothly at 0."
                 .to_string(),
         );
     }

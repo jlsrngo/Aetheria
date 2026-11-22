@@ -436,25 +436,27 @@ fn collect_scene_filmstrip_pass1_images(ws_root: &Path, scene_num: usize) -> Vec
         return collect_scene_pass1_images(ws_root, scene_num);
     }
 
-    let picked: Vec<&Value> = if matching.len() <= 8 {
+    let picked: Vec<&Value> = if matching.len() <= 5 {
         matching
     } else {
         let last = matching.len() - 1;
-        (0..8)
-            .map(|k| matching[(k * last) / 7])
+        (0..5)
+            .map(|k| matching[(k * last) / 4])
             .collect()
     };
 
-    let mut urls = Vec::with_capacity(picked.len() + 1);
+    let mut urls = Vec::with_capacity(picked.len() + 3);
     for sh in picked {
-        let rel_vis = sh.get("visionRelPath").and_then(Value::as_str).unwrap_or("");
         let rel_raw = sh.get("relPath").and_then(Value::as_str).unwrap_or("");
-        let vis_p = extracted_dir.join(rel_vis);
+        let rel_vis = sh.get("visionRelPath").and_then(Value::as_str).unwrap_or("");
         let raw_p = extracted_dir.join(rel_raw);
-        let chosen = if !rel_vis.is_empty() && vis_p.is_file() {
-            Some(vis_p)
-        } else if !rel_raw.is_empty() && raw_p.is_file() {
+        let vis_p = extracted_dir.join(rel_vis);
+        // Prefer full-tile `relPath` (240x426 / 384x216 tiles, ~48 KB) over downscaled `visionRelPath`
+        // so micro-typography and shapes on the 1/1 filmstrip stay sharp!
+        let chosen = if !rel_raw.is_empty() && raw_p.is_file() {
             Some(raw_p)
+        } else if !rel_vis.is_empty() && vis_p.is_file() {
+            Some(vis_p)
         } else {
             None
         };
@@ -464,9 +466,33 @@ fn collect_scene_filmstrip_pass1_images(ws_root: &Path, scene_num: usize) -> Vec
             }
         }
     }
-    let hero_p = extracted_dir.join("frames").join(format!("ref_scene_{scene_num:02}.jpg"));
-    if let Some(hero_url) = encode_jpeg_data_url(&hero_p) {
-        urls.push(hero_url);
+    // Always attach all 3 full-resolution keyframes (early, mid, late) alongside the filmstrip sheets
+    // so every sub-beat has 1:1 full-resolution visual clarity!
+    let frames_dir = extracted_dir.join("frames");
+    let early_p = {
+        let q1 = frames_dir.join(format!("ref_scene_{scene_num:02}_q1.jpg"));
+        if q1.is_file() {
+            q1
+        } else {
+            frames_dir.join(format!("ref_scene_{scene_num:02}_start.jpg"))
+        }
+    };
+    let mid_p = frames_dir.join(format!("ref_scene_{scene_num:02}.jpg"));
+    let late_p = {
+        let q3 = frames_dir.join(format!("ref_scene_{scene_num:02}_q3.jpg"));
+        if q3.is_file() {
+            q3
+        } else {
+            frames_dir.join(format!("ref_scene_{scene_num:02}_end.jpg"))
+        }
+    };
+    let mut seen_kf = std::collections::HashSet::new();
+    for kf_p in [early_p, mid_p, late_p] {
+        if seen_kf.insert(kf_p.clone()) {
+            if let Some(kf_url) = encode_jpeg_data_url(&kf_p) {
+                urls.push(kf_url);
+            }
+        }
     }
     if urls.is_empty() {
         collect_scene_pass1_images(ws_root, scene_num)
@@ -682,11 +708,6 @@ async fn run_single_direct_scene(
             hard_facts.push_str("\n\n");
             hard_facts.push_str(&summary_block);
         }
-    }
-    if shared.active_filmstrip {
-        hard_facts.push_str(
-            "\n\n1/1 FILMSTRIP PASS-1 MODE: The attached images are chronological 1/1 filmstrip sheets (10 frames/sheet labeled fNNNN t.tts dX.X) spanning this scene from start to end, plus the Hero keyframe. Do NOT write empty/solid-color placeholder stubs to unlock tools — if you need exact hex colors, do at most 1 batched sample_ref_region call first, then write the COMPLETE time-driven animated script reproducing every sub-beat across tiles continuously (never freeze shapes when tile delta d > 0.3!). After write_scene_script, render_and_compare_scene will also return an 8-frame REF-vs-RND motion strip — immediately fix any MOTION FROZEN WARNING or shape mismatch via patch_scene_script.",
-        );
     }
     let scene_ts = collect_scene_keyframe_timestamps(
         &shared.ws_root,

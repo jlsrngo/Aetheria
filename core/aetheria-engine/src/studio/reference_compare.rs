@@ -20,6 +20,7 @@ pub struct ReferenceKeyframe {
 #[derive(Clone, Debug)]
 pub struct FrameComparePair {
     pub timestamp: f64,
+    pub ref_timestamp: f64,
     pub ref_abs: PathBuf,
     pub ref_rel: String,
     pub preview_abs: PathBuf,
@@ -413,6 +414,101 @@ pub fn discover_reference_keyframes_for_film(
     kfs
 }
 
+/// Maps a timestamp on the generated film timeline (`film.json`) back to the corresponding
+/// proportional timestamp inside the reference video (`ref/extracted/style.json`).
+/// - For 1:1 remakes (identical scene timings), returns `film_ts` unchanged.
+/// - For adapted/narrated projects where scene durations or counts differ from the reference video,
+///   maps the normalized intra-scene phase `u in [0..1]` onto the matched reference scene `[r_start, r_start + r_dur]`.
+pub fn map_film_ts_to_reference_video_ts(ws_root: &Path, film_root: &Path, film_ts: f64) -> f64 {
+    let style_path = ws_root.join("ref").join("extracted").join("style.json");
+    let film_path = film_root.join("film.json");
+    let (Ok(style_raw), Ok(film_raw)) = (
+        std::fs::read_to_string(&style_path),
+        std::fs::read_to_string(&film_path),
+    ) else {
+        return film_ts;
+    };
+    let (Ok(style_val), Ok(film_val)) = (
+        serde_json::from_str::<Value>(&style_raw),
+        serde_json::from_str::<Value>(&film_raw),
+    ) else {
+        return film_ts;
+    };
+    let (Some(ref_arr), Some(film_arr)) = (
+        style_val.get("scenes").and_then(Value::as_array),
+        film_val.get("scenes").and_then(Value::as_array),
+    ) else {
+        return film_ts;
+    };
+    if ref_arr.is_empty() || film_arr.is_empty() {
+        return film_ts;
+    }
+
+    let parse_scene_windows = |arr: &[Value]| -> Vec<(String, f64, f64)> {
+        let mut out = Vec::with_capacity(arr.len());
+        let mut cursor = 0.0f64;
+        for (idx, sc) in arr.iter().enumerate() {
+            let id = sc
+                .get("id")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("scene{}", idx + 1));
+            let start = sc.get("start").and_then(Value::as_f64).unwrap_or(cursor);
+            let dur = sc
+                .get("duration")
+                .and_then(Value::as_f64)
+                .filter(|&d| d.is_finite() && d > 0.05)
+                .or_else(|| {
+                    sc.get("end")
+                        .and_then(Value::as_f64)
+                        .map(|e| (e - start).max(0.05))
+                })
+                .unwrap_or(2.0);
+            out.push((id, start, dur));
+            cursor = start + dur;
+        }
+        out
+    };
+
+    let ref_scenes = parse_scene_windows(ref_arr);
+    let film_scenes = parse_scene_windows(film_arr);
+    let Some((f_idx, (f_id, f_start, f_dur))) = film_scenes
+        .iter()
+        .enumerate()
+        .find(|(_, (_, s, d))| film_ts >= *s - 0.02 && film_ts <= *s + *d + 0.05)
+        .or_else(|| {
+            film_scenes.iter().enumerate().min_by(|(_, (_, s1, d1)), (_, (_, s2, d2))| {
+                let c1 = *s1 + *d1 * 0.5;
+                let c2 = *s2 + *d2 * 0.5;
+                (film_ts - c1)
+                    .abs()
+                    .partial_cmp(&(film_ts - c2).abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+        })
+    else {
+        return film_ts;
+    };
+
+    let matched_ref = ref_scenes
+        .iter()
+        .find(|(rid, _, _)| rid == f_id)
+        .or_else(|| {
+            let mapped_idx = if ref_scenes.len() == film_scenes.len() {
+                f_idx
+            } else {
+                (f_idx * ref_scenes.len()) / film_scenes.len().max(1)
+            };
+            ref_scenes.get(mapped_idx)
+        });
+    let Some((_, r_start, r_dur)) = matched_ref else {
+        return film_ts;
+    };
+    let u = ((film_ts - *f_start) / f_dur.max(0.05)).clamp(0.0, 1.0);
+    let mapped = *r_start + u * *r_dur;
+    (mapped * 1000.0).round() / 1000.0
+}
+
 fn sample_kf_indices(len: usize, max_count: usize) -> Vec<usize> {
     if len == 0 || max_count == 0 {
         return Vec::new();
@@ -570,6 +666,7 @@ pub fn pair_preview_with_reference(
         };
         pairs.push(FrameComparePair {
             timestamp: pf.timestamp,
+            ref_timestamp: best_ref.timestamp,
             ref_abs: best_ref.abs_path.clone(),
             ref_rel: best_ref.rel_path.clone(),
             preview_abs: film_root.join(&pf.saved_rel_path),
@@ -603,12 +700,16 @@ pub async fn compare_preview_to_reference(
     let _ = tokio::fs::create_dir_all(&preview_dir).await;
     let payload_path = preview_dir.join("compare_payload.json");
     let strip_path = preview_dir.join("comparison_strip.jpg");
+    let ref_video_path = crate::tool::ref_probe::locate_reference_video(ws_root, None);
 
     let pairs_json: Vec<Value> = pairs
         .iter()
         .map(|p| {
+            let video_ts = map_film_ts_to_reference_video_ts(ws_root, film_root, p.timestamp);
             json!({
                 "timestamp": p.timestamp,
+                "videoTimestamp": video_ts,
+                "refTimestamp": p.ref_timestamp,
                 "sceneId": p.scene_id,
                 "phase": p.phase,
                 "refPath": p.ref_abs.to_string_lossy().to_string(),
@@ -622,6 +723,7 @@ pub async fn compare_preview_to_reference(
     let payload = json!({
         "passThreshold": pass_threshold,
         "stripOutputPath": strip_path.to_string_lossy().to_string(),
+        "refVideoPath": ref_video_path.as_ref().map(|p| p.to_string_lossy().to_string()),
         "pairs": pairs_json,
     });
     let payload_bytes = serde_json::to_vec_pretty(&payload)
@@ -794,6 +896,12 @@ mod tests {
             (s2_mid.timestamp - 4.3).abs() < 0.05,
             "expected s2 mid mapped to adapted film window (2.8 + 1.5 = 4.3s), got {}",
             s2_mid.timestamp
+        );
+        let mapped_video_ts = map_film_ts_to_reference_video_ts(&ws, &film_dir, 4.3);
+        assert!(
+            (mapped_video_ts - 3.0).abs() < 0.05,
+            "expected adapted film_ts=4.3s (50% of s2 [2.8..5.8s]) to map back to reference video_ts=3.0s (50% of ref s2 [2.0..4.0s]), got {}",
+            mapped_video_ts
         );
 
         let _ = std::fs::remove_dir_all(&ws);
