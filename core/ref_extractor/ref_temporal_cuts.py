@@ -251,6 +251,19 @@ def scan_motion_timeline_accurate(
             continue
         if any(abs(jf - c["frame"]) < min_struct_gap for c in combined):
             continue
+        # Do not split an already-short (< 4.2s) interval between two hard cuts with a weak soft cut
+        # (prevents chopping a single continuous 3.3s object morph like the glass sphere -> 4-point star in half).
+        if ev_kind == "soft" and strength < 0.84:
+            prev_hard = max(
+                (c["cutSec"] for c in combined if c["evidence"] == "hard" and c["cutSec"] < t_sec),
+                default=0.0,
+            )
+            next_hard = min(
+                (c["cutSec"] for c in combined if c["evidence"] == "hard" and c["cutSec"] > t_sec),
+                default=actual_duration,
+            )
+            if prev_hard > 0.0 and next_hard < actual_duration and (next_hard - prev_hard) < 4.20:
+                continue
         combined.append({
             "frame": int(jf),
             "cutSec": round(t_sec, 3),

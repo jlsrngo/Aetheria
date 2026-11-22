@@ -113,10 +113,11 @@ def _stamp_tile(
     else:
         f_idx = int(entry["frame"])
         t_sec = float(entry["t"])
+        local_t = float(entry.get("localT", t_sec))
         d_val = float(entry["delta"])
-        label = f"f{f_idx:04d} {t_sec:.2f}s d{d_val:.1f}"
-        cv2.rectangle(sm, (0, 0), (min(tile_w, 168), bar_h), (10, 10, 14), -1)
-        cv2.putText(sm, label[:24], (4, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (245, 245, 250), 1, cv2.LINE_AA)
+        label = f"t={local_t:.2f}s ({t_sec:.1f}s) d{d_val:.1f}"
+        cv2.rectangle(sm, (0, 0), (min(tile_w, 188), bar_h), (10, 10, 14), -1)
+        cv2.putText(sm, label[:26], (4, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.37, (245, 245, 250), 1, cv2.LINE_AA)
     return sm
 
 
@@ -131,25 +132,30 @@ def _select_kept_tiles(
     """Builds the ordered list of kept tile descriptors plus the scene index for each frame."""
     n = len(decoded_frames)
     frame_to_scene = [0] * n
+    scene_start_for_frame = [0.0] * n
     boundary_frames = {0, max(0, n - 1)}
-    for sc_idx, _, _, _, fs, fe in scene_ranges:
+    for sc_idx, _, st_sec, _, fs, fe in scene_ranges:
         lo = max(0, min(n - 1, fs))
         hi = max(lo, min(n - 1, fe))
         for f in range(lo, hi + 1):
             frame_to_scene[f] = sc_idx
+            scene_start_for_frame[f] = float(st_sec)
         boundary_frames.add(lo)
         boundary_frames.add(max(lo, hi - 1))
 
     def _raw_entry(f_idx: int) -> Dict[str, Any]:
+        g_t = f_idx / fps
+        loc_t = max(0.0, g_t - scene_start_for_frame[f_idx])
         return {
             "kind": "frame",
             "isHold": False,
             "frame": f_idx,
             "frameStart": f_idx,
             "frameEnd": f_idx,
-            "t": round(f_idx / fps, 3),
-            "tStart": round(f_idx / fps, 3),
-            "tEnd": round(f_idx / fps, 3),
+            "t": round(g_t, 3),
+            "localT": round(loc_t, 3),
+            "tStart": round(g_t, 3),
+            "tEnd": round(g_t, 3),
             "delta": round(deltas[f_idx], 3),
             "sceneIndex": frame_to_scene[f_idx],
             "tile": None,

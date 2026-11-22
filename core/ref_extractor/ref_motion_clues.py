@@ -405,10 +405,17 @@ def extract_scene_motion_clues(
 
     saw_wide_marquee = False
     saw_vertical_slot = False
+    mid_idx = len(sampled) // 2
+    last_idx = max(0, len(sampled) - 1)
 
-    for ts, fr in sampled:
+    for s_idx, (ts, fr) in enumerate(sampled):
         box, _, ratio = _foreground_box_and_mask(fr, bg_bgr)
-        raw_words = ocr_summary_fn(fr) if (ocr_summary_fn is not None and 0.004 <= ratio <= 0.65) else []
+        should_run_ocr = (
+            ocr_summary_fn is not None
+            and 0.004 <= ratio <= 0.65
+            and (s_idx in (0, mid_idx, last_idx) or len(sampled) <= 4)
+        )
+        raw_words = ocr_summary_fn(fr) if should_run_ocr else []
         words = sanitize_ocr_tokens_for_clues(raw_words)
         raw_ocr_per_slice.append((ts, raw_words, box))
         entry: Dict[str, Any] = {"t": round(ts, 2)}
