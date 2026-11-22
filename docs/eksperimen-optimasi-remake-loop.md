@@ -23,7 +23,10 @@ Dokumen ini merangkum seluruh hasil eksperimen A/B/C terkontrol serta loop itera
 | `Exp R2` (`exp_R2_motion_and_optics`) | Direct + `ref_compare` motion delta + 34m | 0.5909 | 0.6677 | 0.4757 | 0.7895 | 0.8937 | 0.2995 | 78.16% | 1.75% | 2027.1s (8/8 OK) | **KEEP (Best Direct)** |
 | `Exp R3` (`exp_R3_continuity_polish`) | Direct + `_card.jpg` Pass 1 | 0.5422 | 0.6001 | 0.4555 | 0.7591 | 0.8369 | 0.2038 | 77.38% | 1.84% | 2040.1s (TO Sc7) | **REVERT -> R2** |
 | `Exp R4` (`exp_R4_standard_tuned`) | Standard + 14-beat `preview_capture` + prompt 50 baris | 0.5956 | 0.6642 | 0.4927 | 0.8126 | 0.8817 | 0.2365 | 79.13% | 2.62% | 1200.2s | Keep `preview_capture` 14-beat; reject prompt panjang |
-| **`Exp R5` (`exp_R5_concise_hybrid`)** | **Standard + 14-beat + Composite Cards + `AM.ease.inBack` + prompt ringkas (~17 baris)** | **0.6611** | **0.6871** | **0.6220** | 0.8203 | 0.8788 | **0.3208** | **74.27%** | **5.24%** | 1202.0s | **KEEP & PROMOTE -> `default.txt`** |
+| `Exp R5` (`exp_R5_concise_hybrid`) | Standard + 14-beat + Composite Cards + `AM.ease.inBack` + prompt ringkas (~17 baris) | 0.6611 | 0.6871 | 0.6220 | 0.8203 | 0.8788 | 0.3208 | 74.27% | 5.24% | 1202.0s | Promote -> `default.txt` |
+| `Exp F3` (`exp_F3_full13_winner`) | Direct Parallel + 1/1 Filmstrip + Motion Clues (`12/13` scene, 1 stub) | 0.6596 | 0.5789 | 0.7805 | 0.6254 | 0.8190 | 0.3027 | 50.10% | 4.66% | 1426.5s | Fase 2 (masih loncat 380px di Scene 7–10) |
+| `Exp F4` (`exp_F4_smooth_visual_winner`) | Direct Parallel + Exact Video-TS Strip + Same-Plate Cut Merge (`10/10` scene, 0 stub) | 0.6784 | 0.6814 | 0.6739 | 0.7671 | 0.8758 | 0.3328 | 66.12% | 5.63% | 801.0s | Fase 3 (0 teleport lintas-scene, `-43.8%` waktu) |
+| **`Exp F5` (`exp_F5_clean_motion`)** | **Direct Parallel + Unused-`progress` Guard + Local-Time `t=` Tiles + Auto-Scaffold Step 1 (`9/9` scene, 0 stub)** | **0.7335** 🏆 | **0.7303** 🏆 | **0.7383** | **0.8363** 🏆 | **0.9100** 🏆 | **0.3890** 🏆 | **44.17%** | **4.66%** | 1291.7s | **REKOR BARU — Melampaui Manual `AG5` (`0.7239`)** |
 
 ### B. Uji Generalisasi Anti-Overfit `16:9` (Landscape `labs-showreel-remake.mp4`, 25.87s, tanpa `--prompt-override`)
 
@@ -176,3 +179,58 @@ Walaupun `Exp F3_full13_winner` mencetak skor gabungan tinggi, pengamatan langsu
 ### C. Tautan Artefak Visual & MP4 Fase 3
 
 - **Exp F4 Smooth Visual Winner (`10/10` scene, `801s`, 0 teleportasi lintas-scene):** [exp_F4_smooth_visual_winner.mp4](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_F4_smooth_visual_winner/exp_F4_smooth_visual_winner.mp4) · [strip_10scenes.jpg](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_F4_smooth_visual_winner/eval/strip_10scenes.jpg) · [strip_scene1_dense.jpg](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_F4_smooth_visual_winner/eval/strip_scene1_dense.jpg) · [strip_scene2_dense.jpg](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_F4_smooth_visual_winner/eval/strip_scene2_dense.jpg) · [scene7.js](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_F4_smooth_visual_winner/script/scene7.js)
+
+---
+
+## 6. Fase 4 — Audit 100% Kode (`scene1..10.js` + Pipeline) & Rekor `exp_F5_clean_motion` (`0.7335` > `AG5` `0.7239`)
+
+Setelah `Exp F4`, audit pembacaan 100% kode baris-per-baris dilakukan pada seluruh `3,479` baris kode yang dihasilkan agen (`exp_F4/script/scene1.js` s/d `scene10.js`) serta seluruh modul pipeline (`ref_extractor.py`, `ref_temporal_cuts.py`, `ref_filmstrip.py`, `ref_motion_clues.py`, `ref_compare.py`, `direct_scene_*.rs`, dan `runner.rs`). Audit ini mengungkap **6 bug konkret pada kode animasi & pipeline** yang menjelaskan mengapa gerakan beberapa adegan masih tampak patah/membeku lalu muncul tiba-tiba:
+
+### A. 6 Temuan Audit Kode & Perbaikannya
+
+1. **Bug Animasi Palsu — Parameter/Variabel `progress` & `traceProgress` Dihitung tetapi Tidak Dipakai Saat Menggambar (`scene6.js` & `scene8.js`):**
+   - Pada `exp_F4/script/scene6.js` (baris 209–248), agen menulis `function drawHoppingArc(ctx, x1, x2, baseY, height, progress, ...)` tetapi **tidak pernah memakai `progress`** di dalam fungsi (`ctx.quadraticCurveTo(cpX, cpY, x2, baseY)` langsung menggambar busur penuh 100%), ditambah duplikasi 3 fungsi (`drawEqualizerPill`, `drawHoppingArc`, `drawEqualizerStage`) dua kali dalam file yang sama.
+   - Pada `exp_F4/script/scene8.js` (baris 139–171), agen menghitung `var traceProgress = AM.clamp((t - 0.15) / (0.65 - 0.15), 0, 1);` tetapi **tidak pernah memakai `traceProgress`** saat memanggil `ctx.roundRect(...)`, sehingga kapsul *"Connected"* langsung muncul utuh bukannya ditelusuri oleh titik komet mengelilingi keliling kapsul.
+   - **Perbaikan (`direct_scene_prompt.rs` + `direct_scene_remake.rs`):** Menambahkan detektor AST/leksikal `find_unused_progress_params`, `find_unused_progress_vars`, dan `find_duplicate_function_declarations` ke dalam `detect_scene_collision_hazards`, serta menginjeksikan hasil `active_hazards` langsung ke pesan balikan setiap `render_and_compare_scene` sebagai `CRITICAL MOTION / CODE BUGS DETECTED` (sekaligus menahan early-exit bila masih ada hazard).
+
+2. **Salah Hitung Waktu Lokal (`local_t = global_t - scene_start`) karena Label Tile Filmstrip Hanya Mencetak Waktu Global (`ref_filmstrip.py`):**
+   - Tile filmstrip 1/1 sebelumnya hanya mencetak waktu global (`f0200 6.67s d1.2`), sedangkan `render(ctx, t, ...)` di tiap scene memakai waktu **lokal** `t = 0 .. scene_duration`. Pada `exp_F4/script/scene4.js` (`4.97s..7.40s`), salah kurang `0.6s` membuat kata kedua `"form"` pada *"Finding form"* terlewat dan kapsul putih muncul `0.6s` terlalu cepat (`t=0.80s` lokal padahal di referensi `t=1.40s` lokal).
+   - **Perbaikan (`ref_filmstrip.py`):** Setiap tile filmstrip kini mencetak waktu lokal scene di depan waktu global (`t=1.70s (6.7s) d1.2`) dan menyimpan `localT` pada JSON manifest filmstrip.
+
+3. **Cut Lemah di Tengah Morph Objek Tunggal `1.67s..4.97s` (*Sphere → 4-Point Star*, `ref_temporal_cuts.py`):**
+   - Sebuah `soft` cut lemah (`strength = 0.72 < 0.84`) di `2.80s` membelah adegan bola kaca `"With a Motions"` (`1.67..2.80s`) dari kelanjutan morph bintang 4-sudutnya sendiri (`2.80..4.97s`), sehingga warna dan ukuran bola/bintang berbeda di `2.80s`.
+   - **Perbaikan (`ref_temporal_cuts.py`):** Menolak `soft` cut lemah (`strength < 0.84`) yang membelah interval pendek (`< 4.20s`) di antara dua `hard` cut menjadi fragmen `< 1.35s`. Hasilnya: `9:16 ref_original.mp4` menghasilkan **9 scene bersih** (`1.67..4.97s` utuh dalam 1 scene), sementara `16:9 labs-showreel-remake.mp4` tetap tepat **8 scene**.
+
+4. **Layar Gelap Kosong Selama `0.74s` di Akhir Scene & Artefak Garis Caustic Tajam (`direct_scene_prompt.rs`):**
+   - Pada `exp_F4/script/scene6.js` (`13.44s`), kapsul equalizer menghilang di `t=2.55s` sementara latar oranye baru masuk di `t=3.05s`, menyisakan layar hitam kosong. Pada `scene7.js`, pita cahaya latar (*caustic bands*) digambar sebagai poligon tajam `rgba(255,155,70,0.45)` tanpa blur.
+   - **Perbaikan (`direct_scene_prompt.rs`):** Menambahkan aturan keras di `DIRECT_SCENE_SYSTEM_PROMPT`: larangan dead-black gap antar-fase, aturan *soft radial/multi-stop gradient* untuk *background caustics* (`alpha <= 0.16`), aturan *progressive arc/perimeter comet trace* (`ctx.setLineDash([traceProgress * perim, perim])`), dan aturan *shard-to-origami assembly* pada logo akhir.
+
+5. **Pemangkasan Waktu Ekstraksi, Giliran Koordinator, & Putaran LLM (`ref_motion_clues.py`, `runner.rs`, `direct_scene_remake.rs`):**
+   - **RapidOCR CPU dipangkas 62,5%** (`ref_motion_clues.py`): OCR yang sebelumnya dijalankan pada seluruh 8 slice per scene kini hanya dijalankan pada 3 slice kunci (`0, mid, last`), sedangkan 8 slice bounding-box `denseTimeline` tetap utuh.
+   - **Auto-Scaffold Langsung di Step 1 Koordinator** (`runner.rs`): Setelah `extract_video_reference` selesai pada Step 1, engine langsung menjalankan `scaffold_film_From_reference` + parallel direct-scene remake tanpa membuang 1 putaran LLM tambahan hanya untuk `read("ref_report.md")`.
+   - **Early-Exit Scene Bersih** (`direct_scene_remake.rs`): Bila scene telah dirender tanpa runtime error, `0` code hazard, `0` motion warning, dan `score >= 0.76` setelah 2 render (atau `>= 0.84` setelah 1 render), worker langsung selesai tanpa membuang putaran LLM ekstra untuk menjawab `"Done"`.
+
+### B. Hasil Verifikasi `exp_F5_clean_motion` (`9:16`, 9/9 Scene Utuh, Melampaui Manual `AG5`)
+
+| Metrik | `Exp F3` | `Exp F4` | **`Exp F5_clean_motion` (Fase 4)** | Manual `AG5` (Acuan Craft) | `REF` (`ref_original.mp4`) |
+|---|---:|---:|---:|---:|---:|
+| **Scene Selesai (Tanpa Stub)** | 12/13 (1 stub) | 10/10 (0 stub) | **9/9 (0 stub, 100% utuh)** | 8/8 | 9/9 |
+| **Composite Score** | 0.6596 | 0.6784 | **0.7335** 🏆 | 0.7239 | 1.0000 |
+| **Visual Score** | 0.5789 | 0.6814 | **0.7303** 🏆 | 0.6317 | 1.0000 |
+| **Motion Score** | 0.7805 | 0.6739 | **0.7383** | 0.8622 | 1.0000 |
+| **Mean SSIM** | 0.6254 | 0.7671 | **0.8363** 🏆 | 0.6978 | 1.0000 |
+| **Mean Color Similarity** | 0.8190 | 0.8758 | **0.9100** 🏆 | 0.8482 | 1.0000 |
+| **Mean Edge Overlap** | 0.3027 | 0.3328 | **0.3890** 🏆 | 0.2759 | 1.0000 |
+| **p90 Frame Delta (Smoothness)** | 3.7493 | 4.8639 | **3.2595** 🏆 | 3.3042 | 3.1657 |
+| **Median Frame Delta** | 0.0888 | 0.0252 | **0.1079** | 0.4083 | 0.6716 |
+
+Verifikasi visual pada ke-6 strip evaluasi (`0.00s..34.00s`) membuktikan kelima cacat gerak pada `Exp F4` telah teratasi:
+- **`5.67s..7.11s` (*"Finding form"*):** Teks dua kata `"Finding form"` dengan bintang 4-sudut di atasnya muncul tepat waktu (`5.67s..6.33s`), lalu mengecil mulus menjadi kapsul putih bercahaya (`6.33s..7.11s`).
+- **`10.28s..13.44s` (*"Focus organizes motion"*):** Busur lompat oranye beranimasi progresif di `10.28s`, 4 batang jarum equalizer vertikal dengan ujung bercahaya naik dari dasar kapsul di `11.33s`, dan tidak ada lagi layar hitam kosong di `13.44s`.
+- **`15.44s..22.06s` (*"Build structure → Create rhythm → Shape meaning"*):** Pita cahaya latar (*caustics*) tampil lembut tanpa garis poligon kasar, dan tali kurva (*tether*) dengan titik berjalan mengalir mulus melintasi ketiga kapsul.
+- **`23.00s..24.22s` (*"Connected"*):** Pada `23.00s (f690)`, titik putih bercahaya dengan ekor komet oranye **menelusuri sudut kanan-atas keliling kapsul secara progresif** (persis seperti `REF 23.00s`), sebelum kapsul penuh terbentuk di `24.22s`.
+- **`30.33s..34.00s` (Origami Fox M-Logo):** Pada `30.33s`, 4 keping pecahan menyatu ke pusat membentuk logo rubah origami sayap-putih + wajah-oranye yang sama hingga akhir video (`31.56s..34.00s`).
+
+### C. Tautan Artefak Visual & MP4 Fase 4 (`exp_F5_clean_motion`)
+
+- **Exp F5 Clean Motion Winner (`9/9` scene, `composite = 0.7335` > `AG5` `0.7239`):** [exp_F5_clean_motion.mp4](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_F5_clean_motion/exp_F5_clean_motion.mp4) · [strip_10scenes.jpg](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_F5_clean_motion/eval/strip_10scenes.jpg) · [strip_scene1_dense.jpg](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_F5_clean_motion/eval/strip_scene1_dense.jpg) · [strip_scene2_dense.jpg](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_F5_clean_motion/eval/strip_scene2_dense.jpg) · [strip_part3_dense.jpg](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_F5_clean_motion/eval/strip_part3_dense.jpg) · [strip_part4_dense.jpg](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_F5_clean_motion/eval/strip_part4_dense.jpg) · [strip_part5_dense.jpg](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_F5_clean_motion/eval/strip_part5_dense.jpg) · [score.json](file:///C:/Users/Asus/.gemini/antigravity/brain/7321be9c-6cd2-47ff-90b1-f94fe9cc1067/experiments/exp_F5_clean_motion/score.json)
