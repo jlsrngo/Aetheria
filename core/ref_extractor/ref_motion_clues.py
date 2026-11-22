@@ -332,6 +332,35 @@ def detect_inline_glyph_morph(
     )
 
 
+def _measure_boundary_anchor(
+    frame_at_fn: Callable[[float], Optional[np.ndarray]],
+    ts: float,
+    local_t: float,
+) -> Optional[Dict[str, Any]]:
+    fr = frame_at_fn(ts)
+    if fr is None or fr.size == 0:
+        return None
+    bg_bgr = _border_bg_bgr(fr)
+    bg_hex = _bgr_to_hex(bg_bgr)
+    box, mask, ratio = _foreground_box_and_mask(fr, bg_bgr)
+    fg_hex: Optional[str] = None
+    center: Optional[List[int]] = None
+    if box is not None and int(np.count_nonzero(mask)) >= 20:
+        fg_bgr = np.median(fr[mask > 0], axis=0)
+        fg_hex = _bgr_to_hex(fg_bgr)
+        bx, by, bw, bh = box
+        center = [int(bx + bw // 2), int(by + bh // 2)]
+    return {
+        "t": round(float(ts), 3),
+        "localT": round(float(local_t), 3),
+        "bgHex": bg_hex,
+        "fgHex": fg_hex,
+        "box": box,
+        "center": center,
+        "fgRatio": round(float(ratio), 4),
+    }
+
+
 def extract_scene_motion_clues(
     frame_at_fn: Callable[[float], Optional[np.ndarray]],
     start: float,
@@ -358,6 +387,11 @@ def extract_scene_motion_clues(
 
     if not sampled:
         return {}
+
+    entry_anchor = _measure_boundary_anchor(frame_at_fn, start + 0.02, 0.0)
+    exit_anchor = _measure_boundary_anchor(
+        frame_at_fn, max(start + 0.02, end - 0.03), round(dur, 3)
+    )
 
     bg_bgr = _border_bg_bgr(sampled[len(sampled) // 2][1])
     accents = extract_saturated_accent_callouts(sampled)
@@ -458,6 +492,10 @@ def extract_scene_motion_clues(
         "containerClip": container_clip,
         "denseTimeline": timeline,
         "kineticClues": kinetic_clues,
+        "boundaryAnchors": {
+            "entry": entry_anchor,
+            "exit": exit_anchor,
+        },
     }
     if hero_card_info is not None:
         out["heroCardBox"] = hero_card_info["heroCardBox"]

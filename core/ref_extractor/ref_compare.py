@@ -203,6 +203,65 @@ def _mean_adjacent_frame_delta(frames: List[Tuple[float, np.ndarray]]) -> Option
     return round(float(np.mean(deltas)), 2)
 
 
+def _compute_motion_step_diagnostics(
+    ref_frames: List[Tuple[float, np.ndarray]],
+    prev_frames: List[Tuple[float, np.ndarray]],
+) -> Dict[str, Any]:
+    if len(ref_frames) < 2 or len(prev_frames) != len(ref_frames):
+        return {
+            "refStepDeltas": [],
+            "prevStepDeltas": [],
+            "frozenIntervals": [],
+            "jumpIntervals": [],
+            "motionWarning": None,
+        }
+    ref_ord = sorted(ref_frames, key=lambda x: x[0])
+    prev_ord = sorted(prev_frames, key=lambda x: x[0])
+    ref_steps: List[float] = []
+    prev_steps: List[float] = []
+    frozen_intervals: List[str] = []
+    jump_intervals: List[str] = []
+    for ((rt0, rg0), (rt1, rg1)), ((pt0, pg0), (pt1, pg1)) in zip(
+        zip(ref_ord, ref_ord[1:]),
+        zip(prev_ord, prev_ord[1:]),
+    ):
+        if abs(rt1 - rt0) < 0.025:
+            continue
+        if rg0.shape != rg1.shape:
+            rg1 = cv2.resize(rg1, (rg0.shape[1], rg0.shape[0]), interpolation=cv2.INTER_AREA)
+        if pg0.shape != pg1.shape:
+            pg1 = cv2.resize(pg1, (pg0.shape[1], pg0.shape[0]), interpolation=cv2.INTER_AREA)
+        rd = round(float(np.mean(np.abs(rg0.astype(np.float32) - rg1.astype(np.float32)))), 2)
+        pd = round(float(np.mean(np.abs(pg0.astype(np.float32) - pg1.astype(np.float32)))), 2)
+        ref_steps.append(rd)
+        prev_steps.append(pd)
+        if rd >= 0.45 and pd < 0.08:
+            frozen_intervals.append(f"{pt0:.2f}s->{pt1:.2f}s (REF d={rd:.2f} vs RND d={pd:.2f})")
+        elif pd >= 18.0 and pd > max(18.0, rd * 2.8) and rd < 14.0:
+            jump_intervals.append(f"{pt0:.2f}s->{pt1:.2f}s (RND d={pd:.2f} vs REF d={rd:.2f})")
+
+    warnings: List[str] = []
+    if frozen_intervals:
+        warnings.append(
+            "MOTION FROZEN WARNING: Your rendered scene is static while the reference moves at "
+            + ", ".join(frozen_intervals[:4])
+            + " — animate position/scale/morph continuously across `t` instead of holding a static pose!"
+        )
+    if jump_intervals:
+        warnings.append(
+            "MOTION JUMP / TELEPORT WARNING: Your rendered scene snaps abruptly between frames at "
+            + ", ".join(jump_intervals[:4])
+            + " while the reference moves smoothly — remove sudden `if (t >= X)` position/phase jumps or mid-scene `return;` cutoffs and interpolate smoothly with `AM.lerp` / `AM.ease` or a smooth `Math.sin(p * Math.PI)` envelope!"
+        )
+    return {
+        "refStepDeltas": ref_steps,
+        "prevStepDeltas": prev_steps,
+        "frozenIntervals": frozen_intervals,
+        "jumpIntervals": jump_intervals,
+        "motionWarning": "\n".join(warnings) if warnings else None,
+    }
+
+
 def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
     pairs = payload.get("pairs") or []
     if not pairs:
@@ -212,6 +271,18 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
     strip_out.parent.mkdir(parents=True, exist_ok=True)
     raw_threshold = payload.get("passThreshold")
     threshold = float(raw_threshold) if raw_threshold is not None else 0.85
+
+    ref_video_raw = payload.get("refVideoPath")
+    ref_video_path = Path(str(ref_video_raw)) if ref_video_raw else None
+    video_cap: Optional[cv2.VideoCapture] = None
+    video_fps: float = 30.0
+    video_total_frames: int = 0
+    if ref_video_path is not None and ref_video_path.is_file():
+        cap_candidate = cv2.VideoCapture(str(ref_video_path))
+        if cap_candidate.isOpened():
+            video_cap = cap_candidate
+            video_fps = max(1.0, float(video_cap.get(cv2.CAP_PROP_FPS) or 30.0))
+            video_total_frames = max(0, int(video_cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0))
 
     per_frame: List[Dict[str, Any]] = []
     strip_rows: List[np.ndarray] = []
@@ -224,15 +295,31 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
         ref_path = Path(str(item.get("refPath", "")))
         prev_path = Path(str(item.get("previewPath", "")))
         ts = float(item.get("timestamp", 0.0))
+        video_ts = float(item.get("videoTimestamp", ts))
+        ref_ts = float(item.get("refTimestamp", ts))
         scene_id = item.get("sceneId")
         phase = item.get("phase")
 
-        if not ref_path.is_file() or not prev_path.is_file():
+        if not prev_path.is_file():
             continue
 
-        ref_img = cv2.imread(str(ref_path))
         prev_img = cv2.imread(str(prev_path))
-        if ref_img is None or prev_img is None:
+        if prev_img is None:
+            continue
+
+        ref_img: Optional[np.ndarray] = None
+        if video_cap is not None and (abs(ts - ref_ts) > 0.04 or not ref_path.is_file()):
+            target_f = max(0, int(round(max(0.0, video_ts) * video_fps)))
+            if video_total_frames > 0:
+                target_f = min(video_total_frames - 1, target_f)
+            video_cap.set(cv2.CAP_PROP_POS_FRAMES, target_f)
+            ok_dec, frame_dec = video_cap.read()
+            if ok_dec and frame_dec is not None:
+                ref_img = frame_dec
+
+        if ref_img is None and ref_path.is_file():
+            ref_img = cv2.imread(str(ref_path))
+        if ref_img is None:
             continue
 
         rh, rw = ref_img.shape[:2]
@@ -365,6 +452,9 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
         )
         strip_rows.append(np.vstack([banner, row_img]))
 
+    if video_cap is not None:
+        video_cap.release()
+
     if not per_frame:
         return {"ok": False, "error": "Failed to load any valid reference/preview image pairs."}
 
@@ -381,7 +471,7 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
         ref_row_tiles: List[np.ndarray] = []
         prev_row_tiles: List[np.ndarray] = []
         diff_row_tiles: List[np.ndarray] = []
-        for ts_v, rt, pt, dt, ss_v, ed_v, cb_v in tile_items[:6]:
+        for ts_v, rt, pt, dt, ss_v, ed_v, cb_v in tile_items[:8]:
             r_lbl = rt.copy()
             p_lbl = pt.copy()
             d_lbl = dt.copy()
@@ -439,6 +529,7 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     prev_adj_delta = _mean_adjacent_frame_delta(prev_grays)
     ref_adj_delta = _mean_adjacent_frame_delta(ref_grays)
+    motion_diag = _compute_motion_step_diagnostics(ref_grays, prev_grays)
 
     ssim_floor = round(threshold * 0.90, 4)
     passed = bool((overall >= threshold) and (ssim_mean >= ssim_floor) and (not any_ar_mismatch))
@@ -453,6 +544,7 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
         "overallFidelity": overall,
         "meanAdjacentFrameDelta": prev_adj_delta,
         "refMeanAdjacentFrameDelta": ref_adj_delta,
+        "motionDiagnostics": motion_diag,
         "passThreshold": threshold,
         "ssimFloor": ssim_floor,
         "aspectRatioMismatch": bool(any_ar_mismatch),

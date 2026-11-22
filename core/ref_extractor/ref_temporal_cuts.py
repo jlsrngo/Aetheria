@@ -196,16 +196,25 @@ def scan_motion_timeline_accurate(
             win_delta = float(np.abs(a_small - b_small).mean() / 255.0)
             local_step = float(deltas[i - 1]["score"]) if (i - 1) < len(deltas) else 0.0
             is_fade_pause = (ea_sum >= 80 and eb_sum == 0) or (ea_sum == 0 and eb_sum >= 80)
+            med_a = float(np.median(ga))
+            med_b = float(np.median(gb))
+            same_bright_plate = min(med_a, med_b) >= 90.0 and abs(med_a - med_b) < 16.0
             is_dark_layout_shift = (
-                edge_overlap < 0.14
+                max(med_a, med_b) < 75.0
+                and edge_overlap < 0.14
                 and fg_iou < 0.14
                 and (win_delta > 0.020 or local_step > 0.020 or is_fade_pause)
             )
-            if (
+            is_structural_shift = (
                 edge_overlap < 0.22
                 and fg_iou < 0.18
-                and (local_step > 0.032 or win_delta > 0.035 or is_fade_pause)
-            ) or is_dark_layout_shift:
+                and (
+                    is_fade_pause
+                    or (not same_bright_plate and (local_step > 0.032 or win_delta > 0.035))
+                    or (same_bright_plate and win_delta >= 0.14)
+                )
+            )
+            if is_structural_shift or is_dark_layout_shift:
                 # Refine structural candidate within [cur_f - stride, cur_f + stride] using exact frame_diffs
                 refined_f = cur_f
                 evidence_kind = "structural"
