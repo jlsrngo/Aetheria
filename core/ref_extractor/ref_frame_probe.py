@@ -274,6 +274,63 @@ def sample_reference_region(
     }
 
 
+def build_side_by_side_preview_strip(
+    video_path: Path,
+    pairs_spec: str,
+    save_path: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Builds a 2-row side-by-side comparison strip (`TOP: REF @ t`, `BOTTOM: YOU @ t`)
+    for visual inspection so the agent immediately sees every discrepancy against the reference."""
+    entries: List[Tuple[float, Path]] = []
+    for item in (pairs_spec or "").split(";"):
+        item = item.strip()
+        if not item or "|" not in item:
+            continue
+        ts_s, p_s = item.split("|", 1)
+        try:
+            entries.append((float(ts_s), Path(p_s)))
+        except Exception:
+            continue
+    if not entries:
+        return {"ok": False, "error": "No valid timestamp|path pairs provided"}
+
+    ref_tiles: List[np.ndarray] = []
+    prv_tiles: List[np.ndarray] = []
+    for ts, prv_path in entries[:8]:
+        ref_fr, _meta = _read_frame_at_sec(video_path, ts)
+        prv_fr = cv2.imread(str(prv_path)) if prv_path.is_file() else None
+        if ref_fr is None or prv_fr is None:
+            continue
+        h, w = ref_fr.shape[:2]
+        tw = 180 if h >= w else 240
+        th = max(120, min(320, int(round(tw * (h / float(max(1, w)))))))
+        r_im = cv2.resize(ref_fr, (tw, th), interpolation=cv2.INTER_AREA)
+        p_im = cv2.resize(prv_fr, (tw, th), interpolation=cv2.INTER_AREA)
+        cv2.rectangle(r_im, (0, 0), (112, 22), (8, 8, 12), -1)
+        cv2.putText(r_im, f"REF {ts:.2f}s", (5, 16), cv2.FONT_HERSHEY_SIMPLEX, 0.46, (120, 255, 160), 1, cv2.LINE_AA)
+        cv2.rectangle(p_im, (0, 0), (112, 22), (8, 8, 12), -1)
+        cv2.putText(p_im, f"YOU {ts:.2f}s", (5, 16), cv2.FONT_HERSHEY_SIMPLEX, 0.46, (120, 210, 255), 1, cv2.LINE_AA)
+        ref_tiles.append(r_im)
+        prv_tiles.append(p_im)
+
+    if not ref_tiles:
+        return {"ok": False, "error": "Could not decode reference/preview pair frames"}
+
+    grid = np.vstack([np.hstack(ref_tiles), np.hstack(prv_tiles)])
+    ok_enc, buf = cv2.imencode(".jpg", grid, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
+    if not ok_enc:
+        return {"ok": False, "error": "Failed encoding side-by-side comparison strip"}
+    jpeg_bytes = buf.tobytes()
+    if save_path is not None:
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        save_path.write_bytes(jpeg_bytes)
+    return {
+        "ok": True,
+        "pairsCount": len(ref_tiles),
+        "dataUrl": "data:image/jpeg;base64," + base64.b64encode(jpeg_bytes).decode("ascii"),
+    }
+
+
 def _parse_box(raw: Optional[str]) -> Optional[Tuple[int, int, int, int]]:
     if not raw or not raw.strip():
         return None
@@ -285,18 +342,25 @@ def _parse_box(raw: Optional[str]) -> Optional[Tuple[int, int, int, int]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="On-demand reference frame & pixel probe")
-    parser.add_argument("mode", choices=["inspect", "sample"])
+    parser.add_argument("mode", choices=["inspect", "sample", "compare-strip"])
     parser.add_argument("--video", required=True, type=str)
-    parser.add_argument("--t", required=True, type=float)
+    parser.add_argument("--t", required=False, default=0.0, type=float)
     parser.add_argument("--end-t", type=float, default=None, help="Optional end timestamp for multi-frame motion micro-strip")
     parser.add_argument("--frames", type=int, default=8, help="Number of frames in motion micro-strip (2..16)")
     parser.add_argument("--box", type=str, default=None, help="Optional x,y,w,h crop/sample box")
+    parser.add_argument("--pairs", type=str, default=None, help="Semicolon-separated ts|path pairs for compare-strip mode")
     parser.add_argument("--out", type=str, default=None, help="Optional JPEG output path (inspect mode)")
     args = parser.parse_args()
 
     try:
         box = _parse_box(args.box)
-        if args.mode == "inspect":
+        if args.mode == "compare-strip":
+            res = build_side_by_side_preview_strip(
+                Path(args.video),
+                args.pairs or "",
+                save_path=Path(args.out) if args.out else None,
+            )
+        elif args.mode == "inspect":
             if args.end_t is not None and float(args.end_t) > float(args.t) + 0.04:
                 res = inspect_reference_motion_strip(
                     Path(args.video),

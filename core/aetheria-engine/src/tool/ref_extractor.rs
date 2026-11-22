@@ -135,9 +135,19 @@ pub(crate) fn select_extracted_vision_keyframes(
                             .pointer("/keyframes/mid")
                             .and_then(Value::as_str)
                             .or_else(|| sc.get("keyframe").and_then(Value::as_str));
-                        // Prefer the 6-panel adaptive beat strip (`ref_scene_XX_beats.jpg` containing
-                        // scene-start, motion-peak, camera-peak, mid-pacing, scene-end) when present on disk,
-                        // so the vision model sees full intra-scene motion & cross-scene continuity on Turn 1.
+                        // Prefer Composite Scene Card (`ref_scene_XX_card.jpg`: Hero HD + 6-Beat Strip)
+                        // when available so the vision model gets full material/typo sharpness AND motion cadence in 1 image.
+                        if let Some(cc_p) = sc
+                            .get("compositeCard")
+                            .and_then(Value::as_str)
+                            .and_then(|s| resolve_style_frame_in_dir(frames_dir, s))
+                        {
+                            if seen.insert(cc_p.clone()) {
+                                midpoints.push(cc_p);
+                            }
+                            continue;
+                        }
+                        // Otherwise prefer the 6-panel adaptive beat strip (`ref_scene_XX_beats.jpg`).
                         if let Some(bs_p) = sc
                             .get("beatsStrip")
                             .and_then(Value::as_str)
@@ -263,7 +273,7 @@ pub(crate) fn select_extracted_vision_keyframes(
     // Collect compact contact sheets generated in ref/extracted/ (full temporal storyboard).
     let mut sheets: Vec<PathBuf> = Vec::new();
     if let Some(extracted_root) = frames_dir.parent() {
-        for idx in 1..=2 {
+        for idx in 1..=3 {
             let cs = extracted_root.join(format!("contact_sheet_{}.jpg", idx));
             if cs.is_file() {
                 sheets.push(cs);
@@ -462,11 +472,14 @@ pub(crate) fn build_compact_extraction_summary(
                 .and_then(Value::as_str)
                 .unwrap_or("");
             let bs = s.get("beatsStrip").and_then(Value::as_str).unwrap_or("");
+            let cc = s.get("compositeCard").and_then(Value::as_str).unwrap_or("");
             (!kf.is_empty() && Path::new(kf).file_name().and_then(|n| n.to_str()) == Some(base))
                 || (!kf_mid.is_empty()
                     && Path::new(kf_mid).file_name().and_then(|n| n.to_str()) == Some(base))
                 || (!bs.is_empty()
                     && Path::new(bs).file_name().and_then(|n| n.to_str()) == Some(base))
+                || (!cc.is_empty()
+                    && Path::new(cc).file_name().and_then(|n| n.to_str()) == Some(base))
         });
         if let Some(s) = matched {
             let idx = s.get("index").and_then(Value::as_u64).unwrap_or(0);
@@ -1208,6 +1221,78 @@ mod tests {
             BASE64_STANDARD.decode(b64).expect("decode"),
             b"compact"
         );
+
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn select_extracted_vision_keyframes_prefers_composite_cards_with_sheets() {
+        let ws = std::env::temp_dir().join(format!(
+            "aetheria_composite_cards_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let ext_dir = ws.join("ref").join("extracted");
+        let frames_dir = ext_dir.join("frames");
+        std::fs::create_dir_all(&frames_dir).expect("mkdir frames");
+
+        for f in [
+            "ref_scene_01_card.jpg",
+            "ref_scene_01.jpg",
+            "ref_scene_01_beats.jpg",
+            "ref_scene_01_start.jpg",
+            "ref_scene_02_card.jpg",
+            "ref_scene_02.jpg",
+        ] {
+            std::fs::write(frames_dir.join(f), b"jpg").expect("write frame");
+        }
+        std::fs::write(ext_dir.join("contact_sheet_1.jpg"), b"sheet1").expect("write sheet1");
+        std::fs::write(ext_dir.join("contact_sheet_3.jpg"), b"sheet3").expect("write sheet3");
+
+        let style = serde_json::json!({
+            "scenes": [
+                {
+                    "index": 1,
+                    "duration": 2.4,
+                    "compositeCard": "frames/ref_scene_01_card.jpg",
+                    "beatsStrip": "frames/ref_scene_01_beats.jpg",
+                    "keyframe": "frames/ref_scene_01.jpg",
+                    "keyframes": [
+                        { "t": 0.05, "path": "frames/ref_scene_01_start.jpg" },
+                        { "t": 1.2, "path": "frames/ref_scene_01.jpg" }
+                    ]
+                },
+                {
+                    "index": 2,
+                    "duration": 1.8,
+                    "compositeCard": "frames/ref_scene_02_card.jpg",
+                    "keyframe": "frames/ref_scene_02.jpg",
+                    "keyframes": [
+                        { "t": 3.0, "path": "frames/ref_scene_02.jpg" }
+                    ]
+                }
+            ]
+        });
+        let style_path = ext_dir.join("style.json");
+        std::fs::write(&style_path, style.to_string()).expect("write style");
+
+        let selected = select_extracted_vision_keyframes(&frames_dir, Some(&style_path), 5);
+        let names: Vec<String> = selected
+            .iter()
+            .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(str::to_string))
+            .collect();
+        assert_eq!(
+            &names[..4],
+            &[
+                "ref_scene_01_card.jpg",
+                "ref_scene_02_card.jpg",
+                "contact_sheet_1.jpg",
+                "contact_sheet_3.jpg",
+            ]
+        );
+        assert!(!names.iter().any(|n| n == "ref_scene_01_beats.jpg"));
 
         let _ = std::fs::remove_dir_all(&ws);
     }

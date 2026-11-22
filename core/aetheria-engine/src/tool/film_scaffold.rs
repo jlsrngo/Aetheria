@@ -306,6 +306,17 @@ pub(crate) fn render_managed_index_html(
 
     var canvas = document.getElementById("film");
     var ctx = canvas.getContext("2d");
+    var __origSave = ctx.save.bind(ctx);
+    var __origRestore = ctx.restore.bind(ctx);
+    var __saveDepth = 0;
+    ctx.save = function () {{
+      __saveDepth++;
+      return __origSave();
+    }};
+    ctx.restore = function () {{
+      if (__saveDepth > 0) __saveDepth--;
+      return __origRestore();
+    }};
 
     window.renderAt = function (t) {{
       var sec = Number.isFinite(t) ? Math.max(0, t) : 0;
@@ -321,6 +332,7 @@ pub(crate) fn render_managed_index_html(
       var localTime = resolved.localTime;
       var renderFn = window.AM.getSceneRenderer(scene.id, resolved.index);
       if (renderFn) {{
+        var __baseDepth = __saveDepth;
         ctx.save();
         try {{
           renderFn(ctx, localTime, scene.duration, scene, window.AM);
@@ -332,8 +344,19 @@ pub(crate) fn render_managed_index_html(
             window.__aetheriaErrors.push(errMsg);
           }}
           if (typeof console !== "undefined" && console.error) console.error(err);
+        }} finally {{
+          while (__saveDepth > __baseDepth) {{
+            ctx.restore();
+          }}
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.globalAlpha = 1;
+          ctx.globalCompositeOperation = "source-over";
+          ctx.filter = "none";
+          ctx.shadowBlur = 0;
+          ctx.shadowColor = "transparent";
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 0;
         }}
-        ctx.restore();
       }}
       if (!MICROSTOCK_MODE && scene._words && scene._words.length > 0 && window.AM.drawSubtitles) {{
         var subOpts = (scene.subtitleStyle && typeof scene.subtitleStyle === "object")
@@ -1566,6 +1589,32 @@ mod tests {
         assert!(index_html.contains("<!-- TODO: hybrid stage stub by film_scaffold -->"));
         assert!(index_html.contains("window.renderAt"));
         assert!(index_html.contains("perspective: 1400px"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn render_managed_index_html_guards_canvas_save_stack_leak() {
+        let dir = std::env::temp_dir().join(format!("aetheria_scaffold_stack_{}", crate::paths::now_ms()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ws = dir.to_string_lossy().to_string();
+
+        let res = execute_film_scaffold(
+            "ses_stack",
+            &ws,
+            &json!({
+                "title": "Stack Guard",
+                "preset": "portrait",
+                "scenes": [{ "id": "scene1", "duration": 2.0 }]
+            }),
+        );
+        assert_eq!(res["ok"], true, "{:?}", res);
+        let film_dir = dir.join(res["filmRoot"].as_str().unwrap());
+        let index_html = std::fs::read_to_string(film_dir.join("index.html")).unwrap();
+        assert!(index_html.contains("__saveDepth"));
+        assert!(index_html.contains("while (__saveDepth > __baseDepth)"));
+        assert!(index_html.contains("finally {"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

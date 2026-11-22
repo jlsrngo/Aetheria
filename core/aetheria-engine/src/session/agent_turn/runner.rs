@@ -591,7 +591,9 @@ pub async fn run_agent_turn(
             &mut chat_messages,
         )
         .await;
-        if batch_had_ref_probe && !batch.all_blocked {
+        let strict_budget =
+            std::env::var("AETHERIA_STRICT_BUDGET_NUDGE").ok().as_deref() == Some("1");
+        if strict_budget && batch_had_ref_probe && !batch.all_blocked {
             ref_probe_batches_done += 1;
             if ref_probe_batches_done >= 1 {
                 chat_messages.push(json!({
@@ -600,7 +602,7 @@ pub async fn run_agent_turn(
                 }));
             }
         }
-        if batch_had_preview && !batch.all_blocked {
+        if strict_budget && batch_had_preview && !batch.all_blocked {
             preview_captures_done += 1;
             let nudge = if preview_captures_done == 1 {
                 "SYSTEM BUDGET NOTE: First visual preview captured. Apply ALL remaining visual fixes in ONE parallel batch of `edit` calls (avoid sequential small `read` loops), then run ONE final `capture_film_preview` and finish."

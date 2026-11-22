@@ -9,7 +9,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
     import cv2
@@ -186,6 +186,23 @@ def compute_foreground_metrics(ref_bgr: np.ndarray, prev_bgr: np.ndarray) -> Dic
     }
 
 
+def _mean_adjacent_frame_delta(frames: List[Tuple[float, np.ndarray]]) -> Optional[float]:
+    if len(frames) < 2:
+        return None
+    ordered = sorted(frames, key=lambda x: x[0])
+    deltas: List[float] = []
+    for (t0, g0), (t1, g1) in zip(ordered, ordered[1:]):
+        if abs(t1 - t0) < 0.03:
+            continue
+        if g0.shape != g1.shape:
+            g1 = cv2.resize(g1, (g0.shape[1], g0.shape[0]), interpolation=cv2.INTER_AREA)
+        diff = np.abs(g0.astype(np.float32) - g1.astype(np.float32))
+        deltas.append(float(np.mean(diff)))
+    if not deltas:
+        return None
+    return round(float(np.mean(deltas)), 2)
+
+
 def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
     pairs = payload.get("pairs") or []
     if not pairs:
@@ -198,6 +215,8 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     per_frame: List[Dict[str, Any]] = []
     strip_rows: List[np.ndarray] = []
+    prev_grays: List[Tuple[float, np.ndarray]] = []
+    ref_grays: List[Tuple[float, np.ndarray]] = []
     scene_tiles_map: Dict[str, List[Tuple[float, np.ndarray, np.ndarray, np.ndarray, float, float, float]]] = {}
     any_ar_mismatch = False
 
@@ -232,6 +251,8 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         ref_cmp = _fit_letterbox(ref_img, cw, ch) if ar_mismatch else _fit_for_strip(ref_img, cw, ch)
         prev_cmp = _fit_for_strip(prev_img, cw, ch)
+        prev_grays.append((ts, cv2.cvtColor(prev_cmp, cv2.COLOR_BGR2GRAY)))
+        ref_grays.append((ts, cv2.cvtColor(ref_cmp, cv2.COLOR_BGR2GRAY)))
 
         ssim = compute_rgb_ssim(ref_cmp, prev_cmp)
         color_sim = compute_color_similarity(ref_cmp, prev_cmp)
@@ -416,6 +437,9 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
             "overallMin": round(float(np.min([x["combinedScore"] for x in items])), 4),
         }
 
+    prev_adj_delta = _mean_adjacent_frame_delta(prev_grays)
+    ref_adj_delta = _mean_adjacent_frame_delta(ref_grays)
+
     ssim_floor = round(threshold * 0.90, 4)
     passed = bool((overall >= threshold) and (ssim_mean >= ssim_floor) and (not any_ar_mismatch))
 
@@ -427,6 +451,8 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
         "colorMatchMean": color_mean,
         "edgeMatchMean": edge_mean,
         "overallFidelity": overall,
+        "meanAdjacentFrameDelta": prev_adj_delta,
+        "refMeanAdjacentFrameDelta": ref_adj_delta,
         "passThreshold": threshold,
         "ssimFloor": ssim_floor,
         "aspectRatioMismatch": bool(any_ar_mismatch),

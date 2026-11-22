@@ -133,10 +133,40 @@ pub fn assemble_system_prompt(workspace_dir: &str) -> String {
     assemble_system_prompt_for_turn(workspace_dir, "")
 }
 
+/// Loads the base prompt template dynamically in debug builds (via `AETHERIA_PROMPT_OVERRIDE_PATH`
+/// or `default.txt` on disk) so prompt experiments take 0s to reload, falling back to embedded `default.txt`.
+fn load_base_prompt_template() -> std::borrow::Cow<'static, str> {
+    if cfg!(debug_assertions) {
+        if let Ok(override_path) = std::env::var("AETHERIA_PROMPT_OVERRIDE_PATH") {
+            let trimmed = override_path.trim();
+            if !trimmed.is_empty() {
+                if let Ok(raw) = std::fs::read_to_string(trimmed) {
+                    if !raw.trim().is_empty() {
+                        return std::borrow::Cow::Owned(raw);
+                    }
+                }
+            }
+        }
+        let disk_path = crate::paths::project_root()
+            .join("core")
+            .join("aetheria-engine")
+            .join("src")
+            .join("session")
+            .join("prompt")
+            .join("default.txt");
+        if let Ok(raw) = std::fs::read_to_string(&disk_path) {
+            if !raw.trim().is_empty() {
+                return std::borrow::Cow::Owned(raw);
+            }
+        }
+    }
+    std::borrow::Cow::Borrowed(include_str!("../prompt/default.txt"))
+}
+
 /// Assembles base system prompt plus turn-filtered & budget-capped dynamic context blocks (`F6`).
 /// Uses date-only (`YYYY-MM-DD (Day)`) without clock minutes so provider prompt caches stay hot.
 pub fn assemble_system_prompt_for_turn(workspace_dir: &str, prompt_text: &str) -> String {
-    let base_prompt_template = include_str!("../prompt/default.txt");
+    let base_prompt_template = load_base_prompt_template();
     let now = chrono::Local::now();
     let today_date_str = now.format("%Y-%m-%d").to_string();
     let day_of_week = now.format("%A").to_string();

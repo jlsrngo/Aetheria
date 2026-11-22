@@ -170,8 +170,31 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
     )
     .await
     {
-        Ok(res) => {
-            let attach_full_res = include_full_res_frames.unwrap_or(res.visual_inspect_only);
+        Ok(mut res) => {
+            if res.comparison_strip_data_url.is_none() && !res.frames.is_empty() {
+                let ws_root = std::path::Path::new(workspace_dir);
+                let ref_vid = super::ref_probe::locate_reference_video(ws_root, None).or_else(|| {
+                    crate::studio::motion::resolve_active_html_film_path(Some(workspace_dir))
+                        .and_then(|hp| hp.parent().map(std::path::Path::to_path_buf))
+                        .and_then(|fr| super::ref_probe::locate_reference_video(&fr, None))
+                });
+                if let Some(video_path) = ref_vid {
+                    if let Some(strip_url) = super::ref_probe::build_visual_ref_vs_preview_strip(
+                        ws_root,
+                        &video_path,
+                        &res.frames,
+                    )
+                    .await
+                    {
+                        res.comparison_strip_data_url = Some(strip_url);
+                    }
+                }
+            }
+            let attach_full_res = if res.comparison_strip_data_url.is_some() {
+                include_full_res_frames.unwrap_or(false)
+            } else {
+                include_full_res_frames.unwrap_or(res.visual_inspect_only)
+            };
             let captured: Vec<Value> = res
                 .frames
                 .iter()

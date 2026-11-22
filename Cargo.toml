@@ -11,16 +11,17 @@ edition = "2021"
 license = "GPL-3.0-or-later"
 
 [profile.dev]
-debug = "line-tables-only"
+debug = 0
 
 [profile.dev.package."*"]
 opt-level = 2
 debug = 0
 
 [profile.test]
-debug = "line-tables-only"
+debug = 0
 
 [profile.test.package."*"]
+opt-level = 2
 debug = 0
 
 [profile.release]

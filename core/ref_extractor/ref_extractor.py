@@ -857,10 +857,10 @@ def build_dense_contact_sheets(
     aspect_h: int,
     out_dir: Path,
 ) -> List[str]:
-    """Builds 1..2 compact timestamped contact sheets (5 cols x up to 7 rows) for full temporal vision."""
+    """Builds compact timestamped contact sheets (6 cols x up to 3 rows = 18 frames) for full temporal vision."""
     if not sample_timestamps:
         return []
-    tile_w = 320
+    tile_w = 240
     tile_h = max(120, min(568, int(round(tile_w * (aspect_h / max(1, aspect_w))))))
     tiles: List[np.ndarray] = []
     for ts in sample_timestamps:
@@ -874,10 +874,10 @@ def build_dense_contact_sheets(
     if not tiles:
         return []
 
-    cols = 5
-    max_per_sheet = 35
+    cols = 6
+    max_per_sheet = 18
     sheet_rels: List[str] = []
-    for sheet_idx, offset in enumerate(range(0, min(len(tiles), max_per_sheet * 2), max_per_sheet), 1):
+    for sheet_idx, offset in enumerate(range(0, min(len(tiles), max_per_sheet * 3), max_per_sheet), 1):
         chunk = tiles[offset:offset + max_per_sheet]
         rows = (len(chunk) + cols - 1) // cols
         canvas = np.zeros((rows * tile_h, cols * tile_w, 3), dtype=np.uint8)
@@ -885,10 +885,115 @@ def build_dense_contact_sheets(
             r, c = divmod(i, cols)
             canvas[r * tile_h:(r + 1) * tile_h, c * tile_w:(c + 1) * tile_w] = tile
         name = f"contact_sheet_{sheet_idx}.jpg"
-        cv2.imwrite(str(out_dir / name), canvas, [cv2.IMWRITE_JPEG_QUALITY, 86])
-        _write_vision_copy(canvas, out_dir / "vision", name, max_edge=1280, quality=76)
+        cv2.imwrite(str(out_dir / name), canvas, [cv2.IMWRITE_JPEG_QUALITY, 88])
+        _write_vision_copy(canvas, out_dir / "vision", name, max_edge=1280, quality=84)
         sheet_rels.append(name)
     return sheet_rels
+
+
+def build_scene_composite_card(
+    frame_lookup: Any,
+    hero_frame: Optional[np.ndarray],
+    hero_ts: float,
+    beat_timestamps: List[float],
+    aspect_w: int,
+    aspect_h: int,
+    out_path: Path,
+) -> Optional[str]:
+    """Builds a high-res single-scene Composite Card (Hero HD + 6 Beat subframes)."""
+    if hero_frame is None:
+        hero_frame = frame_lookup(hero_ts)
+    if hero_frame is None:
+        return None
+
+    portrait = aspect_h > aspect_w
+    gap = 4
+    bg_color = (14, 14, 18)
+
+    if len(beat_timestamps) > 6:
+        idxs = [int(round(k * (len(beat_timestamps) - 1) / 5.0)) for k in range(6)]
+        selected_beats = [beat_timestamps[idx] for idx in idxs]
+    else:
+        selected_beats = list(beat_timestamps[:6])
+
+    if portrait:
+        hero_w = 540
+        hero_h = max(480, min(960, int(round(hero_w * (aspect_h / max(1, aspect_w))))))
+        hero_h -= hero_h % 3
+        tile_h = max(120, hero_h // 3)
+        tile_w = max(90, int(round(tile_h * (aspect_w / max(1, aspect_h)))))
+        grid_cols, grid_rows = 2, 3
+        total_h = (grid_rows * tile_h) + ((grid_rows - 1) * gap)
+        hero_h = total_h
+        total_w = hero_w + gap + (grid_cols * tile_w) + ((grid_cols - 1) * gap)
+        canvas = np.full((total_h, total_w, 3), bg_color, dtype=np.uint8)
+        hero_panel = cv2.resize(hero_frame, (hero_w, hero_h), interpolation=cv2.INTER_AREA)
+        cv2.rectangle(hero_panel, (6, 6), (146, 30), (14, 14, 18), -1)
+        cv2.putText(
+            hero_panel,
+            f"HERO {hero_ts:.2f}s",
+            (12, 24),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (255, 208, 96),
+            1,
+            cv2.LINE_AA,
+        )
+        canvas[0:hero_h, 0:hero_w] = hero_panel
+        grid_x0, grid_y0 = hero_w + gap, 0
+    else:
+        hero_w = 960
+        hero_h = max(320, min(640, int(round(hero_w * (aspect_h / max(1, aspect_w))))))
+        tile_w = max(160, (hero_w - 2 * gap) // 3)
+        tile_h = max(96, int(round(tile_w * (aspect_h / max(1, aspect_w)))))
+        grid_cols, grid_rows = 3, 2
+        total_w = max(hero_w, (grid_cols * tile_w) + ((grid_cols - 1) * gap))
+        total_h = hero_h + gap + (grid_rows * tile_h) + ((grid_rows - 1) * gap)
+        canvas = np.full((total_h, total_w, 3), bg_color, dtype=np.uint8)
+        hero_panel = cv2.resize(hero_frame, (total_w, hero_h), interpolation=cv2.INTER_AREA)
+        cv2.rectangle(hero_panel, (6, 6), (156, 32), (14, 14, 18), -1)
+        cv2.putText(
+            hero_panel,
+            f"HERO {hero_ts:.2f}s",
+            (12, 25),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.58,
+            (255, 208, 96),
+            1,
+            cv2.LINE_AA,
+        )
+        canvas[0:hero_h, 0:total_w] = hero_panel
+        grid_x0, grid_y0 = 0, hero_h + gap
+
+    for idx, ts in enumerate(selected_beats):
+        fr = frame_lookup(ts)
+        if fr is None:
+            continue
+        r, c = divmod(idx, grid_cols)
+        x = grid_x0 + c * (tile_w + gap)
+        y = grid_y0 + r * (tile_h + gap)
+        tile = cv2.resize(fr, (tile_w, tile_h), interpolation=cv2.INTER_AREA)
+        cv2.rectangle(tile, (4, 4), (78, 22), (10, 10, 14), -1)
+        cv2.putText(
+            tile,
+            f"{ts:.2f}s",
+            (8, 17),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.44,
+            (248, 248, 252),
+            1,
+            cv2.LINE_AA,
+        )
+        canvas[y:y + tile_h, x:x + tile_w] = tile
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(out_path), canvas, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+    try:
+        vision_dir = out_path.parent.parent / "vision"
+        _write_vision_copy(canvas, vision_dir, out_path.name, max_edge=1280, quality=84)
+    except Exception:
+        pass
+    return out_path.name
 
 
 def build_scene_beats_strip(
@@ -1300,10 +1405,10 @@ def extract_reference_blueprint(
         for ratio in thumb_ratios
     ]
 
-    sheet_step = max(0.45, duration / 68.0) if duration > 0 else 0.5
+    sheet_step = max(0.45, duration / 52.0) if duration > 0 else 0.5
     sheet_timestamps: List[float] = []
     cur_sheet_t = 0.0
-    while cur_sheet_t < max(0.2, duration - 0.05) and len(sheet_timestamps) < 70:
+    while cur_sheet_t < max(0.2, duration - 0.05) and len(sheet_timestamps) < 54:
         sheet_timestamps.append(round(cur_sheet_t, 3))
         cur_sheet_t += sheet_step
 
@@ -1484,6 +1589,16 @@ def extract_reference_blueprint(
             frames_dir / f"ref_scene_{i + 1:02d}_beats.jpg",
         )
         beats_strip_rel = f"frames/{beats_strip_name}" if beats_strip_name else None
+        card_name = build_scene_composite_card(
+            _frame_at,
+            fr_mid,
+            ts_mid,
+            beat_strip_ts,
+            width,
+            height,
+            frames_dir / f"ref_scene_{i + 1:02d}_card.jpg",
+        )
+        card_rel = f"frames/{card_name}" if card_name else None
 
         grid_tilt_deg = detect_grid_tilt_deg(fr_mid)
         contrast_tiles = detect_bimodal_contrast_tiles(fr_mid)
@@ -1608,6 +1723,7 @@ def extract_reference_blueprint(
             "motionEnergy": motion_energy,
             "keyframeTimestamp": ts_mid,
             "keyframe": f"frames/{scene_kf_name}",
+            "compositeCard": card_rel,
             "beatsStrip": beats_strip_rel,
             "beatStripTimestamps": [round(float(t), 3) for t in beat_strip_ts],
             "beatStripPanels": beat_strip_meta,

@@ -42,12 +42,22 @@ FIVE UNIVERSAL ZERO-COLLISION & MOTION HYGIENE LAWS:
 4. SURFACE CONTRAST & LUMINANCE FIDELITY: Match the reference's actual surface brightness and gradient glow, and always invert inner ink/icon contrast on light vs dark cards/tiles so active or dark surfaces never appear empty.
 5. CLEAN BOUNDARY FRAMES: Render a valid visual frame at both `t = 0` and `t = dur` (never leave unguarded blank/black flashes at scene boundaries).
 
+OPTICAL MATERIAL & LIVING MOTION CRAFT:
+- **Zero dead static holds:** Never freeze on flat solid colors (`staticFramesPct` kills cinematic feel). Keep subtle continuous ambient radial glow/light-ray drift, gentle camera breathing (`AM.applyCamera`), or spring settling motion alive across `0..dur`, with crisp fast transitions (`AM.ease.snap` / `AM.spring`).
+- **Volumetric soft light vs sharp geometry:** For luminous clouds/portals/glows, use wide smooth radial gradients fading to `alpha=0` with `lighter` (`AM.drawOpticalGlow` / `AM.drawBloomStroke`) — never thin harsh oval outlines or stepped unblurred rings.
+- **Optical lens & tapered ribbons:** When Row 1 shows water-bubble / spherical glass distortion bending text or edges, use `AM.drawSphericalLens(ctx, cx, cy, r, k, drawFn, opts)`. When Row 1 shows a glowing arc, hopping comet, or light swoosh, use `AM.drawTaperedRibbon(ctx, pts, maxW, opts)`.
+- **Micro-physics & crisp shapes:** Use `AM.impactRecoil` for dot/tether collisions and `AM.twistPolygon` for elastic 3D-sheared polygon spins. Match concave vs convex geometry faithfully (e.g. pinched 4-point concave stars/diamonds vs rounded circles).
+- **Boundary continuity:** Match `t = 0` and `t = dur` to the exact opening and closing frames of the beat strip (`ref_scene_XX_beats.jpg`) so flashes, wipes, and shape handoffs flow seamlessly across cuts.
+
 COMPACT `window.AM` RUNTIME API (already loaded globally before your script):
 - `AM.registerScene(id, fn)` — `fn(ctx, t, dur, scene, AM)` where `t` is local scene seconds `0..dur`.
 - `AM.applyCamera(ctx, { s, cx, cy, rot }, W, H)` — global camera zoom/pan/rotation around `(cx, cy)` in degrees `rot`.
 - `AM.clamp(v, lo, hi)`, `AM.lerp(a, b, p)`, `AM.invLerp(a, b, v)`, `AM.remap(v, a, b, c, d)`
-- `AM.ease.inCubic(p)`, `AM.ease.outCubic(p)`, `AM.ease.inOutCubic(p)`, `AM.ease.outBack(p)`, `AM.ease.outExpo(p)`, `AM.ease.inOutQuart(p)`
+- `AM.ease.inCubic(p)`, `AM.ease.outCubic(p)`, `AM.ease.inOutCubic(p)`, `AM.ease.outBack(p)`, `AM.ease.outExpo(p)`, `AM.ease.inOutQuart(p)`, `AM.ease.snap(p)`
 - `AM.spring(tSec, { stiffness: 180, damping: 18, mass: 1 })` -> smooth spring 0..1 with slight overshoot
+- `AM.drawOpticalGlow(ctx, x, y, radius, colorHex, intensity)`, `AM.drawBloomStroke(ctx, drawPathFn, { color, lineWidth, glowRadius })`
+- `AM.drawSphericalLens(ctx, cx, cy, radius, strength, drawContentFn, opts)`, `AM.drawTaperedRibbon(ctx, points, maxWidth, opts)`
+- `AM.impactRecoil(t, hitTime, opts)` -> `{ dx, dy, rot, sx, sy }`; `AM.twistPolygon(points, angle, lagFactor)`
 - `AM.rng(seed)` -> callable deterministic PRNG `r()` returning `0..1` (also has `r.next()`, `r.range(min, max)`, `r.pick(arr)`)
 - `AM.drawCursor(ctx, x, y, { scale: 1.0, color: '#FFFFFF', stroke: '#111116', shadow: true, angle: 0 })`
 - `AM.drawExtrudedArrow3D(ctx, cx, cy, pixelRadius, { rx, ry, rz, depth, topColor, sideColor, glowColor })`
@@ -78,8 +88,9 @@ COMPACT `window.AM` API:
 - `AM.registerScene(id, fn)` — `fn(ctx, t, dur, scene, AM)`
 - `AM.applyCamera(ctx, { s, cx, cy, rot }, W, H)` — global zoom/pan/rotation (`rot` in deg)
 - `AM.clamp(v, lo, hi)`, `AM.lerp(a, b, p)`, `AM.invLerp(a, b, v)`, `AM.remap(v, a, b, c, d)`
-- `AM.ease.{inCubic,outCubic,inOutCubic,outBack,outExpo,inOutQuart}(p)`
-- `AM.spring(tSec, { stiffness, damping, mass })`
+- `AM.ease.{inCubic,outCubic,inOutCubic,outBack,outExpo,inOutQuart,snap}(p)`
+- `AM.spring(tSec, { stiffness, damping, mass })`, `AM.impactRecoil(t, hitTime, opts)`, `AM.twistPolygon(points, angle, lagFactor)`
+- `AM.drawOpticalGlow(ctx, x, y, r, hex, inten)`, `AM.drawBloomStroke(ctx, fn, opts)`, `AM.drawSphericalLens(ctx, cx, cy, r, k, fn, opts)`, `AM.drawTaperedRibbon(ctx, pts, w, opts)`
 - `AM.rng(seed)` -> deterministic PRNG (`r()`, `r.range(min, max)`, `r.pick(arr)`)
 - `AM.drawCursor(ctx, x, y, opts)`, `AM.drawExtrudedArrow3D(ctx, cx, cy, r, opts)`, `AM.drawLaptopFrame(ctx, rect, fn)`, `AM.drawWordWheel(ctx, opts)`, `AM.drawSVGPath(ctx, d, opts)`
 - `AM.loadImage('/img/asset.png')`, `AM.drawImageFit(ctx, img, x, y, w, h, 'contain')`";
@@ -452,6 +463,21 @@ pub(crate) fn format_comparison_feedback(
             "MEASURED SCORE: overall={:.3} (SSIM={:.3}, Color={:.3}, Edge={:.3})",
             score, ssim, color, edge
         ));
+        let compared_count = cmp.get("comparedCount").and_then(Value::as_u64).unwrap_or(0);
+        if compared_count >= 3 {
+            if let Some(prev_delta) = cmp.get("meanAdjacentFrameDelta").and_then(Value::as_f64) {
+                let ref_delta = cmp
+                    .get("refMeanAdjacentFrameDelta")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(2.5);
+                if prev_delta < 1.2 && ref_delta >= 2.0 {
+                    lines.push(format!(
+                        "MOTION ACTIVITY WARNING: rendered frames across this scene are nearly static (avg frame delta={:.2} < 1.2 vs reference {:.2}) — add continuous ambient glow/ray drift, subtle AM.applyCamera breathing, and crisp spring motion!",
+                        prev_delta, ref_delta
+                    ));
+                }
+            }
+        }
         if let Some(p) = cmp
             .get("primarySceneBeatStripPath")
             .or_else(|| cmp.get("comparisonStripPath"))
@@ -691,6 +717,19 @@ mod tests {
         assert!(fb.contains("POLARITY/LAYOUT SHIFT"));
         assert!(fb.contains("SCALE/POSITION MISMATCH"));
         assert!(fb.contains("COLOR/LUMINANCE DRIFT"));
+
+        let static_cmp = json!({
+            "overallFidelity": 0.72,
+            "ssimMean": 0.80,
+            "colorMatchMean": 0.85,
+            "edgeMatchMean": 0.40,
+            "comparedCount": 4,
+            "meanAdjacentFrameDelta": 0.65,
+            "refMeanAdjacentFrameDelta": 3.40,
+            "perFrame": []
+        });
+        let (_, static_fb, _) = format_comparison_feedback(Some(&static_cmp), 0.0, &[], None);
+        assert!(static_fb.contains("MOTION ACTIVITY WARNING"));
     }
 
     #[test]

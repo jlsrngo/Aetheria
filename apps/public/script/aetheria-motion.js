@@ -141,6 +141,11 @@
       if (x >= 1) return 1;
       return x < 0.5 ? Math.pow(2, 20 * x - 10) / 2 : (2 - Math.pow(2, -20 * x + 10)) / 2;
     },
+    inBack: (t, overshoot = 1.70158) => {
+      const x = clamp(t, 0, 1);
+      const c3 = overshoot + 1;
+      return c3 * x * x * x - overshoot * x * x;
+    },
     outBack: (t, overshoot = 1.70158) => {
       const x = clamp(t, 0, 1);
       const c3 = overshoot + 1;
@@ -529,15 +534,45 @@
   // 5. Studio Canvas Drawing Primitives & Shared Layout Zones
   // ============================================================================
 
+  function normalizeCornerRadii(r, maxR) {
+    if (Array.isArray(r)) {
+      const n = r.length;
+      const v0 = n > 0 ? clamp(Number(r[0]) || 0, 0, maxR) : 0;
+      const v1 = n > 1 ? clamp(Number(r[1]) || 0, 0, maxR) : v0;
+      const v2 = n > 2 ? clamp(Number(r[2]) || 0, 0, maxR) : v0;
+      const v3 = n > 3 ? clamp(Number(r[3]) || 0, 0, maxR) : v1;
+      return [v0, v1, v2, v3];
+    }
+    const s = clamp(Number(r) || 0, 0, maxR);
+    return [s, s, s, s];
+  }
+
   function roundRect(ctx, x, y, w, h, r) {
-    const radius = Math.min(r, w / 2, h / 2);
+    const rw = Math.max(0, Number(w) || 0);
+    const rh = Math.max(0, Number(h) || 0);
+    const maxR = Math.min(rw / 2, rh / 2);
+    const [tl, tr, br, bl] = normalizeCornerRadii(r, maxR);
     ctx.beginPath();
-    ctx.moveTo(x + radius, y);
-    ctx.arcTo(x + w, y, x + w, y + h, radius);
-    ctx.arcTo(x + w, y + h, x, y + h, radius);
-    ctx.arcTo(x, y + h, x, y, radius);
-    ctx.arcTo(x, y, x + w, y, radius);
+    ctx.moveTo(x + tl, y);
+    ctx.lineTo(x + rw - tr, y);
+    if (tr > 0) ctx.arcTo(x + rw, y, x + rw, y + tr, tr);
+    ctx.lineTo(x + rw, y + rh - br);
+    if (br > 0) ctx.arcTo(x + rw, y + rh, x + rw - br, y + rh, br);
+    ctx.lineTo(x + bl, y + rh);
+    if (bl > 0) ctx.arcTo(x, y + rh, x, y + rh - bl, bl);
+    ctx.lineTo(x, y + tl);
+    if (tl > 0) ctx.arcTo(x, y, x + tl, y, tl);
     ctx.closePath();
+  }
+
+  function fillRoundRect(ctx, x, y, w, h, r) {
+    roundRect(ctx, x, y, w, h, r);
+    ctx.fill();
+  }
+
+  function strokeRoundRect(ctx, x, y, w, h, r) {
+    roundRect(ctx, x, y, w, h, r);
+    ctx.stroke();
   }
 
   function hexAlpha(hex, alpha) {
@@ -2033,6 +2068,8 @@
     getSceneRenderer,
     resolveScene,
     roundRect,
+    fillRoundRect,
+    strokeRoundRect,
     hexAlpha,
     drawGridBackdrop,
     drawTopHeader,

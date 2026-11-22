@@ -280,6 +280,35 @@ pub(crate) fn should_restore_best_checkpoint(
             || (latest_score + 0.03 < best_score && final_hazards >= best_hazards))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PostWriteToolPhase {
+    AllTools,
+    FixRuntimeErrorsNow,
+    ApplyPolishOrFinish,
+    VerifyDirtyScriptNow,
+}
+
+fn select_post_write_tool_phase(
+    has_written: bool,
+    dirty_since_render: bool,
+    has_runtime_errors: bool,
+    probes_since_edit: usize,
+) -> PostWriteToolPhase {
+    if !has_written {
+        return PostWriteToolPhase::AllTools;
+    }
+    if dirty_since_render && probes_since_edit >= 1 {
+        return PostWriteToolPhase::VerifyDirtyScriptNow;
+    }
+    if !dirty_since_render && has_runtime_errors && probes_since_edit >= 1 {
+        return PostWriteToolPhase::FixRuntimeErrorsNow;
+    }
+    if !dirty_since_render && !has_runtime_errors && probes_since_edit >= 2 {
+        return PostWriteToolPhase::ApplyPolishOrFinish;
+    }
+    PostWriteToolPhase::AllTools
+}
+
 /// Runs the Zero-Subagent Direct Per-Scene Vision-First Remake Compiler end-to-end.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_direct_per_scene_remake(
@@ -426,6 +455,24 @@ pub(crate) async fn run_direct_per_scene_remake_with_switches(
         })
         .cloned()
         .collect();
+    let patch_or_write_tools: Vec<Value> = scene_tools
+        .iter()
+        .filter(|t| {
+            t.pointer("/function/name")
+                .and_then(Value::as_str)
+                .is_some_and(|n| matches!(n, "patch_scene_script" | "write_scene_script"))
+        })
+        .cloned()
+        .collect();
+    let render_only_tools: Vec<Value> = scene_tools
+        .iter()
+        .filter(|t| {
+            t.pointer("/function/name")
+                .and_then(Value::as_str)
+                .is_some_and(|n| n == "render_and_compare_scene")
+        })
+        .cloned()
+        .collect();
     let total_scenes = film_scenes.len();
     let mut outcomes = Vec::with_capacity(total_scenes);
 
@@ -511,6 +558,8 @@ pub(crate) async fn run_direct_per_scene_remake_with_switches(
         let mut latest_errs: Vec<String> = Vec::new();
         let mut has_written = false;
         let mut dirty_since_render = false;
+        let mut probes_since_edit: usize = 0;
+        let mut renders_completed: usize = 0;
         let mut rolled_back = false;
         let mut passes_run = 0usize;
         let mut first_write_step: Option<usize> = None;
@@ -547,10 +596,31 @@ pub(crate) async fn run_direct_per_scene_remake_with_switches(
         for step_idx in 0..max_scene_steps {
             let enforce_write_now =
                 switches.should_enforce_write_gate(has_written, step_idx, !write_only_tools.is_empty());
+            let post_phase = if enforce_write_now {
+                PostWriteToolPhase::AllTools
+            } else {
+                select_post_write_tool_phase(
+                    has_written,
+                    dirty_since_render,
+                    !latest_errs.is_empty(),
+                    probes_since_edit,
+                )
+            };
             let active_tools: &[Value] = if enforce_write_now {
                 &write_only_tools
             } else {
-                &scene_tools
+                match post_phase {
+                    PostWriteToolPhase::FixRuntimeErrorsNow
+                    | PostWriteToolPhase::ApplyPolishOrFinish
+                        if !patch_or_write_tools.is_empty() =>
+                    {
+                        &patch_or_write_tools
+                    }
+                    PostWriteToolPhase::VerifyDirtyScriptNow if !render_only_tools.is_empty() => {
+                        &render_only_tools
+                    }
+                    _ => &scene_tools,
+                }
             };
             let active_tool_choice = if enforce_write_now {
                 Some(&force_write_choice)
@@ -605,6 +675,9 @@ pub(crate) async fn run_direct_per_scene_remake_with_switches(
                 let mut step_captions: Vec<String> = Vec::new();
                 let mut step_tool_records: Vec<ToolCallTraceRecord> = Vec::new();
                 let mut step_blocked_by_gate: Vec<String> = Vec::new();
+                let mut step_modified = false;
+                let mut step_rendered = false;
+                let mut step_probed = false;
 
                 for (tc_idx, tc) in comp.tool_calls.iter().enumerate() {
                     let tool_started = now_ms();
@@ -677,6 +750,52 @@ pub(crate) async fn run_direct_per_scene_remake_with_switches(
                             rendered_metrics: None,
                             rendered_errors: None,
                         }
+                    } else if post_phase == PostWriteToolPhase::VerifyDirtyScriptNow
+                        && fn_name != "render_and_compare_scene"
+                    {
+                        blocked_this_call = true;
+                        step_blocked_by_gate.push(fn_name.to_string());
+                        super::direct_scene_tools::SceneToolOutcome {
+                            result_json: json!({
+                                "ok": false,
+                                "error": format!("You modified `{}` — call `render_and_compare_scene` NOW to inspect your pixels before further probing.", script_rel)
+                            }),
+                            vision_images: Vec::new(),
+                            vision_caption: None,
+                            script_modified: false,
+                            rendered_score: None,
+                            rendered_metrics: None,
+                            rendered_errors: None,
+                        }
+                    } else if matches!(
+                        post_phase,
+                        PostWriteToolPhase::FixRuntimeErrorsNow
+                            | PostWriteToolPhase::ApplyPolishOrFinish
+                    ) && !matches!(
+                        fn_name,
+                        "write_scene_script"
+                            | "write"
+                            | "write_to_file"
+                            | "patch_scene_script"
+                            | "edit"
+                            | "replace_file_content"
+                    ) {
+                        blocked_this_call = true;
+                        step_blocked_by_gate.push(fn_name.to_string());
+                        let msg = if post_phase == PostWriteToolPhase::FixRuntimeErrorsNow {
+                            format!("Runtime JS errors are active — fix `{}` NOW with `patch_scene_script` or `write_scene_script` before probing further.", script_rel)
+                        } else {
+                            format!("Post-render probing limit reached — call `patch_scene_script` or `write_scene_script` on `{}` to apply fixes, or reply briefly in text if done.", script_rel)
+                        };
+                        super::direct_scene_tools::SceneToolOutcome {
+                            result_json: json!({ "ok": false, "error": msg }),
+                            vision_images: Vec::new(),
+                            vision_caption: None,
+                            script_modified: false,
+                            rendered_score: None,
+                            rendered_metrics: None,
+                            rendered_errors: None,
+                        }
                     } else {
                         emit_event(
                             workspace_dir,
@@ -725,11 +844,17 @@ pub(crate) async fn run_direct_per_scene_remake_with_switches(
                         }
                         has_written = true;
                         dirty_since_render = true;
-                    } else if !has_written && !blocked_this_call {
-                        probe_calls_before_write += 1;
+                        step_modified = true;
+                    } else if !blocked_this_call && outcome.rendered_score.is_none() {
+                        step_probed = true;
+                        if !has_written {
+                            probe_calls_before_write += 1;
+                        }
                     }
                     if let Some(sc_val) = outcome.rendered_score {
                         dirty_since_render = false;
+                        step_rendered = true;
+                        renders_completed += 1;
                         let errs = outcome.rendered_errors.clone().unwrap_or_default();
                         latest_score = sc_val;
                         latest_errs = errs.clone();
@@ -849,13 +974,49 @@ pub(crate) async fn run_direct_per_scene_remake_with_switches(
                     output_tokens: comp.output_tokens,
                 });
 
-                let budget_nudge = switches.build_probe_budget_nudge(
+                if step_modified || step_rendered {
+                    probes_since_edit = 0;
+                } else if has_written && step_probed {
+                    probes_since_edit += 1;
+                }
+
+                let mut nudge_opt = switches.build_probe_budget_nudge(
                     has_written,
                     step_idx,
                     scene_num,
                     total_scenes,
                     &script_rel,
                 );
+                if nudge_opt.is_none() && has_written && step_idx + 1 < max_scene_steps {
+                    let next_post_phase = select_post_write_tool_phase(
+                        has_written,
+                        dirty_since_render,
+                        !latest_errs.is_empty(),
+                        probes_since_edit,
+                    );
+                    nudge_opt = if step_rendered && !latest_errs.is_empty() {
+                        Some("RUNTIME JS ERRORS DETECTED — fix them immediately with `patch_scene_script` (or `write_scene_script`), then re-verify with `render_and_compare_scene`.".to_string())
+                    } else if step_rendered
+                        && latest_errs.is_empty()
+                        && latest_score >= 0.78
+                        && renders_completed >= 2
+                    {
+                        Some("Score is >= 0.78 with 0 runtime errors. Reply briefly in text to finalize this scene and move on, unless a glaring visual/motion defect remains.".to_string())
+                    } else {
+                        match next_post_phase {
+                            PostWriteToolPhase::VerifyDirtyScriptNow => Some(
+                                "Script was modified — call `render_and_compare_scene` NOW to visually inspect your rendered pixels against Row 1.".to_string(),
+                            ),
+                            PostWriteToolPhase::FixRuntimeErrorsNow => Some(
+                                "Probe complete — call `patch_scene_script` or `write_scene_script` NOW to fix the runtime JS errors, then re-verify with `render_and_compare_scene`.".to_string(),
+                            ),
+                            PostWriteToolPhase::ApplyPolishOrFinish => Some(
+                                "Probing window complete after render. Apply your fixes NOW via `patch_scene_script` (or `write_scene_script`), or reply briefly in text if this scene is already complete.".to_string(),
+                            ),
+                            PostWriteToolPhase::AllTools => None,
+                        }
+                    };
+                }
 
                 if !step_images.is_empty() {
                     let mut caption = if step_captions.is_empty() {
@@ -863,12 +1024,12 @@ pub(crate) async fn run_direct_per_scene_remake_with_switches(
                     } else {
                         step_captions.join("\n")
                     };
-                    if let Some(nudge) = budget_nudge {
+                    if let Some(nudge) = nudge_opt {
                         caption.push_str("\n\n");
                         caption.push_str(&nudge);
                     }
                     scene_msgs.push(build_vision_user_message(caption, &step_images));
-                } else if let Some(nudge) = budget_nudge {
+                } else if let Some(nudge) = nudge_opt {
                     scene_msgs.push(json!({
                         "role": "user",
                         "content": nudge
@@ -1851,5 +2012,37 @@ mod tests {
             assert!(!should_run_direct_scene_remake(&ws_str));
         }
         let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn select_post_write_tool_phase_enforces_fix_verify_and_polish_transitions() {
+        assert_eq!(
+            select_post_write_tool_phase(false, false, false, 5),
+            PostWriteToolPhase::AllTools
+        );
+        assert_eq!(
+            select_post_write_tool_phase(true, true, false, 0),
+            PostWriteToolPhase::AllTools
+        );
+        assert_eq!(
+            select_post_write_tool_phase(true, true, false, 1),
+            PostWriteToolPhase::VerifyDirtyScriptNow
+        );
+        assert_eq!(
+            select_post_write_tool_phase(true, false, true, 0),
+            PostWriteToolPhase::AllTools
+        );
+        assert_eq!(
+            select_post_write_tool_phase(true, false, true, 1),
+            PostWriteToolPhase::FixRuntimeErrorsNow
+        );
+        assert_eq!(
+            select_post_write_tool_phase(true, false, false, 1),
+            PostWriteToolPhase::AllTools
+        );
+        assert_eq!(
+            select_post_write_tool_phase(true, false, false, 2),
+            PostWriteToolPhase::ApplyPolishOrFinish
+        );
     }
 }

@@ -255,6 +255,49 @@ pub(crate) fn normalize_preview_timestamps(raw: &[f64], duration: f64) -> Vec<f6
     out
 }
 
+pub(crate) fn resolve_default_preview_timestamps(
+    requested_timestamps: &[f64],
+    should_compare: bool,
+    has_reference: bool,
+    ref_root: &Path,
+    film_root: &Path,
+    duration: f64,
+    story_midpoints: &[(String, f64)],
+    scenes: &[super::film_inspector::FilmSceneSpec],
+) -> Vec<f64> {
+    let align_budget = if should_compare {
+        MAX_PREVIEW_FRAMES
+    } else {
+        14
+    };
+    if requested_timestamps.is_empty() && (should_compare || has_reference) {
+        let aligned = super::reference_compare::recommended_reference_timestamps_for_film(
+            ref_root,
+            film_root,
+            duration,
+            align_budget,
+        );
+        if !aligned.is_empty() {
+            return aligned;
+        }
+    }
+    if requested_timestamps.is_empty() && !story_midpoints.is_empty() {
+        return story_midpoints
+            .iter()
+            .map(|(_, t)| *t)
+            .take(MAX_PREVIEW_FRAMES)
+            .collect();
+    }
+    if requested_timestamps.is_empty() && scenes.len() >= 2 {
+        return scenes
+            .iter()
+            .take(MAX_PREVIEW_FRAMES)
+            .map(|sc| (sc.start + sc.duration * 0.5).clamp(0.0, duration.max(0.1)))
+            .collect();
+    }
+    requested_timestamps.to_vec()
+}
+
 /// Captures 1-4 JPEG screenshots of the workspace `index.html` motion canvas via headless Edge/Chrome CDP.
 pub async fn capture_film_preview_frames(
     workspace_dir: &str,
@@ -386,33 +429,16 @@ async fn run_cdp_preview_capture(
         args.effective_visual_inspect_only,
     );
 
-    let effective_requested: Vec<f64> = if args.requested_timestamps.is_empty() && should_compare {
-        let aligned = super::reference_compare::recommended_reference_timestamps_for_film(
-            &ref_root,
-            args.film_root,
-            meta.duration,
-            MAX_PREVIEW_FRAMES,
-        );
-        if aligned.is_empty() {
-            args.requested_timestamps.to_vec()
-        } else {
-            aligned
-        }
-    } else if args.requested_timestamps.is_empty() && !args.story_midpoints.is_empty() {
-        args.story_midpoints
-            .iter()
-            .map(|(_, t)| *t)
-            .take(MAX_PREVIEW_FRAMES)
-            .collect()
-    } else if args.requested_timestamps.is_empty() && meta.scenes.len() >= 2 {
-        meta.scenes
-            .iter()
-            .take(MAX_PREVIEW_FRAMES)
-            .map(|sc| (sc.start + sc.duration * 0.5).clamp(0.0, meta.duration.max(0.1)))
-            .collect()
-    } else {
-        args.requested_timestamps.to_vec()
-    };
+    let effective_requested = resolve_default_preview_timestamps(
+        args.requested_timestamps,
+        should_compare,
+        has_reference,
+        &ref_root,
+        args.film_root,
+        meta.duration,
+        args.story_midpoints,
+        &meta.scenes,
+    );
 
     let timestamps = normalize_preview_timestamps(&effective_requested, meta.duration);
     let _ = tokio::fs::create_dir_all(args.preview_dir).await;
@@ -1117,5 +1143,100 @@ mod tests {
         assert!((compute_preview_capture_scale(1080, 1920, 960) - 0.5).abs() < 1e-6);
         assert!((compute_preview_capture_scale(720, 1280, 960) - 0.75).abs() < 1e-6);
         assert!((compute_preview_capture_scale(360, 640, 960) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn standalone_visual_inspect_with_reference_auto_samples_multi_beat_timestamps() {
+        let dir = std::env::temp_dir().join(format!(
+            "aetheria_preview_multibeat_{}",
+            crate::paths::now_ms()
+        ));
+        let frames_dir = dir.join("ref").join("extracted").join("frames");
+        std::fs::create_dir_all(&frames_dir).unwrap();
+        for f in [
+            "ref_scene_01_start.jpg",
+            "ref_scene_01.jpg",
+            "ref_scene_01_end.jpg",
+            "ref_scene_02_start.jpg",
+            "ref_scene_02_q1.jpg",
+            "ref_scene_02.jpg",
+            "ref_scene_02_q3.jpg",
+            "ref_scene_02_end.jpg",
+        ] {
+            std::fs::write(frames_dir.join(f), b"jpg").unwrap();
+        }
+        let style_json = json!({
+            "scenes": [
+                {
+                    "index": 1,
+                    "id": "scene1",
+                    "start": 0.0,
+                    "duration": 2.0,
+                    "keyframe": "frames/ref_scene_01.jpg",
+                    "keyframes": [
+                        { "t": 0.1, "path": "frames/ref_scene_01_start.jpg" },
+                        { "t": 1.0, "path": "frames/ref_scene_01.jpg" },
+                        { "t": 1.9, "path": "frames/ref_scene_01_end.jpg" }
+                    ]
+                },
+                {
+                    "index": 2,
+                    "id": "scene2",
+                    "start": 2.0,
+                    "duration": 4.0,
+                    "keyframe": "frames/ref_scene_02.jpg",
+                    "keyframes": [
+                        { "t": 2.1, "path": "frames/ref_scene_02_start.jpg" },
+                        { "t": 3.1, "path": "frames/ref_scene_02_q1.jpg" },
+                        { "t": 4.0, "path": "frames/ref_scene_02.jpg" },
+                        { "t": 4.9, "path": "frames/ref_scene_02_q3.jpg" },
+                        { "t": 5.9, "path": "frames/ref_scene_02_end.jpg" }
+                    ]
+                }
+            ]
+        });
+        std::fs::write(
+            dir.join("ref").join("extracted").join("style.json"),
+            style_json.to_string(),
+        )
+        .unwrap();
+        let scenes = vec![
+            crate::studio::film_inspector::FilmSceneSpec {
+                id: "scene1".into(),
+                title: "S1".into(),
+                start: 0.0,
+                duration: 2.0,
+                start_frame: 0,
+                duration_frames: 60,
+                audio: None,
+                sfx: None,
+                words: None,
+            },
+            crate::studio::film_inspector::FilmSceneSpec {
+                id: "scene2".into(),
+                title: "S2".into(),
+                start: 2.0,
+                duration: 4.0,
+                start_frame: 60,
+                duration_frames: 120,
+                audio: None,
+                sfx: None,
+                words: None,
+            },
+        ];
+        // Even in standalone visual-inspect mode (`should_compare = false`), when `has_reference` is true,
+        // omitting timestamps selects multi-beat morph keyframes (`q1`/`q3`) instead of only 2 scene midpoints.
+        let picked = resolve_default_preview_timestamps(
+            &[],
+            false,
+            true,
+            &dir,
+            &dir,
+            6.0,
+            &[],
+            &scenes,
+        );
+        assert!(picked.len() > 2, "expected multi-beat morph timestamps, got {:?}", picked);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

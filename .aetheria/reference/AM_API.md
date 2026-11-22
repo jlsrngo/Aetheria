@@ -29,7 +29,7 @@ Do NOT call `Math.random()`, `Date.now()`, `performance.now()`, `requestAnimatio
 
 ## Easing & Spring Physics
 - `AM.bezier(x1, y1, x2, y2)` — returns cubic-bezier easing `(u) => y`
-- `AM.ease` — `{ linear, inQuad, outQuad, inOutQuad, inCubic, outCubic, inOutCubic, outQuart, outExpo, inOutExpo, outBack, outElastic, outBounce, pop, snap }`
+- `AM.ease` — `{ linear, inQuad, outQuad, inOutQuad, inCubic, outCubic, inOutCubic, outQuart, outExpo, inOutExpo, inBack, outBack, outElastic, outBounce, pop, snap }`
 - `AM.E` — shorthand aliases `{ inQ, outQ, ioQ, inC, outC, ioC, outQt, ioQt, outX, outB, inB, pop, snap }`
 - `AM.spring(t, fOrOpts = 2, z = 0.4)` — damped spring `0 -> 1` (accepts `(t, fHz, zeta)` or `(t, { stiffness, damping, mass })`)
 - `AM.springV(t, f = 2, z = 0.4)` — closed-form spring derivative (velocity)
@@ -45,7 +45,9 @@ Do NOT call `Math.random()`, `Date.now()`, `performance.now()`, `requestAnimatio
 - `AM.ring(c, t, t0, r0, r1, w0, dur = 12/30)` — animate SVG shockwave `<circle>`
 
 ## Canvas 2D Drawing, Camera, Rigging & Subtitles
-- `AM.roundRect(ctx, x, y, w, h, r)`
+- `AM.roundRect(ctx, x, y, w, h, r)` — trace rounded rectangle path (`r` can be a scalar or `[tl, tr, br, bl]`)
+- `AM.fillRoundRect(ctx, x, y, w, h, r)` — draws and fills a rounded rectangle (scalar radius or `[tl, tr, br, bl]`)
+- `AM.strokeRoundRect(ctx, x, y, w, h, r)` — draws and strokes a rounded rectangle (scalar radius or `[tl, tr, br, bl]`)
 - `AM.applyCamera(ctx, cam, W = 1080, H = 1920)` — `{ s, cx, cy, rot }` zoom/pan/rotate
 - `AM.drawBurstLines(ctx, cx, cy, count, r0, r1, t, t0, dur = 0.35, color = "#FFC62B", lineWidth = 8)`
 - `AM.drawShockRing(ctx, cx, cy, t, t0, r0, r1, w0 = 16, dur = 0.4, color = "#FF5A4E")`
@@ -53,7 +55,7 @@ Do NOT call `Math.random()`, `Date.now()`, `performance.now()`, `requestAnimatio
 - `AM.drawElectricBolt(ctx, x1, y1, x2, y2, segments, jitterAmp, seed, color, width)`
 - `AM.drawOpticalGlow(ctx, x, y, radius, colorHex = "#FF8800", intensity = 1.0)` — 3-layer additive (`lighter`) optical bloom orb (wide atmospheric halo + saturated mid bloom + white-hot core)
 - `AM.drawBloomStroke(ctx, drawPathFn, opts?)` — Gaussian-blurred additive (`lighter`) glowing stroke (`{ color, coreColor, lineWidth, glowRadius, intensity, lineCap, lineJoin }`)
-- `AM.drawSphericalLens(ctx, cx, cy, radius, strength, drawContentFn, opts?)` — deterministic pixel-level spherical/water-bubble lens refraction shader (`strength` `0..1.4`, `{ chromatic, rimAlpha, rimColor }`)
+- `AM.drawSphericalLens(ctx, cx, cy, radius, strength, drawContentFn, opts?)` — deterministic pixel-level spherical/water-bubble lens refraction shader (`drawContentFn(lc, size)` draws into `0..size` centered at `(size/2, size/2)`; `strength` `0..1.4`, `{ chromatic, rimAlpha, rimColor }`)
 - `AM.drawTaperedRibbon(ctx, points, maxWidth = 24, opts?)` — variable-width tapered crescent/calligraphic light ribbon with Gaussian aura (`{ color, coreColor, alpha, asymmetry, glowBlur }`)
 - `AM.impactRecoil(t, hitTime, opts?)` — deterministic damped spring collision jolt returning `{ dx, dy, rot, sx, sy }` (`{ ampX, ampY, ampRot, squash, damping, freq, duration }`)
 - `AM.twistPolygon(points, angle, lagFactor = 0.35)` — deterministic elastic vertex-lag rotation/shear for polygon vertices (`[{x, y}]` or `[[x, y]]`)
