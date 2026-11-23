@@ -87,10 +87,6 @@ crates/**/target/
 
 docs/*
 !docs/backlog-integrasi-sosial-dan-akun.md
-!docs/laporan-analisis-latensi-showreel-dan-saran-perbaikan.md
-!docs/eksperimen-optimasi-remake-loop.md
-!docs/laporan-audit-kepatuhan-agents-file-besar.md
-!docs/investigasi-forensik-akurasi-rekonstruksi-video.md
 demo/
 demo-workspace/
 
