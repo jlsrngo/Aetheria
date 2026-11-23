@@ -33,6 +33,8 @@ pub struct ScaffoldSceneInput {
     pub words: Option<String>,
     #[serde(default)]
     pub accent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transition_from_prev: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,6 +69,8 @@ pub struct FilmManifestScene {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub words: Option<String>,
     pub accent: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transition_from_prev: Option<String>,
 }
 
 pub fn film_scaffold_tool_definition() -> Value {
@@ -318,6 +322,34 @@ pub(crate) fn render_managed_index_html(
       return __origRestore();
     }};
 
+    function runSceneSafely(targetCtx, renderFn, localT, targetScene, globalSec) {{
+      var __baseDepth = __saveDepth;
+      targetCtx.save();
+      try {{
+        renderFn(targetCtx, localT, targetScene.duration, targetScene, window.AM);
+      }} catch (err) {{
+        var errMsg = "[" + (targetScene && targetScene.id ? targetScene.id : "scene") + " @ t=" + globalSec.toFixed(2) + "s] " + String(err && err.stack ? err.stack : err);
+        window.__runtimeError = errMsg;
+        window.__aetheriaErrors = Array.isArray(window.__aetheriaErrors) ? window.__aetheriaErrors : [];
+        if (window.__aetheriaErrors.length < 16 && window.__aetheriaErrors.indexOf(errMsg) === -1) {{
+          window.__aetheriaErrors.push(errMsg);
+        }}
+        if (typeof console !== "undefined" && console.error) console.error(err);
+      }} finally {{
+        while (__saveDepth > __baseDepth) {{
+          ctx.restore();
+        }}
+        targetCtx.setTransform(1, 0, 0, 1, 0, 0);
+        targetCtx.globalAlpha = 1;
+        targetCtx.globalCompositeOperation = "source-over";
+        targetCtx.filter = "none";
+        targetCtx.shadowBlur = 0;
+        targetCtx.shadowColor = "transparent";
+        targetCtx.shadowOffsetX = 0;
+        targetCtx.shadowOffsetY = 0;
+      }}
+    }}
+
     window.renderAt = function (t) {{
       var sec = Number.isFinite(t) ? Math.max(0, t) : 0;
       ctx.save();
@@ -332,31 +364,7 @@ pub(crate) fn render_managed_index_html(
       var localTime = resolved.localTime;
       var renderFn = window.AM.getSceneRenderer(scene.id, resolved.index);
       if (renderFn) {{
-        var __baseDepth = __saveDepth;
-        ctx.save();
-        try {{
-          renderFn(ctx, localTime, scene.duration, scene, window.AM);
-        }} catch (err) {{
-          var errMsg = "[" + (scene && scene.id ? scene.id : "scene") + " @ t=" + sec.toFixed(2) + "s] " + String(err && err.stack ? err.stack : err);
-          window.__runtimeError = errMsg;
-          window.__aetheriaErrors = Array.isArray(window.__aetheriaErrors) ? window.__aetheriaErrors : [];
-          if (window.__aetheriaErrors.length < 16 && window.__aetheriaErrors.indexOf(errMsg) === -1) {{
-            window.__aetheriaErrors.push(errMsg);
-          }}
-          if (typeof console !== "undefined" && console.error) console.error(err);
-        }} finally {{
-          while (__saveDepth > __baseDepth) {{
-            ctx.restore();
-          }}
-          ctx.setTransform(1, 0, 0, 1, 0, 0);
-          ctx.globalAlpha = 1;
-          ctx.globalCompositeOperation = "source-over";
-          ctx.filter = "none";
-          ctx.shadowBlur = 0;
-          ctx.shadowColor = "transparent";
-          ctx.shadowOffsetX = 0;
-          ctx.shadowOffsetY = 0;
-        }}
+        runSceneSafely(ctx, renderFn, localTime, scene, sec);
       }}
       if (!MICROSTOCK_MODE && scene._words && scene._words.length > 0 && window.AM.drawSubtitles) {{
         var subOpts = (scene.subtitleStyle && typeof scene.subtitleStyle === "object")
@@ -976,6 +984,13 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
             .filter(|s| !s.is_empty())
             .unwrap_or("#f59e0b")
             .to_string();
+        let transition_from_prev = parsed
+            .transition_from_prev
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .or_else(|| prev.and_then(|p| p.transition_from_prev.clone()));
 
         manifest_scenes.push(FilmManifestScene {
             id: clean_id,
@@ -991,6 +1006,7 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
             sfx,
             words,
             accent,
+            transition_from_prev,
         });
         acc_start += resolved_duration;
     }
@@ -1464,6 +1480,7 @@ mod tests {
                 sfx: None,
                 words: None,
                 accent: "#FFDE59".to_string(),
+                transition_from_prev: None,
             }],
         };
         let html = render_managed_index_html(&manifest, false);
@@ -1615,6 +1632,36 @@ mod tests {
         assert!(index_html.contains("__saveDepth"));
         assert!(index_html.contains("while (__saveDepth > __baseDepth)"));
         assert!(index_html.contains("finally {"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn film_scaffold_preserves_transition_metadata_without_auto_ghost_dissolve() {
+        let dir = std::env::temp_dir().join(format!("aetheria_scaffold_softcut_{}", crate::paths::now_ms()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ws = dir.to_string_lossy().to_string();
+
+        let res = execute_film_scaffold(
+            "ses_softcut",
+            &ws,
+            &json!({
+                "title": "Soft Cut Test",
+                "preset": "portrait",
+                "scenes": [
+                    { "id": "scene1", "duration": 1.0 },
+                    { "id": "scene2", "duration": 1.0, "transitionFromPrev": "soft" }
+                ]
+            }),
+        );
+        assert_eq!(res["ok"], true, "{:?}", res);
+        let film_dir = dir.join(res["filmRoot"].as_str().unwrap());
+        let film_json = std::fs::read_to_string(film_dir.join("film.json")).unwrap();
+        assert!(film_json.contains("\"transitionFromPrev\": \"soft\""));
+        let index_html = std::fs::read_to_string(film_dir.join("index.html")).unwrap();
+        assert!(!index_html.contains("_xfadeCanvas"));
+        assert!(!index_html.contains("scene.transitionFromPrev === \"soft\""));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

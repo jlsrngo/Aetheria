@@ -922,6 +922,7 @@ pub async fn execute_film_audio(
                 sfx: sfx_rel.clone(),
                 words: words_rel_opt.clone(),
                 accent: accent.to_string(),
+                transition_from_prev: None,
             },
         );
 
@@ -1150,6 +1151,7 @@ mod tests {
             sfx: None,
             words: None,
             accent: "#f59e0b".to_string(),
+            transition_from_prev: None,
         }];
         let err = validate_scenes_audio_durations(&dir, &too_short, 2.0).unwrap_err();
         assert_eq!(err["code"], "AUDIO_LONGER_THAN_SCENE");
@@ -1166,6 +1168,7 @@ mod tests {
             sfx: None,
             words: None,
             accent: "#f59e0b".to_string(),
+            transition_from_prev: None,
         }];
         let warnings = validate_scenes_audio_durations(&dir, &too_long, 2.0).unwrap();
         assert_eq!(warnings.len(), 1);

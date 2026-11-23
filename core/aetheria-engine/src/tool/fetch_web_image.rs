@@ -65,6 +65,164 @@ fn normalize_image_rel_path(raw_out: &str) -> String {
     s
 }
 
+fn is_search_noise_token(token: &str) -> bool {
+    matches!(
+        token,
+        "png"
+            | "jpg"
+            | "jpeg"
+            | "webp"
+            | "gif"
+            | "svg"
+            | "transparent"
+            | "isolated"
+            | "background"
+            | "white"
+            | "black"
+            | "cutout"
+            | "cut"
+            | "out"
+            | "clipart"
+            | "stock"
+            | "photo"
+            | "picture"
+            | "image"
+            | "icon"
+            | "render"
+            | "hd"
+            | "4k"
+            | "free"
+            | "no"
+            | "without"
+            | "on"
+            | "with"
+            | "of"
+            | "the"
+            | "a"
+            | "an"
+    )
+}
+
+fn is_view_style_modifier(token: &str) -> bool {
+    matches!(
+        token,
+        "side"
+            | "view"
+            | "front"
+            | "top"
+            | "angle"
+            | "profile"
+            | "shot"
+            | "closeup"
+            | "close"
+            | "up"
+            | "3d"
+            | "realistic"
+            | "illustration"
+            | "drawing"
+            | "art"
+            | "vector"
+    )
+}
+
+/// Builds up to 3 progressively broader search queries for Wikimedia Commons / Wikipedia so
+/// overly specific asset hints (e.g. "isolated transparent png", truncated tokens) still find hits.
+pub(crate) fn build_image_search_queries(raw_query: &str) -> Vec<String> {
+    let cleaned: Vec<String> = raw_query
+        .to_ascii_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.chars().count() >= 2 && !is_search_noise_token(w))
+        .map(str::to_string)
+        .collect();
+
+    let mut out: Vec<String> = Vec::new();
+    let mut push_unique = |cand: String| {
+        let trimmed = cand.trim();
+        if !trimmed.is_empty() && !out.iter().any(|existing| existing == trimmed) && out.len() < 3 {
+            out.push(trimmed.to_string());
+        }
+    };
+
+    if !cleaned.is_empty() {
+        push_unique(cleaned.join(" "));
+        let core: Vec<String> = cleaned
+            .iter()
+            .filter(|w| !is_view_style_modifier(w.as_str()))
+            .cloned()
+            .collect();
+        if !core.is_empty() {
+            push_unique(core.join(" "));
+            if core.len() > 2 {
+                push_unique(core[..2].join(" "));
+            }
+        }
+        if cleaned.len() > 2 {
+            push_unique(cleaned[..2].join(" "));
+        }
+    }
+
+    if out.is_empty() {
+        let trimmed = raw_query.trim();
+        if !trimmed.is_empty() {
+            out.push(trimmed.to_string());
+        }
+    }
+    out
+}
+
+pub(crate) fn score_commons_filename(
+    title_lower: &str,
+    keywords: &[String],
+    prefer_png: bool,
+    wants_realistic: bool,
+) -> i32 {
+    let mut score: i32 = 0;
+    for kw in keywords {
+        if title_lower.contains(kw) {
+            score += 10;
+        }
+    }
+    if prefer_png && title_lower.ends_with(".png") {
+        score += 6;
+    }
+    if wants_realistic {
+        if title_lower.contains("3d")
+            || title_lower.contains("render")
+            || title_lower.contains("model")
+            || title_lower.contains("photo")
+            || title_lower.contains("real")
+            || title_lower.contains("lateral")
+        {
+            score += 6;
+        }
+        if title_lower.contains("bioart")
+            || title_lower.contains("clipart")
+            || title_lower.contains("line")
+            || title_lower.contains("sketch")
+            || title_lower.contains("icon")
+            || title_lower.contains("cartoon")
+        {
+            score -= 6;
+        }
+    } else if title_lower.contains("3d") || title_lower.contains("render") || title_lower.contains("model") {
+        score += 3;
+    }
+    if title_lower.contains("diagram")
+        || title_lower.contains("chart")
+        || title_lower.contains("map")
+        || title_lower.contains("scan")
+        || title_lower.contains("mri")
+        || title_lower.contains("xray")
+        || title_lower.contains("x-ray")
+        || title_lower.contains("slice")
+        || title_lower.contains("histology")
+        || title_lower.contains("drawing")
+    {
+        score -= 5;
+    }
+    score
+}
+
 pub async fn execute_fetch_web_image(workspace_dir: &str, arguments: &Value) -> Value {
     let query = arguments
         .get("query")
@@ -145,8 +303,14 @@ pub async fn execute_fetch_web_image(workspace_dir: &str, arguments: &Value) -> 
             || q_lower.contains("icon")
             || q_lower.contains("3d")
             || q_lower.contains("isolated");
+        let wants_realistic = !q_lower.contains("icon")
+            && !q_lower.contains("flat")
+            && !q_lower.contains("diagram")
+            && !q_lower.contains("outline")
+            && !q_lower.contains("sketch")
+            && !q_lower.contains("vector");
 
-        let fetch_commons = |q: String, prefer_png: bool| {
+        let fetch_commons = |q: String, prefer_png: bool, wants_realistic: bool| {
             let client = client.clone();
             async move {
                 let mut scored: Vec<(i32, String)> = Vec::new();
@@ -180,21 +344,7 @@ pub async fn execute_fetch_web_image(workspace_dir: &str, arguments: &Value) -> 
                                 {
                                     continue;
                                 }
-                                let mut score: i32 = 0;
-                                for kw in &keywords {
-                                    if title.contains(kw) {
-                                        score += 10;
-                                    }
-                                }
-                                if prefer_png && title.ends_with(".png") {
-                                    score += 6;
-                                }
-                                if title.contains("3d") || title.contains("render") || title.contains("model") {
-                                    score += 3;
-                                }
-                                if title.contains("diagram") || title.contains("chart") || title.contains("map") || title.contains("scan") || title.contains("mri") {
-                                    score -= 5;
-                                }
+                                let score = score_commons_filename(&title, &keywords, prefer_png, wants_realistic);
                                 if let Some(arr) = page.get("imageinfo").and_then(|v| v.as_array()) {
                                     for info in arr {
                                         let mime = info
@@ -254,13 +404,40 @@ pub async fn execute_fetch_web_image(workspace_dir: &str, arguments: &Value) -> 
             }
         };
 
+        let search_queries = build_image_search_queries(query);
         if prefer_commons {
-            candidate_urls.extend(fetch_commons(query.to_string(), true).await);
-            candidate_urls.extend(fetch_wikipedia(query.to_string()).await);
-        } else {
-            candidate_urls.extend(fetch_wikipedia(query.to_string()).await);
+            for sq in &search_queries {
+                let hits = fetch_commons(sq.clone(), true, wants_realistic).await;
+                if !hits.is_empty() {
+                    candidate_urls.extend(hits);
+                    break;
+                }
+            }
             if candidate_urls.is_empty() {
-                candidate_urls.extend(fetch_commons(query.to_string(), false).await);
+                for sq in &search_queries {
+                    let hits = fetch_wikipedia(sq.clone()).await;
+                    if !hits.is_empty() {
+                        candidate_urls.extend(hits);
+                        break;
+                    }
+                }
+            }
+        } else {
+            for sq in &search_queries {
+                let hits = fetch_wikipedia(sq.clone()).await;
+                if !hits.is_empty() {
+                    candidate_urls.extend(hits);
+                    break;
+                }
+            }
+            if candidate_urls.is_empty() {
+                for sq in &search_queries {
+                    let hits = fetch_commons(sq.clone(), false, wants_realistic).await;
+                    if !hits.is_empty() {
+                        candidate_urls.extend(hits);
+                        break;
+                    }
+                }
             }
         }
     }
@@ -366,5 +543,48 @@ print(json.dumps({"w": int(w), "h": int(h), "alpha": bool(has_alpha), "rm": bool
         }
     }
     (None, None, false, false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_image_search_queries_strips_noise_and_broadens() {
+        let qs = build_image_search_queries("human brain side view isolated transparent p");
+        assert_eq!(
+            qs,
+            vec![
+                "human brain side view".to_string(),
+                "human brain".to_string()
+            ]
+        );
+
+        let target_qs = build_image_search_queries("archery target bullseye png transparent background");
+        assert_eq!(target_qs[0], "archery target bullseye");
+        assert_eq!(target_qs[1], "archery target");
+
+        let person_qs = build_image_search_queries("Rami Malek portrait");
+        assert_eq!(person_qs[0], "rami malek portrait");
+        assert_eq!(person_qs[1], "rami malek");
+
+        let single_qs = build_image_search_queries("rocket");
+        assert_eq!(single_qs, vec!["rocket".to_string()]);
+    }
+
+    #[test]
+    fn normalize_image_rel_path_places_plain_names_in_img() {
+        assert_eq!(normalize_image_rel_path("brain.png"), "img/brain.png");
+        assert_eq!(normalize_image_rel_path("./public/img/a.jpg"), "img/a.jpg");
+        assert_eq!(normalize_image_rel_path("workspace/img/b.png"), "img/b.png");
+    }
+
+    #[test]
+    fn score_commons_filename_prefers_realistic_over_flat_bioart() {
+        let kws = vec!["human".to_string(), "brain".to_string()];
+        let bioart = score_commons_filename("file:brain lateral (nih bioart 60).png", &kws, true, true);
+        let real_3d = score_commons_filename("file:human brain lateral 3d model.png", &kws, true, true);
+        assert!(real_3d > bioart, "expected real_3d ({real_3d}) > bioart ({bioart})");
+    }
 }
 

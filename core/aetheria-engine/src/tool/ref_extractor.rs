@@ -590,12 +590,19 @@ pub(crate) fn collect_extracted_frames_response(
     })
 }
 
+pub(crate) fn should_use_fast_mode(arguments: &Value) -> bool {
+    arguments
+        .get("mode")
+        .and_then(|v| v.as_str())
+        .is_some_and(|m| m.trim().eq_ignore_ascii_case("fast"))
+}
+
 pub fn ref_extractor_tool_definition() -> Value {
     json!({
         "type": "function",
         "function": {
             "name": "extract_video_reference",
-            "description": "Extracts scene cuts, color palettes, BPM/audio cadence, keyframes, contact sheets, and `ref_report.md`/`style.json` metadata from a reference video file. Defaults to `mode: \"fast\"` (~2-3s via OpenCV/FFmpeg without CPU OCR; ideal for vision models).",
+            "description": "Extracts scene cuts, color palettes, BPM/audio cadence, keyframes, contact sheets, CPU RapidOCR text regions, sub-beat motion clues, and `ref_report.md`/`style.json` metadata from a reference video file. Defaults to `mode: \"deep\"` (~15-35s: full OCR layout regions + denseTimeline motionClues + scene AST); pass `mode: \"fast\"` to skip CPU OCR.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -609,8 +616,8 @@ pub fn ref_extractor_tool_definition() -> Value {
                     },
                     "mode": {
                         "type": "string",
-                        "enum": ["fast", "deep"],
-                        "description": "Extraction mode: 'fast' (default, ~2-3s: scene cuts, keyframes, contact sheets, palette, BPM, no CPU OCR) or 'deep' (~60-90s: adds CPU RapidOCR text boxes, sub-beat motion clues, and scene AST)."
+                        "enum": ["deep", "fast"],
+                        "description": "Extraction mode: 'deep' (default: full CPU RapidOCR text boxes, denseTimeline motion clues, sub-beats, and scene AST) or 'fast' (skips CPU OCR while keeping geometric motion clues)."
                     }
                 },
                 "required": ["videoPath"]
@@ -801,12 +808,8 @@ pub async fn execute_ref_extractor(workspace_dir: &str, arguments: &Value) -> Va
         if let Some(ff_bin) = crate::paths::locate_ffmpeg_binary() {
             cmd.env("AETHERIA_FFMPEG", ff_bin);
         }
-        let deep_mode = arguments
-            .get("mode")
-            .and_then(|v| v.as_str())
-            .is_some_and(|m| m.trim().eq_ignore_ascii_case("deep"));
         cmd.arg(&script_path).arg(&video_path).arg(&out_dir);
-        if !deep_mode {
+        if should_use_fast_mode(arguments) {
             cmd.arg("--fast");
         }
 
@@ -1327,5 +1330,14 @@ mod tests {
         assert!(!names.iter().any(|n| n == "ref_scene_01_beats.jpg"));
 
         let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn should_use_fast_mode_defaults_to_deep_and_accepts_explicit_fast() {
+        assert!(!should_use_fast_mode(&json!({})));
+        assert!(!should_use_fast_mode(&json!({ "mode": "deep" })));
+        assert!(!should_use_fast_mode(&json!({ "mode": "DEEP" })));
+        assert!(should_use_fast_mode(&json!({ "mode": "fast" })));
+        assert!(should_use_fast_mode(&json!({ "mode": "FAST" })));
     }
 }
