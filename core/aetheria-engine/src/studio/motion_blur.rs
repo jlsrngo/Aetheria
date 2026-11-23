@@ -1,9 +1,9 @@
-//! Selective temporal supersampling (180-degree shutter motion blur) for headless CDP export (Prompt 11 M5).
+//! Selective temporal supersampling (centered 130-degree shutter motion blur) for headless CDP export (Prompt 11 M5).
 //!
-//! Default is `Off`. Controlled via `AETHERIA_MOTION_BLUR=off|auto|N` (where `N` in `2..=8`).
+//! Default is `Off`. Controlled via `AETHERIA_MOTION_BLUR=off|auto|N` (where `N` in `2..=12`).
 //! In `auto` mode, only frames inside active `push_*`/`zoom_blur` transitions or measured high-velocity
-//! `motionBursts`/`phaseZoomBridge` windows are supersampled (`4x`) directly on an in-tab accumulation
-//! canvas without altering `window.renderAt(t)` purity or adding extra CDP screenshot round-trips.
+//! `motionBursts`/`phaseZoomBridge` windows are supersampled (`8x`, centered shutter) directly on an
+//! in-tab accumulation canvas so fast moves smear smoothly without 4-copy stroboscopic ghosting.
 
 use serde_json::Value;
 use std::path::Path;
@@ -28,10 +28,10 @@ impl MotionBlurMode {
         }
         if s == "auto" {
             let windows = collect_motion_blur_windows(film_root, ws_root);
-            return Self::Auto { samples: 4, windows };
+            return Self::Auto { samples: 8, windows };
         }
         if let Ok(n) = s.parse::<u32>() {
-            let clamped = n.clamp(1, 8);
+            let clamped = n.clamp(1, 12);
             if clamped <= 1 {
                 return Self::Off;
             }
@@ -99,7 +99,7 @@ pub(crate) fn collect_motion_blur_windows(film_root: &Path, ws_root: &Path) -> V
                     {
                         for b in bursts {
                             let peak = b.get("peakPxPerStep").and_then(Value::as_f64).unwrap_or(0.0);
-                            if peak >= 12.0 {
+                            if peak >= 18.0 {
                                 if let (Some(bt0), Some(bt1)) = (
                                     b.get("t0").and_then(Value::as_f64),
                                     b.get("t1").and_then(Value::as_f64),
@@ -141,7 +141,7 @@ pub(crate) fn collect_motion_blur_windows(film_root: &Path, ws_root: &Path) -> V
 }
 
 /// Builds the JS expression to evaluate either a single pure `window.renderAt(t)` (`samples <= 1`)
-/// or an exact `N`-sub-frame temporal average across a 180-degree shutter window `[t, t + 0.5/fps]`.
+/// or an exact `N`-sub-frame centered temporal average across `[t - 0.18/fps, t + 0.18/fps]`.
 pub(crate) fn build_render_frame_expr(t: f64, fps: f64, samples: u32) -> String {
     if samples <= 1 {
         return format!(
@@ -149,8 +149,8 @@ pub(crate) fn build_render_frame_expr(t: f64, fps: f64, samples: u32) -> String 
             t
         );
     }
-    let n = samples.clamp(2, 8);
-    let shutter_sec = 0.5 / fps.max(1.0);
+    let n = samples.clamp(2, 12);
+    let shutter_sec = 0.36 / fps.max(1.0);
     format!(
         "(() => {{ \
             const N = {}; const t0 = {:.6}; const shutter = {:.6}; \
@@ -168,7 +168,7 @@ pub(crate) fn build_render_frame_expr(t: f64, fps: f64, samples: u32) -> String 
             aCtx.setTransform(1, 0, 0, 1, 0, 0); \
             aCtx.clearRect(0, 0, acc.width, acc.height); \
             for (let k = 0; k < N; k++) {{ \
-                const tk = t0 + (k / N) * shutter; \
+                const tk = Math.max(0, t0 + ((k + 0.5) / N - 0.5) * shutter); \
                 window.renderAt(tk); \
                 aCtx.globalAlpha = 1 / (k + 1); \
                 aCtx.drawImage(stage, 0, 0); \
@@ -236,9 +236,9 @@ mod tests {
 
         let auto = MotionBlurMode::parse_spec("auto", &film_dir, &tmp);
         assert!(auto.is_enabled());
-        assert_eq!(auto.samples_for_time(0.55), 4);
+        assert_eq!(auto.samples_for_time(0.55), 8);
         assert_eq!(auto.samples_for_time(1.35), 1, "low-velocity burst should stay 1x");
-        assert_eq!(auto.samples_for_time(2.50), 4, "push_left bridge should be 4x");
+        assert_eq!(auto.samples_for_time(2.50), 8, "push_left bridge should be 8x");
         assert_eq!(auto.samples_for_time(4.00), 1, "steady hold should stay 1x");
 
         let fixed = MotionBlurMode::parse_spec("6", &film_dir, &tmp);
@@ -246,9 +246,10 @@ mod tests {
 
         let expr1 = build_render_frame_expr(1.0, 30.0, 1);
         assert!(!expr1.contains("__aeMbCanvas"));
-        let expr4 = build_render_frame_expr(1.0, 30.0, 4);
-        assert!(expr4.contains("__aeMbCanvas"));
-        assert!(expr4.contains("const N = 4;"));
+        let expr8 = build_render_frame_expr(1.0, 30.0, 8);
+        assert!(expr8.contains("__aeMbCanvas"));
+        assert!(expr8.contains("const N = 8;"));
+        assert!(expr8.contains("((k + 0.5) / N - 0.5)"));
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

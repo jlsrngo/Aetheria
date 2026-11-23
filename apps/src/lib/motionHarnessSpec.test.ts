@@ -521,7 +521,11 @@ describe("Harness F1 spec guards (skill-lint & AM API parity)", () => {
       amExt.drawTurntableObject(measureCtx, 360, 440, 1.5, () => {
         ttCalled += 1;
       }, { ringRadius: 120, spinMode: "rock" });
-      expect(ttCalled).toBe(2);
+      // Zero-omega bypasses spherical 3D warp cleanly and still renders flat 2D content once
+      amExt.drawTurntableObject(measureCtx, 360, 440, 1.0, () => {
+        ttCalled += 1;
+      }, { omega: 0, ringRadius: 0 });
+      expect(ttCalled).toBe(3);
       const morphed = amExt.drawMorphPolygon(
         measureCtx,
         [[0, -40], [40, 0], [0, 40], [-40, 0]],

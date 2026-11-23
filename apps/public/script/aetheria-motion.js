@@ -625,6 +625,7 @@
           totalDispPx,
           u,
           progress,
+          curve: tb.curve,
         };
       }
     }
@@ -706,19 +707,21 @@
     }
 
     // 2. Measured Two-Phase Camera Whip-Push around cutSec (when totalDispPx > 0 from 30fps reference extraction)
-    // Outgoing scene accelerates out before cutSec without premature incoming background occlusion;
-    // incoming scene settles over a short damped distance after cutSec while outgoing edge tail clears.
+    // Uses the measured 16-point optical-flow displacement curve (`tr.progress`) so velocity flows
+    // continuously across cutSec without artificial stop-start or premature half-frame exit.
     if (cA && cB && tr.totalDispPx > 0 && Number.isFinite(tr.cutSec) && tr.cutSec > tr.tStart && tr.cutSec < tr.tEnd) {
       const isHoriz = tr.kind === "push_left" || tr.kind === "push_right";
       const sign = tr.kind === "push_left" || tr.kind === "push_up" ? -1 : 1;
       const dim = isHoriz ? W : H;
-      const exitAtCut = Math.min(dim * 0.48, Math.max(dim * 0.22, tr.totalDispPx * 1.15));
-      const exitFull = Math.min(dim * 0.72, exitAtCut + dim * 0.20);
-      const enterSettle = Math.min(dim * 0.16, Math.max(44, tr.totalDispPx * 0.36));
+      const uAtCut = clamp((tr.cutSec - tr.tStart) / Math.max(0.015, tr.tEnd - tr.tStart), 0.1, 0.9);
+      const pAtCut = Math.max(0.08, evalCurve(tr.curve, uAtCut));
+      const exitAtCut = Math.min(dim * 0.36, Math.max(dim * 0.16, tr.totalDispPx * 0.85));
+      const exitFull = Math.min(dim * 0.68, exitAtCut + dim * 0.24);
+      const enterSettle = Math.min(dim * 0.16, Math.max(40, tr.totalDispPx * 0.34));
 
       if (sec < tr.cutSec) {
-        const uPre = clamp((sec - tr.tStart) / Math.max(0.015, tr.cutSec - tr.tStart), 0, 1);
-        const shiftPre = sign * ease.inCubic(uPre) * exitAtCut;
+        const pPreNorm = clamp(tr.progress / pAtCut, 0, 1);
+        const shiftPre = sign * pPreNorm * exitAtCut;
         cA.setTransform(1, 0, 0, 1, 0, 0);
         cA.clearRect(0, 0, W, H);
         renderSceneFn(cA, tr.fromScene, tr.fromIndex, tr.fromLocalTime, sec);
@@ -734,8 +737,8 @@
       }
 
       const postSpan = Math.max(0.02, tr.tEnd - tr.cutSec);
-      const uPost = clamp((sec - tr.cutSec) / postSpan, 0, 1);
-      const inOffset = -sign * (1 - ease.outCubic(uPost)) * enterSettle;
+      const pPostNorm = clamp((tr.progress - pAtCut) / Math.max(0.05, 1 - pAtCut), 0, 1);
+      const inOffset = -sign * (1 - pPostNorm) * enterSettle;
 
       cB.setTransform(1, 0, 0, 1, 0, 0);
       cB.clearRect(0, 0, W, H);
@@ -2431,7 +2434,7 @@
         ? 1.0
         : Number.isFinite(Number(opts.scaleFrom))
         ? clamp(Number(opts.scaleFrom), 0.12, 1.5)
-        : 0.30;
+        : 0.92;
     const baseColor = opts.color || ctx.fillStyle || "#111116";
     const inkStart = opts.inkStart || null;
     const baseAlpha = Number.isFinite(Number(opts.alpha)) ? Number(opts.alpha) : 1;
@@ -2726,6 +2729,20 @@
       ctx.restore();
     }
 
+    // Bypass spherical 3D pixel-warp when omega === 0 or depth <= 0.005 so flat 2D shapes
+    // (targets, badges, icons) are never spherically distorted or cross-blended.
+    if (omega === 0 || depth <= 0.005) {
+      ctx.save();
+      ctx.translate(cx, cy);
+      if (typeof drawFnOrImg === "function") {
+        drawFnOrImg(ctx, w, h, 0);
+      } else if (drawFnOrImg) {
+        drawImageFit(ctx, drawFnOrImg, -w * 0.5, -h * 0.5, w, h, opts.fitMode || "contain");
+      }
+      ctx.restore();
+      return;
+    }
+
     const phase = sec * omega;
     const rock = Math.sin(phase * 0.75) * tiltRad;
     const dy = Math.sin(sec * 2.5) * floatPx;
@@ -2754,12 +2771,12 @@
       try {
         const srcImg = sCtx.getImageData(0, 0, bw, bh);
         const sData = srcImg.data;
-        // Find tight active bounding box to verify non-empty render and speed up 3D warp
+        // Find tight solid bounding box (alpha > 64 ignores soft outer drop-shadows so ellipsoid stays centered)
         let minX = bw, minY = bh, maxX = -1, maxY = -1;
         for (let y = 0; y < bh; y += 2) {
           const rowOff = y * bw * 4;
           for (let x = 0; x < bw; x += 2) {
-            if (sData[rowOff + x * 4 + 3] > 10) {
+            if (sData[rowOff + x * 4 + 3] > 64) {
               if (x < minX) minX = x;
               if (x > maxX) maxX = x;
               if (y < minY) minY = y;
