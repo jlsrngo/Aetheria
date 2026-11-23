@@ -773,6 +773,24 @@ class RefExtractorAndCompareTests(unittest.TestCase):
         md_dir = ref_compare._compute_motion_step_diagnostics(ref_seq, opposite_prev)
         self.assertIn("MOTION DIRECTION/PAN MISMATCH", md_dir["motionWarning"] or "", md_dir)
 
+    def test_regional_hotspots_pinpoint_corner_extra_and_missing_elements(self) -> None:
+        h, w = 360, 270
+        bg_bgr = np.array([232, 232, 232], dtype=np.int16)
+        ref = np.full((h, w, 3), 232, dtype=np.uint8)
+        prev = ref.copy()
+        # Shared centered subject so global fg boxes are similar
+        cv2.rectangle(ref, (75, 130), (195, 230), (60, 80, 140), -1)
+        cv2.rectangle(prev, (75, 130), (195, 230), (60, 80, 140), -1)
+        # Missing reference icon in top-right cell
+        cv2.circle(ref, (228, 56), 24, (190, 45, 70), -1)
+        # Extra unreferenced decoration in top-left cell of preview
+        cv2.circle(prev, (42, 56), 24, (45, 150, 70), -1)
+
+        zones = ref_compare._compute_regional_hotspots(ref, prev, bg_bgr)
+        joined = " | ".join(zones)
+        self.assertTrue(any("top-right" in z and "missing reference element" in z for z in zones), joined)
+        self.assertTrue(any("top-left" in z and "extra unreferenced element" in z for z in zones), joined)
+
 
 if __name__ == "__main__":
     unittest.main()

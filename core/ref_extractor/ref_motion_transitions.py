@@ -481,8 +481,9 @@ def _extract_scene_motion_timeline(
     mean_scene_p90 = round(float(np.mean([flows[fi]["p90"] for fi in span_fs])), 1)
     act_pct = round(100.0 * sum(1 for fi in span_fs if flows[fi]["actPct"] >= 2.0) / float(len(span_fs)), 1)
 
-    # 4. Detect local spinning objects (corner stars, spinning rings, 3D turntable hero)
+    # 4. Detect local spinning objects (corner stars, spinning rings, sustained 3D turntable hero)
     spinning_objects: List[Dict[str, Any]] = []
+    non_cam_clean_fs = [fi for fi in clean_fs if fi not in cam_frames]
     zone_defs = [
         ("top_left", "corner_spin"),
         ("top_right", "corner_spin"),
@@ -494,13 +495,29 @@ def _extract_scene_motion_timeline(
         om_key = f"om_{z_name}"
         act_key = f"act_{z_name}"
         tt_key = f"tt_{z_name}"
-        active_fs = [
-            fi for fi in clean_fs
-            if fi not in cam_frames
-            and (flows[fi].get(act_key, 0.0) >= 1.2)
-            and (abs(flows[fi].get(om_key, 0.0)) >= 0.010 or flows[fi].get(tt_key, 0.0) >= 1.35)
-        ]
-        if len(active_fs) >= max(6, int(round(0.22 * fps))):
+        div_key = f"div_{z_name}"
+        if z_name == "center":
+            # True 3D Y-axis turntable (e.g. rotating brain/globe): sustained center surface texture
+            # rolling horizontally while silhouette scale stays steady (ultra-low radial divergence)
+            # over >= 0.90s AND >= 45% of non-camera-pan frames — rejects radial pop-ins (targets),
+            # morphs (puzzle), and burst text reveals.
+            active_fs = [
+                fi for fi in non_cam_clean_fs
+                if (flows[fi].get(act_key, 0.0) >= 14.0)
+                and (abs(flows[fi].get(div_key, 0.0)) <= 0.0022)
+                and (0.12 <= flows[fi].get(f"mv_{z_name}", 0.0) <= 0.95)
+                and (flows[fi].get(f"hdom_{z_name}", 0.0) >= 1.25 or abs(flows[fi].get(om_key, 0.0)) >= 0.012)
+            ]
+            min_frames = max(24, int(round(0.90 * fps)), int(round(len(non_cam_clean_fs) * 0.45)))
+        else:
+            # Corner emblems require genuine rotational curl (not radial expansion or wipe)
+            active_fs = [
+                fi for fi in non_cam_clean_fs
+                if (flows[fi].get(act_key, 0.0) >= 1.2)
+                and (abs(flows[fi].get(om_key, 0.0)) >= 0.010)
+            ]
+            min_frames = max(6, int(round(0.22 * fps)))
+        if len(active_fs) >= min_frames:
             om_vals = [flows[fi].get(om_key, 0.0) for fi in active_fs]
             pos_cnt = sum(1 for v in om_vals if v > 0.006)
             neg_cnt = sum(1 for v in om_vals if v < -0.006)
@@ -665,13 +682,22 @@ def analyze_video_30fps_motion(
                         dy_c = zy.astype(np.float32) - cy_z
                         r2_c = np.maximum(4.0, dx_c * dx_c + dy_c * dy_c)
                         om = float(np.median((dx_c * (z_fy - z_mdy) - dy_c * (z_fx - z_mdx)) / r2_c))
+                        z_div = float(np.median((dx_c * (z_fx - z_mdx) + dy_c * (z_fy - z_mdy)) / r2_c))
+                        z_mv = math.hypot(z_mdx, z_mdy)
+                        z_hdom = abs(z_mdx) / max(0.05, abs(z_mdy))
                         # 3D turntable / internal surface motion while centroid stays relatively steady
                         internal_std = float(np.percentile(np.hypot(z_fx - z_mdx, z_fy - z_mdy), 85))
-                        tt_score = internal_std if math.hypot(z_mdx, z_mdy) <= 1.25 else 0.0
+                        tt_score = internal_std if z_mv <= 1.25 else 0.0
                         zone_metrics[f"om_{z_name}"] = om
+                        zone_metrics[f"div_{z_name}"] = z_div
+                        zone_metrics[f"mv_{z_name}"] = z_mv
+                        zone_metrics[f"hdom_{z_name}"] = z_hdom
                         zone_metrics[f"tt_{z_name}"] = tt_score
                     else:
                         zone_metrics[f"om_{z_name}"] = 0.0
+                        zone_metrics[f"div_{z_name}"] = 0.0
+                        zone_metrics[f"mv_{z_name}"] = 0.0
+                        zone_metrics[f"hdom_{z_name}"] = 0.0
                         zone_metrics[f"tt_{z_name}"] = 0.0
 
                 # Detect horizontal progressive character blur-to-sharp reveal wave across text band

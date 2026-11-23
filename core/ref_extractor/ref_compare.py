@@ -222,6 +222,57 @@ def compute_foreground_metrics(ref_bgr: np.ndarray, prev_bgr: np.ndarray) -> Dic
     }
 
 
+def _compute_regional_hotspots(
+    ref_bgr: np.ndarray,
+    prev_bgr: np.ndarray,
+    bg_bgr: np.ndarray,
+) -> List[str]:
+    """Identifies up to 2 worst mismatching 3x3 zones (extra unreferenced items, missing items, or shape/color drift)."""
+    h, w = ref_bgr.shape[:2]
+    if h < 48 or w < 48:
+        return []
+    diff = np.mean(np.abs(ref_bgr.astype(np.float32) - prev_bgr.astype(np.float32)), axis=2)
+    ref_fg = np.max(np.abs(ref_bgr.astype(np.int16) - bg_bgr), axis=2) > 22
+    prev_fg = np.max(np.abs(prev_bgr.astype(np.int16) - bg_bgr), axis=2) > 22
+    row_names = ("top", "mid", "bottom")
+    col_names = ("left", "center", "right")
+    ys = (0, h // 3, (2 * h) // 3, h)
+    xs = (0, w // 3, (2 * w) // 3, w)
+    frame_mean = float(np.mean(diff))
+    hotspots: List[Tuple[float, str]] = []
+    for ri in range(3):
+        for ci in range(3):
+            y0, y1 = ys[ri], ys[ri + 1]
+            x0, x1 = xs[ci], xs[ci + 1]
+            cell_diff = float(np.mean(diff[y0:y1, x0:x1]))
+            r_fg = float(np.mean(ref_fg[y0:y1, x0:x1]))
+            p_fg = float(np.mean(prev_fg[y0:y1, x0:x1]))
+            fg_gap = abs(r_fg - p_fg)
+            if cell_diff < 15.0 and fg_gap < 0.08:
+                continue
+            if cell_diff < max(12.0, frame_mean * 1.15) and fg_gap < 0.10:
+                continue
+            zone = "center" if (ri == 1 and ci == 1) else f"{row_names[ri]}-{col_names[ci]}"
+            if p_fg >= r_fg + 0.055 and r_fg < 0.03:
+                reason = "extra unreferenced element in your render — remove it"
+                priority = cell_diff + fg_gap * 120.0
+            elif r_fg >= p_fg + 0.055 and p_fg < 0.03:
+                reason = "missing reference element"
+                priority = cell_diff + fg_gap * 120.0
+            elif p_fg > r_fg * 1.45 and fg_gap >= 0.06:
+                reason = "oversized or wrong silhouette"
+                priority = cell_diff + fg_gap * 80.0
+            elif r_fg > p_fg * 1.45 and fg_gap >= 0.06:
+                reason = "undersized or faint element"
+                priority = cell_diff + fg_gap * 80.0
+            else:
+                reason = "shape/alignment/color mismatch"
+                priority = cell_diff
+            hotspots.append((priority, f"{zone} ({reason}, diff={cell_diff:.0f})"))
+    hotspots.sort(key=lambda x: x[0], reverse=True)
+    return [msg for _, msg in hotspots[:2]]
+
+
 def _mean_adjacent_frame_delta(frames: List[Tuple[float, np.ndarray]]) -> Optional[float]:
     if len(frames) < 2:
         return None
@@ -342,11 +393,12 @@ def _compute_motion_step_diagnostics(
             + ", ".join(frozen_intervals[:4])
             + " — animate position/scale/morph/rings continuously across `t` instead of holding a static pose!"
         )
-    if len(ref_steps) >= 3 and mean_ref_step >= 1.5 and motion_ratio < 0.35:
+    if len(ref_steps) >= 3 and mean_ref_step >= 1.0 and motion_ratio < 0.45:
         warnings.append(
             f"MOTION STIFFNESS WARNING: Your scene motion energy is only {motion_ratio:.0%} of the reference "
-            f"(mean step delta {mean_prev_step:.2f} vs ref {mean_ref_step:.2f}) — add missing zooms, stage pans/scrolls, "
-            "spring overshoot (`AM.ease.outBack`/`AM.spring`), and continuous ring rotation/hero float so the scene never feels stiff!"
+            f"(mean step delta {mean_prev_step:.2f} vs ref {mean_ref_step:.2f}) — avoid stop-start chained `outCubic` segments, "
+            "animate continuous living details (e.g. marching dashed offsets `ctx.lineDashOffset = -t * 28`, continuous path tracing, "
+            "or smooth camera/element follow-through) so the scene never feels stiff or frozen!"
         )
     if jump_intervals:
         warnings.append(
@@ -553,6 +605,11 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         ref_rel = str(item.get("refRelPath") or ref_path.name)
         prev_rel = str(item.get("previewRelPath") or prev_path.name)
+        worst_zones = (
+            []
+            if fg_info["blankFrameDetected"]
+            else _compute_regional_hotspots(ref_cmp, prev_cmp, fg_info["bgBgr"])
+        )
         entry: Dict[str, Any] = {
             "timestamp": round(ts, 3),
             "refPath": ref_rel,
@@ -578,6 +635,7 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
             "clippedTextDetected": bool(struct_info.get("clippedTextDetected", False)),
             "textDriftDetected": bool(struct_info.get("textDriftDetected", False)),
             "structuralDiagnosis": struct_info.get("structuralDiagnosis") or "",
+            "worstZones": worst_zones,
             "combinedScore": round(combined, 4),
             "aspectRatioMismatch": bool(ar_mismatch),
             "refDimensions": [int(rw), int(rh)],
