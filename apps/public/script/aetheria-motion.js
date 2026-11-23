@@ -513,7 +513,7 @@
           : 5;
       const end = start + dur;
       cursor = end;
-      if (t < end || i === scenes.length - 1) {
+      if (t + 0.002 < end || i === scenes.length - 1) {
         const localTime = clamp(t - start, 0, dur);
         return {
           scene: s,
@@ -1789,9 +1789,11 @@
   let _lensDstCanvas = null;
 
   /**
-   * Renders content drawn by `drawContentFn(offCtx, size)` through a deterministic
+   * Renders content drawn by `drawContentFn` through a deterministic
    * spherical / water-bubble refractive glass lens (`strength` 0 = flat, 0.3..1.4 = convex bubble).
-   * Supports optional chromatic dispersion (`chromatic`, default 0.04) and specular rim highlight.
+   * Supports both 1-arg main-canvas coordinates `drawContentFn(c)` centered around `(cx, cy)` and
+   * 2-arg local `0..size` coordinates `drawContentFn(lc, size)` centered at `(size/2, size/2)`,
+   * plus optional `opts.coordSpace` (`"canvas" | "local"`), chromatic dispersion, and rim highlight.
    */
   function drawSphericalLens(ctx, cx, cy, radius, strength, drawContentFn, opts = {}) {
     if (!ctx || !(radius > 2) || typeof drawContentFn !== "function") return;
@@ -1800,11 +1802,17 @@
     const chromatic = clamp(Number(opts.chromatic ?? 0.04), 0, 0.25);
     const rimAlpha = clamp(Number(opts.rimAlpha ?? 0.45), 0, 1);
     const rimColor = opts.rimColor || "#FFD9A0";
+    const useLocal =
+      opts.coordSpace === "local" ||
+      (opts.coordSpace !== "canvas" && drawContentFn.length >= 2);
+    const srcScale = size / (radius * 2);
 
     if (typeof document === "undefined") {
       ctx.save();
-      ctx.translate(cx - size * 0.5, cy - size * 0.5);
-      drawContentFn(ctx, size);
+      if (useLocal) {
+        ctx.translate(cx - size * 0.5, cy - size * 0.5);
+      }
+      drawContentFn(ctx, size, { cx, cy, radius, size });
       ctx.restore();
       return;
     }
@@ -1819,10 +1827,55 @@
     }
     const sCtx = _lensSrcCanvas.getContext("2d", { willReadFrequently: true });
     const dCtx = _lensDstCanvas.getContext("2d", { willReadFrequently: true });
-    sCtx.clearRect(0, 0, size, size);
-    sCtx.save();
-    drawContentFn(sCtx, size);
-    sCtx.restore();
+
+    function renderOffscreen(localMode) {
+      sCtx.clearRect(0, 0, size, size);
+      sCtx.save();
+      if (!localMode) {
+        sCtx.translate(size * 0.5, size * 0.5);
+        if (Math.abs(srcScale - 1) > 1e-4) sCtx.scale(srcScale, srcScale);
+        sCtx.translate(-cx, -cy);
+      }
+      drawContentFn(sCtx, size, { cx, cy, radius, size });
+      sCtx.restore();
+    }
+
+    function bufferHasAlpha(data) {
+      for (let i = 3; i < data.length; i += 4) {
+        if (data[i] > 0) return true;
+      }
+      return false;
+    }
+
+    renderOffscreen(useLocal);
+    let src = sCtx.getImageData(0, 0, size, size).data;
+    let hasPixels = bufferHasAlpha(src);
+    if (
+      !hasPixels &&
+      opts.coordSpace == null &&
+      (Math.abs(cx - size * 0.5) > 2 || Math.abs(cy - size * 0.5) > 2)
+    ) {
+      renderOffscreen(!useLocal);
+      src = sCtx.getImageData(0, 0, size, size).data;
+      hasPixels = bufferHasAlpha(src);
+    }
+    if (!hasPixels && typeof window !== "undefined") {
+      const msg =
+        "drawSphericalLens: drawContentFn painted nothing inside the lens disc (cx=" +
+        Math.round(cx) +
+        ", cy=" +
+        Math.round(cy) +
+        ", r=" +
+        Math.round(radius) +
+        ")";
+      if (
+        Array.isArray(window.__aetheriaErrors) &&
+        window.__aetheriaErrors.length < 16 &&
+        window.__aetheriaErrors.indexOf(msg) === -1
+      ) {
+        window.__aetheriaErrors.push(msg);
+      }
+    }
 
     if (k <= 0.005) {
       ctx.save();
@@ -1834,7 +1887,6 @@
       return;
     }
 
-    const src = sCtx.getImageData(0, 0, size, size).data;
     const dstImg = dCtx.createImageData(size, size);
     const dst = dstImg.data;
     const half = size * 0.5;

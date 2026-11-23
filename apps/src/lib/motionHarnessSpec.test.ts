@@ -218,4 +218,128 @@ describe("Harness F1 spec guards (skill-lint & AM API parity)", () => {
     expect(rA.range(10, 20)).toBeGreaterThanOrEqual(10);
     expect(rA.pick(["a", "b"])).toMatch(/^[ab]$/);
   });
+
+  it("drawSphericalLens preserves main-canvas coords for 1-arg callbacks and local coords for 2-arg callbacks", () => {
+    const code = fs.readFileSync(
+      path.join(REPO_ROOT, "apps", "public", "script", "aetheria-motion.js"),
+      "utf8",
+    );
+    const fakeWin: { AM?: Record<string, (...args: unknown[]) => void> } = {};
+    new Function("window", code)(fakeWin);
+    const AM = fakeWin.AM;
+    expect(AM).toBeDefined();
+
+    const calls: string[] = [];
+    const mockCtx = {
+      save: () => {},
+      restore: () => {},
+      translate: (tx: number, ty: number) => calls.push(`translate:${tx},${ty}`),
+      fillText: (txt: string, x: number, y: number) => calls.push(`fillText:${txt}@${x},${y}`),
+    };
+
+    // 1-arg callback draws in main-canvas coordinates around (cx, cy) -> zero translation offset
+    AM?.drawSphericalLens(mockCtx, 360, 640, 290, 0.8, (c: unknown) => {
+      (c as typeof mockCtx).fillText("With a Motions", 360, 640);
+    });
+    expect(calls.some((c) => c.startsWith("translate:"))).toBe(false);
+    expect(calls).toContain("fillText:With a Motions@360,640");
+
+    calls.length = 0;
+    // 2-arg callback draws in local 0..size coordinates -> translated by (cx - size/2, cy - size/2)
+    AM?.drawSphericalLens(mockCtx, 360, 640, 290, 0.8, (c: unknown, sz: number) => {
+      (c as typeof mockCtx).fillText(`sz=${sz}`, sz * 0.5, sz * 0.5);
+    });
+    expect(calls).toContain("translate:70,350");
+    expect(calls).toContain("fillText:sz=580@290,290");
+  });
+
+  it("AM.resolveScene advances cleanly on rounded 30fps hard-cut boundaries without early shift", () => {
+    const code = fs.readFileSync(
+      path.join(REPO_ROOT, "apps", "public", "script", "aetheria-motion.js"),
+      "utf8",
+    );
+    const fakeWin: {
+      AM?: {
+        resolveScene: (t: number, scenes: Array<{ id: string; start: number; duration: number }>) => { index: number };
+        drawSphericalLens: (...args: unknown[]) => void;
+      };
+      __aetheriaErrors?: string[];
+    } = { __aetheriaErrors: [] };
+    new Function("window", code)(fakeWin);
+    const AM = fakeWin.AM!;
+
+    // 6 rounded-up 30fps boundaries matching 1.667/4.967/7.367/9.267/14.467/22.367
+    const ends = [1.667, 4.967, 7.367, 9.267, 14.467, 22.367, 26.0];
+    const scenes = ends.map((end, i) => {
+      const start = i === 0 ? 0 : ends[i - 1];
+      return { id: `s${i + 1}`, start, duration: Number((end - start).toFixed(3)) };
+    });
+    const cutFrames = [50, 149, 221, 278, 434, 671, 780];
+    cutFrames.forEach((k, idx) => {
+      expect(AM.resolveScene((k - 1) / 30, scenes).index).toBe(idx);
+      expect(AM.resolveScene(k / 30, scenes).index).toBe(Math.min(idx + 1, scenes.length - 1));
+    });
+
+    // Rounded-down boundary 4.333 (frame 130) and 29.97fps boundary 2.502 (frame 75)
+    const downScenes = [
+      { id: "a", start: 0, duration: 2.502 },
+      { id: "b", start: 2.502, duration: 1.831 },
+      { id: "c", start: 4.333, duration: 2.0 },
+    ];
+    expect(AM.resolveScene(74 / 30, downScenes).index).toBe(0);
+    expect(AM.resolveScene(75 / 30, downScenes).index).toBe(1);
+    expect(AM.resolveScene(129 / 30, downScenes).index).toBe(1);
+    expect(AM.resolveScene(130 / 30, downScenes).index).toBe(2);
+  });
+
+  it("drawSphericalLens records runtime diagnostic when callback paints zero alpha pixels", () => {
+    const code = fs.readFileSync(
+      path.join(REPO_ROOT, "apps", "public", "script", "aetheria-motion.js"),
+      "utf8",
+    );
+    const emptyBuf = new Uint8ClampedArray(128 * 128 * 4);
+    const makeOffCtx = () => ({
+      clearRect: () => {},
+      save: () => {},
+      restore: () => {},
+      translate: () => {},
+      scale: () => {},
+      getImageData: (_x: number, _y: number, w: number, h: number) => ({
+        data: new Uint8ClampedArray(w * h * 4),
+      }),
+      createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+      putImageData: () => {},
+    });
+    const prevDoc = (globalThis as { document?: unknown }).document;
+    const prevWin = (globalThis as { window?: unknown }).window;
+    const fakeWin: { AM?: { drawSphericalLens: (...args: unknown[]) => void }; __aetheriaErrors: string[] } = {
+      __aetheriaErrors: [],
+    };
+    (globalThis as { window?: unknown }).window = fakeWin;
+    (globalThis as { document?: unknown }).document = {
+      createElement: () => ({
+        width: 128,
+        height: 128,
+        getContext: () => makeOffCtx(),
+      }),
+    };
+    try {
+      new Function("window", code)(fakeWin);
+      const mainCtx = {
+        save: () => {},
+        restore: () => {},
+        beginPath: () => {},
+        arc: () => {},
+        clip: () => {},
+        drawImage: () => {},
+        stroke: () => {},
+      };
+      expect(emptyBuf.length).toBeGreaterThan(0);
+      fakeWin.AM?.drawSphericalLens(mainCtx, 360, 640, 64, 0, () => {});
+      expect(fakeWin.__aetheriaErrors.some((e) => e.includes("painted nothing inside the lens disc"))).toBe(true);
+    } finally {
+      (globalThis as { document?: unknown }).document = prevDoc;
+      (globalThis as { window?: unknown }).window = prevWin;
+    }
+  });
 });
