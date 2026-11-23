@@ -342,13 +342,12 @@ async fn prepare_film_tab(
 async fn capture_single_frame_jpeg(
     cdp: &mut CdpWebSocket,
     t: f64,
+    fps: f64,
+    samples: u32,
     frame_num: u32,
     jpeg_quality: u32,
 ) -> Result<Vec<u8>, String> {
-    let eval_expr = format!(
-        "(() => {{ window.renderAt({:.6}); return new Promise(r => requestAnimationFrame(() => r(true))); }})()",
-        t
-    );
+    let eval_expr = super::motion_blur::build_render_frame_expr(t, fps, samples);
     cdp.call(
         "Runtime.evaluate",
         json!({ "expression": eval_expr, "awaitPromise": true }),
@@ -521,6 +520,13 @@ where
     let ff_stderr_task = spawn_stderr_drain(ff_child.stderr.take());
 
     let jpeg_quality = if is_proxy { 75 } else { 92 };
+    let mb_mode = if is_proxy {
+        super::motion_blur::MotionBlurMode::Off
+    } else {
+        super::motion_blur::MotionBlurMode::from_env_and_project(&film_root, &ws_root)
+    };
+    let mb_mode_arc = Arc::new(mb_mode);
+    let mb_supersampled_frames = Arc::new(AtomicUsize::new(0));
     let total_jobs = frames_to_render as usize;
     let next_idx = Arc::new(AtomicUsize::new(0));
     let cancel = Arc::new(AtomicBool::new(false));
@@ -532,6 +538,8 @@ where
         let next_ref = Arc::clone(&next_idx);
         let cancel_ref = Arc::clone(&cancel);
         let tx_ref = tx.clone();
+        let mb_ref = Arc::clone(&mb_mode_arc);
+        let mb_cnt_ref = Arc::clone(&mb_supersampled_frames);
         worker_handles.push(tokio::spawn(async move {
             while !cancel_ref.load(Ordering::Relaxed) {
                 let idx = next_ref.fetch_add(1, Ordering::Relaxed);
@@ -540,7 +548,13 @@ where
                 }
                 let frame_num = start_frame + idx as u32;
                 let t = frame_num as f64 / fps_f;
-                let res = capture_single_frame_jpeg(&mut tab, t, frame_num, jpeg_quality).await;
+                let samples = mb_ref.samples_for_time(t);
+                if samples > 1 {
+                    mb_cnt_ref.fetch_add(1, Ordering::Relaxed);
+                }
+                let res =
+                    capture_single_frame_jpeg(&mut tab, t, fps_f, samples, frame_num, jpeg_quality)
+                        .await;
                 let is_err = res.is_err();
                 if is_err {
                     cancel_ref.store(true, Ordering::Relaxed);
@@ -593,6 +607,16 @@ where
     drop(rx);
     for handle in worker_handles {
         let _ = handle.await;
+    }
+    if mb_mode_arc.is_enabled() {
+        let ss_count = mb_supersampled_frames.load(Ordering::Relaxed);
+        crate::paths::log_engine(
+            "render",
+            &format!(
+                "Motion blur temporal supersampling applied to {}/{} frames (mode={:?})",
+                ss_count, frames_to_render, *mb_mode_arc
+            ),
+        );
     }
     if pipe_res.is_ok() && rendered != frames_to_render {
         pipe_res = Err(format!(

@@ -342,4 +342,198 @@ describe("Harness F1 spec guards (skill-lint & AM API parity)", () => {
       (globalThis as { window?: unknown }).window = prevWin;
     }
   });
+
+  it("supports 30fps cross-scene push transitions, isolation flag, and multi-pulse cameraTrack", () => {
+    const code = fs.readFileSync(
+      path.join(REPO_ROOT, "apps", "public", "script", "aetheria-motion.js"),
+      "utf8",
+    );
+    const prevWin = (globalThis as { window?: unknown }).window;
+    const prevDoc = (globalThis as { document?: unknown }).document;
+    const fakeWin: {
+      __isolateSceneTransition?: boolean;
+      AM?: {
+        evalCurve: (curve: number[], u: number) => number;
+        resolveTransition: (t: number, scenes: Array<Record<string, unknown>>) => Record<string, unknown> | null;
+        renderFrameWithTransitions: (
+          ctx: unknown,
+          sec: number,
+          scenes: Array<Record<string, unknown>>,
+          W: number,
+          H: number,
+          fn: (targetCtx: unknown, sc: Record<string, unknown>, idx: number, lt: number) => void,
+        ) => void;
+        evalCameraTrack: (track: Array<Record<string, number>>, lt: number, W: number, H: number) => { s: number; cx: number; cy: number; rot: number } | null;
+      };
+    } = {};
+    (globalThis as { window?: unknown }).window = fakeWin;
+    (globalThis as { document?: unknown }).document = undefined;
+    try {
+      new Function("window", code)(fakeWin);
+      const AM = fakeWin.AM!;
+      expect(AM.evalCurve([0, 0.25, 1], 0)).toBe(0);
+      expect(AM.evalCurve([0, 0.25, 1], 0.5)).toBeCloseTo(0.25, 4);
+      expect(AM.evalCurve([0, 0.25, 1], 1)).toBe(1);
+
+      const scenes = [
+        { id: "scene1", start: 0, duration: 2.0 },
+        {
+          id: "scene2",
+          start: 2.0,
+          duration: 2.0,
+          transitionBridge: {
+            kind: "push_left",
+            tStart: 1.8,
+            tEnd: 2.4,
+            curve: [0, 0.5, 1],
+          },
+        },
+        {
+          id: "scene3",
+          start: 4.0,
+          duration: 2.0,
+          transitionBridge: { kind: "hard_cut", leadInBlankSec: 0.067 },
+        },
+      ];
+      expect(AM.resolveTransition(1.5, scenes)).toBeNull();
+      expect(AM.resolveTransition(4.05, scenes)).toBeNull();
+      const mid = AM.resolveTransition(2.1, scenes)!;
+      expect(mid.kind).toBe("push_left");
+      expect(mid.progress).toBeCloseTo(0.5, 3);
+      expect(mid.fromIndex).toBe(0);
+      expect(mid.toIndex).toBe(1);
+
+      fakeWin.__isolateSceneTransition = true;
+      expect(AM.resolveTransition(2.1, scenes)).toBeNull();
+      fakeWin.__isolateSceneTransition = false;
+
+      const drawn: Array<{ tx: number; id: unknown }> = [];
+      let curTx = 0;
+      const mockCtx = {
+        save: () => {},
+        restore: () => {},
+        translate: (x: number, _y: number) => {
+          curTx = x;
+        },
+      };
+      AM.renderFrameWithTransitions(mockCtx, 2.1, scenes, 720, 1280, (_c, sc) => {
+        drawn.push({ tx: curTx, id: sc.id });
+      });
+      expect(drawn.length).toBe(2);
+      expect(drawn[0].id).toBe("scene1");
+      expect(drawn[0].tx).toBeCloseTo(-360, 2);
+      expect(drawn[1].id).toBe("scene2");
+      expect(drawn[1].tx).toBeCloseTo(360, 2);
+
+      const track = [
+        { t: 0.0, tx: 0, ty: 0, s: 1.0, rot: 0 },
+        { t: 0.5, tx: 0, ty: 0, s: 1.0, rot: 0 },
+        { t: 1.0, tx: 0, ty: -120, s: 1.2, rot: 0 },
+        { t: 2.0, tx: 0, ty: -120, s: 1.2, rot: 0 },
+      ];
+      const holdStart = AM.evalCameraTrack(track, 0.25, 720, 1280)!;
+      expect(holdStart.s).toBeCloseTo(1.0, 3);
+      expect(holdStart.cy).toBeCloseTo(640, 2);
+      const midPan = AM.evalCameraTrack(track, 0.75, 720, 1280)!;
+      expect(midPan.s).toBeCloseTo(1.1, 3);
+      expect(midPan.cy).toBeGreaterThan(640);
+      const holdEnd = AM.evalCameraTrack(track, 1.5, 720, 1280)!;
+      expect(holdEnd.s).toBeCloseTo(1.2, 3);
+      expect(holdEnd.cy).toBeCloseTo(640 + 120 / 1.2, 2);
+
+      // MotionCraft choreography helpers: layoutBalancedHeadline, drawBlurRevealText, drawBlurRiseWords, drawTurntableObject, drawMorphPolygon
+      const measureCtx = {
+        font: "700 48px Inter",
+        fillStyle: "#111116",
+        textAlign: "left",
+        globalAlpha: 1,
+        filter: "none",
+        save: () => {},
+        restore: () => {},
+        translate: () => {},
+        rotate: () => {},
+        scale: () => {},
+        beginPath: () => {},
+        moveTo: () => {},
+        lineTo: () => {},
+        closePath: () => {},
+        fill: () => {},
+        stroke: () => {},
+        arc: () => {},
+        setLineDash: () => {},
+        measureText: (s: string) => ({ width: s.length * 18 }),
+        fillText: () => {},
+      };
+      const lines = (AM as unknown as {
+        layoutBalancedHeadline: (c: unknown, txt: string, maxW: number) => string[];
+        drawBlurRevealText: (c: unknown, txt: string, x: number, y: number, t: number, t0: number, dur: number, opts?: unknown) => void;
+        drawBlurRiseWords: (c: unknown, txt: string, x: number, y: number, t: number, t0: number, opts?: unknown) => void;
+        drawTurntableObject: (c: unknown, cx: number, cy: number, t: number, fn: () => void, opts?: unknown) => void;
+        drawMorphPolygon: (c: unknown, a: number[][], b: number[][], p: number, opts?: unknown) => Array<{ x: number; y: number }>;
+      }).layoutBalancedHeadline(measureCtx, "Smart decisions aren't Luck", 280);
+      expect(lines.length).toBe(2);
+      expect(lines[0]).toBe("Smart decisions");
+      expect(lines[1]).toBe("aren't Luck");
+
+      const amExt = AM as unknown as {
+        drawBlurRevealText: (c: unknown, txt: string, x: number, y: number, t: number, t0: number, dur: number, opts?: unknown) => void;
+        drawBlurRiseWords: (c: unknown, txt: string, x: number, y: number, t: number, t0: number, opts?: unknown) => void;
+        drawTurntableObject: (c: unknown, cx: number, cy: number, t: number, fn: () => void, opts?: unknown) => void;
+        drawMorphPolygon: (c: unknown, a: number[][], b: number[][], p: number, opts?: unknown) => Array<{ x: number; y: number }>;
+      };
+      let ttCalled = 0;
+      const alphaTrack: number[] = [];
+      const origFillText = measureCtx.fillText;
+      measureCtx.fillText = () => {
+        alphaTrack.push(measureCtx.globalAlpha);
+      };
+      amExt.drawBlurRevealText(measureCtx, "research", 80, 600, 0.2, 0.0, 0.45, {
+        scaleFrom: 0.28,
+        maxBlur: 18,
+        exitAt: 1.0,
+        exitDur: 0.28,
+      });
+      expect(alphaTrack.length).toBeGreaterThan(0);
+      alphaTrack.length = 0;
+      // During exit window (t = 1.14 is 50% through exitAt=1.0..1.28), characters fade & blur out
+      amExt.drawBlurRevealText(measureCtx, "research", 80, 600, 1.14, 0.0, 0.45, {
+        scaleFrom: 0.28,
+        maxBlur: 18,
+        exitAt: 1.0,
+        exitDur: 0.28,
+      });
+      expect(alphaTrack.length).toBeGreaterThan(0);
+      expect(alphaTrack[0]).toBeLessThan(0.95);
+      alphaTrack.length = 0;
+      // Past exitAt + exitDur (t = 1.35), nothing is drawn
+      amExt.drawBlurRevealText(measureCtx, "research", 80, 600, 1.35, 0.0, 0.45, {
+        scaleFrom: 0.28,
+        maxBlur: 18,
+        exitAt: 1.0,
+        exitDur: 0.28,
+      });
+      expect(alphaTrack.length).toBe(0);
+      measureCtx.fillText = origFillText;
+      amExt.drawBlurRiseWords(measureCtx, "shows that", 80, 680, 0.3, 0.0, { preBlurSec: 0.15 });
+      amExt.drawTurntableObject(measureCtx, 360, 440, 0.5, () => {
+        ttCalled += 1;
+      }, { ringRadius: 120 });
+      amExt.drawTurntableObject(measureCtx, 360, 440, 1.5, () => {
+        ttCalled += 1;
+      }, { ringRadius: 120, spinMode: "rock" });
+      expect(ttCalled).toBe(2);
+      const morphed = amExt.drawMorphPolygon(
+        measureCtx,
+        [[0, -40], [40, 0], [0, 40], [-40, 0]],
+        [[-30, -30], [30, -30], [30, 30], [-30, 30]],
+        0.5,
+        { fill: "#7602BD" },
+      );
+      expect(morphed.length).toBe(4);
+      expect(morphed[0].x).toBeCloseTo(-15, 2);
+    } finally {
+      (globalThis as { document?: unknown }).document = prevDoc;
+      (globalThis as { window?: unknown }).window = prevWin;
+    }
+  });
 });

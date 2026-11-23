@@ -29,6 +29,7 @@ pub mod html_renderer;
 pub mod media_stream;
 pub mod microstock;
 pub mod motion;
+pub(crate) mod motion_blur;
 pub mod motion_linter;
 pub mod native_canvas;
 pub mod native_renderer;

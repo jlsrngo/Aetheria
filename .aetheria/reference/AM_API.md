@@ -7,6 +7,9 @@ Do NOT call `Math.random()`, `Date.now()`, `performance.now()`, `requestAnimatio
 - `AM.registerScene(idOrIndex, fn)` — register `(ctx, localTime, dur, scene, AM) => void` for scene ID (`"scene1_hook"`), 1-based (`"scene1"`), or 0-based index (`0`).
 - `AM.getSceneRenderer(sceneId, index)` — look up registered scene renderer (auto-dispatched by managed `index.html`).
 - `AM.resolveScene(t, scenes)` — resolve `{ scene, index, localTime }` at global time `t` seconds.
+- `AM.evalCurve(curve, u)` — linearly sample a normalized `[0..1]` monotonic curve array at `u` (falls back to `AM.ease.inOutCubic`).
+- `AM.resolveTransition(t, scenes)` — resolves active `push_*` cross-scene transition bridge (`{ kind, fromScene, toScene, fromLocalTime, toLocalTime, progress }`) or `null` (also bypassed when `window.__isolateSceneTransition === true`).
+- `AM.renderFrameWithTransitions(ctx, sec, scenes, W = 1080, H = 1920, renderSceneFn)` — composites outgoing + incoming scenes during `push_*` transition bridges or renders single resolved scene otherwise.
 
 ## Math, Interpolation & Color
 - `AM.TAU` (`Math.PI * 2`), `AM.f3(v)` (round to 3 decimals)
@@ -49,6 +52,8 @@ Do NOT call `Math.random()`, `Date.now()`, `performance.now()`, `requestAnimatio
 - `AM.fillRoundRect(ctx, x, y, w, h, r)` — draws and fills a rounded rectangle (scalar radius or `[tl, tr, br, bl]`)
 - `AM.strokeRoundRect(ctx, x, y, w, h, r)` — draws and strokes a rounded rectangle (scalar radius or `[tl, tr, br, bl]`)
 - `AM.applyCamera(ctx, cam, W = 1080, H = 1920)` — `{ s, cx, cy, rot }` zoom/pan/rotate
+- `AM.evalCameraTrack(track, localT, W = 1080, H = 1920)` — interpolates sparse 30fps `scene.cameraTrack` keyframes `{ t, tx, ty, s, rot }` into `{ s, cx, cy, rot }`
+- `AM.applyTrackedCamera(ctx, track, localT, W = 1080, H = 1920)` — evaluates `evalCameraTrack(...)` and calls `AM.applyCamera(ctx, cam, W, H)`
 - `AM.drawBurstLines(ctx, cx, cy, count, r0, r1, t, t0, dur = 0.35, color = "#FFC62B", lineWidth = 8)`
 - `AM.drawShockRing(ctx, cx, cy, t, t0, r0, r1, w0 = 16, dur = 0.4, color = "#FF5A4E")`
 - `AM.drawShapeWipe(ctx, t, tStart, dur = 0.65, colors?, originX = 540, originY = 660, W = 1080, H = 1920)`
@@ -59,6 +64,11 @@ Do NOT call `Math.random()`, `Date.now()`, `performance.now()`, `requestAnimatio
 - `AM.drawTaperedRibbon(ctx, points, maxWidth = 24, opts?)` — variable-width tapered crescent/calligraphic light ribbon with Gaussian aura (`{ color, coreColor, alpha, asymmetry, glowBlur }`)
 - `AM.impactRecoil(t, hitTime, opts?)` — deterministic damped spring collision jolt returning `{ dx, dy, rot, sx, sy }` (`{ ampX, ampY, ampRot, squash, damping, freq, duration }`)
 - `AM.twistPolygon(points, angle, lagFactor = 0.35)` — deterministic elastic vertex-lag rotation/shear for polygon vertices (`[{x, y}]` or `[[x, y]]`)
+- `AM.drawBlurRevealText(ctx, text, x, y, t, tStart = 0, dur = 0.45, opts?)` — 3D Z-depth zoom (`scaleFrom: 0.30 -> 1.0`) + progressive left-to-right character blur-rise reveal (`blur(maxBlur -> 0px)` + soft spring rise + locked kerning width via `measureText` + optional `preBlurSec` ghost preview, `inkStart -> color` tint, and `exitAt` / `exitDur` character blur-fade exit)
+- `AM.drawBlurRiseWords(ctx, wordsOrText, x, y, t, tStart = 0, opts?)` — staggered word-by-word spring rise + optical blur decay + ink-tint transition + faster exit (`{ stagger, enterDur, maxBlur, risePx, inkStart, color, preBlurSec, exitAt, exitDur }`)
+- `AM.layoutBalancedHeadline(ctx, text, maxWidth = 800)` — balanced 2-line / multi-line headline wrapper using `ctx.measureText` with zero single-word orphans
+- `AM.drawTurntableObject(ctx, cx, cy, t, drawFnOrImg, opts?)` — 3D Y-axis turntable foreshortening + gentle rock/float + optional continuous spinning dashed orbital ring (`{ w, h, omega, depth, tiltRad, floatPx, ringRadius, ringOmega, ringColor, ringDash }`)
+- `AM.drawMorphPolygon(ctx, ptsA, ptsB, p, opts?)` — vertex-matched polygon interpolation between `ptsA` and `ptsB` at progress `p` (`0..1`, `{ cx, cy, rot, scale, fill, stroke, lineWidth, draw }`)
 - `AM.drawGridBackdrop(ctx, t, accentColor, bgTop, bgBottom, W = 1080, H = 1920)`
 - `AM.drawCharacterRig(ctx, t, opts?)` — `{ x, y, scale, coatColor, coatShade, skinColor, hairColor, hairStyle, glasses, reactTime, reachTime, lean, expression, collarColor, leftSh, ... }`
 - `AM.drawTopHeader(ctx, scene, localTimeOrIdx, globalTime)` — **OPTIONAL** top bar (omit unless active skill wants header bar)

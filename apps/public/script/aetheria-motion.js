@@ -513,7 +513,7 @@
           : 5;
       const end = start + dur;
       cursor = end;
-      if (t + 0.002 < end || i === scenes.length - 1) {
+      if (t + 0.012 < end || i === scenes.length - 1) {
         const localTime = clamp(t - start, 0, dur);
         return {
           scene: s,
@@ -528,6 +528,296 @@
     }
     const last = scenes[scenes.length - 1];
     return { scene: last, index: scenes.length - 1, localTime: 0, duration: 1, progress: 1 };
+  }
+
+  let _trBufA = null;
+  let _trBufB = null;
+
+  function _ensureTransitionBuffer(slot, W, H) {
+    if (typeof document === "undefined" || typeof document.createElement !== "function") {
+      return null;
+    }
+    let buf = slot === 0 ? _trBufA : _trBufB;
+    if (!buf || buf.width !== W || buf.height !== H) {
+      buf = document.createElement("canvas");
+      buf.width = W;
+      buf.height = H;
+      if (slot === 0) _trBufA = buf;
+      else _trBufB = buf;
+    }
+    return buf;
+  }
+
+  function _computeSceneIntervals(scenes) {
+    const out = [];
+    let cursor = 0;
+    for (let i = 0; i < scenes.length; i++) {
+      const s = scenes[i];
+      const start = typeof s.start === "number" ? s.start : cursor;
+      const dur =
+        typeof s.duration === "number"
+          ? s.duration
+          : typeof s.end === "number"
+          ? s.end - start
+          : 5;
+      const end = start + Math.max(0.001, dur);
+      cursor = end;
+      out.push({ scene: s, index: i, start, dur: Math.max(0.001, dur), end });
+    }
+    return out;
+  }
+
+  function evalCurve(curve, u) {
+    const t = clamp(Number(u) || 0, 0, 1);
+    if (!Array.isArray(curve) || curve.length < 2) {
+      return ease.inOutCubic(t);
+    }
+    const n = curve.length;
+    const pos = t * (n - 1);
+    const i0 = Math.min(n - 2, Math.max(0, Math.floor(pos)));
+    const frac = pos - i0;
+    return clamp(lerp(Number(curve[i0]) || 0, Number(curve[i0 + 1]) || 0, frac), 0, 1);
+  }
+
+  function resolveTransition(t, scenes) {
+    if (global.__isolateSceneTransition === true) return null;
+    if (!Array.isArray(scenes) || scenes.length < 2) return null;
+    const sec = Number.isFinite(t) ? Math.max(0, t) : 0;
+    const intervals = _computeSceneIntervals(scenes);
+    for (let i = 1; i < intervals.length; i++) {
+      const prev = intervals[i - 1];
+      const cur = intervals[i];
+      const tb = cur.scene && cur.scene.transitionBridge;
+      if (!tb || typeof tb.kind !== "string") {
+        continue;
+      }
+      const isPush = tb.kind.indexOf("push_") === 0;
+      const isZoomBlur =
+        tb.kind === "zoom_blur" ||
+        tb.kind === "zoom_in" ||
+        tb.kind === "zoom_out" ||
+        tb.kind === "blur_dissolve";
+      if (!isPush && !isZoomBlur) {
+        continue;
+      }
+      const t0 = Number(tb.tStart);
+      const t1 = Number(tb.tEnd);
+      if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 <= t0) {
+        continue;
+      }
+      if (sec >= t0 && sec <= t1) {
+        const u = clamp((sec - t0) / (t1 - t0), 0, 1);
+        const progress = evalCurve(tb.curve, u);
+        const cutSec = Number.isFinite(Number(tb.cutSec)) ? Number(tb.cutSec) : cur.start;
+        const totalDispPx = Number.isFinite(Number(tb.totalDispPx)) ? Number(tb.totalDispPx) : 0;
+        return {
+          active: true,
+          kind: tb.kind,
+          fromIndex: prev.index,
+          toIndex: cur.index,
+          fromScene: prev.scene,
+          toScene: cur.scene,
+          fromLocalTime: clamp(sec - prev.start, 0, prev.dur),
+          toLocalTime: clamp(sec - cur.start, 0, cur.dur),
+          tStart: t0,
+          tEnd: t1,
+          cutSec,
+          totalDispPx,
+          u,
+          progress,
+        };
+      }
+    }
+    return null;
+  }
+
+  function _sampleCanvasBorderHex(c, W, H) {
+    if (!c || typeof c.getImageData !== "function") return null;
+    try {
+      const d = c.getImageData(Math.min(8, W - 1), Math.min(8, H - 1), 1, 1).data;
+      if (d && d.length >= 3) {
+        return `rgb(${d[0]}, ${d[1]}, ${d[2]})`;
+      }
+    } catch (_) {
+      // Ignore tainted or mocked canvas
+    }
+    return null;
+  }
+
+  function renderFrameWithTransitions(ctx, sec, scenes, W = 1080, H = 1920, renderSceneFn) {
+    if (!ctx || !Array.isArray(scenes) || scenes.length === 0 || typeof renderSceneFn !== "function") {
+      return;
+    }
+    const tr = resolveTransition(sec, scenes);
+    if (!tr) {
+      const resolved = resolveScene(sec, scenes);
+      renderSceneFn(ctx, resolved.scene, resolved.index, resolved.localTime, sec);
+      return;
+    }
+
+    const bufA = _ensureTransitionBuffer(0, W, H);
+    const bufB = _ensureTransitionBuffer(1, W, H);
+    const cA = bufA && typeof bufA.getContext === "function" ? bufA.getContext("2d") : null;
+    const cB = bufB && typeof bufB.getContext === "function" ? bufB.getContext("2d") : null;
+
+    // 1. MotionCraft-style Zoom + Optical Blur Cross-Dissolve Bridge
+    if (
+      tr.kind === "zoom_blur" ||
+      tr.kind === "zoom_in" ||
+      tr.kind === "zoom_out" ||
+      tr.kind === "blur_dissolve"
+    ) {
+      const p = ease.inOutCubic(tr.u);
+      const outScale = tr.kind === "zoom_out" ? lerp(1.0, 0.86, p) : lerp(1.0, 1.16, p);
+      const inScale = tr.kind === "zoom_out" ? lerp(1.14, 1.0, p) : lerp(0.90, 1.0, p);
+      const outBlur = p * 12;
+      const inBlur = (1 - p) * 12;
+      if (cA && cB) {
+        cA.setTransform(1, 0, 0, 1, 0, 0);
+        cA.clearRect(0, 0, W, H);
+        renderSceneFn(cA, tr.fromScene, tr.fromIndex, tr.fromLocalTime, sec);
+
+        cB.setTransform(1, 0, 0, 1, 0, 0);
+        cB.clearRect(0, 0, W, H);
+        renderSceneFn(cB, tr.toScene, tr.toIndex, tr.toLocalTime, sec);
+
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.globalAlpha = clamp(1 - p, 0, 1);
+        if (outBlur > 0.5) ctx.filter = `blur(${outBlur.toFixed(1)}px)`;
+        ctx.translate(W * 0.5, H * 0.5);
+        ctx.scale(outScale, outScale);
+        ctx.drawImage(bufA, -W * 0.5, -H * 0.5);
+        ctx.restore();
+
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.globalAlpha = clamp(p, 0, 1);
+        if (inBlur > 0.5) ctx.filter = `blur(${inBlur.toFixed(1)}px)`;
+        ctx.translate(W * 0.5, H * 0.5);
+        ctx.scale(inScale, inScale);
+        ctx.drawImage(bufB, -W * 0.5, -H * 0.5);
+        ctx.restore();
+      } else {
+        const resolved = resolveScene(sec, scenes);
+        renderSceneFn(ctx, resolved.scene, resolved.index, resolved.localTime, sec);
+      }
+      return;
+    }
+
+    // 2. Measured Two-Phase Camera Whip-Push around cutSec (when totalDispPx > 0 from 30fps reference extraction)
+    // Outgoing scene accelerates out before cutSec without premature incoming background occlusion;
+    // incoming scene settles over a short damped distance after cutSec while outgoing edge tail clears.
+    if (cA && cB && tr.totalDispPx > 0 && Number.isFinite(tr.cutSec) && tr.cutSec > tr.tStart && tr.cutSec < tr.tEnd) {
+      const isHoriz = tr.kind === "push_left" || tr.kind === "push_right";
+      const sign = tr.kind === "push_left" || tr.kind === "push_up" ? -1 : 1;
+      const dim = isHoriz ? W : H;
+      const exitAtCut = Math.min(dim * 0.48, Math.max(dim * 0.22, tr.totalDispPx * 1.15));
+      const exitFull = Math.min(dim * 0.72, exitAtCut + dim * 0.20);
+      const enterSettle = Math.min(dim * 0.16, Math.max(44, tr.totalDispPx * 0.36));
+
+      if (sec < tr.cutSec) {
+        const uPre = clamp((sec - tr.tStart) / Math.max(0.015, tr.cutSec - tr.tStart), 0, 1);
+        const shiftPre = sign * ease.inCubic(uPre) * exitAtCut;
+        cA.setTransform(1, 0, 0, 1, 0, 0);
+        cA.clearRect(0, 0, W, H);
+        renderSceneFn(cA, tr.fromScene, tr.fromIndex, tr.fromLocalTime, sec);
+        const bgCol = _sampleCanvasBorderHex(cA, W, H) || tr.fromScene.background || "#DADADA";
+
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.fillStyle = bgCol;
+        ctx.fillRect(0, 0, W, H);
+        ctx.drawImage(bufA, isHoriz ? shiftPre : 0, isHoriz ? 0 : shiftPre);
+        ctx.restore();
+        return;
+      }
+
+      const postSpan = Math.max(0.02, tr.tEnd - tr.cutSec);
+      const uPost = clamp((sec - tr.cutSec) / postSpan, 0, 1);
+      const inOffset = -sign * (1 - ease.outCubic(uPost)) * enterSettle;
+
+      cB.setTransform(1, 0, 0, 1, 0, 0);
+      cB.clearRect(0, 0, W, H);
+      renderSceneFn(cB, tr.toScene, tr.toIndex, tr.toLocalTime, sec);
+      const inBg = _sampleCanvasBorderHex(cB, W, H) || tr.toScene.background || "#DADADA";
+
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = inBg;
+      ctx.fillRect(0, 0, W, H);
+      ctx.drawImage(bufB, isHoriz ? inOffset : 0, isHoriz ? 0 : inOffset);
+
+      // Brief outgoing trailing edge overlap (first 38% of post-cut window, max 0.14s)
+      const tailDur = Math.min(0.14, Math.max(0.04, postSpan * 0.38));
+      const uTail = clamp((sec - tr.cutSec) / tailDur, 0, 1);
+      if (uTail < 1) {
+        cA.setTransform(1, 0, 0, 1, 0, 0);
+        cA.clearRect(0, 0, W, H);
+        renderSceneFn(cA, tr.fromScene, tr.fromIndex, tr.fromLocalTime, sec);
+        const tailShift = sign * lerp(exitAtCut, exitFull, ease.outQuad(uTail));
+        const visSpan = Math.max(0, dim * 0.34 * (1 - uTail));
+        if (visSpan > 2) {
+          ctx.save();
+          ctx.beginPath();
+          if (tr.kind === "push_left") ctx.rect(0, 0, visSpan, H);
+          else if (tr.kind === "push_right") ctx.rect(W - visSpan, 0, visSpan, H);
+          else if (tr.kind === "push_up") ctx.rect(0, 0, W, visSpan);
+          else ctx.rect(0, H - visSpan, W, visSpan);
+          ctx.clip();
+          ctx.globalAlpha = clamp(1 - uTail * 0.85, 0, 1);
+          ctx.drawImage(bufA, isHoriz ? tailShift : 0, isHoriz ? 0 : tailShift);
+          ctx.restore();
+        }
+      }
+      ctx.restore();
+      return;
+    }
+
+    // 3. Classic Full-Canvas Push (default when totalDispPx is omitted)
+    const p = tr.progress;
+    let fx = 0;
+    let fy = 0;
+    let tx = 0;
+    let ty = 0;
+    if (tr.kind === "push_left") {
+      fx = -p * W;
+      tx = (1 - p) * W;
+    } else if (tr.kind === "push_right") {
+      fx = p * W;
+      tx = -(1 - p) * W;
+    } else if (tr.kind === "push_up") {
+      fy = -p * H;
+      ty = (1 - p) * H;
+    } else if (tr.kind === "push_down") {
+      fy = p * H;
+      ty = -(1 - p) * H;
+    }
+
+    if (cA && cB) {
+      cA.setTransform(1, 0, 0, 1, 0, 0);
+      cA.clearRect(0, 0, W, H);
+      renderSceneFn(cA, tr.fromScene, tr.fromIndex, tr.fromLocalTime, sec);
+
+      cB.setTransform(1, 0, 0, 1, 0, 0);
+      cB.clearRect(0, 0, W, H);
+      renderSceneFn(cB, tr.toScene, tr.toIndex, tr.toLocalTime, sec);
+
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(bufA, fx, fy);
+      ctx.drawImage(bufB, tx, ty);
+      ctx.restore();
+    } else {
+      ctx.save();
+      ctx.translate(fx, fy);
+      renderSceneFn(ctx, tr.fromScene, tr.fromIndex, tr.fromLocalTime, sec);
+      ctx.restore();
+      ctx.save();
+      ctx.translate(tx, ty);
+      renderSceneFn(ctx, tr.toScene, tr.toIndex, tr.toLocalTime, sec);
+      ctx.restore();
+    }
   }
 
   // ============================================================================
@@ -738,6 +1028,49 @@
     if (rot !== 0) ctx.rotate(rot);
     ctx.scale(s, s);
     ctx.translate(-cx, -cy);
+  }
+
+  function evalCameraTrack(track, localT, W = 1080, H = 1920) {
+    if (!Array.isArray(track) || track.length === 0) return null;
+    const t = Number.isFinite(localT) ? Math.max(0, localT) : 0;
+    let k0 = track[0];
+    let k1 = track[track.length - 1];
+    if (t <= Number(k0.t || 0)) {
+      k1 = k0;
+    } else if (t >= Number(k1.t || 0)) {
+      k0 = k1;
+    } else {
+      for (let i = 0; i < track.length - 1; i++) {
+        const a = track[i];
+        const b = track[i + 1];
+        if (t >= Number(a.t || 0) && t <= Number(b.t || 0)) {
+          k0 = a;
+          k1 = b;
+          break;
+        }
+      }
+    }
+    const u = k0 === k1 ? 0 : invLerp(Number(k0.t || 0), Number(k1.t || 0), t);
+    const s = Math.max(1e-4, lerp(Number(k0.s ?? 1), Number(k1.s ?? 1), u));
+    const tx = lerp(Number(k0.tx || 0), Number(k1.tx || 0), u);
+    const ty = lerp(Number(k0.ty || 0), Number(k1.ty || 0), u);
+    const rot = lerp(Number(k0.rot || 0), Number(k1.rot || 0), u);
+    const rad = (rot * Math.PI) / 180;
+    const a = s * Math.cos(rad);
+    const b = -s * Math.sin(rad);
+    const c = s * Math.sin(rad);
+    const d = s * Math.cos(rad);
+    const s2 = s * s;
+    const cx = W * 0.5 - (a * tx + c * ty) / s2;
+    const cy = H * 0.5 - (b * tx + d * ty) / s2;
+    return { s, cx, cy, rot };
+  }
+
+  function applyTrackedCamera(ctx, track, localT, W = 1080, H = 1920) {
+    const cam = evalCameraTrack(track, localT, W, H);
+    if (!cam) return false;
+    applyCamera(ctx, cam, W, H);
+    return true;
   }
 
   /**
@@ -2078,6 +2411,546 @@
     });
   }
 
+  /**
+   * MotionCraft-inspired progressive left-to-right character blur-rise reveal with 3D Z-depth zoom
+   * (far + small + heavily blurred -> close + full-size + solid sharp).
+   * Locks exact full-string kerning width via `ctx.measureText(text.slice(0, i)).width` so characters
+   * never reflow while zooming in from `scaleFrom` (`0.28 -> 1.0`) and unblurring left-to-right.
+   */
+  function drawBlurRevealText(ctx, text, x, y, t, tStart = 0, dur = 0.45, opts = {}) {
+    if (!ctx || typeof text !== "string" || text.length === 0) return;
+    const elapsed = Number(t) - Number(tStart);
+    const preBlurSec = Number(opts.preBlurSec) || 0;
+    if (elapsed < -preBlurSec) return;
+
+    const totalDur = Math.max(0.08, Number(dur) || 0.45);
+    const maxBlur = Number.isFinite(Number(opts.maxBlur)) ? Number(opts.maxBlur) : 18;
+    const risePx = Number.isFinite(Number(opts.risePx)) ? Number(opts.risePx) : 14;
+    const scaleFrom =
+      opts.depthZoom === false
+        ? 1.0
+        : Number.isFinite(Number(opts.scaleFrom))
+        ? clamp(Number(opts.scaleFrom), 0.12, 1.5)
+        : 0.30;
+    const baseColor = opts.color || ctx.fillStyle || "#111116";
+    const inkStart = opts.inkStart || null;
+    const baseAlpha = Number.isFinite(Number(opts.alpha)) ? Number(opts.alpha) : 1;
+
+    ctx.save();
+    if (opts.font) ctx.font = opts.font;
+    if (opts.textBaseline) ctx.textBaseline = opts.textBaseline;
+    const align = opts.textAlign || ctx.textAlign || "left";
+    ctx.textAlign = "left";
+
+    const fullW = ctx.measureText ? ctx.measureText(text).width : text.length * 24;
+    let startX = Number(x) || 0;
+    if (align === "center") startX -= fullW * 0.5;
+    else if (align === "right" || align === "end") startX -= fullW;
+    const baseY = Number(y) || 0;
+    const pivotX = startX + fullW * (Number.isFinite(Number(opts.zoomPivotX)) ? Number(opts.zoomPivotX) : 0.16);
+    const pivotY = baseY - 22;
+
+    // Pre-reveal far-away soft blurred ghost preview (e.g. "shows" pre-blurring beneath "research")
+    if (elapsed < 0) {
+      const preU = clamp((elapsed + preBlurSec) / Math.max(0.02, preBlurSec), 0, 1);
+      const preScale = lerp(scaleFrom * 0.78, scaleFrom, ease.outQuad(preU));
+      ctx.globalAlpha = baseAlpha * preU * 0.35;
+      ctx.filter = `blur(${(maxBlur * 0.95).toFixed(1)}px)`;
+      ctx.fillStyle = inkStart && typeof baseColor === "string" && baseColor[0] === "#"
+        ? mixHex(inkStart, baseColor, 0.3)
+        : baseColor;
+      ctx.translate(pivotX, pivotY);
+      ctx.scale(preScale, preScale);
+      ctx.translate(-pivotX, -pivotY);
+      ctx.fillText(text, startX, baseY + risePx * 0.5);
+      ctx.restore();
+      return;
+    }
+
+    const exitAt = Number.isFinite(Number(opts.exitAt)) ? Number(opts.exitAt) : null;
+    const exitDur = Math.max(0.06, Number(opts.exitDur) || 0.28);
+    if (exitAt !== null && Number(t) >= exitAt + exitDur) {
+      ctx.restore();
+      return;
+    }
+    const isExiting = exitAt !== null && Number(t) >= exitAt;
+
+    // Fast path once all characters have completely zoomed in and settled solid (before any exit window)
+    if (!isExiting && elapsed >= totalDur + 0.08) {
+      ctx.globalAlpha = baseAlpha;
+      ctx.filter = "none";
+      ctx.fillStyle = baseColor;
+      ctx.fillText(text, startX, baseY);
+      ctx.restore();
+      return;
+    }
+
+    // 3D Z-depth camera approach: zooms smoothly from far/small (scaleFrom) to close/solid (1.0),
+    // and smoothly blurs/drifts out when `exitAt` is reached.
+    const wordU = clamp(elapsed / totalDur, 0, 1);
+    const exitWordU = isExiting ? clamp((Number(t) - exitAt) / exitDur, 0, 1) : 0;
+    const wordScale = lerp(scaleFrom, 1.0, ease.outCubic(wordU)) * lerp(1.0, 0.90, ease.inQuad(exitWordU));
+    if (Math.abs(wordScale - 1.0) > 0.002) {
+      ctx.translate(pivotX, pivotY);
+      ctx.scale(wordScale, wordScale);
+      ctx.translate(-pivotX, -pivotY);
+    }
+
+    const chars = Array.from(text);
+    const n = chars.length;
+    const staggerSpan = totalDur * 0.58;
+    const charDur = Math.max(0.06, totalDur * 0.48);
+    const stepDelay = n > 1 ? staggerSpan / (n - 1) : 0;
+    const exitStaggerSpan = exitDur * 0.45;
+    const exitCharDur = Math.max(0.05, exitDur * 0.60);
+    const exitStepDelay = n > 1 ? exitStaggerSpan / (n - 1) : 0;
+
+    let prefix = "";
+    for (let i = 0; i < n; i++) {
+      const ch = chars[i];
+      const offsetX = prefix.length > 0 && ctx.measureText ? ctx.measureText(prefix).width : i * 22;
+      prefix += ch;
+      if (ch === " ") continue;
+
+      const cElapsed = elapsed - i * stepDelay;
+      // Right-hand characters already appear dimly in deep blur while left-hand characters solidify
+      const u = clamp((cElapsed + charDur * 0.32) / (charDur * 1.32), 0, 1);
+      if (u <= 0.01) continue;
+      const eOut = ease.outCubic(u);
+      const sp = spring(Math.max(0, cElapsed), { stiffness: 150, damping: 12, mass: 0.7 });
+      let blurPx = Math.pow(1 - eOut, 1.15) * maxBlur;
+      let dy = (1 - clamp(sp, 0, 1.12)) * risePx;
+      let cAlpha = clamp(0.14 + Math.pow(u, 1.25) * 0.96, 0.12, 1) * baseAlpha;
+      let charScale = lerp(0.84, 1.0, eOut);
+
+      if (isExiting) {
+        const cExitU = clamp((Number(t) - exitAt - i * exitStepDelay) / exitCharDur, 0, 1);
+        if (cExitU >= 0.995) continue;
+        const eEx = ease.inQuad(cExitU);
+        blurPx = Math.max(blurPx, eEx * maxBlur);
+        dy -= eEx * risePx * 0.75;
+        cAlpha *= 1 - eEx;
+        charScale *= lerp(1.0, 0.88, eEx);
+      }
+
+      ctx.save();
+      ctx.globalAlpha = cAlpha;
+      ctx.filter = blurPx > 0.45 ? `blur(${blurPx.toFixed(1)}px)` : "none";
+      if (inkStart && typeof baseColor === "string" && baseColor[0] === "#") {
+        ctx.fillStyle = mixHex(inkStart, baseColor, eOut);
+      } else {
+        ctx.fillStyle = baseColor;
+      }
+      const gx = startX + offsetX;
+      const gy = baseY + dy;
+      ctx.translate(gx, gy);
+      ctx.scale(charScale, charScale);
+      ctx.fillText(ch, 0, 0);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  /**
+   * MotionCraft `<Word>` staggered word-by-word spring rise + optical blur + ink-tint transition,
+   * with faster exit than entrance (`exitDur = 0.28s` vs `enterDur = 0.38s`).
+   */
+  function drawBlurRiseWords(ctx, wordsOrText, x, y, t, tStart = 0, opts = {}) {
+    if (!ctx || !wordsOrText) return;
+    const words = Array.isArray(wordsOrText)
+      ? wordsOrText.map(String)
+      : String(wordsOrText).trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0) return;
+
+    const stepDelay = Number.isFinite(Number(opts.stagger)) ? Number(opts.stagger) : 0.12;
+    const enterDur = Number.isFinite(Number(opts.enterDur)) ? Number(opts.enterDur) : 0.38;
+    const maxBlur = Number.isFinite(Number(opts.maxBlur)) ? Number(opts.maxBlur) : 10;
+    const risePx = Number.isFinite(Number(opts.risePx)) ? Number(opts.risePx) : 18;
+    const exitAt = Number.isFinite(Number(opts.exitAt)) ? Number(opts.exitAt) : null;
+    const exitDur = Number.isFinite(Number(opts.exitDur)) ? Number(opts.exitDur) : 0.28;
+    const baseColor = opts.color || ctx.fillStyle || "#16181D";
+    const inkStart = opts.inkStart || null;
+
+    ctx.save();
+    if (opts.font) ctx.font = opts.font;
+    if (opts.textBaseline) ctx.textBaseline = opts.textBaseline;
+    const align = opts.textAlign || ctx.textAlign || "left";
+    ctx.textAlign = "left";
+
+    const spaceW = ctx.measureText ? ctx.measureText(" ").width : 12;
+    const widths = words.map((w) => (ctx.measureText ? ctx.measureText(w).width : w.length * 20));
+    const totalW = widths.reduce((a, b) => a + b, 0) + Math.max(0, words.length - 1) * spaceW;
+    let cursorX = Number(x) || 0;
+    if (align === "center") cursorX -= totalW * 0.5;
+    else if (align === "right" || align === "end") cursorX -= totalW;
+
+    for (let i = 0; i < words.length; i++) {
+      const wStart = Number(tStart) + i * stepDelay;
+      const wW = widths[i];
+      let exitMul = 1;
+      let exitDy = 0;
+      let exitBlur = 0;
+      if (exitAt !== null && Number(t) > exitAt + i * (stepDelay * 0.5)) {
+        const eu = clamp((Number(t) - (exitAt + i * (stepDelay * 0.5))) / Math.max(0.05, exitDur), 0, 1);
+        const eIn = ease.inCubic(eu);
+        exitMul = 1 - eIn;
+        exitDy = -eIn * (risePx * 0.75);
+        exitBlur = eIn * (maxBlur * 0.8);
+      }
+      if (exitMul > 0.01) {
+        drawBlurRevealText(ctx, words[i], cursorX, Number(y) + exitDy, t, wStart, enterDur, {
+          maxBlur: maxBlur + exitBlur,
+          risePx,
+          color: baseColor,
+          inkStart,
+          alpha: exitMul,
+          preBlurSec: opts.preBlurSec || 0,
+        });
+      }
+      cursorX += wW + spaceW;
+    }
+    ctx.restore();
+  }
+
+  /**
+   * MotionCraft `<Headline>` balanced multi-line breaker using `ctx.measureText` with zero orphan words.
+   */
+  function layoutBalancedHeadline(ctx, text, maxWidth = 800) {
+    const clean = String(text || "").trim();
+    if (!clean) return [];
+    const words = clean.split(/\s+/).filter(Boolean);
+    if (words.length <= 1) return [clean];
+    const measure = (s) => (ctx && typeof ctx.measureText === "function" ? ctx.measureText(s).width : s.length * 22);
+    if (measure(clean) <= maxWidth) return [clean];
+
+    // Find optimal 2-line balanced split avoiding 1-word orphan on line 2 when words.length >= 4
+    if (words.length >= 2) {
+      let bestIdx = 1;
+      let bestScore = Infinity;
+      const minSecondLineWords = words.length >= 4 ? 2 : 1;
+      for (let split = 1; split <= words.length - minSecondLineWords; split++) {
+        const l1 = words.slice(0, split).join(" ");
+        const l2 = words.slice(split).join(" ");
+        const w1 = measure(l1);
+        const w2 = measure(l2);
+        const overPenalty = (Math.max(0, w1 - maxWidth) + Math.max(0, w2 - maxWidth)) * 4;
+        const diff = Math.abs(w1 - w2) + overPenalty;
+        if (diff < bestScore) {
+          bestScore = diff;
+          bestIdx = split;
+        }
+      }
+      const bestL1 = words.slice(0, bestIdx).join(" ");
+      const bestL2 = words.slice(bestIdx).join(" ");
+      if (measure(bestL1) <= maxWidth * 1.15 && measure(bestL2) <= maxWidth * 1.15) {
+        return [bestL1, bestL2];
+      }
+    }
+
+    // Greedy wrap fallback with orphan prevention on last line
+    const lines = [];
+    let cur = words[0];
+    for (let i = 1; i < words.length; i++) {
+      const cand = `${cur} ${words[i]}`;
+      if (measure(cand) <= maxWidth) {
+        cur = cand;
+      } else {
+        lines.push(cur);
+        cur = words[i];
+      }
+    }
+    if (cur) lines.push(cur);
+    if (lines.length >= 2 && !lines[lines.length - 1].includes(" ")) {
+      const prevWords = lines[lines.length - 2].split(" ");
+      if (prevWords.length >= 3) {
+        const moved = prevWords.pop();
+        lines[lines.length - 2] = prevWords.join(" ");
+        lines[lines.length - 1] = `${moved} ${lines[lines.length - 1]}`;
+      }
+    }
+    return lines;
+  }
+
+  let _ttSrcBuf = null;
+  let _ttDstBuf = null;
+
+  function _ensureTurntableBuffers(bw, bh) {
+    if (typeof document === "undefined" || typeof document.createElement !== "function") {
+      return null;
+    }
+    if (!_ttSrcBuf || _ttSrcBuf.width !== bw || _ttSrcBuf.height !== bh) {
+      _ttSrcBuf = document.createElement("canvas");
+      _ttSrcBuf.width = bw;
+      _ttSrcBuf.height = bh;
+      _ttDstBuf = document.createElement("canvas");
+      _ttDstBuf.width = bw;
+      _ttDstBuf.height = bh;
+    }
+    return { src: _ttSrcBuf, dst: _ttDstBuf };
+  }
+
+  /**
+   * True 3D Ellipsoid Y-Axis Turntable Surface Shader + spinning orbital dashed ring helper
+   * for 3D hero objects/images (e.g. rotating brain, globe, coin, icon).
+   * Rolls internal surface details/gyri across the curved 3D hemisphere with spherical cosine
+   * foreshortening at the edges and a dynamic 3D directional lighting sweep.
+   */
+  function drawTurntableObject(ctx, cx, cy, t, drawFnOrImg, opts = {}) {
+    if (!ctx) return;
+    const sec = Number(t) || 0;
+    const rawOmega = Number.isFinite(Number(opts.omega)) ? Number(opts.omega) : 2.1;
+    // Clamp ultra-slow positive omegas (< 1.25 rad/s) up to 1.45 so 3D rotation is visibly readable over short 2-4s scenes
+    const omega = rawOmega === 0 ? 0 : (Math.abs(rawOmega) < 1.25 ? Math.sign(rawOmega) * 1.45 : rawOmega);
+    const depth = clamp(Number.isFinite(Number(opts.depth)) ? Number(opts.depth) : 0.26, 0, 0.48);
+    const tiltRad = Number.isFinite(Number(opts.tiltRad)) ? Number(opts.tiltRad) : 0.055;
+    const floatPx = Number.isFinite(Number(opts.floatPx)) ? Number(opts.floatPx) : 4.5;
+    const w = Math.max(32, Math.round(Number(opts.w) || 260));
+    const h = Math.max(32, Math.round(Number(opts.h) || 220));
+
+    // 1. Optional continuous spinning dashed orbital ring
+    const ringR = Number(opts.ringRadius) || 0;
+    if (ringR > 4) {
+      const ringOmega = Number.isFinite(Number(opts.ringOmega)) ? Number(opts.ringOmega) : 0.65;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(sec * ringOmega);
+      ctx.strokeStyle = opts.ringColor || "rgba(80, 80, 88, 0.58)";
+      ctx.lineWidth = Number(opts.ringLineWidth) || 1.8;
+      if (typeof ctx.setLineDash === "function") {
+        ctx.setLineDash(Array.isArray(opts.ringDash) ? opts.ringDash : [6, 8]);
+      }
+      ctx.beginPath();
+      ctx.arc(0, 0, ringR, 0, TAU);
+      ctx.stroke();
+      if (typeof ctx.setLineDash === "function") ctx.setLineDash([]);
+      ctx.restore();
+    }
+
+    const phase = sec * omega;
+    const rock = Math.sin(phase * 0.75) * tiltRad;
+    const dy = Math.sin(sec * 2.5) * floatPx;
+    const dx = Math.sin(phase) * (w * 0.03);
+
+    // 2. Try 3D Ellipsoid Spherical Surface Turntable Warp via offscreen pixel buffer
+    const pad = 28;
+    const bw = w + pad * 2;
+    const bh = h + pad * 2;
+    const bufs = _ensureTurntableBuffers(bw, bh);
+    const sCtx = bufs && bufs.src && typeof bufs.src.getContext === "function" ? bufs.src.getContext("2d") : null;
+    const dCtx = bufs && bufs.dst && typeof bufs.dst.getContext === "function" ? bufs.dst.getContext("2d") : null;
+
+    if (sCtx && dCtx && typeof sCtx.getImageData === "function" && typeof ctx.drawImage === "function") {
+      sCtx.setTransform(1, 0, 0, 1, 0, 0);
+      sCtx.clearRect(0, 0, bw, bh);
+      sCtx.save();
+      sCtx.translate(bw * 0.5, bh * 0.5);
+      if (typeof drawFnOrImg === "function") {
+        drawFnOrImg(sCtx, w, h, phase);
+      } else if (drawFnOrImg) {
+        drawImageFit(sCtx, drawFnOrImg, -w * 0.5, -h * 0.5, w, h, opts.fitMode || "contain");
+      }
+      sCtx.restore();
+
+      try {
+        const srcImg = sCtx.getImageData(0, 0, bw, bh);
+        const sData = srcImg.data;
+        // Find tight active bounding box to verify non-empty render and speed up 3D warp
+        let minX = bw, minY = bh, maxX = -1, maxY = -1;
+        for (let y = 0; y < bh; y += 2) {
+          const rowOff = y * bw * 4;
+          for (let x = 0; x < bw; x += 2) {
+            if (sData[rowOff + x * 4 + 3] > 10) {
+              if (x < minX) minX = x;
+              if (x > maxX) maxX = x;
+              if (y < minY) minY = y;
+              if (y > maxY) maxY = y;
+            }
+          }
+        }
+        if (maxX > minX + 6 && maxY > minY + 6) {
+          minX = Math.max(0, minX - 4);
+          minY = Math.max(0, minY - 4);
+          maxX = Math.min(bw - 1, maxX + 4);
+          maxY = Math.min(bh - 1, maxY + 4);
+          const objCx = (minX + maxX) * 0.5;
+          const objCy = (minY + maxY) * 0.5;
+          const rx = Math.max(12, (maxX - minX) * 0.5);
+          const ry = Math.max(12, (maxY - minY) * 0.5);
+
+          const dstImg = dCtx.createImageData(bw, bh);
+          const dData = dstImg.data;
+          // True 360-degree continuous 3D Y-axis turntable rotation (default) using dual-phase spherical
+          // flow-map longitude wrapping so surface details roll endlessly in one direction across the curved
+          // hemisphere with genuine asin(nx) limb compression, zero seam pop, and rotating directional lighting.
+          // Pass `opts.spinMode = "rock"` to explicitly request bounded oscillation instead.
+          const isRockMode = opts.spinMode === "rock";
+          const yaw = Math.sin(phase) * (0.58 + depth * 0.72);
+          const pitch = Math.cos(phase * 0.7) * 0.14;
+          const cosY = Math.cos(yaw);
+          const sinY = Math.sin(yaw);
+          const spinRad = phase * (0.68 + depth * 0.45);
+          const lightX = Math.cos(phase * 0.9) * 0.65;
+          const lightY = -0.24;
+          const lightZ = 0.72 + Math.sin(phase * 0.9) * 0.12;
+
+          for (let y = minY; y <= maxY; y++) {
+            const ny = (y - objCy) / ry;
+            const ny2 = ny * ny;
+            const rowOff = y * bw * 4;
+            for (let x = minX; x <= maxX; x++) {
+              const dIdx = rowOff + x * 4;
+              const a0 = sData[dIdx + 3];
+              if (a0 === 0) continue;
+
+              const nx = (x - objCx) / rx;
+              const r2 = nx * nx + ny2;
+              const clampedR2 = Math.min(0.96, r2);
+              const nz = Math.sqrt(Math.max(0.04, 1.0 - clampedR2));
+
+              // Dynamic 3D Lambertian + limb ambient occlusion + specular highlight sweep
+              const lambert = nx * lightX + ny * lightY + nz * lightZ;
+              const limbAo = 0.78 + 0.22 * nz;
+              const shade = clamp((0.84 + lambert * 0.28) * limbAo, 0.58, 1.24);
+              const spec = Math.max(0, lambert - 0.56) * 48;
+
+              let rCol, gCol, bCol;
+              if (isRockMode) {
+                const uSurf = clamp(nx * cosY - nz * sinY * 0.78, -0.96, 0.96);
+                const vSurf = clamp(ny - nz * pitch * 0.30, -0.96, 0.96);
+                const sxPx = clamp(Math.round(objCx + uSurf * rx), minX, maxX);
+                const syPx = clamp(Math.round(objCy + vSurf * ry), minY, maxY);
+                const sIdx = (syPx * bw + sxPx) * 4;
+                const useIdx = sData[sIdx + 3] > 32 ? sIdx : dIdx;
+                rCol = sData[useIdx];
+                gCol = sData[useIdx + 1];
+                bCol = sData[useIdx + 2];
+              } else {
+                const theta = Math.asin(clamp(nx, -0.985, 0.985));
+                const p1 = ((((theta + spinRad) / Math.PI) % 1) + 1) % 1;
+                const p2 = p1 >= 0.5 ? p1 - 0.5 : p1 + 0.5;
+                const u1 = (p1 * 2 - 1) * 0.92;
+                const u2 = (p2 * 2 - 1) * 0.92;
+                const vSurf = clamp(ny - nz * pitch * 0.22, -0.95, 0.95);
+                const syPx = clamp(Math.round(objCy + vSurf * ry), minY, maxY);
+                const sx1 = clamp(Math.round(objCx + u1 * rx), minX, maxX);
+                const sx2 = clamp(Math.round(objCx + u2 * rx), minX, maxX);
+                const sIdx1 = (syPx * bw + sx1) * 4;
+                const sIdx2 = (syPx * bw + sx2) * 4;
+                const ok1 = sData[sIdx1 + 3] > 32;
+                const ok2 = sData[sIdx2 + 3] > 32;
+                const edgeT = clamp((Math.abs(u1) - 0.54) / 0.38, 0, 1);
+                const wb = edgeT * edgeT * (3 - 2 * edgeT);
+                if (ok1 && ok2) {
+                  const wa = 1 - wb;
+                  rCol = sData[sIdx1] * wa + sData[sIdx2] * wb;
+                  gCol = sData[sIdx1 + 1] * wa + sData[sIdx2 + 1] * wb;
+                  bCol = sData[sIdx1 + 2] * wa + sData[sIdx2 + 2] * wb;
+                } else {
+                  const useIdx = ok1 ? sIdx1 : (ok2 ? sIdx2 : dIdx);
+                  rCol = sData[useIdx];
+                  gCol = sData[useIdx + 1];
+                  bCol = sData[useIdx + 2];
+                }
+              }
+
+              dData[dIdx] = clamp(Math.round(rCol * shade + spec), 0, 255);
+              dData[dIdx + 1] = clamp(Math.round(gCol * shade + spec), 0, 255);
+              dData[dIdx + 2] = clamp(Math.round(bCol * shade + spec * 0.85), 0, 255);
+              dData[dIdx + 3] = a0;
+            }
+          }
+
+          dCtx.putImageData(dstImg, 0, 0);
+          const silSx = isRockMode
+            ? 1 - depth * 0.42 * (0.5 - 0.5 * Math.cos(phase))
+            : 1 - depth * 0.24 * (0.5 - 0.5 * Math.cos(phase * 2));
+          const silSy = 1 + depth * 0.12 * Math.sin(phase);
+          ctx.save();
+          ctx.translate(cx + dx, cy + dy);
+          ctx.rotate(rock);
+          ctx.scale(silSx, silSy);
+          ctx.drawImage(bufs.dst, -bw * 0.5, -bh * 0.5);
+          ctx.restore();
+          return;
+        }
+      } catch (_) {
+        // Fallback to 2D affine turntable below
+      }
+    }
+
+    // 3. Fallback 2D affine foreshortening + rock
+    const sx = 1 - depth * (0.5 - 0.5 * Math.cos(phase));
+    const sy = 1 + depth * 0.18 * Math.sin(phase);
+    ctx.save();
+    ctx.translate(cx + dx, cy + dy);
+    ctx.rotate(rock);
+    ctx.scale(sx, sy);
+    if (typeof drawFnOrImg === "function") {
+      drawFnOrImg(ctx, w, h, phase);
+    } else if (drawFnOrImg) {
+      drawImageFit(ctx, drawFnOrImg, -w * 0.5, -h * 0.5, w, h, opts.fitMode || "contain");
+    }
+    ctx.restore();
+  }
+
+  /**
+   * MotionCraft `<MorphTransition>` vertex-matched polygon morph between `ptsA` and `ptsB` at progress `p` (0..1).
+   */
+  function drawMorphPolygon(ctx, ptsA, ptsB, p, opts = {}) {
+    if (!ctx || !Array.isArray(ptsA) || !Array.isArray(ptsB) || ptsA.length === 0 || ptsB.length === 0) {
+      return [];
+    }
+    const norm = (arr) =>
+      arr.map((pt) =>
+        Array.isArray(pt)
+          ? { x: Number(pt[0]) || 0, y: Number(pt[1]) || 0 }
+          : { x: Number(pt.x) || 0, y: Number(pt.y) || 0 }
+      );
+    const a = norm(ptsA);
+    const b = norm(ptsB);
+    const count = Math.max(a.length, b.length);
+    const u = clamp(Number(p) || 0, 0, 1);
+    const morphed = [];
+    for (let i = 0; i < count; i++) {
+      const pa = a[Math.min(a.length - 1, Math.floor((i * a.length) / count))];
+      const pb = b[Math.min(b.length - 1, Math.floor((i * b.length) / count))];
+      morphed.push({
+        x: lerp(pa.x, pb.x, u),
+        y: lerp(pa.y, pb.y, u),
+      });
+    }
+
+    if (opts.draw !== false && morphed.length >= 3) {
+      ctx.save();
+      if (Number.isFinite(Number(opts.cx)) || Number.isFinite(Number(opts.cy))) {
+        ctx.translate(Number(opts.cx) || 0, Number(opts.cy) || 0);
+      }
+      if (Number.isFinite(Number(opts.rot)) && Number(opts.rot) !== 0) {
+        ctx.rotate(Number(opts.rot));
+      }
+      if (Number.isFinite(Number(opts.scale)) && Number(opts.scale) !== 1) {
+        ctx.scale(Number(opts.scale), Number(opts.scale));
+      }
+      ctx.beginPath();
+      ctx.moveTo(morphed[0].x, morphed[0].y);
+      for (let i = 1; i < morphed.length; i++) {
+        ctx.lineTo(morphed[i].x, morphed[i].y);
+      }
+      ctx.closePath();
+      if (opts.fill) {
+        ctx.fillStyle = opts.fill;
+        ctx.fill();
+      }
+      if (opts.stroke) {
+        ctx.strokeStyle = opts.stroke;
+        ctx.lineWidth = Number(opts.lineWidth) || 2;
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    return morphed;
+  }
+
   const API = {
     TAU,
     clamp,
@@ -2119,6 +2992,9 @@
     registerScene,
     getSceneRenderer,
     resolveScene,
+    evalCurve,
+    resolveTransition,
+    renderFrameWithTransitions,
     roundRect,
     fillRoundRect,
     strokeRoundRect,
@@ -2145,6 +3021,13 @@
     drawTaperedRibbon,
     impactRecoil,
     twistPolygon,
+    drawBlurRevealText,
+    drawBlurRiseWords,
+    layoutBalancedHeadline,
+    drawTurntableObject,
+    drawMorphPolygon,
+    evalCameraTrack,
+    applyTrackedCamera,
   };
 
   global.AetheriaMotion = API;
