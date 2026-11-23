@@ -59,6 +59,57 @@ def _foreground_box_and_mask(
     return [x0, y0, max(1, x1 - x0), max(1, y1 - y0)], clean, ratio
 
 
+def _extract_top_foreground_components(
+    clean_mask: np.ndarray,
+    width: int,
+    height: int,
+    max_components: int = 3,
+) -> List[Dict[str, Any]]:
+    """Extracts up to `max_components` spatially separate foreground objects via horizontal-biased close."""
+    if clean_mask is None or clean_mask.size == 0:
+        return []
+    mh, mw = clean_mask.shape[:2]
+    if mh <= 0 or mw <= 0:
+        return []
+    kx = max(7, min(25, int(mw) // 48))
+    ky = max(5, min(17, int(mh) // 96))
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kx, ky))
+    grouped = cv2.morphologyEx((clean_mask > 0).astype(np.uint8) * 255, cv2.MORPH_CLOSE, kernel)
+    num_labels, _, stats, _ = cv2.connectedComponentsWithStats(grouped, connectivity=8)
+    mask_area = max(1, mw * mh)
+    min_area = max(36, int(mask_area * 0.0002))
+    max_box_area = int(mask_area * 0.72)
+    sx = float(width) / float(mw)
+    sy = float(height) / float(mh)
+    comps: List[Tuple[int, Dict[str, Any]]] = []
+    for lbl in range(1, num_labels):
+        area = int(stats[lbl, cv2.CC_STAT_AREA])
+        if area < min_area:
+            continue
+        bx = int(stats[lbl, cv2.CC_STAT_LEFT])
+        by = int(stats[lbl, cv2.CC_STAT_TOP])
+        bw = int(stats[lbl, cv2.CC_STAT_WIDTH])
+        bh = int(stats[lbl, cv2.CC_STAT_HEIGHT])
+        if bw <= 0 or bh <= 0 or (bw * bh) >= max_box_area:
+            continue
+        out_x = int(round(bx * sx))
+        out_y = int(round(by * sy))
+        out_w = max(1, int(round(bw * sx)))
+        out_h = max(1, int(round(bh * sy)))
+        comps.append(
+            (
+                area,
+                {
+                    "box": [out_x, out_y, out_w, out_h],
+                    "center": [out_x + out_w // 2, out_y + out_h // 2],
+                    "areaFrac": round(float(area) / float(mask_area), 4),
+                },
+            )
+        )
+    comps.sort(key=lambda item: item[0], reverse=True)
+    return [item[1] for item in comps[:max_components]]
+
+
 def extract_saturated_accent_callouts(
     sampled_frames: List[Tuple[float, np.ndarray]],
 ) -> List[Dict[str, Any]]:
@@ -407,18 +458,29 @@ def extract_scene_motion_clues(
     saw_vertical_slot = False
     mid_idx = len(sampled) // 2
     last_idx = max(0, len(sampled) - 1)
+    ocr_slice_indices = (
+        {0, 1, 2, mid_idx, max(0, last_idx - 1), last_idx}
+        if len(sampled) > 4
+        else set(range(len(sampled)))
+    )
 
     for s_idx, (ts, fr) in enumerate(sampled):
-        box, _, ratio = _foreground_box_and_mask(fr, bg_bgr)
+        box, clean_mask, ratio = _foreground_box_and_mask(fr, bg_bgr)
         should_run_ocr = (
             ocr_summary_fn is not None
             and 0.004 <= ratio <= 0.65
-            and (s_idx in (0, mid_idx, last_idx) or len(sampled) <= 4)
+            and s_idx in ocr_slice_indices
         )
         raw_words = ocr_summary_fn(fr) if should_run_ocr else []
         words = sanitize_ocr_tokens_for_clues(raw_words)
         raw_ocr_per_slice.append((ts, raw_words, box))
-        entry: Dict[str, Any] = {"t": round(ts, 2)}
+        entry: Dict[str, Any] = {
+            "t": round(ts, 2),
+            "localT": round(max(0.0, ts - start), 3),
+        }
+        comps = _extract_top_foreground_components(clean_mask, width, height, max_components=3)
+        if comps:
+            entry["objects"] = comps
         if box:
             bx, by, bw, bh = box
             area_frac = float(bw * bh) / float(max(1, width * height))
@@ -504,6 +566,22 @@ def extract_scene_motion_clues(
             "exit": exit_anchor,
         },
     }
+    try:
+        from ref_element_tracks import extract_scene_element_tracks
+
+        el_tracks = extract_scene_element_tracks(frame_at_fn, start, end, width, height)
+        if el_tracks:
+            out["elementTracks"] = el_tracks
+    except Exception:
+        pass
+    try:
+        from ref_motion_kinematics import extract_scene_motion_kinematics
+
+        kinematics = extract_scene_motion_kinematics(frame_at_fn, start, end, width, height)
+        if kinematics:
+            out["kinematics"] = kinematics
+    except Exception:
+        pass
     if hero_card_info is not None:
         out["heroCardBox"] = hero_card_info["heroCardBox"]
         out["blurredBackdrop"] = hero_card_info["blurredBackdrop"]

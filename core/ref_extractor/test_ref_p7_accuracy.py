@@ -345,6 +345,88 @@ class RefExtractorP7AccuracyTests(unittest.TestCase):
         self.assertEqual(reconciled_tw_light["bgHex"], "#0C0B0E")
         self.assertTrue(reconciled_tw_light["isDark"])
 
+    def test_r1_isolated_shared_bg_hard_cut_detected_without_early_soft_cut(self) -> None:
+        w, h, fps = 640, 360, 30.0
+
+        def _grid_frame(variant: int) -> np.ndarray:
+            fr = np.full((h, w, 3), (222, 224, 224), dtype=np.uint8)
+            for gx in range(20, w, 40):
+                cv2.line(fr, (gx, 0), (gx, h), (204, 206, 206), 1)
+            for gy in range(20, h, 40):
+                cv2.line(fr, (0, gy), (w, gy), (204, 206, 206), 1)
+            if variant == 1:
+                cv2.rectangle(fr, (110, 65), (340, 290), (24, 24, 28), -1)
+                cv2.circle(fr, (460, 180), 75, (184, 5, 118), -1)
+            else:
+                cv2.rectangle(fr, (190, 50), (255, 295), (210, 120, 30), -1)
+                cv2.rectangle(fr, (280, 90), (345, 295), (170, 50, 125), -1)
+                cv2.rectangle(fr, (370, 70), (435, 295), (50, 150, 240), -1)
+            return fr
+
+        f1 = _grid_frame(1)
+        f2 = _grid_frame(2)
+        with tempfile.TemporaryDirectory(prefix="p7_shared_bg_cut_") as tmp:
+            td = Path(tmp)
+            mp4 = td / "shared_bg.mp4"
+            writer = cv2.VideoWriter(str(mp4), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+            self.assertTrue(writer.isOpened())
+            for _ in range(45):
+                writer.write(f1)
+            for _ in range(45):
+                writer.write(f2)
+            writer.release()
+
+            cap = cv2.VideoCapture(str(mp4))
+            scan = ref_temporal_cuts.scan_motion_timeline_accurate(cap, 90, fps, 3.0)
+            cap.release()
+            non_start = [c for c in scan["cuts"] if c["evidence"] != "start"]
+            self.assertEqual(len(non_start), 1, f"expected single cut at frame 45, got {non_start}")
+            self.assertEqual(non_start[0]["evidence"], "hard", f"expected hard cut, got {non_start}")
+            self.assertLessEqual(abs(int(non_start[0]["frame"]) - 45), 1, f"cut drifted: {non_start}")
+
+    def test_r1_bright_plate_layout_swap_splits_long_span_without_chopping_short_scene(self) -> None:
+        w, h, fps = 640, 360, 30.0
+
+        def _bright_plate_frame(phase: int, slide_px: int = 0) -> np.ndarray:
+            fr = np.full((h, w, 3), (220, 222, 222), dtype=np.uint8)
+            for gx in range(20, w, 40):
+                cv2.line(fr, (gx, 0), (gx, h), (204, 206, 206), 1)
+            for gy in range(20, h, 40):
+                cv2.line(fr, (0, gy), (w, gy), (204, 206, 206), 1)
+            if phase == 1:
+                cv2.circle(fr, (180 + slide_px, 140), 42, (28, 28, 32), -1)
+                cv2.rectangle(fr, (110 + slide_px, 210), (260 + slide_px, 250), (140, 20, 120), -1)
+            else:
+                cv2.rectangle(fr, (380 + slide_px, 60), (540 + slide_px, 270), (220, 120, 35), -1)
+                cv2.circle(fr, (460 + slide_px, 310), 28, (35, 160, 45), -1)
+            return fr
+
+        with tempfile.TemporaryDirectory(prefix="p7_bp_swap_") as tmp:
+            td = Path(tmp)
+            mp4 = td / "bp_swap.mp4"
+            writer = cv2.VideoWriter(str(mp4), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+            self.assertTrue(writer.isOpened())
+            # 6.0s clip (180 frames) with smooth 10-frame slide swap at t=3.0s
+            for idx in range(180):
+                if idx < 85:
+                    writer.write(_bright_plate_frame(1, 0))
+                elif idx < 95:
+                    alpha = (idx - 85) / 10.0
+                    f_a = _bright_plate_frame(1, int(-alpha * 220))
+                    f_b = _bright_plate_frame(2, int((1.0 - alpha) * 180))
+                    writer.write(cv2.addWeighted(f_a, 1.0 - alpha, f_b, alpha, 0.0))
+                else:
+                    writer.write(_bright_plate_frame(2, 0))
+            writer.release()
+
+            cap = cv2.VideoCapture(str(mp4))
+            scan = ref_temporal_cuts.scan_motion_timeline_accurate(cap, 180, fps, 6.0)
+            cap.release()
+            non_start = [c for c in scan["cuts"] if c["evidence"] != "start"]
+            self.assertGreaterEqual(len(non_start), 1, f"expected split near 3.0s, got {scan['cuts']}")
+            nearest = min(non_start, key=lambda c: abs(c["cutSec"] - 3.0))
+            self.assertLessEqual(abs(nearest["cutSec"] - 3.0), 0.35, f"split drifted from 3.0s: {non_start}")
+
 
 if __name__ == "__main__":
     unittest.main()

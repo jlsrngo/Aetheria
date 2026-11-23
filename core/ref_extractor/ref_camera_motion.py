@@ -584,22 +584,36 @@ def _estimate_dense_flow_camera_fallback(
     tys = [0.0]
     step_mags = []
 
+    qh, qw = flow_h // 2, flow_w // 2
+    min_quad_pix = max(8, int(qh * qw * 0.015))
     for i in range(1, len(smalls)):
         flow = cv2.calcOpticalFlowFarneback(
             smalls[i - 1], smalls[i], None, 0.5, 2, 13, 2, 5, 1.1, 0
         )
         fx, fy = flow[..., 0], flow[..., 1]
-        active = (fx * fx + fy * fy) > 0.04
-        if int(np.sum(active)) < int(flow_w * flow_h * 0.12):
+        active = (fx * fx + fy * fy) > 0.08
+        active_quads = sum(
+            1
+            for qmask in (
+                active[:qh, :qw],
+                active[:qh, qw:],
+                active[qh:, :qw],
+                active[qh:, qw:],
+            )
+            if int(np.sum(qmask)) >= min_quad_pix
+        )
+        if int(np.sum(active)) < int(flow_w * flow_h * 0.12) or active_quads < 3:
             scales.append(cum_s)
             txs.append(cum_tx)
             tys.append(cum_ty)
             step_mags.append(0.0)
             continue
-        mdx = float(np.median(fx))
-        mdy = float(np.median(fy))
-        # Radial divergence (zoom) after removing median pan
-        div = float(np.median(((fx - mdx) * rx + (fy - mdy) * ry) / r_norm2)) / max(1.0, flow_w * 0.5)
+        afx = fx[active]
+        afy = fy[active]
+        mdx = float(np.median(afx))
+        mdy = float(np.median(afy))
+        # Radial divergence (zoom) measured over active pixels relative to median pan
+        div = float(np.median(((afx - mdx) * rx[active] + (afy - mdy) * ry[active]) / r_norm2[active])) / max(1.0, flow_w * 0.5)
         step_scale = float(np.clip(1.0 + div, 0.88, 1.14))
         cum_s = float(np.clip(cum_s * step_scale, 0.45, 2.6))
         cum_tx += mdx * (width / float(flow_w))
@@ -616,21 +630,25 @@ def _estimate_dense_flow_camera_fallback(
 
     local_ts = [round(max(0.0, g[1] - scene_start_sec), 3) for g in grays]
     global_ts = [round(g[1], 3) for g in grays]
+    peak_mag = max(step_mags) if step_mags else 0.0
+    active_steps = [k for k, m in enumerate(step_mags) if m >= max(0.25, peak_mag * 0.15)]
+    i0 = active_steps[0] if active_steps else 0
+    i1 = min(len(local_ts) - 1, active_steps[-1] + 1) if active_steps else len(local_ts) - 1
     peak_idx = int(np.argmax(np.asarray(step_mags, dtype=np.float64))) if step_mags else 0
     peak_sec = round(global_ts[min(len(global_ts) - 1, peak_idx + 1)], 3)
     return {
         "segments": [
             {
-                "t0": local_ts[0],
-                "t1": local_ts[-1],
-                "scaleFrom": round(scales[0], 4),
-                "scaleTo": round(scales[-1], 4),
+                "t0": local_ts[i0],
+                "t1": local_ts[i1],
+                "scaleFrom": round(scales[i0], 4),
+                "scaleTo": round(scales[i1], 4),
                 "rotDegFrom": 0.0,
                 "rotDegTo": 0.0,
-                "txFrom": round(txs[0], 2),
-                "txTo": round(txs[-1], 2),
-                "tyFrom": round(tys[0], 2),
-                "tyTo": round(tys[-1], 2),
+                "txFrom": round(txs[i0], 2),
+                "txTo": round(txs[i1], 2),
+                "tyFrom": round(tys[i0], 2),
+                "tyTo": round(tys[i1], 2),
                 "ease": "inOutCubic",
                 "confidence": "medium",
                 "backend": "dense_optical_flow",

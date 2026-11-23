@@ -71,7 +71,7 @@ def scan_motion_timeline_accurate(
 
     samples: List[Tuple[int, float, np.ndarray, np.ndarray, np.ndarray]] = []
     deltas: List[Dict[str, Any]] = []
-    structural_jumps: List[Tuple[int, float, str]] = []
+    structural_jumps: List[Tuple[int, float, str, bool]] = []
 
     # Per-frame lightweight 32x18 RGB + gray difference trace (index k corresponds to transition (k) -> (k+1), i.e. frame k+1)
     frame_diffs: List[float] = []
@@ -139,9 +139,18 @@ def scan_motion_timeline_accurate(
             if k > 0 and val <= float(diffs_arr[k - 1]):
                 continue
             local_med = _local_baseline_diff(diffs_arr, k, half_win)
+            imm_vals = [float(diffs_arr[j]) for j in (k - 1, k + 1) if 0 <= j < int(diffs_arr.size)]
+            max_imm = max(imm_vals) if imm_vals else 0.0
+            isolated_shared_bg_cut = (
+                val >= 18.0
+                and chg >= 0.22
+                and val >= max(local_med * 8.0, 18.0)
+                and max_imm <= val * 0.22
+            )
             strong_impulse = (
                 (val >= 26.0 and val >= max(local_med * 3.0, 16.0) and chg >= 0.30)
                 or (val >= 17.5 and val >= max(local_med * 4.5, 16.0) and chg >= 0.42)
+                or isolated_shared_bg_cut
             )
             if not strong_impulse:
                 continue
@@ -205,6 +214,12 @@ def scan_motion_timeline_accurate(
                 and fg_iou < 0.14
                 and (win_delta > 0.020 or local_step > 0.020 or is_fade_pause)
             )
+            is_bright_layout_swap = (
+                same_bright_plate
+                and edge_overlap < 0.11
+                and fg_iou < 0.095
+                and win_delta >= 0.032
+            )
             is_structural_shift = (
                 edge_overlap < 0.22
                 and fg_iou < 0.18
@@ -212,6 +227,7 @@ def scan_motion_timeline_accurate(
                     is_fade_pause
                     or (not same_bright_plate and (local_step > 0.032 or win_delta > 0.035))
                     or (same_bright_plate and win_delta >= 0.14)
+                    or is_bright_layout_swap
                 )
             )
             if is_structural_shift or is_dark_layout_shift:
@@ -230,10 +246,11 @@ def scan_motion_timeline_accurate(
                         if peak_v < max(med_v * 1.9, 6.0):
                             evidence_kind = "soft"
                 strength = (1.0 - edge_overlap) * 0.5 + (1.0 - fg_iou) * 0.3 + max(local_step, win_delta)
-                structural_jumps.append((refined_f, round(strength, 4), evidence_kind))
+                structural_jumps.append((refined_f, round(strength, 4), evidence_kind, bool(is_bright_layout_swap and same_bright_plate)))
 
     # 3. Combine: ALL hard cuts first, then well-separated structural/soft cuts (1.15s spacing)
     min_struct_gap = max(3, int(round(1.15 * safe_fps)))
+    min_bp_gap = max(min_struct_gap, int(round(1.60 * safe_fps)))
     combined: List[Dict[str, Any]] = []
     for cf, conf in hard_cuts_frames:
         score_val = float(diffs_arr[cf - 1]) / 255.0 + 1.0 if 0 < cf <= diffs_arr.size else 1.5
@@ -245,23 +262,25 @@ def scan_motion_timeline_accurate(
             "_rank": score_val,
         })
 
-    for jf, strength, ev_kind in sorted(structural_jumps, key=lambda x: x[1], reverse=True):
+    for jf, strength, ev_kind, is_bp_swap in sorted(structural_jumps, key=lambda x: x[1], reverse=True):
         t_sec = jf / safe_fps
         if t_sec <= 0.70 or t_sec >= max(0.5, actual_duration - 0.35):
             continue
-        if any(abs(jf - c["frame"]) < min_struct_gap for c in combined):
+        gap_frames = min_bp_gap if is_bp_swap else min_struct_gap
+        if any(abs(jf - c["frame"]) < gap_frames for c in combined):
             continue
-        # Do not split an already-short (< 4.2s) interval between two hard cuts with a weak soft cut
-        # (prevents chopping a single continuous 3.3s object morph like the glass sphere -> 4-point star in half).
+        prev_hard = max(
+            (c["cutSec"] for c in combined if c["evidence"] == "hard" and c["cutSec"] < t_sec),
+            default=0.0,
+        )
+        next_hard = min(
+            (c["cutSec"] for c in combined if c["evidence"] == "hard" and c["cutSec"] > t_sec),
+            default=actual_duration,
+        )
+        # Keep short (< 4.2s) scenes intact across bright-plate wipes or weak soft transitions
+        if is_bp_swap and (next_hard - prev_hard) < 4.20:
+            continue
         if ev_kind == "soft" and strength < 0.84:
-            prev_hard = max(
-                (c["cutSec"] for c in combined if c["evidence"] == "hard" and c["cutSec"] < t_sec),
-                default=0.0,
-            )
-            next_hard = min(
-                (c["cutSec"] for c in combined if c["evidence"] == "hard" and c["cutSec"] > t_sec),
-                default=actual_duration,
-            )
             if prev_hard > 0.0 and next_hard < actual_duration and (next_hard - prev_hard) < 4.20:
                 continue
         combined.append({

@@ -1744,30 +1744,39 @@ def extract_reference_blueprint(
         mid_words = layout_info.get("hero", []) + layout_info.get("top", [])
         if fast_mode:
             sub_beats = []
-            motion_clues: Dict[str, Any] = {}
         else:
             sub_beats = extract_scene_sub_beats(
                 fr_start, fr_mid, fr_end, ts_start, ts_mid, ts_end, dur, mid_words, ocr_engine
             )
-            motion_clues = {}
-            try:
-                from ref_motion_clues import extract_scene_motion_clues
+        motion_clues: Dict[str, Any] = {}
+        try:
+            from ref_motion_clues import extract_scene_motion_clues
 
-                motion_clues = extract_scene_motion_clues(
-                    _frame_at,
-                    start,
-                    end,
-                    width,
-                    height,
-                    ocr_summary_fn=lambda f: _quick_ocr_summary(f, ocr_engine),
-                    sub_ts_list=sub_ts_list,
-                )
-            except Exception:
-                motion_clues = {}
+            motion_clues = extract_scene_motion_clues(
+                _frame_at,
+                start,
+                end,
+                width,
+                height,
+                ocr_summary_fn=(
+                    (lambda f: _quick_ocr_summary(f, ocr_engine))
+                    if ocr_engine is not None
+                    else None
+                ),
+                sub_ts_list=sub_ts_list,
+            )
+        except Exception:
+            motion_clues = {}
         layout_info["cleanPlate"] = clean_plate
         layout_info["motionClues"] = motion_clues
         if camera_motion is not None:
             layout_info["cameraMotion"] = camera_motion
+        cut_ev = (
+            str(aligned_cuts[i].get("evidence") or ("start" if i == 0 else "hard"))
+            if i < len(aligned_cuts)
+            else ("start" if i == 0 else "hard")
+        )
+        trans_prev = "soft" if (i > 0 and cut_ev == "soft") else ("hard" if i > 0 else "none")
         scene_id = f"scene{i + 1}_{role}"
         scene_palettes.append(pal)
         scenes.append({
@@ -1778,6 +1787,8 @@ def extract_reference_blueprint(
             "end": round(end, 3),
             "duration": dur,
             "durationFrames": max(1, int(round(dur * fps))),
+            "cutEvidence": cut_ev,
+            "transitionFromPrev": trans_prev,
             "motion": cadence,
             "motionEnergy": motion_energy,
             "keyframeTimestamp": ts_hero,
@@ -1802,6 +1813,8 @@ def extract_reference_blueprint(
                 "start": round(start, 3),
                 "end": round(end, 3),
                 "duration": dur,
+                "cutEvidence": cut_ev,
+                "transitionFromPrev": trans_prev,
                 "beatsStrip": beats_strip_rel,
                 "beatStripTimestamps": [round(float(t), 3) for t in beat_strip_ts],
                 "beatStripPanels": beat_strip_meta,

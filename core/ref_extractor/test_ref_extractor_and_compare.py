@@ -411,6 +411,334 @@ class RefExtractorAndCompareTests(unittest.TestCase):
         self.assertTrue(bento_diag["emptyTileCellsDetected"])
         self.assertIn("EMPTY BENTO CELLS", bento_diag["diagnosis"])
 
+    def test_geometry_gate_penalizes_wrong_geometry_and_preserves_good_and_soft_glow_frames(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="mc_py_geogate_") as tmp:
+            td = Path(tmp)
+            bg = (4, 8, 11)  # dark #0B0804 in BGR
+
+            # Pair A: Empty dark sphere vs sphere with bright text inside (Scene 2 bug)
+            ref_a = np.full((1280, 720, 3), bg, dtype=np.uint8)
+            cv2.circle(ref_a, (360, 640), 260, (160, 210, 240), 6)
+            cv2.putText(ref_a, "WITH A", (200, 600), cv2.FONT_HERSHEY_SIMPLEX, 2.0, (245, 245, 250), 6)
+            cv2.putText(ref_a, "MOTIONS", (175, 695), cv2.FONT_HERSHEY_SIMPLEX, 2.0, (245, 245, 250), 6)
+            prev_a = np.full((1280, 720, 3), bg, dtype=np.uint8)
+            cv2.circle(prev_a, (360, 640), 260, (160, 210, 240), 6)
+
+            # Pair B: Wide capsule vs tiny half-size pill (Scene 3 bug)
+            ref_b = np.full((1280, 720, 3), bg, dtype=np.uint8)
+            cv2.rectangle(ref_b, (110, 560), (610, 710), (242, 242, 245), -1)
+            cv2.putText(ref_b, "FORM", (245, 655), cv2.FONT_HERSHEY_SIMPLEX, 2.2, (16, 16, 20), 6)
+            prev_b = np.full((1280, 720, 3), bg, dtype=np.uint8)
+            cv2.rectangle(prev_b, (280, 605), (440, 665), (242, 242, 245), -1)
+
+            # Pair C: 5 horizontal dots vs 4 vertical staircase bars (Scene 5 phase inversion)
+            ref_c = np.full((1280, 720, 3), bg, dtype=np.uint8)
+            for idx in range(5):
+                cv2.circle(ref_c, (150 + idx * 105, 640), 26, (60, 175, 250), -1)
+            prev_c = np.full((1280, 720, 3), bg, dtype=np.uint8)
+            for idx in range(4):
+                x0 = 150 + idx * 120
+                cv2.rectangle(prev_c, (x0, 260 + idx * 140), (x0 + 48, 1220), (235, 235, 242), -1)
+
+            # Pair D: Panned top-right capsule vs static center capsule (Scene 6 camera miss)
+            ref_d = np.full((1280, 720, 3), (245, 248, 250), dtype=np.uint8)
+            cv2.rectangle(ref_d, (390, 180), (675, 300), (28, 30, 36), -1)
+            cv2.putText(ref_d, "Create", (440, 255), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (245, 245, 250), 4)
+            prev_d = np.full((1280, 720, 3), (245, 248, 250), dtype=np.uint8)
+            cv2.rectangle(prev_d, (210, 560), (510, 700), (28, 30, 36), -1)
+            cv2.putText(prev_d, "Create", (265, 645), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (245, 245, 250), 4)
+
+            # Pair E: Good aligned card frame
+            ref_good = ref_a.copy()
+            prev_good = ref_a.copy()
+
+            # Pair F: Pure soft radial gradient glow (no sharp Canny edges)
+            yy, xx = np.mgrid[0:1280, 0:720]
+            dist = np.sqrt(((xx - 360.0) / 260.0) ** 2 + ((yy - 640.0) / 260.0) ** 2)
+            glow = np.clip(1.0 - dist, 0.0, 1.0) ** 2.0
+            ref_glow = np.zeros((1280, 720, 3), dtype=np.uint8)
+            ref_glow[:, :, 0] = (bg[0] + glow * 45).astype(np.uint8)
+            ref_glow[:, :, 1] = (bg[1] + glow * 130).astype(np.uint8)
+            ref_glow[:, :, 2] = (bg[2] + glow * 210).astype(np.uint8)
+            prev_glow = ref_glow.copy()
+
+            paths = {}
+            for name, img in [
+                ("ref_a", ref_a), ("prev_a", prev_a),
+                ("ref_b", ref_b), ("prev_b", prev_b),
+                ("ref_c", ref_c), ("prev_c", prev_c),
+                ("ref_d", ref_d), ("prev_d", prev_d),
+                ("ref_good", ref_good), ("prev_good", prev_good),
+                ("ref_glow", ref_glow), ("prev_glow", prev_glow),
+            ]:
+                p = td / f"{name}.jpg"
+                cv2.imwrite(str(p), img, [cv2.IMWRITE_JPEG_QUALITY, 94])
+                paths[name] = str(p)
+
+            res = ref_compare.compare_pairs({
+                "passThreshold": 0.72,
+                "stripOutputPath": str(td / "strip_geo.jpg"),
+                "pairs": [
+                    {"timestamp": 2.6, "refPath": paths["ref_a"], "previewPath": paths["prev_a"], "sceneId": "scene2_context"},
+                    {"timestamp": 6.7, "refPath": paths["ref_b"], "previewPath": paths["prev_b"], "sceneId": "scene3_proof"},
+                    {"timestamp": 11.7, "refPath": paths["ref_c"], "previewPath": paths["prev_c"], "sceneId": "scene5_beat"},
+                    {"timestamp": 18.4, "refPath": paths["ref_d"], "previewPath": paths["prev_d"], "sceneId": "scene6_beat"},
+                    {"timestamp": 32.3, "refPath": paths["ref_good"], "previewPath": paths["prev_good"], "sceneId": "scene9_logo"},
+                    {"timestamp": 0.5, "refPath": paths["ref_glow"], "previewPath": paths["prev_glow"], "sceneId": "scene1_hook"},
+                ],
+            })
+            self.assertTrue(res["ok"])
+            self.assertIn("overallMin", res)
+            pf = res["perFrame"]
+            # All 4 wrong-geometry pairs must drop strictly below 0.60 with geometry gate active
+            for idx, label in [(0, "empty-sphere"), (1, "tiny-pill"), (2, "phase-bars"), (3, "static-vs-panned")]:
+                self.assertLess(
+                    pf[idx]["combinedScore"],
+                    0.60,
+                    f"{label} score too high: {pf[idx]}",
+                )
+                self.assertTrue(pf[idx]["geometryGateApplied"], f"{label} expected geometryGateApplied=True")
+            # Good frame & pure soft glow must remain high and unpenalized
+            self.assertGreaterEqual(pf[4]["combinedScore"], 0.78)
+            self.assertFalse(pf[4]["geometryGateApplied"])
+            self.assertGreaterEqual(pf[5]["combinedScore"], 0.85)
+            self.assertFalse(pf[5]["geometryGateApplied"])
+
+            # Verify writeSceneBeatStrips=False preserves existing per-scene strip and primary strip picks largest bucket
+            sentinel = b"KEEP_EXISTING_8BEAT_STRIP"
+            strip1 = td / "scene_01_compare_6beats.jpg"
+            strip1.write_bytes(sentinel)
+            no_overwrite = ref_compare.compare_pairs({
+                "stripOutputPath": str(td / "comparison_strip.jpg"),
+                "writeSceneBeatStrips": False,
+                "pairs": [
+                    {"timestamp": 0.5, "refPath": paths["ref_glow"], "previewPath": paths["prev_glow"], "sceneId": "scene1_hook"},
+                ],
+            })
+            self.assertTrue(no_overwrite["ok"])
+            self.assertEqual(strip1.read_bytes(), sentinel)
+
+            multi_bucket = ref_compare.compare_pairs({
+                "stripOutputPath": str(td / "comparison_strip2.jpg"),
+                "writeSceneBeatStrips": True,
+                "pairs": [
+                    {"timestamp": 0.5, "refPath": paths["ref_glow"], "previewPath": paths["prev_glow"], "sceneId": "scene1_hook"},
+                    {"timestamp": 2.6, "refPath": paths["ref_a"], "previewPath": paths["prev_good"], "sceneId": "scene2_context"},
+                    {"timestamp": 2.8, "refPath": paths["ref_a"], "previewPath": paths["prev_good"], "sceneId": "scene2_context"},
+                    {"timestamp": 3.0, "refPath": paths["ref_a"], "previewPath": paths["prev_good"], "sceneId": "scene2_context"},
+                ],
+            })
+            self.assertTrue(multi_bucket["ok"])
+            self.assertTrue(
+                str(multi_bucket.get("primarySceneBeatStripPath", "")).endswith("scene_02_compare_6beats.jpg"),
+                f"expected scene_02 strip (3 tiles) over scene_01 (1 tile), got {multi_bucket.get('primarySceneBeatStripPath')}",
+            )
+
+    def test_motion_clues_extracts_top3_connected_components_and_soft_cut_metadata(self) -> None:
+        import ref_motion_clues as rmc
+
+        fr = np.full((1280, 720, 3), 10, dtype=np.uint8)
+        # Object 1: top star/badge (medium)
+        cv2.circle(fr, (360, 260), 65, (60, 180, 255), -1)
+        # Object 2: wide center pill (largest)
+        cv2.rectangle(fr, (120, 560), (600, 710), (245, 245, 250), -1)
+        # Object 3: bottom accent block (smaller)
+        cv2.rectangle(fr, (260, 930), (460, 1000), (220, 100, 250), -1)
+
+        clues = rmc.extract_scene_motion_clues(
+            lambda _ts: fr,
+            2.0,
+            4.0,
+            720,
+            1280,
+            ocr_summary_fn=None,
+            sub_ts_list=[2.1, 2.6, 3.1, 3.6],
+        )
+        timeline = clues.get("denseTimeline") or []
+        self.assertGreaterEqual(len(timeline), 4)
+        first = timeline[0]
+        self.assertIn("localT", first)
+        self.assertAlmostEqual(first["localT"], 0.1, places=2)
+        objs = first.get("objects") or []
+        self.assertEqual(len(objs), 3, f"expected 3 separate connected components, got {objs}")
+        self.assertGreaterEqual(objs[0]["areaFrac"], objs[1]["areaFrac"])
+
+        with tempfile.TemporaryDirectory(prefix="mc_py_softcut_") as tmp:
+            td = Path(tmp)
+            mp4 = td / "soft_cut.mp4"
+            writer = cv2.VideoWriter(str(mp4), cv2.VideoWriter_fourcc(*"mp4v"), 15.0, (320, 180))
+            self.assertTrue(writer.isOpened())
+            s1 = np.full((180, 320, 3), 18, dtype=np.uint8)
+            cv2.circle(s1, (80, 90), 34, (40, 160, 240), -1)
+            s2 = np.full((180, 320, 3), 232, dtype=np.uint8)
+            cv2.rectangle(s2, (160, 40), (280, 140), (40, 40, 200), -1)
+            for _ in range(18):
+                writer.write(s1)
+            for k in range(6):
+                a = (k + 1) / 6.0
+                writer.write(cv2.addWeighted(s1, 1.0 - a, s2, a, 0.0))
+            for _ in range(18):
+                writer.write(s2)
+            writer.release()
+
+            res = ref_extractor.extract_reference_blueprint(str(mp4), str(td / "out"), fast_mode=True)
+            self.assertTrue(res.get("success"), res)
+            bp_scenes = res["blueprint"]["scenes"]
+            self.assertGreaterEqual(len(bp_scenes), 2)
+            for sc in bp_scenes:
+                self.assertIn("cutEvidence", sc)
+                self.assertIn("transitionFromPrev", sc)
+                mc = sc.get("motionClues") or {}
+                self.assertGreaterEqual(len(mc.get("denseTimeline") or []), 4)
+                self.assertIn("boundaryAnchors", mc)
+
+        # Verify multi-phase OCR runs on Q1/mid/Q3/end slices when scene has > 4 slices
+        ocr_calls: list[int] = []
+        frame_tags: dict[int, int] = {}
+
+        def _frame_at_idx(ts_val: float) -> np.ndarray:
+            tag = int(round(ts_val * 10))
+            fr_i = np.full((360, 640, 3), 240, dtype=np.uint8)
+            cv2.rectangle(fr_i, (120, 120), (420, 240), (20, 20, 30), -1)
+            cv2.putText(fr_i, str(tag), (140, 190), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (240, 240, 240), 2)
+            frame_tags[id(fr_i)] = tag
+            return fr_i
+
+        def _spy_ocr(fr_in: np.ndarray) -> list[str]:
+            tag = int(frame_tags.get(id(fr_in), -1))
+            ocr_calls.append(tag)
+            return [f"word_{tag}"]
+
+        multi_clues = rmc.extract_scene_motion_clues(
+            _frame_at_idx,
+            0.0,
+            6.0,
+            640,
+            360,
+            ocr_summary_fn=_spy_ocr,
+            sub_ts_list=[0.3, 1.0, 1.7, 2.5, 3.4, 4.2, 5.0, 5.7],
+        )
+        self.assertGreaterEqual(len(ocr_calls), 5, f"expected multi-phase Q1/mid/Q3 OCR calls, got {ocr_calls}")
+        self.assertGreaterEqual(len(multi_clues.get("denseTimeline") or []), 8)
+
+    def test_element_tracks_verdict_geometri_beda_and_color_drift(self) -> None:
+        import ref_element_tracks as ret
+        import ref_structural_compare as rsc
+
+        # K3 synthetic test: saturated rounded pill moving diagonally over a striped light gradient background
+        w, h = 720, 1280
+        base = np.zeros((h, w, 3), dtype=np.uint8)
+        for y in range(h):
+            v = int(218 + 24 * (y / float(h)))
+            base[y, :, :] = (v, v, v)
+        for x in range(40, w, 60):
+            cv2.line(base, (x, 0), (x, h), (205, 205, 208), 1)
+
+        def _synth_at(ts: float) -> np.ndarray:
+            p = max(0.0, min(1.0, ts / 2.0))
+            cx = int(round(120 + (540 - 120) * p))
+            cy = int(round(220 + (880 - 220) * p))
+            fr = base.copy()
+            cv2.rectangle(fr, (cx - 75, cy - 35), (cx + 75, cy + 35), (47, 172, 246), -1)  # #F6AC2F in BGR
+            return fr
+
+        tracks = ret.extract_scene_element_tracks(_synth_at, 0.0, 2.0, w, h, step_sec=0.25)
+        self.assertGreaterEqual(len(tracks), 1, "expected at least 1 salient track")
+        tr1 = tracks[0]
+        self.assertGreaterEqual(tr1["displacementPx"], 650.0)
+        pts = tr1["points"]
+        self.assertLessEqual(abs(pts[0]["cx"] - 124), 6)
+        self.assertLessEqual(abs(pts[0]["cy"] - 226), 6)
+        self.assertLessEqual(abs(pts[-1]["cx"] - 536), 6)
+        self.assertLessEqual(abs(pts[-1]["cy"] - 874), 6)
+
+        # K6 test: #F6AC2F (BGR 47,172,246) vs #E9791D (BGR 29,121,233) emits COLOR DRIFT; identical -> None
+        img_ref = np.full((120, 120, 3), 24, dtype=np.uint8)
+        img_prev = np.full((120, 120, 3), 24, dtype=np.uint8)
+        cv2.circle(img_ref, (60, 60), 34, (47, 172, 246), -1)
+        cv2.circle(img_prev, (60, 60), 34, (29, 121, 233), -1)
+        drift_msg = rsc.detect_color_and_luma_drift(img_ref, img_prev)
+        self.assertIsNotNone(drift_msg)
+        self.assertIn("COLOR DRIFT", drift_msg)
+        self.assertIsNone(rsc.detect_color_and_luma_drift(img_ref, img_ref.copy()))
+
+        # K5 test: foreground present with edge_sim <= 0.15 yields verdict == "geometri_beda"
+        with tempfile.TemporaryDirectory(prefix="mc_py_geobeda_") as tmp:
+            td = Path(tmp)
+            ref_shape = np.full((320, 180, 3), 12, dtype=np.uint8)
+            cv2.rectangle(ref_shape, (35, 70), (145, 250), (240, 240, 240), -1)
+            prev_wrong = np.full((320, 180, 3), 12, dtype=np.uint8)
+            cv2.circle(prev_wrong, (90, 160), 42, (240, 240, 240), -1)
+            rp = td / "ref.png"
+            pp = td / "prev.png"
+            cv2.imwrite(str(rp), ref_shape)
+            cv2.imwrite(str(pp), prev_wrong)
+            res_cmp = ref_compare.compare_pairs({
+                "stripOutputPath": str(td / "s.jpg"),
+                "pairs": [{"timestamp": 0.5, "refPath": str(rp), "previewPath": str(pp), "sceneId": "scene1"}],
+            })
+            self.assertEqual(res_cmp["perFrame"][0]["verdict"], "geometri_beda", res_cmp["perFrame"][0])
+
+    def test_motion_kinematics_and_stiffness_warning(self) -> None:
+        import math
+        import ref_motion_kinematics as rmk
+
+        w, h = 720, 1280
+        # 1a. Zoom-in expanding textured hero card
+        def _zoom_fr(ts: float) -> np.ndarray:
+            fr = np.full((h, w, 3), 220, dtype=np.uint8)
+            p = max(0.0, min(1.0, (ts - 0.35) / 0.85))
+            hw = int(95 * (0.6 + 1.0 * p))
+            hh = int(70 * (0.6 + 1.0 * p))
+            cv2.rectangle(fr, (360 - hw, 640 - hh), (360 + hw, 640 + hh), (150, 12, 55), -1)
+            cv2.putText(fr, "ZOOM", (360 - hw // 2, 650), cv2.FONT_HERSHEY_SIMPLEX, 0.8 + 0.6 * p, (255, 255, 255), 3)
+            return fr
+
+        kin_zoom = rmk.extract_scene_motion_kinematics(_zoom_fr, 0.0, 1.6, w, h)
+        self.assertTrue(any(b["kind"] == "zoom_in" and b["scaleRatio"] > 1.3 for b in kin_zoom["motionBursts"]), kin_zoom)
+
+        # 1b. Vertical pan-up stage
+        def _pan_fr(ts: float) -> np.ndarray:
+            fr = np.full((h, w, 3), 220, dtype=np.uint8)
+            p = max(0.0, min(1.0, (ts - 0.4) / 0.7))
+            cy = int(round(780 - 180 * p))
+            cv2.rectangle(fr, (190, cy - 110), (530, cy + 110), (35, 130, 230), -1)
+            cv2.circle(fr, (360, cy), 44, (240, 240, 240), -1)
+            return fr
+
+        kin_pan = rmk.extract_scene_motion_kinematics(_pan_fr, 0.0, 1.6, w, h)
+        self.assertTrue(any(b["kind"] == "pan_up" and b["dyPx"] < -50 for b in kin_pan["motionBursts"]), kin_pan)
+
+        # 1c. Living hold vs static hold
+        def _living_fr(ts: float) -> np.ndarray:
+            fr = np.full((h, w, 3), 218, dtype=np.uint8)
+            ang = ts * 2.8
+            for k in range(18):
+                a = ang + k * (2 * math.pi / 18)
+                px = int(360 + math.cos(a) * 145)
+                py = int(500 + math.sin(a) * 145)
+                cv2.circle(fr, (px, py), 6, (40, 40, 44), -1)
+            sway_x = int(360 + math.sin(ts * 4.0) * 18)
+            cv2.circle(fr, (sway_x, 500), 68, (140, 120, 105), -1)
+            return fr
+
+        kin_live = rmk.extract_scene_motion_kinematics(_living_fr, 0.0, 2.0, w, h)
+        self.assertTrue(kin_live["hasLivingHold"], kin_live)
+        self.assertGreaterEqual(kin_live["activeFramePct"], 70.0)
+
+        kin_static = rmk.extract_scene_motion_kinematics(lambda _t: _zoom_fr(0.0), 0.0, 1.4, w, h)
+        self.assertFalse(kin_static["hasLivingHold"], kin_static)
+
+        # 2. Motion stiffness warning on stiff preview vs lively ref
+        ref_seq = [(i * 0.25, cv2.cvtColor(_pan_fr(i * 0.25), cv2.COLOR_BGR2GRAY)) for i in range(6)]
+        stiff_base = cv2.cvtColor(_pan_fr(0.4), cv2.COLOR_BGR2GRAY)
+        stiff_seq = [(i * 0.25, stiff_base.copy()) for i in range(6)]
+        md_stiff = ref_compare._compute_motion_step_diagnostics(ref_seq, stiff_seq)
+        self.assertLess(md_stiff["motionEnergyRatio"], 0.35)
+        self.assertIn("MOTION STIFFNESS WARNING", md_stiff["motionWarning"] or "")
+        md_live = ref_compare._compute_motion_step_diagnostics(ref_seq, ref_seq)
+        self.assertNotIn("MOTION STIFFNESS WARNING", md_live["motionWarning"] or "")
+
 
 if __name__ == "__main__":
     unittest.main()

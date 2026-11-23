@@ -354,6 +354,48 @@ def evaluate_text_alignment(ref_words: List[str], prev_words: List[str]) -> Dict
     }
 
 
+def detect_color_and_luma_drift(
+    ref_cmp: np.ndarray,
+    prev_cmp: np.ndarray,
+) -> Optional[str]:
+    """Detects measured luma or foreground hue drift when mean delta exceeds thresholds."""
+    if ref_cmp is None or prev_cmp is None or ref_cmp.size == 0 or prev_cmp.size == 0:
+        return None
+    ref_luma = float(np.mean(cv2.cvtColor(ref_cmp, cv2.COLOR_BGR2GRAY))) / 255.0
+    prev_luma = float(np.mean(cv2.cvtColor(prev_cmp, cv2.COLOR_BGR2GRAY))) / 255.0
+    delta_luma = abs(prev_luma - ref_luma)
+
+    ref_hsv = cv2.cvtColor(ref_cmp, cv2.COLOR_BGR2HSV)
+    prev_hsv = cv2.cvtColor(prev_cmp, cv2.COLOR_BGR2HSV)
+    ref_sat = (ref_hsv[:, :, 1] >= 60) & (ref_hsv[:, :, 2] >= 45)
+    prev_sat = (prev_hsv[:, :, 1] >= 60) & (prev_hsv[:, :, 2] >= 45)
+
+    has_sat_pair = int(np.count_nonzero(ref_sat)) >= 40 and int(np.count_nonzero(prev_sat)) >= 40
+    if has_sat_pair:
+        h_ref = float(np.median(ref_hsv[:, :, 0][ref_sat]))
+        h_prev = float(np.median(prev_hsv[:, :, 0][prev_sat]))
+        diff_h = abs(h_ref - h_prev)
+        delta_hue = min(diff_h, 180.0 - diff_h)
+        ref_bgr = np.mean(ref_cmp[ref_sat], axis=0)
+        prev_bgr = np.mean(prev_cmp[prev_sat], axis=0)
+    else:
+        h_ref = 0.0
+        h_prev = 0.0
+        delta_hue = 0.0
+        ref_bgr = np.mean(ref_cmp.reshape(-1, 3), axis=0)
+        prev_bgr = np.mean(prev_cmp.reshape(-1, 3), axis=0)
+
+    if delta_luma <= 0.06 and not (has_sat_pair and delta_hue >= 5.0):
+        return None
+
+    ref_hex = f"#{int(round(ref_bgr[2])):02X}{int(round(ref_bgr[1])):02X}{int(round(ref_bgr[0])):02X}"
+    prev_hex = f"#{int(round(prev_bgr[2])):02X}{int(round(prev_bgr[1])):02X}{int(round(prev_bgr[0])):02X}"
+    return (
+        f"COLOR DRIFT: ref fg ≈ {ref_hex} (hue {h_ref:.0f}, luma {ref_luma:.2f}), "
+        f"preview ≈ {prev_hex} (hue {h_prev:.0f}, luma {prev_luma:.2f}) — match the fill hex"
+    )
+
+
 def evaluate_structural_frame_pair(
     ref_cmp: np.ndarray,
     prev_cmp: np.ndarray,
@@ -468,6 +510,10 @@ def evaluate_structural_frame_pair(
     if bento_info is not None:
         empty_bento = True
         struct_diags.append(bento_info["diagnosis"])
+
+    color_drift_diag = detect_color_and_luma_drift(ref_cmp, prev_cmp)
+    if color_drift_diag is not None:
+        struct_diags.append(color_drift_diag)
 
     # Compute structural penalty so structural bugs (spill, clipped text, wrong active words, tiny marquee, wrong pose)
     # cannot hide behind high dark-background SSIM.

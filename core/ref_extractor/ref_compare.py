@@ -87,6 +87,8 @@ def compute_edge_similarity(img_a: np.ndarray, img_b: np.ndarray) -> float:
     if ea_sum == 0 and eb_sum == 0:
         return 1.0
     if ea_sum == 0 or eb_sum == 0:
+        if ea_sum >= 20 or eb_sum >= 20:
+            return 0.0
         return 0.15
 
     kernel = np.ones((5, 5), np.uint8)
@@ -154,9 +156,33 @@ def compute_foreground_metrics(ref_bgr: np.ndarray, prev_bgr: np.ndarray) -> Dic
     coverage = prev_ratio / max(ref_ratio, 1e-6) if ref_ratio > 0 else 1.0
     blank_detected = bool(ref_ratio >= 0.012 and prev_ratio < ref_ratio * 0.12)
 
+    fg_inter = int(np.count_nonzero(ref_fg & prev_fg))
+    fg_union = int(np.count_nonzero(ref_fg | prev_fg))
+    fg_mask_iou = float(fg_inter) / float(fg_union) if fg_union >= 16 else 1.0
+
+    k9 = np.ones((9, 9), np.uint8)
+    prev_fg_dil9 = cv2.dilate(prev_fg.astype(np.uint8), k9, iterations=1) > 0
+    ref_fg_cnt = int(np.count_nonzero(ref_fg))
+    missed_ref_fg_frac = (
+        float(np.count_nonzero(ref_fg & (~prev_fg_dil9))) / float(ref_fg_cnt)
+        if ref_fg_cnt >= 16
+        else 0.0
+    )
+
+    ref_gray = cv2.GaussianBlur(cv2.cvtColor(ref_bgr, cv2.COLOR_BGR2GRAY), (5, 5), 0)
+    ref_edges = cv2.Canny(ref_gray, 50, 150) > 0
+    ref_edge_count = int(np.count_nonzero(ref_edges))
+    ref_has_edges = bool(ref_edge_count >= 25)
+    missed_ref_edge_frac = (
+        float(np.count_nonzero(ref_edges & (~prev_fg_dil9))) / float(ref_edge_count)
+        if ref_edge_count >= 25
+        else 0.0
+    )
+
     fg_ssim = None
     fg_color = None
-    if not blank_detected and 0.012 <= ref_ratio <= 0.42:
+    fg_edge = None
+    if not blank_detected and 0.008 <= ref_ratio <= 0.65:
         union = ref_fg | prev_fg
         ys, xs = np.where(union)
         if ys.size >= 32 and xs.size >= 32:
@@ -166,8 +192,10 @@ def compute_foreground_metrics(ref_bgr: np.ndarray, prev_bgr: np.ndarray) -> Dic
             x0 = max(0, int(xs.min()) - pad)
             x1 = min(w, int(xs.max()) + pad + 1)
             if (y1 - y0) >= 24 and (x1 - x0) >= 24:
-                fg_ssim = compute_rgb_ssim(ref_bgr[y0:y1, x0:x1], prev_bgr[y0:y1, x0:x1])
-        if np.count_nonzero(ref_fg) >= 32 and np.count_nonzero(prev_fg) >= 32:
+                if ref_ratio <= 0.50:
+                    fg_ssim = compute_rgb_ssim(ref_bgr[y0:y1, x0:x1], prev_bgr[y0:y1, x0:x1])
+                fg_edge = compute_edge_similarity(ref_bgr[y0:y1, x0:x1], prev_bgr[y0:y1, x0:x1])
+        if ref_ratio <= 0.42 and np.count_nonzero(ref_fg) >= 32 and np.count_nonzero(prev_fg) >= 32:
             r_hsv = cv2.cvtColor(ref_bgr, cv2.COLOR_BGR2HSV)
             p_hsv = cv2.cvtColor(prev_bgr, cv2.COLOR_BGR2HSV)
             h1 = cv2.calcHist([r_hsv], [0, 1], ref_fg.astype(np.uint8) * 255, [24, 16], [0, 180, 0, 256])
@@ -180,8 +208,15 @@ def compute_foreground_metrics(ref_bgr: np.ndarray, prev_bgr: np.ndarray) -> Dic
     return {
         "blankFrameDetected": blank_detected,
         "fgCoverageRatio": round(min(coverage, 9.99), 3),
+        "refFgRatio": round(ref_ratio, 4),
+        "prevFgRatio": round(prev_ratio, 4),
+        "fgMaskIou": round(fg_mask_iou, 4),
+        "missedRefFgFrac": round(missed_ref_fg_frac, 4),
+        "missedRefEdgeFrac": round(missed_ref_edge_frac, 4),
         "fgSsim": fg_ssim,
         "fgColor": fg_color,
+        "fgEdge": round(fg_edge, 4) if fg_edge is not None else None,
+        "refHasEdges": ref_has_edges,
         "bgBgr": bg_bgr,
     }
 
@@ -235,17 +270,27 @@ def _compute_motion_step_diagnostics(
         pd = round(float(np.mean(np.abs(pg0.astype(np.float32) - pg1.astype(np.float32)))), 2)
         ref_steps.append(rd)
         prev_steps.append(pd)
-        if rd >= 0.45 and pd < 0.08:
+        if rd >= 0.45 and pd < 0.08 or (rd >= 1.20 and pd < rd * 0.22):
             frozen_intervals.append(f"{pt0:.2f}s->{pt1:.2f}s (REF d={rd:.2f} vs RND d={pd:.2f})")
         elif pd >= 18.0 and pd > max(18.0, rd * 2.8) and rd < 14.0:
             jump_intervals.append(f"{pt0:.2f}s->{pt1:.2f}s (RND d={pd:.2f} vs REF d={rd:.2f})")
+
+    mean_ref_step = round(float(np.mean(ref_steps)), 3) if ref_steps else 0.0
+    mean_prev_step = round(float(np.mean(prev_steps)), 3) if prev_steps else 0.0
+    motion_ratio = round(mean_prev_step / max(0.05, mean_ref_step), 3) if ref_steps else 1.0
 
     warnings: List[str] = []
     if frozen_intervals:
         warnings.append(
             "MOTION FROZEN WARNING: Your rendered scene is static while the reference moves at "
             + ", ".join(frozen_intervals[:4])
-            + " — animate position/scale/morph continuously across `t` instead of holding a static pose!"
+            + " — animate position/scale/morph/rings continuously across `t` instead of holding a static pose!"
+        )
+    if len(ref_steps) >= 3 and mean_ref_step >= 1.5 and motion_ratio < 0.35:
+        warnings.append(
+            f"MOTION STIFFNESS WARNING: Your scene motion energy is only {motion_ratio:.0%} of the reference "
+            f"(mean step delta {mean_prev_step:.2f} vs ref {mean_ref_step:.2f}) — add missing zooms, stage pans/scrolls, "
+            "spring overshoot (`AM.ease.outBack`/`AM.spring`), and continuous ring rotation/hero float so the scene never feels stiff!"
         )
     if jump_intervals:
         warnings.append(
@@ -256,6 +301,7 @@ def _compute_motion_step_diagnostics(
     return {
         "refStepDeltas": ref_steps,
         "prevStepDeltas": prev_steps,
+        "motionEnergyRatio": motion_ratio,
         "frozenIntervals": frozen_intervals,
         "jumpIntervals": jump_intervals,
         "motionWarning": "\n".join(warnings) if warnings else None,
@@ -372,13 +418,69 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
                 struct_info = {}
 
         struct_pen = float(struct_info.get("structuralPenalty", 0.0))
+        eff_edge = (
+            float(np.clip(0.5 * edge_sim + 0.5 * float(fg_info["fgEdge"]), 0.0, 1.0))
+            if fg_info.get("fgEdge") is not None
+            else edge_sim
+        )
         combined = float(
             np.clip(0.50 * ssim + 0.30 * color_sim + 0.20 * edge_sim - struct_pen, 0.0, 1.0)
         )
+        fg_bbox_iou = struct_info.get("fgBboxIou")
+        fg_mask_iou = float(fg_info.get("fgMaskIou", 1.0))
+        missed_ref_fg_frac = float(fg_info.get("missedRefFgFrac", 0.0))
+        missed_ref_edge_frac = float(fg_info.get("missedRefEdgeFrac", 0.0))
+        ref_has_edges = bool(fg_info.get("refHasEdges", False))
+        ref_box = struct_info.get("refFgBox")
+        ref_area_frac = (
+            float(ref_box[2] * ref_box[3]) / max(1.0, float(rw * rh))
+            if isinstance(ref_box, list) and len(ref_box) >= 4
+            else 1.0
+        )
+        geo_cap = 1.0
+        if not fg_info["blankFrameDetected"] and float(fg_info.get("refFgRatio", 0.0)) >= 0.008:
+            if ref_has_edges and eff_edge < 0.18:
+                geo_cap = min(geo_cap, 0.38 + 0.18 * (eff_edge / 0.18) + 0.03 * fg_mask_iou)
+            if fg_bbox_iou is not None and ref_area_frac < 0.72 and float(fg_bbox_iou) < 0.25:
+                geo_cap = min(geo_cap, 0.40 + 0.16 * (float(fg_bbox_iou) / 0.25))
+            if ref_area_frac < 0.72 and fg_mask_iou < 0.18 and eff_edge < 0.30:
+                geo_cap = min(geo_cap, 0.42 + 0.16 * (fg_mask_iou / 0.18))
+            if (
+                ref_has_edges
+                and missed_ref_fg_frac >= 0.30
+                and missed_ref_edge_frac >= 0.18
+                and eff_edge < 0.88
+            ):
+                geo_cap = min(
+                    geo_cap,
+                    0.54 - 0.16 * min(1.0, (missed_ref_fg_frac - 0.30) / 0.45),
+                )
+        geo_gate_applied = bool(
+            not fg_info["blankFrameDetected"]
+            and float(fg_info.get("refFgRatio", 0.0)) >= 0.008
+            and geo_cap < 0.999
+            and combined > geo_cap
+        )
+        if geo_gate_applied:
+            combined = float(min(combined, geo_cap))
+            gate_msg = (
+                f"GEOMETRY GATE: edge={eff_edge:.2f}, fgMaskIoU={fg_mask_iou:.2f}, "
+                f"missedRefFg={missed_ref_fg_frac:.2f}, missedRefEdge={missed_ref_edge_frac:.2f}, "
+                f"fgBboxIoU={fg_bbox_iou} — background SSIM masked severe shape/text/position mismatch"
+            )
+            prev_diag = str(struct_info.get("structuralDiagnosis") or "").strip()
+            struct_info["structuralDiagnosis"] = f"{prev_diag}; {gate_msg}" if prev_diag else gate_msg
+
         if fg_info["blankFrameDetected"]:
             combined = min(combined, 0.12)
         if ar_mismatch:
             verdict = "aspect_mismatch"
+        elif (
+            not fg_info["blankFrameDetected"]
+            and float(fg_info.get("refFgRatio", 0.0)) >= 0.012
+            and edge_sim <= 0.15
+        ):
+            verdict = "geometri_beda"
         else:
             verdict = "cocok" if combined >= 0.85 else ("sebagian" if combined >= 0.65 else "beda")
 
@@ -393,6 +495,9 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
             "ssim": round(ssim, 4),
             "colorSimilarity": round(color_sim, 4),
             "edgeSimilarity": round(edge_sim, 4),
+            "fgEdge": fg_info.get("fgEdge"),
+            "fgMaskIou": fg_info.get("fgMaskIou"),
+            "geometryGateApplied": bool(geo_gate_applied),
             "luminanceDelta": luma_delta,
             "lumaCorrelation": round(luma_corr, 3),
             "blankFrameDetected": bool(fg_info["blankFrameDetected"]),
@@ -463,53 +568,62 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
         canvas = np.vstack(strip_rows)
         strip_saved = bool(cv2.imwrite(str(strip_out), canvas, [cv2.IMWRITE_JPEG_QUALITY, 86]))
 
+    write_scene_strips = bool(payload.get("writeSceneBeatStrips", True))
     scene_beat_strips: Dict[str, str] = {}
-    for sid, tile_items in scene_tiles_map.items():
-        if not tile_items:
-            continue
-        tile_items.sort(key=lambda x: x[0])
-        ref_row_tiles: List[np.ndarray] = []
-        prev_row_tiles: List[np.ndarray] = []
-        diff_row_tiles: List[np.ndarray] = []
-        for ts_v, rt, pt, dt, ss_v, ed_v, cb_v in tile_items[:8]:
-            r_lbl = rt.copy()
-            p_lbl = pt.copy()
-            d_lbl = dt.copy()
-            cv2.rectangle(r_lbl, (0, 0), (140, 24), (14, 14, 18), -1)
-            cv2.putText(r_lbl, f"REF {ts_v:.2f}s", (6, 17), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
-            cv2.rectangle(p_lbl, (0, 0), (155, 24), (14, 14, 18), -1)
-            cv2.putText(p_lbl, f"PREV {ts_v:.2f}s", (6, 17), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 255, 180), 1, cv2.LINE_AA)
-            cv2.rectangle(d_lbl, (0, 0), (r_lbl.shape[1], 24), (14, 14, 18), -1)
-            cv2.putText(
-                d_lbl,
-                f"DIFF S={ss_v:.2f} E={ed_v:.2f} C={cb_v:.2f}",
-                (6, 17),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.40,
-                (255, 220, 140),
-                1,
-                cv2.LINE_AA,
-            )
-            ref_row_tiles.append(r_lbl)
-            prev_row_tiles.append(p_lbl)
-            diff_row_tiles.append(d_lbl)
-        row_ref = np.hstack(ref_row_tiles)
-        row_prev = np.hstack(prev_row_tiles)
-        row_diff = np.hstack(diff_row_tiles)
-        grid_6b = np.vstack([row_ref, row_prev, row_diff])
-        m_num = re.search(r"(\d+)", sid)
-        s_num = int(m_num.group(1)) if m_num else 1
-        beat_out = strip_out.parent / f"scene_{s_num:02d}_compare_6beats.jpg"
-        if cv2.imwrite(str(beat_out), grid_6b, [cv2.IMWRITE_JPEG_QUALITY, 88]):
-            scene_beat_strips[sid] = str(beat_out)
+    if write_scene_strips:
+        for sid, tile_items in scene_tiles_map.items():
+            if not tile_items:
+                continue
+            tile_items.sort(key=lambda x: x[0])
+            ref_row_tiles: List[np.ndarray] = []
+            prev_row_tiles: List[np.ndarray] = []
+            diff_row_tiles: List[np.ndarray] = []
+            for ts_v, rt, pt, dt, ss_v, ed_v, cb_v in tile_items[:8]:
+                r_lbl = rt.copy()
+                p_lbl = pt.copy()
+                d_lbl = dt.copy()
+                cv2.rectangle(r_lbl, (0, 0), (140, 24), (14, 14, 18), -1)
+                cv2.putText(r_lbl, f"REF {ts_v:.2f}s", (6, 17), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
+                cv2.rectangle(p_lbl, (0, 0), (155, 24), (14, 14, 18), -1)
+                cv2.putText(p_lbl, f"PREV {ts_v:.2f}s", (6, 17), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 255, 180), 1, cv2.LINE_AA)
+                cv2.rectangle(d_lbl, (0, 0), (r_lbl.shape[1], 24), (14, 14, 18), -1)
+                cv2.putText(
+                    d_lbl,
+                    f"DIFF S={ss_v:.2f} E={ed_v:.2f} C={cb_v:.2f}",
+                    (6, 17),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.40,
+                    (255, 220, 140),
+                    1,
+                    cv2.LINE_AA,
+                )
+                ref_row_tiles.append(r_lbl)
+                prev_row_tiles.append(p_lbl)
+                diff_row_tiles.append(d_lbl)
+            row_ref = np.hstack(ref_row_tiles)
+            row_prev = np.hstack(prev_row_tiles)
+            row_diff = np.hstack(diff_row_tiles)
+            grid_6b = np.vstack([row_ref, row_prev, row_diff])
+            m_num = re.search(r"(\d+)", sid)
+            s_num = int(m_num.group(1)) if m_num else 1
+            beat_out = strip_out.parent / f"scene_{s_num:02d}_compare_6beats.jpg"
+            if cv2.imwrite(str(beat_out), grid_6b, [cv2.IMWRITE_JPEG_QUALITY, 88]):
+                scene_beat_strips[sid] = str(beat_out)
 
-    primary_beat_strip = next(iter(scene_beat_strips.values()), None) if len(scene_beat_strips) <= 2 else None
+    primary_beat_strip = None
+    if scene_beat_strips and len(scene_beat_strips) <= 2:
+        best_sid = max(
+            scene_beat_strips.keys(),
+            key=lambda sid: len(scene_tiles_map.get(sid, ())),
+        )
+        primary_beat_strip = scene_beat_strips.get(best_sid)
 
     ssim_mean = round(float(np.mean([f["ssim"] for f in per_frame])), 4)
     ssim_min = round(float(np.min([f["ssim"] for f in per_frame])), 4)
     color_mean = round(float(np.mean([f["colorSimilarity"] for f in per_frame])), 4)
     edge_mean = round(float(np.mean([f["edgeSimilarity"] for f in per_frame])), 4)
     overall = round(float(np.mean([f["combinedScore"] for f in per_frame])), 4)
+    overall_min = round(float(np.min([f["combinedScore"] for f in per_frame])), 4)
     worst = sorted(per_frame, key=lambda f: f["combinedScore"])[:3]
 
     scene_buckets: Dict[str, List[Dict[str, Any]]] = {}
@@ -542,6 +656,7 @@ def compare_pairs(payload: Dict[str, Any]) -> Dict[str, Any]:
         "colorMatchMean": color_mean,
         "edgeMatchMean": edge_mean,
         "overallFidelity": overall,
+        "overallMin": overall_min,
         "meanAdjacentFrameDelta": prev_adj_delta,
         "refMeanAdjacentFrameDelta": ref_adj_delta,
         "motionDiagnostics": motion_diag,
