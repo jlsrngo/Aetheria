@@ -35,6 +35,14 @@ pub fn fetch_web_image_tool_definition() -> Value {
                     "candidateIndex": {
                         "type": "integer",
                         "description": "Optional 0-based index (default 0) to pick an alternate candidate from the ranked search results if candidate 0 did not visually match."
+                    },
+                    "targetLuma": {
+                        "type": "number",
+                        "description": "Optional target foreground brightness (0-255, LAB L-channel mean) to smoothly tone-grade the downloaded asset to match the reference object brightness."
+                    },
+                    "targetSat": {
+                        "type": "number",
+                        "description": "Optional target foreground saturation (0-255, HSV S-channel mean) to smoothly tone-grade the downloaded asset (e.g. lower value for matte/muted subjects, higher for vivid subjects)."
                     }
                 },
                 "required": ["query", "outputPath"]
@@ -363,6 +371,16 @@ pub async fn execute_fetch_web_image(workspace_dir: &str, arguments: &Value) -> 
         .or_else(|| arguments.get("candidate_index"))
         .and_then(|v| v.as_u64())
         .unwrap_or(0) as usize;
+    let target_luma = arguments
+        .get("targetLuma")
+        .or_else(|| arguments.get("target_luma"))
+        .and_then(|v| v.as_f64())
+        .map(|v| v.clamp(20.0, 245.0));
+    let target_sat = arguments
+        .get("targetSat")
+        .or_else(|| arguments.get("target_sat"))
+        .and_then(|v| v.as_f64())
+        .map(|v| v.clamp(0.0, 240.0));
 
     if query.is_empty() && direct_url.is_empty() {
         return json!({ "error": "fetch_web_image requires 'query' or 'url'." });
@@ -690,7 +708,13 @@ pub async fn execute_fetch_web_image(workspace_dir: &str, arguments: &Value) -> 
         {
             if (200..300).contains(&status) && bytes.len() > 1024 {
                 if tokio::fs::write(&target_out, &bytes).await.is_ok() {
-                    let meta = postprocess_downloaded_image(&target_out, remove_bg).await;
+                    let meta = postprocess_downloaded_image(
+                        &target_out,
+                        remove_bg,
+                        target_luma,
+                        target_sat,
+                    )
+                    .await;
                     let final_bytes = tokio::fs::metadata(&target_out)
                         .await
                         .map(|m| m.len())
@@ -705,11 +729,15 @@ pub async fn execute_fetch_web_image(workspace_dir: &str, arguments: &Value) -> 
                         "assetPath": asset_rel,
                         "assetUrl": format!("/{}", asset_rel),
                         "bytes": final_bytes,
-                        "width": meta.0,
-                        "height": meta.1,
-                        "hasAlpha": meta.2,
-                        "backgroundRemoved": meta.3,
-                        "satP90": meta.4,
+                        "width": meta.width,
+                        "height": meta.height,
+                        "hasAlpha": meta.has_alpha,
+                        "backgroundRemoved": meta.background_removed,
+                        "satP90": meta.sat_p90,
+                        "meanLuma": meta.mean_luma,
+                        "meanSat": meta.mean_sat,
+                        "meanHex": meta.mean_hex,
+                        "toneAdjusted": meta.tone_adjusted,
                         "candidates": candidate_summary,
                         "message": format!("Downloaded internet image to {} (preload via `AM.loadImage('/{}')` and animate via `AM.drawTurntableObject(...)` or `AM.drawImageFit(...)`)", asset_rel, asset_rel)
                     });
@@ -719,7 +747,7 @@ pub async fn execute_fetch_web_image(workspace_dir: &str, arguments: &Value) -> 
                         && candidate_index == 0
                         && !tried_color_fallback
                         && attempt_pos + 1 < ordered_indices.len()
-                        && meta.4.is_some_and(|sat| sat < 18.0);
+                        && meta.sat_p90.is_some_and(|sat| sat < 18.0);
                     if is_bw_sketch {
                         tried_color_fallback = true;
                         fallback_download = Some(resp_val);
@@ -742,24 +770,43 @@ pub async fn execute_fetch_web_image(workspace_dir: &str, arguments: &Value) -> 
     })
 }
 
+#[derive(Debug, Default)]
+struct DownloadedImageMeta {
+    width: Option<u32>,
+    height: Option<u32>,
+    has_alpha: bool,
+    background_removed: bool,
+    sat_p90: Option<f64>,
+    mean_luma: Option<f64>,
+    mean_sat: Option<f64>,
+    mean_hex: Option<String>,
+    tone_adjusted: bool,
+}
+
 /// Inspects downloaded raster image dimensions/alpha, performs studio-grade multi-quantile LAB border
-/// flood-fill + OpenCV GrabCut cutout when `remove_bg` is requested, and auto-trims transparent margins.
+/// flood-fill + OpenCV GrabCut cutout when `remove_bg` is requested, optionally tone-grades
+/// foreground LAB luma / HSV saturation toward reference targets, and auto-trims transparent margins.
 async fn postprocess_downloaded_image(
     path: &std::path::Path,
     remove_bg: bool,
-) -> (Option<u32>, Option<u32>, bool, bool, Option<f64>) {
+    target_luma: Option<f64>,
+    target_sat: Option<f64>,
+) -> DownloadedImageMeta {
     let python = crate::paths::locate_python_binary();
-    let script = r#"
+    let script = r##"
 import json, sys, cv2, numpy as np
 p = sys.argv[1]
 do_rm = sys.argv[2] == "1"
+t_luma = float(sys.argv[3]) if len(sys.argv) > 3 and sys.argv[3] != "" else None
+t_sat = float(sys.argv[4]) if len(sys.argv) > 4 and sys.argv[4] != "" else None
 img = cv2.imread(p, cv2.IMREAD_UNCHANGED)
 if img is None:
-    print(json.dumps({"w": None, "h": None, "alpha": False, "rm": False, "satP90": None}))
+    print(json.dumps({"w": None, "h": None, "alpha": False, "rm": False, "satP90": None, "meanLuma": None, "meanSat": None, "meanHex": None, "toneAdjusted": False}))
     sys.exit(0)
 h, w = img.shape[:2]
 has_alpha = (img.ndim == 3 and img.shape[2] == 4 and int(np.min(img[:, :, 3])) < 245)
 removed = False
+tone_adjusted = False
 
 def trim_bgra(bgra):
     ih, iw = bgra.shape[:2]
@@ -841,39 +888,108 @@ elif do_rm and img.ndim >= 2:
                 removed = True
                 final_img = bgra
 
+if (t_luma is not None or t_sat is not None) and final_img.ndim == 3 and final_img.shape[2] >= 3:
+    bgr_work = final_img[:, :, :3].copy()
+    alpha_ch = final_img[:, :, 3] if final_img.shape[2] == 4 else None
+    fg_mask = (alpha_ch > 32) if (alpha_ch is not None and np.any(alpha_ch > 32)) else np.ones(bgr_work.shape[:2], dtype=bool)
+    changed = False
+    if t_luma is not None:
+        lab_w = cv2.cvtColor(bgr_work, cv2.COLOR_BGR2LAB).astype(np.float32)
+        cur_l = float(np.mean(lab_w[:, :, 0][fg_mask]))
+        if cur_l > 1.0:
+            gain_l = float(np.clip(t_luma / cur_l, 0.58, 1.55))
+            if abs(gain_l - 1.0) > 0.02:
+                lab_w[:, :, 0] = np.clip(lab_w[:, :, 0] * gain_l, 0.0, 255.0)
+                bgr_work = cv2.cvtColor(lab_w.astype(np.uint8), cv2.COLOR_LAB2BGR)
+                changed = True
+    if t_sat is not None:
+        hsv_w = cv2.cvtColor(bgr_work, cv2.COLOR_BGR2HSV).astype(np.float32)
+        cur_s = float(np.mean(hsv_w[:, :, 1][fg_mask]))
+        if cur_s > 1.0:
+            gain_s = float(np.clip(t_sat / cur_s, 0.25, 1.65))
+            if abs(gain_s - 1.0) > 0.02:
+                hsv_w[:, :, 1] = np.clip(hsv_w[:, :, 1] * gain_s, 0.0, 255.0)
+                bgr_work = cv2.cvtColor(hsv_w.astype(np.uint8), cv2.COLOR_HSV2BGR)
+                changed = True
+    if changed:
+        if alpha_ch is not None:
+            final_img = cv2.merge([bgr_work[:, :, 0], bgr_work[:, :, 1], bgr_work[:, :, 2], alpha_ch])
+        else:
+            final_img = bgr_work
+        cv2.imwrite(p, final_img)
+        tone_adjusted = True
+
 sat_p90 = 0.0
+mean_luma = None
+mean_sat = None
+mean_hex = None
 if final_img.ndim == 3 and final_img.shape[2] >= 3:
-    hsv = cv2.cvtColor(final_img[:, :, :3], cv2.COLOR_BGR2HSV)
-    if final_img.shape[2] == 4:
+    bgr_fin = final_img[:, :, :3]
+    hsv = cv2.cvtColor(bgr_fin, cv2.COLOR_BGR2HSV)
+    lab_fin = cv2.cvtColor(bgr_fin, cv2.COLOR_BGR2LAB)
+    if final_img.shape[2] == 4 and np.any(final_img[:, :, 3] > 32):
         mask = final_img[:, :, 3] > 32
-        s_vals = hsv[:, :, 1][mask] if np.any(mask) else hsv[:, :, 1].reshape(-1)
+        s_vals = hsv[:, :, 1][mask]
+        l_vals = lab_fin[:, :, 0][mask]
+        bgr_vals = bgr_fin[mask]
     else:
         s_vals = hsv[:, :, 1].reshape(-1)
-    sat_p90 = round(float(np.percentile(s_vals, 90)), 1) if s_vals.size > 0 else 0.0
+        l_vals = lab_fin[:, :, 0].reshape(-1)
+        bgr_vals = bgr_fin.reshape(-1, 3)
+    if s_vals.size > 0:
+        sat_p90 = round(float(np.percentile(s_vals, 90)), 1)
+        mean_sat = round(float(np.mean(s_vals)), 1)
+    if l_vals.size > 0:
+        mean_luma = round(float(np.mean(l_vals)), 1)
+    if bgr_vals.size > 0:
+        mb, mg, mr = [int(round(float(x))) for x in np.mean(bgr_vals, axis=0)]
+        mean_hex = "#{:02X}{:02X}{:02X}".format(mr, mg, mb)
 
-print(json.dumps({"w": int(w), "h": int(h), "alpha": bool(has_alpha), "rm": bool(removed), "satP90": sat_p90}))
-"#;
+print(json.dumps({
+    "w": int(w),
+    "h": int(h),
+    "alpha": bool(has_alpha),
+    "rm": bool(removed),
+    "satP90": sat_p90,
+    "meanLuma": mean_luma,
+    "meanSat": mean_sat,
+    "meanHex": mean_hex,
+    "toneAdjusted": bool(tone_adjusted),
+}))
+"##;
     let out = tokio::process::Command::new(python)
         .arg("-c")
         .arg(script)
         .arg(path)
         .arg(if remove_bg { "1" } else { "0" })
+        .arg(target_luma.map(|v| format!("{:.1}", v)).unwrap_or_default())
+        .arg(target_sat.map(|v| format!("{:.1}", v)).unwrap_or_default())
         .output()
         .await;
     if let Ok(o) = out {
         if o.status.success() {
             if let Ok(v) = serde_json::from_slice::<Value>(&o.stdout) {
-                return (
-                    v.get("w").and_then(Value::as_u64).map(|x| x as u32),
-                    v.get("h").and_then(Value::as_u64).map(|x| x as u32),
-                    v.get("alpha").and_then(Value::as_bool).unwrap_or(false),
-                    v.get("rm").and_then(Value::as_bool).unwrap_or(false),
-                    v.get("satP90").and_then(Value::as_f64),
-                );
+                return DownloadedImageMeta {
+                    width: v.get("w").and_then(Value::as_u64).map(|x| x as u32),
+                    height: v.get("h").and_then(Value::as_u64).map(|x| x as u32),
+                    has_alpha: v.get("alpha").and_then(Value::as_bool).unwrap_or(false),
+                    background_removed: v.get("rm").and_then(Value::as_bool).unwrap_or(false),
+                    sat_p90: v.get("satP90").and_then(Value::as_f64),
+                    mean_luma: v.get("meanLuma").and_then(Value::as_f64),
+                    mean_sat: v.get("meanSat").and_then(Value::as_f64),
+                    mean_hex: v
+                        .get("meanHex")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    tone_adjusted: v
+                        .get("toneAdjusted")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                };
             }
         }
     }
-    (None, None, false, false, None)
+    DownloadedImageMeta::default()
 }
 
 #[cfg(test)]
@@ -979,15 +1095,32 @@ mod tests {
             .expect("create synthetic studio test image");
         assert!(mk.status.success(), "python failed creating synthetic image");
 
-        let (w, h, has_alpha, removed, sat_p90) = postprocess_downloaded_image(&tmp, true).await;
-        let _ = std::fs::remove_file(&tmp);
-        assert!(has_alpha, "expected GrabCut cutout to produce alpha channel");
-        assert!(removed, "expected backgroundRemoved=true");
-        assert!(sat_p90.unwrap_or(0.0) >= 15.0, "expected colored synthetic object sat_p90 >= 15, got {:?}", sat_p90);
-        let w = w.expect("width");
-        let h = h.expect("height");
+        let meta = postprocess_downloaded_image(&tmp, true, None, None).await;
+        assert!(meta.has_alpha, "expected GrabCut cutout to produce alpha channel");
+        assert!(meta.background_removed, "expected backgroundRemoved=true");
+        assert!(meta.sat_p90.unwrap_or(0.0) >= 15.0, "expected colored synthetic object sat_p90 >= 15, got {:?}", meta.sat_p90);
+        assert!(meta.mean_luma.unwrap_or(0.0) > 100.0, "expected mean_luma reported, got {:?}", meta.mean_luma);
+        assert!(meta.mean_hex.as_deref().is_some_and(|h| h.starts_with('#')), "expected mean_hex, got {:?}", meta.mean_hex);
+        let w = meta.width.expect("width");
+        let h = meta.height.expect("height");
         assert!(w < 230 && w > 120, "expected auto-trimmed width around ~172px, got {w}");
         assert!(h < 190 && h > 90, "expected auto-trimmed height around ~128px, got {h}");
+
+        // Now verify optional LAB luma / HSV sat tone grading shifts the cutout toward target tone
+        let graded = postprocess_downloaded_image(&tmp, false, Some(135.0), Some(14.0)).await;
+        let _ = std::fs::remove_file(&tmp);
+        assert!(graded.tone_adjusted, "expected toneAdjusted=true when targets differ");
+        assert!(
+            graded.mean_luma.unwrap_or(255.0) < meta.mean_luma.unwrap_or(0.0) - 20.0,
+            "expected toned luma ({:?}) noticeably darker than original ({:?})",
+            graded.mean_luma,
+            meta.mean_luma
+        );
+        assert!(
+            graded.mean_sat.unwrap_or(255.0) <= 22.0,
+            "expected toned saturation muted near targetSat=14, got {:?}",
+            graded.mean_sat
+        );
     }
 }
 
