@@ -22,6 +22,8 @@ pub(crate) struct ToolCallTraceRecord {
     pub image_bytes: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub probe_tag: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diag_summary: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -385,6 +387,7 @@ mod tests {
                 image_count: 1,
                 image_bytes: 8400,
                 probe_tag: Some("t=0.50".to_string()),
+                diag_summary: Vec::new(),
             }],
             blocked_by_gate: vec![],
             assistant_text_chars: 18,

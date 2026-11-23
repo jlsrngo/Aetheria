@@ -26,7 +26,7 @@ use crate::paths::now_ms;
 use crate::session::message::emit_event;
 
 use super::direct_scene_prompt::{
-    build_scene_hard_facts_prompt, detect_scene_collision_hazards, DIRECT_SCENE_SYSTEM_PROMPT,
+    detect_scene_motion_hazards, SceneMotionExpectations, DIRECT_SCENE_SYSTEM_PROMPT,
     DIRECT_SCENE_SYSTEM_PROMPT_MINIMAL,
 };
 use super::direct_scene_switches::{
@@ -122,7 +122,11 @@ pub(crate) fn should_run_direct_scene_remake_with_mode(
             return false;
         }
     }
-    // Only trigger when scene scripts are still scaffold stubs (not already authored).
+    // Only trigger when scene scripts are still scaffold stubs (not already authored),
+    // OR when AETHERIA_REMAKE_ONLY_SCENES targets specific scenes for surgical re-authoring.
+    if DirectSceneSwitches::from_env().only_scenes.is_some() {
+        return true;
+    }
     let mut stub_count = 0usize;
     for (idx, sc) in scenes.iter().enumerate() {
         let rel = sc
@@ -254,6 +258,16 @@ pub(crate) async fn maybe_auto_scaffold_for_direct_filmstrip_remake_with_mode(
             let mut row = json!({ "id": sid, "duration": dur });
             if let Some(tp) = s.get("transitionFromPrev").and_then(Value::as_str) {
                 row["transitionFromPrev"] = Value::String(tp.to_string());
+            }
+            if let Some(tb) = s.get("transitionBridge") {
+                if !tb.is_null() {
+                    row["transitionBridge"] = tb.clone();
+                }
+            }
+            if let Some(ct) = s.get("cameraTrack") {
+                if !ct.is_null() {
+                    row["cameraTrack"] = ct.clone();
+                }
             }
             row
         })
@@ -593,13 +607,64 @@ fn collect_scene_filmstrip_pass1_images(ws_root: &Path, scene_num: usize) -> Vec
     }
 }
 
+/// Computes settled isolated-preview timestamp bounds `(safe_lo, safe_hi)` excluding incoming
+/// and outgoing `push_*` / `zoom_blur` transition bridge overlaps so per-scene isolated renders
+/// (`window.__isolateSceneTransition = true`) never compare against an adjacent scene's sliding elements.
+pub(crate) fn compute_isolated_scene_time_bounds(
+    scene_start: f64,
+    scene_dur: f64,
+    film_duration: f64,
+    style_sc: Option<&Value>,
+    film_sc: &Value,
+    next_style_sc: Option<&Value>,
+) -> (f64, f64) {
+    let scene_end = (scene_start + scene_dur).min((film_duration - 0.03).max(0.0));
+    let mut safe_lo = scene_start + 0.02;
+    let mut safe_hi = (scene_end - 0.03).max(safe_lo);
+
+    if let Some(in_tb) = style_sc
+        .and_then(|s| s.get("transitionBridge"))
+        .or_else(|| film_sc.get("transitionBridge"))
+    {
+        let kind = in_tb.get("kind").and_then(Value::as_str).unwrap_or("");
+        if (kind.starts_with("push_") || kind == "zoom_blur")
+            && in_tb.get("tEnd").and_then(Value::as_f64).is_some()
+        {
+            let t_end = in_tb.get("tEnd").and_then(Value::as_f64).unwrap_or(scene_start);
+            let max_lo = scene_start + scene_dur * 0.42;
+            safe_lo = safe_lo.max((t_end + 0.04).min(max_lo));
+        }
+    }
+
+    if let Some(out_tb) = next_style_sc.and_then(|s| s.get("transitionBridge")) {
+        let kind = out_tb.get("kind").and_then(Value::as_str).unwrap_or("");
+        if (kind.starts_with("push_") || kind == "zoom_blur")
+            && out_tb.get("tStart").and_then(Value::as_f64).is_some()
+        {
+            let t_start = out_tb.get("tStart").and_then(Value::as_f64).unwrap_or(scene_end);
+            let min_hi = scene_start + scene_dur * 0.58;
+            safe_hi = safe_hi.min((t_start - 0.04).max(min_hi));
+        }
+    }
+
+    if safe_hi < safe_lo {
+        safe_hi = safe_lo;
+    }
+    (
+        ((safe_lo * 1000.0).round()) / 1000.0,
+        ((safe_hi * 1000.0).round()) / 1000.0,
+    )
+}
+
 fn collect_scene_keyframe_timestamps(
     ws_root: &Path,
     film_root: &Path,
     film_duration: f64,
     scene_num: usize,
-    scene_start: f64,
-    scene_dur: f64,
+    _scene_start: f64,
+    _scene_dur: f64,
+    safe_lo: f64,
+    safe_hi: f64,
 ) -> Vec<f64> {
     let all_kfs = crate::studio::reference_compare::discover_reference_keyframes_for_film(
         ws_root,
@@ -616,19 +681,20 @@ fn collect_scene_keyframe_timestamps(
                 || sid.starts_with(&format!("scene{scene_num}_"))
                 || sid == format!("scene{scene_num}")
         })
-        .map(|k| k.timestamp)
+        .map(|k| k.timestamp.clamp(safe_lo, safe_hi))
         .collect();
     ts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     ts.dedup_by(|a, b| (*a - *b).abs() < 0.04);
     if ts.len() >= 2 {
         return ts.into_iter().take(6).collect();
     }
+    let span = (safe_hi - safe_lo).max(0.05);
     vec![
-        (scene_start + scene_dur * 0.15).min(film_duration - 0.05),
-        (scene_start + scene_dur * 0.30).min(film_duration - 0.05),
-        (scene_start + scene_dur * 0.50).min(film_duration - 0.05),
-        (scene_start + scene_dur * 0.72).min(film_duration - 0.05),
-        (scene_start + scene_dur * 0.88).min(film_duration - 0.05),
+        (safe_lo + span * 0.12).min(film_duration - 0.05),
+        (safe_lo + span * 0.30).min(film_duration - 0.05),
+        (safe_lo + span * 0.50).min(film_duration - 0.05),
+        (safe_lo + span * 0.72).min(film_duration - 0.05),
+        (safe_lo + span * 0.90).min(film_duration - 0.05),
     ]
 }
 
@@ -646,10 +712,12 @@ pub(crate) fn is_better_checkpoint(
         || (best_errs.is_empty()
             && cand_errs.is_empty()
             && (cand_score >= best_score - 0.002
-                || (cand_hazards < best_hazards && cand_score >= best_score - 0.04)))
+                || (cand_hazards < best_hazards && cand_score >= best_score - 0.12)))
 }
 
 /// Pure end-of-scene safety-restore predicate (baseline rule P4).
+/// Protects clean animated scripts (`final_hazards < best_hazards`, e.g. fixed 3D turntable / blur reveal)
+/// from being rolled back to an older static/hazardous checkpoint unless pixel score severely collapsed.
 pub(crate) fn should_restore_best_checkpoint(
     best_score: f64,
     best_code: &str,
@@ -663,8 +731,8 @@ pub(crate) fn should_restore_best_checkpoint(
         && !best_code.is_empty()
         && !crate::tool::film_state::is_scaffold_stub_content(best_code)
         && ((best_errs.is_empty() && !latest_errs.is_empty())
-            || (latest_score + 0.04 < best_score)
-            || (latest_score + 0.03 < best_score && final_hazards >= best_hazards))
+            || (final_hazards >= best_hazards && latest_score + 0.008 < best_score)
+            || (final_hazards < best_hazards && latest_score + 0.14 < best_score))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -785,6 +853,7 @@ async fn run_single_direct_scene(
     idx: usize,
     film_sc: Value,
     style_sc_owned: Option<Value>,
+    next_style_sc_owned: Option<Value>,
 ) -> (DirectSceneOutcome, SceneSummaryTraceRecord) {
     let scene_num = idx + 1;
     let scene_started = now_ms();
@@ -808,6 +877,7 @@ async fn run_single_direct_scene(
     let sc_start = film_sc.get("start").and_then(Value::as_f64).unwrap_or(0.0);
     let sc_dur = film_sc.get("duration").and_then(Value::as_f64).unwrap_or(2.0);
     let style_sc = style_sc_owned.as_ref();
+    let next_style_sc = next_style_sc_owned.as_ref();
 
     emit_event(
         &shared.workspace_dir,
@@ -825,8 +895,9 @@ async fn run_single_direct_scene(
     } else {
         collect_scene_pass1_images(&shared.ws_root, scene_num)
     };
-    let mut hard_facts = build_scene_hard_facts_prompt(
+    let mut hard_facts = super::direct_scene_prompt::build_scene_hard_facts_prompt_with_next(
         style_sc,
+        next_style_sc,
         &film_sc,
         scene_num,
         total_scenes,
@@ -846,6 +917,14 @@ async fn run_single_direct_scene(
             hard_facts.push_str(&summary_block);
         }
     }
+    let (safe_iso_lo, safe_iso_hi) = compute_isolated_scene_time_bounds(
+        sc_start,
+        sc_dur,
+        shared.total_dur,
+        style_sc,
+        &film_sc,
+        next_style_sc,
+    );
     let scene_ts = collect_scene_keyframe_timestamps(
         &shared.ws_root,
         &shared.film_root,
@@ -853,6 +932,8 @@ async fn run_single_direct_scene(
         scene_num,
         sc_start,
         sc_dur,
+        safe_iso_lo,
+        safe_iso_hi,
     );
 
     let mut best_code = std::fs::read_to_string(&script_path).unwrap_or_default();
@@ -875,6 +956,7 @@ async fn run_single_direct_scene(
     let mut tool_histogram: BTreeMap<String, usize> = BTreeMap::new();
     let mut render_records: Vec<RenderTraceRecord> = Vec::new();
 
+    let motion_expectations = SceneMotionExpectations::from_style_scene(style_sc);
     let tool_ctx = SceneToolContext {
         session_id: &shared.session_id,
         workspace_dir: &shared.workspace_dir,
@@ -890,7 +972,10 @@ async fn run_single_direct_scene(
         width: shared.width,
         height: shared.height,
         default_scene_ts: &scene_ts,
+        safe_iso_lo,
+        safe_iso_hi,
         use_filmstrip: shared.active_filmstrip,
+        motion_expectations,
     };
 
     let mut scene_msgs = vec![
@@ -1166,7 +1251,10 @@ async fn run_single_direct_scene(
                     dirty_since_render = true;
                     step_modified = true;
                 } else if !blocked_this_call && outcome.rendered_score.is_none() {
-                    step_probed = true;
+                    let is_failed_asset_fetch = fn_name == "fetch_web_image" && !call_ok;
+                    if !is_failed_asset_fetch {
+                        step_probed = true;
+                    }
                     if !has_written {
                         probe_calls_before_write += 1;
                     }
@@ -1181,7 +1269,7 @@ async fn run_single_direct_scene(
                     let cur_code = tokio::fs::read_to_string(&script_path)
                         .await
                         .unwrap_or_default();
-                    let cur_haz = detect_scene_collision_hazards(&cur_code).len();
+                    let cur_haz = detect_scene_motion_hazards(&cur_code, motion_expectations).len();
                     let metrics = outcome.rendered_metrics.unwrap_or(RenderedMetrics {
                         overall: sc_val,
                         ssim: 0.0,
@@ -1230,6 +1318,40 @@ async fn run_single_direct_scene(
                     );
                 }
 
+                fn push_diag_tags(out: &mut Vec<String>, text: &str) {
+                    for tag in [
+                        "UNDERSIZED",
+                        "OVERSIZED",
+                        "MISALIGNED",
+                        "COLOR DRIFT",
+                        "MOTION FROZEN WARNING",
+                        "MOTION STIFFNESS WARNING",
+                        "MOTION JUMP / TELEPORT WARNING",
+                        "MOTION WINDOW FREEZE",
+                        "MOTION DIRECTION/PAN MISMATCH",
+                        "MOTION ACTIVITY WARNING",
+                    ] {
+                        if text.contains(tag) && !out.iter().any(|x| x == tag) {
+                            out.push(tag.to_string());
+                        }
+                    }
+                }
+                let mut diag_summary: Vec<String> = Vec::new();
+                if let Some(d_str) = outcome.result_json.get("diagnostics").and_then(Value::as_str) {
+                    push_diag_tags(&mut diag_summary, d_str);
+                }
+                if outcome
+                    .result_json
+                    .get("assetHint")
+                    .and_then(Value::as_str)
+                    .is_some_and(|s| !s.is_empty())
+                {
+                    diag_summary.push("assetHint".to_string());
+                }
+                if let Some(ref cap) = outcome.vision_caption {
+                    push_diag_tags(&mut diag_summary, cap);
+                }
+
                 step_images.extend(outcome.vision_images);
                 if let Some(cap) = outcome.vision_caption {
                     step_captions.push(cap);
@@ -1269,6 +1391,7 @@ async fn run_single_direct_scene(
                     image_count: img_count,
                     image_bytes: img_bytes,
                     probe_tag,
+                    diag_summary,
                 });
                 scene_msgs.push(json!({
                     "role": "tool",
@@ -1310,7 +1433,7 @@ async fn run_single_direct_scene(
                 String::new()
             };
             let active_hazards = if !cur_code_after_step.is_empty() {
-                detect_scene_collision_hazards(&cur_code_after_step)
+                detect_scene_motion_hazards(&cur_code_after_step, motion_expectations)
             } else {
                 Vec::new()
             };
@@ -1321,6 +1444,8 @@ async fn run_single_direct_scene(
                         || c.contains("MOTION STIFFNESS WARNING")
                         || c.contains("MOTION JUMP / TELEPORT WARNING")
                         || c.contains("MOTION ACTIVITY WARNING")
+                        || c.contains("MOTION WINDOW FREEZE")
+                        || c.contains("MOTION DIRECTION/PAN MISMATCH")
                 });
 
             // Fast early-exit for live filmstrip remakes once visual score, edge overlap, worst-frame
@@ -1452,7 +1577,7 @@ async fn run_single_direct_scene(
             let errs = render_out.rendered_errors.unwrap_or_default();
             latest_score = sc_val;
             latest_errs = errs.clone();
-            let cur_haz = detect_scene_collision_hazards(&code_block).len();
+            let cur_haz = detect_scene_motion_hazards(&code_block, motion_expectations).len();
             let metrics = render_out.rendered_metrics.unwrap_or(RenderedMetrics {
                 overall: sc_val,
                 ssim: 0.0,
@@ -1536,7 +1661,7 @@ async fn run_single_direct_scene(
         let final_dirty_code = tokio::fs::read_to_string(&script_path)
             .await
             .unwrap_or_default();
-        let final_dirty_haz = detect_scene_collision_hazards(&final_dirty_code).len();
+        let final_dirty_haz = detect_scene_motion_hazards(&final_dirty_code, motion_expectations).len();
         let metrics = final_out.rendered_metrics.unwrap_or(RenderedMetrics {
             overall: latest_score,
             ssim: 0.0,
@@ -1575,7 +1700,7 @@ async fn run_single_direct_scene(
     let final_code_now = tokio::fs::read_to_string(&script_path)
         .await
         .unwrap_or_default();
-    let final_haz = detect_scene_collision_hazards(&final_code_now).len();
+    let final_haz = detect_scene_motion_hazards(&final_code_now, motion_expectations).len();
     let should_restore_best = shared.switches.restore_best
         && should_restore_best_checkpoint(
             best_score,
@@ -1835,7 +1960,8 @@ pub(crate) async fn run_direct_per_scene_remake_with_switches(
         completed_scenes: Arc::new(tokio::sync::Mutex::new(Vec::new())),
     });
 
-    let mut scene_jobs: Vec<(usize, Value, Option<Value>)> = Vec::with_capacity(total_scenes);
+    let mut scene_jobs: Vec<(usize, Value, Option<Value>, Option<Value>)> =
+        Vec::with_capacity(total_scenes);
     for (idx, film_sc) in film_scenes.into_iter().enumerate() {
         let scene_num = idx + 1;
         if !effective_switches.should_run_scene(scene_num) {
@@ -1848,27 +1974,67 @@ pub(crate) async fn run_direct_per_scene_remake_with_switches(
             }
             sc_val
         });
-        scene_jobs.push((idx, film_sc, style_sc_owned));
+        let next_style_sc_owned = style_scenes.get(idx + 1).cloned();
+        scene_jobs.push((idx, film_sc, style_sc_owned, next_style_sc_owned));
     }
 
     let mut indexed: Vec<(usize, DirectSceneOutcome, SceneSummaryTraceRecord)> =
         Vec::with_capacity(scene_jobs.len());
     if effective_concurrency <= 1 {
-        for (idx, film_sc, style_sc) in scene_jobs {
-            let (outcome, sum_rec) =
-                run_single_direct_scene(Arc::clone(&shared), idx, film_sc, style_sc).await;
+        for (idx, film_sc, style_sc, next_style_sc) in scene_jobs {
+            let (outcome, sum_rec) = run_single_direct_scene(
+                Arc::clone(&shared),
+                idx,
+                film_sc,
+                style_sc,
+                next_style_sc,
+            )
+            .await;
             indexed.push((idx, outcome, sum_rec));
         }
     } else {
+        // M4b: Keep hard-cut scenes 100% parallel, but sequence ONLY `soft` cut scenes (without a
+        // runtime push_* bridge) behind Scene N-1 so Scene N receives Scene N-1's exact closing pose
+        // via `completed_scenes` before acquiring a concurrency permit (deadlock-free).
         let sem = Arc::new(tokio::sync::Semaphore::new(effective_concurrency));
+        let mut done_txs: std::collections::HashMap<usize, tokio::sync::watch::Sender<bool>> =
+            std::collections::HashMap::new();
+        let mut done_rxs: std::collections::HashMap<usize, tokio::sync::watch::Receiver<bool>> =
+            std::collections::HashMap::new();
+        for (idx, _, _, _) in &scene_jobs {
+            let (tx, rx) = tokio::sync::watch::channel(false);
+            done_txs.insert(*idx, tx);
+            done_rxs.insert(*idx, rx);
+        }
         let mut join_set = tokio::task::JoinSet::new();
-        for (idx, film_sc, style_sc) in scene_jobs {
+        for (idx, film_sc, style_sc, next_style_sc) in scene_jobs {
+            let is_soft_seam = style_sc.as_ref().is_some_and(|sc| {
+                let is_soft = sc.get("transitionFromPrev").and_then(Value::as_str) == Some("soft");
+                let has_push = sc
+                    .pointer("/transitionBridge/kind")
+                    .and_then(Value::as_str)
+                    .is_some_and(|k| k.starts_with("push_"));
+                is_soft && !has_push
+            });
+            let wait_prev_rx = if is_soft_seam && idx > 0 {
+                done_rxs.get(&(idx - 1)).cloned()
+            } else {
+                None
+            };
+            let my_done_tx = done_txs.remove(&idx);
             let sem_c = Arc::clone(&sem);
             let shared_c = Arc::clone(&shared);
             join_set.spawn(async move {
+                if let Some(mut rx) = wait_prev_rx {
+                    let _ = rx.wait_for(|&done| done).await;
+                }
                 let _permit = sem_c.acquire_owned().await.ok();
                 let (outcome, sum_rec) =
-                    run_single_direct_scene(shared_c, idx, film_sc, style_sc).await;
+                    run_single_direct_scene(shared_c, idx, film_sc, style_sc, next_style_sc)
+                        .await;
+                if let Some(tx) = my_done_tx {
+                    let _ = tx.send(true);
+                }
                 (idx, outcome, sum_rec)
             });
         }
@@ -2023,7 +2189,16 @@ mod tests {
             "good",
             &[],
             0,
-            0.78,
+            0.795,
+            &[],
+            0
+        ));
+        assert!(should_restore_best_checkpoint(
+            0.7703,
+            "good",
+            &[],
+            0,
+            0.7506,
             &[],
             0
         ));
@@ -2064,6 +2239,45 @@ mod tests {
             &[],
             0
         ));
+    }
+
+    #[test]
+    fn isolated_scene_time_bounds_exclude_incoming_and_outgoing_push_bridges() {
+        let style_sc3 = json!({
+            "transitionBridge": {
+                "kind": "push_left",
+                "tStart": 6.039,
+                "tEnd": 6.673
+            }
+        });
+        let next_sc5 = json!({
+            "transitionBridge": {
+                "kind": "push_up",
+                "tStart": 13.347,
+                "tEnd": 14.181
+            }
+        });
+        let (lo3, hi3) = compute_isolated_scene_time_bounds(
+            6.206,
+            3.337,
+            17.885,
+            Some(&style_sc3),
+            &json!({}),
+            None,
+        );
+        assert!(lo3 >= 6.71, "expected lo3 >= 6.71 outside push_left tail, got {lo3}");
+        assert!(hi3 >= 9.50);
+
+        let (lo4, hi4) = compute_isolated_scene_time_bounds(
+            9.543,
+            4.101,
+            17.885,
+            None,
+            &json!({}),
+            Some(&next_sc5),
+        );
+        assert!((lo4 - 9.563).abs() < 0.01);
+        assert!(hi4 <= 13.31, "expected hi4 <= 13.31 before push_up start, got {hi4}");
     }
 
     fn setup_test_remake_workspace(tag: &str, num_scenes: usize) -> PathBuf {
@@ -2803,6 +3017,13 @@ mod tests {
         assert!(is_better_checkpoint(0.55, &[], 0, 0.82, &[], 0));
         assert!(!is_better_checkpoint(0.82, &[], 0, 0.55, &[], 0));
         assert!(is_better_checkpoint(0.40, &["err".to_string()], 0, 0.30, &[], 0));
+
+        // Motion-hazard protection: a clean 0-hazard animated script (0.622) beats and is NOT rolled back
+        // to an older 2-hazard static script (0.669), while equal-hazard regression still rolls back!
+        assert!(is_better_checkpoint(0.669, &[], 2, 0.622, &[], 0));
+        let real_code = "AM.registerScene('s', function(ctx,t){ ctx.fillRect(0,0,10,10); ctx.arc(5,5,2,0,6); });";
+        assert!(!should_restore_best_checkpoint(0.669, real_code, &[], 2, 0.622, &[], 0));
+        assert!(should_restore_best_checkpoint(0.70, real_code, &[], 0, 0.60, &[], 0));
 
         // Early exit blocked when edge < 0.35, min_frame_score < 0.62, or structuralDiagnosis is present
         assert!(!should_early_exit_scene(true, false, true, &[], &[], false, false, 2, 0.78, 0.12, 0.68));

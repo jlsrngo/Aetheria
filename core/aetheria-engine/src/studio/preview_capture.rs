@@ -449,6 +449,18 @@ async fn run_cdp_preview_capture(
     let timestamps = normalize_preview_timestamps(&effective_requested, meta.duration);
     let _ = tokio::fs::create_dir_all(args.preview_dir).await;
 
+    let isolate_js = if args.options.forced_scene_id.is_some() {
+        "window.__isolateSceneTransition = true;"
+    } else {
+        "window.__isolateSceneTransition = false;"
+    };
+    let _ = cdp
+        .call(
+            "Runtime.evaluate",
+            json!({ "expression": isolate_js, "returnByValue": true }),
+        )
+        .await;
+
     let mut frames = Vec::with_capacity(timestamps.len());
     let mut frame_digests = Vec::with_capacity(timestamps.len());
     for (idx, ts) in timestamps.iter().enumerate() {

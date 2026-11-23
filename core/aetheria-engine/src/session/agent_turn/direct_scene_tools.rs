@@ -14,7 +14,9 @@ use base64::prelude::*;
 use serde_json::{json, Value};
 use std::path::Path;
 
-use super::direct_scene_prompt::{detect_scene_collision_hazards, format_comparison_feedback};
+use super::direct_scene_prompt::{
+    detect_scene_motion_hazards, format_comparison_feedback, SceneMotionExpectations,
+};
 use crate::tool::ref_probe::{locate_reference_video, parse_box_arg, run_probe_python};
 
 pub(crate) struct SceneToolContext<'a> {
@@ -32,7 +34,10 @@ pub(crate) struct SceneToolContext<'a> {
     pub width: u32,
     pub height: u32,
     pub default_scene_ts: &'a [f64],
+    pub safe_iso_lo: f64,
+    pub safe_iso_hi: f64,
     pub use_filmstrip: bool,
+    pub motion_expectations: SceneMotionExpectations,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -241,6 +246,10 @@ pub(crate) fn is_trivial_static_placeholder(code: &str) -> bool {
         "fillroundrect(",
         "strokeroundrect(",
         "drawcursor(",
+        "drawblurrevealtext(",
+        "drawblurrisewords(",
+        "drawturntableobject(",
+        "drawmorphpolygon(",
     ];
     let draw_hits: usize = DRAW_PATTERNS.iter().map(|pat| lower.matches(pat).count()).sum();
     draw_hits <= 1 && (code_lines.len() <= 20 || lower.contains("placeholder"))
@@ -317,7 +326,11 @@ fn encode_file_jpeg_data_url(path: &Path) -> Option<String> {
 }
 
 fn build_unused_downloaded_asset_hint(film_root: &Path, code: &str) -> Option<String> {
-    if code.contains("AM.loadImage(") {
+    let has_load = code.contains("AM.loadImage(");
+    let actually_draws_image = code.contains("AM.drawImageFit(")
+        || code.contains(".drawImage(")
+        || (has_load && code.contains("AM.drawTurntableObject("));
+    if has_load && actually_draws_image {
         return None;
     }
     let img_dir = film_root.join("img");
@@ -344,8 +357,9 @@ fn build_unused_downloaded_asset_hint(film_root: &Path, code: &str) -> Option<St
         return None;
     }
     Some(format!(
-        "Downloaded image asset(s) exist [{}] but your script did not call `AM.loadImage(...)`. Preload and animate the real image (`AM.drawImageFit` with float/scale/rotation) instead of a flat hand-drawn cartoon fallback!",
-        names.join(", ")
+        "UNUSED DOWNLOADED ASSET HAZARD: Real image asset(s) exist on disk [{}] from `fetch_web_image`, but your script did NOT actually render it with `AM.loadImage` + `AM.drawTurntableObject`/`AM.drawImageFit`/`ctx.drawImage`! Preload `var heroImg = AM.loadImage('{}');` at module top level AND pass `heroImg` directly into `AM.drawTurntableObject(ctx, cx, cy, t, heroImg, {{ w, h, omega: 2.1, depth: 0.24, ringRadius }})` or `AM.drawImageFit(ctx, heroImg, ...)` instead of drawing a flat procedural fallback!",
+        names.join(", "),
+        names[0]
     ))
 }
 
@@ -492,9 +506,18 @@ pub(crate) async fn execute_scene_micro_tool(
                                     .get("assetUrl")
                                     .and_then(Value::as_str)
                                     .unwrap_or("/img/web_image.png");
+                                let has_alpha = res.get("hasAlpha").and_then(Value::as_bool).unwrap_or(false);
+                                let bg_rm = res.get("backgroundRemoved").and_then(Value::as_bool).unwrap_or(false);
+                                let dims = match (
+                                    res.get("width").and_then(Value::as_u64),
+                                    res.get("height").and_then(Value::as_u64),
+                                ) {
+                                    (Some(w), Some(h)) => format!("{}x{}", w, h),
+                                    _ => "unknown".to_string(),
+                                };
                                 caption = Some(format!(
-                                    "Downloaded internet image `{}` attached above. Verify it matches the reference object cleanly (if not, try a more specific `query` or `removeBackground: true`); preload via `AM.loadImage('{}')` and draw via `AM.drawImageFit(...)`.",
-                                    asset_url, asset_url
+                                    "Downloaded internet image `{}` ({}, hasAlpha={}, cutout={}) attached above. Preload it at module top level via `var heroImg = AM.loadImage('{}');` and render/rotate it cleanly via `AM.drawTurntableObject(ctx, cx, cy, t, heroImg, {{ w, h, omega: 2.1, depth: 0.24, ringRadius }})` or `AM.drawImageFit(...)` — adjust color tone with `ctx.filter = 'saturate(...) brightness(...)'` to match the reference palette! If this candidate looks wrong, call `fetch_web_image` with `candidateIndex: 1` (or a `url` from `candidates`).",
+                                    asset_url, dims, has_alpha, bg_rm, asset_url
                                 ));
                             }
                         }
@@ -609,9 +632,12 @@ pub(crate) async fn execute_scene_micro_tool(
                     rendered_errors: None,
                 };
             }
-            let hazards = detect_scene_collision_hazards(&normalized);
+            let mut hazards = detect_scene_motion_hazards(&normalized, ctx.motion_expectations);
             let lines_count = normalized.lines().count();
             let asset_hint = build_unused_downloaded_asset_hint(ctx.film_root, &normalized);
+            if let Some(ref hint) = asset_hint {
+                hazards.push(hint.clone());
+            }
             let mut rj = json!({
                 "ok": true,
                 "file": ctx.script_rel,
@@ -685,8 +711,11 @@ pub(crate) async fn execute_scene_micro_tool(
                             rendered_errors: None,
                         };
                     }
-                    let hazards = detect_scene_collision_hazards(&updated);
+                    let mut hazards = detect_scene_motion_hazards(&updated, ctx.motion_expectations);
                     let asset_hint = build_unused_downloaded_asset_hint(ctx.film_root, &updated);
+                    if let Some(ref hint) = asset_hint {
+                        hazards.push(hint.clone());
+                    }
                     let mut rj = json!({
                         "ok": true,
                         "file": ctx.script_rel,
@@ -739,14 +768,15 @@ pub(crate) async fn execute_scene_micro_tool(
                 .unwrap_or_default();
             if ts_list.is_empty() {
                 if ctx.use_filmstrip {
-                    let min_t = ((ctx.scene_start + 0.02) * 1000.0).round() / 1000.0;
-                    let max_t = (((ctx.scene_start + ctx.scene_dur - 0.03)
+                    let raw_min_t = ctx.scene_start + 0.02;
+                    let raw_max_t = (ctx.scene_start + ctx.scene_dur - 0.03)
                         .min((ctx.film_duration - 0.03).max(0.0))
-                        .max(min_t))
-                        * 1000.0)
-                        .round()
+                        .max(raw_min_t);
+                    let min_t = ((raw_min_t.max(ctx.safe_iso_lo).min(raw_max_t)) * 1000.0).round()
                         / 1000.0;
-                    // Include exact entry boundary, saved sub-beat keyframe timestamps, evenly spaced beats, and exact exit boundary
+                    let max_t = ((raw_max_t.min(ctx.safe_iso_hi).max(min_t)) * 1000.0).round()
+                        / 1000.0;
+                    // Include settled entry boundary (outside cross-scene push/zoom bridge), saved sub-beat keyframe timestamps, evenly spaced beats, and settled exit boundary
                     ts_list.push(min_t);
                     for &kt in ctx.default_scene_ts {
                         if kt >= min_t && kt <= max_t && !ts_list.iter().any(|x| (*x - kt).abs() < 0.04) {
@@ -864,6 +894,8 @@ pub(crate) async fn execute_scene_micro_tool(
                                 || l.contains("MOTION STIFFNESS WARNING")
                                 || l.contains("MOTION JUMP / TELEPORT WARNING")
                                 || l.contains("MOTION ACTIVITY WARNING")
+                                || l.contains("MOTION WINDOW FREEZE")
+                                || l.contains("MOTION DIRECTION/PAN MISMATCH")
                         })
                         .collect();
                     let caption = Some(if motion_warn_lines.is_empty() {

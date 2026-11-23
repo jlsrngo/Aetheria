@@ -35,6 +35,10 @@ pub struct ScaffoldSceneInput {
     pub accent: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transition_from_prev: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transition_bridge: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub camera_track: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,6 +75,10 @@ pub struct FilmManifestScene {
     pub accent: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transition_from_prev: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transition_bridge: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub camera_track: Option<Value>,
 }
 
 pub fn film_scaffold_tool_definition() -> Value {
@@ -324,6 +332,22 @@ pub(crate) fn render_managed_index_html(
 
     function runSceneSafely(targetCtx, renderFn, localT, targetScene, globalSec) {{
       var __baseDepth = __saveDepth;
+      var __isOuter = targetCtx === ctx;
+      var __localDepth = 0;
+      var __localOrigSave = null;
+      var __localOrigRestore = null;
+      if (!__isOuter) {{
+        __localOrigSave = targetCtx.save.bind(targetCtx);
+        __localOrigRestore = targetCtx.restore.bind(targetCtx);
+        targetCtx.save = function () {{
+          __localDepth++;
+          return __localOrigSave();
+        }};
+        targetCtx.restore = function () {{
+          if (__localDepth > 0) __localDepth--;
+          return __localOrigRestore();
+        }};
+      }}
       targetCtx.save();
       try {{
         renderFn(targetCtx, localT, targetScene.duration, targetScene, window.AM);
@@ -336,8 +360,17 @@ pub(crate) fn render_managed_index_html(
         }}
         if (typeof console !== "undefined" && console.error) console.error(err);
       }} finally {{
-        while (__saveDepth > __baseDepth) {{
-          ctx.restore();
+        if (__isOuter) {{
+          while (__saveDepth > __baseDepth) {{
+            ctx.restore();
+          }}
+        }} else {{
+          while (__localDepth > 0) {{
+            __localOrigRestore();
+            __localDepth--;
+          }}
+          targetCtx.save = __localOrigSave;
+          targetCtx.restore = __localOrigRestore;
         }}
         targetCtx.setTransform(1, 0, 0, 1, 0, 0);
         targetCtx.globalAlpha = 1;
@@ -359,20 +392,32 @@ pub(crate) fn render_managed_index_html(
       ctx.restore();
 
       if (!window.AM || !SCENES.length) return;
-      var resolved = window.AM.resolveScene(sec, SCENES);
-      var scene = resolved.scene;
-      var localTime = resolved.localTime;
-      var renderFn = window.AM.getSceneRenderer(scene.id, resolved.index);
-      if (renderFn) {{
-        runSceneSafely(ctx, renderFn, localTime, scene, sec);
-      }}
-      if (!MICROSTOCK_MODE && scene._words && scene._words.length > 0 && window.AM.drawSubtitles) {{
-        var subOpts = (scene.subtitleStyle && typeof scene.subtitleStyle === "object")
-          ? scene.subtitleStyle
-          : {{ style: "neobrutalism", wordsPerGroup: 1 }};
-        ctx.save();
-        window.AM.drawSubtitles(ctx, scene._words, localTime, subOpts);
-        ctx.restore();
+      var renderSceneItem = function (targetCtx, targetScene, targetIdx, targetLocalT) {{
+        if (targetCtx !== ctx) {{
+          targetCtx.save();
+          targetCtx.setTransform(1, 0, 0, 1, 0, 0);
+          targetCtx.fillStyle = BG;
+          targetCtx.fillRect(0, 0, W, H);
+          targetCtx.restore();
+        }}
+        var renderFn = window.AM.getSceneRenderer(targetScene.id, targetIdx);
+        if (renderFn) {{
+          runSceneSafely(targetCtx, renderFn, targetLocalT, targetScene, sec);
+        }}
+        if (!MICROSTOCK_MODE && targetScene._words && targetScene._words.length > 0 && window.AM.drawSubtitles) {{
+          var subOpts = (targetScene.subtitleStyle && typeof targetScene.subtitleStyle === "object")
+            ? targetScene.subtitleStyle
+            : {{ style: "neobrutalism", wordsPerGroup: 1 }};
+          targetCtx.save();
+          window.AM.drawSubtitles(targetCtx, targetScene._words, targetLocalT, subOpts);
+          targetCtx.restore();
+        }}
+      }};
+      if (typeof window.AM.renderFrameWithTransitions === "function") {{
+        window.AM.renderFrameWithTransitions(ctx, sec, SCENES, W, H, renderSceneItem);
+      }} else {{
+        var resolved = window.AM.resolveScene(sec, SCENES);
+        renderSceneItem(ctx, resolved.scene, resolved.index, resolved.localTime);
       }}
     }};
 
@@ -991,6 +1036,14 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
             .filter(|s| !s.is_empty())
             .map(str::to_string)
             .or_else(|| prev.and_then(|p| p.transition_from_prev.clone()));
+        let transition_bridge = parsed
+            .transition_bridge
+            .filter(|v| !v.is_null())
+            .or_else(|| prev.and_then(|p| p.transition_bridge.clone()));
+        let camera_track = parsed
+            .camera_track
+            .filter(|v| !v.is_null())
+            .or_else(|| prev.and_then(|p| p.camera_track.clone()));
 
         manifest_scenes.push(FilmManifestScene {
             id: clean_id,
@@ -1007,6 +1060,8 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
             words,
             accent,
             transition_from_prev,
+            transition_bridge,
+            camera_track,
         });
         acc_start += resolved_duration;
     }
@@ -1481,6 +1536,8 @@ mod tests {
                 words: None,
                 accent: "#FFDE59".to_string(),
                 transition_from_prev: None,
+                transition_bridge: None,
+                camera_track: None,
             }],
         };
         let html = render_managed_index_html(&manifest, false);
@@ -1662,6 +1719,54 @@ mod tests {
         let index_html = std::fs::read_to_string(film_dir.join("index.html")).unwrap();
         assert!(!index_html.contains("_xfadeCanvas"));
         assert!(!index_html.contains("scene.transitionFromPrev === \"soft\""));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn film_scaffold_preserves_30fps_transition_bridge_and_camera_track() {
+        let dir = std::env::temp_dir().join(format!("aetheria_scaffold_bridge_{}", crate::paths::now_ms()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ws = dir.to_string_lossy().to_string();
+
+        let res = execute_film_scaffold(
+            "ses_bridge",
+            &ws,
+            &json!({
+                "title": "Bridge Test",
+                "preset": "portrait",
+                "scenes": [
+                    {
+                        "id": "scene1",
+                        "duration": 2.0,
+                        "cameraTrack": [
+                            { "t": 0.0, "tx": 0.0, "ty": 0.0, "s": 1.0, "rot": 0.0 },
+                            { "t": 1.0, "tx": 0.0, "ty": -100.0, "s": 1.2, "rot": 0.0 }
+                        ]
+                    },
+                    {
+                        "id": "scene2",
+                        "duration": 2.0,
+                        "transitionFromPrev": "soft",
+                        "transitionBridge": {
+                            "kind": "push_left",
+                            "tStart": 1.8,
+                            "tEnd": 2.4,
+                            "curve": [0.0, 0.5, 1.0]
+                        }
+                    }
+                ]
+            }),
+        );
+        assert_eq!(res["ok"], true, "{:?}", res);
+        let film_dir = dir.join(res["filmRoot"].as_str().unwrap());
+        let film_json = std::fs::read_to_string(film_dir.join("film.json")).unwrap();
+        assert!(film_json.contains("\"transitionBridge\""));
+        assert!(film_json.contains("\"push_left\""));
+        assert!(film_json.contains("\"cameraTrack\""));
+        let index_html = std::fs::read_to_string(film_dir.join("index.html")).unwrap();
+        assert!(index_html.contains("renderFrameWithTransitions"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

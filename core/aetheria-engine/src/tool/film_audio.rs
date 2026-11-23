@@ -923,6 +923,8 @@ pub async fn execute_film_audio(
                 words: words_rel_opt.clone(),
                 accent: accent.to_string(),
                 transition_from_prev: None,
+                transition_bridge: None,
+                camera_track: None,
             },
         );
 
@@ -1152,6 +1154,8 @@ mod tests {
             words: None,
             accent: "#f59e0b".to_string(),
             transition_from_prev: None,
+            transition_bridge: None,
+            camera_track: None,
         }];
         let err = validate_scenes_audio_durations(&dir, &too_short, 2.0).unwrap_err();
         assert_eq!(err["code"], "AUDIO_LONGER_THAN_SCENE");
@@ -1169,6 +1173,8 @@ mod tests {
             words: None,
             accent: "#f59e0b".to_string(),
             transition_from_prev: None,
+            transition_bridge: None,
+            camera_track: None,
         }];
         let warnings = validate_scenes_audio_durations(&dir, &too_long, 2.0).unwrap();
         assert_eq!(warnings.len(), 1);

@@ -46,18 +46,27 @@ FIVE UNIVERSAL ZERO-COLLISION & MOTION HYGIENE LAWS:
 5. CLEAN BOUNDARY FRAMES & STRICT SCENE SCOPE: Render a valid visual frame at both `t = 0` and `t = dur` matching `BOUNDARY CONTINUITY LOCK` (`OPENING FRAME local_t=0.00s` and `CLOSING FRAME local_t=dur`). Never re-animate an already-exited card from the previous scene at a different Y position, and never prematurely draw the next scene's hero logo/text unless it is visibly present in THIS scene's final filmstrip tile.
 
 OPTICAL MATERIAL & LIVING MOTION CRAFT:
-- **Snappy Zoom-Zoom, Springs & Living Holds:** Drive punchy entrances/pops with `AM.ease.outBack` / `AM.spring` / `AM.ease.outExpo` (`0.85 -> 1.04 -> 1.0`), exit zooms/wipes with `AM.ease.inCubic`, and camera or stage zooms/scrolls via `AM.applyCamera(ctx, { s, cx, cy, rot }, W, H)` whenever `MEASURED ZOOM / PAN / HOLD DYNAMICS` reports a `zoom_in`, `zoom_out`, or `pan_*` burst. Whenever `CONTINUOUS LIVING HOLD REQUIRED` appears (or orbital rings / floating objects exist in Row 1), keep dashed/orbital rings rotating (`ctx.rotate(t * omega)` or `lineDashOffset = -t * speed`) and floating objects gently breathing/swaying (`Math.sin(t * 2.5)`) instead of freezing dead-still — while keeping steady locked headlines/bars aligned!
+- **Snappy Zoom-Zoom, Springs & Measured Holds:** Drive punchy entrances/pops with `AM.ease.outBack` / `AM.spring` / `AM.ease.outExpo` (`0.85 -> 1.04 -> 1.0`), exit zooms/wipes with `AM.ease.inCubic`, and camera or stage zooms/scrolls via `AM.applyCamera(ctx, { s, cx, cy, rot }, W, H)` whenever `MEASURED ZOOM / PAN / HOLD DYNAMICS` reports a `zoom_in`, `zoom_out`, or `pan_*` burst. Only animate continuous orbital rings or gentle breathing drift on regions where `MEASURED LIVING HOLD` / `30FPS ROTATING` confirms the reference actually moves — NEVER invent synthetic wobble on steady locked headlines or bars when the reference hold is steady!
 - **Volumetric soft light vs sharp geometry:** For luminous clouds/portals/glows, use wide smooth radial gradients fading to `alpha=0` with `lighter` (`AM.drawOpticalGlow` / `AM.drawBloomStroke`) — never thin harsh oval outlines or stepped unblurred rings.
 - **Optical lens & tapered ribbons:** When Row 1 shows water-bubble / spherical glass distortion bending text or edges, use `AM.drawSphericalLens(ctx, cx, cy, r, k, function(c) { ... }, opts)` (`drawFn(c)` draws in main canvas coords around `(cx, cy)`, or 2-arg `drawFn(lc, size)` draws in local `0..size`). When Row 1 shows a glowing arc, hopping comet, or light swoosh, use `AM.drawTaperedRibbon(ctx, pts, maxW, opts)`.
-- **Micro-physics & crisp shapes:** Use `AM.impactRecoil` for dot/tether collisions and `AM.twistPolygon` for elastic 3D-sheared polygon spins. Match concave vs convex geometry faithfully (e.g. pinched 4-point concave stars/diamonds vs rounded circles).
+- **Progressive Character Blur Reveal, 3D Turntable & Smooth Overlapped Transitions (MotionCraft Craft Laws):**
+  - Whenever text reveals out of optical blur (e.g. `'research'`, `'Problem Solving'`, `'Smart decisions'`, `'decisions'`, `'every single day'`), NEVER draw the whole word with a single uniform `ctx.fillText` blur that snaps bold all at once, and NEVER snap words on/off in 1 frame! Call `AM.drawBlurRevealText(ctx, text, x, y, t, tStart, dur, { scaleFrom: 0.28, maxBlur: 18, risePx: 14, color, preBlurSec: 0.18, exitAt, exitDur: 0.28 })` or `AM.drawBlurRiseWords(ctx, text, x, y, t, tStart, opts)` so every word zooms in from far/small/blurred (`scaleFrom: 0.28 -> 1.0`) to close/solid character-by-character left-to-right AND blurs out character-by-character when `exitAt` is reached!
+  - When a line grows word-by-word across beats (e.g. `'every'` at `t=2.35s` followed by `'single'` at `t=2.95s` and `'day'` at `t=3.20s`), NEVER draw `'every'` with `fillText` and then swap the whole string to `'every single day'`! Either pass `'every single day'` to `AM.drawBlurRiseWords(ctx, 'every single day', cx, y, t, 2.35, { stagger: 0.42, enterDur: 0.36, maxBlur: 16 })` OR call `AM.drawBlurRevealText` on each word at its measured X offset so `'every'`, `'single'`, and `'day'` each unblur in character-by-character!
+  - Whenever a 3D hero object/brain/coin sits inside a dashed ring or corner stars/accents frame the stage, NEVER leave them static! Call `AM.drawTurntableObject(ctx, cx, cy, t, imgOrFn, { w, h, omega: 2.1, depth: 0.22, ringRadius, ringOmega: 0.65 })` so the 3D hemisphere surface genuinely turns in 3D while its dashed orbital ring spins, and rotate corner stars continuously (`ctx.rotate(baseAngle + t * omegaRad)`).
+  - Whenever an intra-scene phase changes or a transition in the reference looks fast/ambiguous, NEVER switch with a raw 1-frame cut: overlap the outgoing element's zoom/slide/blur exit (`0.30..0.45s`) with the incoming element's `AM.drawBlurRevealText` / `AM.drawMorphPolygon` entrance!
+- **Micro-physics & crisp shapes:** Use `AM.impactRecoil` for dot/tether collisions, `AM.twistPolygon` for elastic 3D-sheared polygon spins, and `AM.drawMorphPolygon(ctx, ptsA, ptsB, p, opts)` for smooth shape morphs. Match concave vs convex geometry faithfully (e.g. pinched 4-point concave stars/diamonds vs rounded circles).
 - **Boundary continuity:** Match `t = 0` and `t = dur` to the exact opening and closing frames of the beat strip (`ref_scene_XX_beats.jpg`) so flashes, wipes, and shape handoffs flow seamlessly across cuts.
 
 COMPACT `window.AM` RUNTIME API (already loaded globally before your script):
 - `AM.registerScene(id, fn)` — `fn(ctx, t, dur, scene, AM)` where `t` is local scene seconds `0..dur`.
-- `AM.applyCamera(ctx, { s, cx, cy, rot }, W, H)` — global camera zoom/pan/rotation around `(cx, cy)` in degrees `rot`.
+- `AM.applyCamera(ctx, { s, cx, cy, rot }, W, H)` — global camera zoom/pan/rotation around `(cx, cy)` in degrees `rot`; `AM.applyTrackedCamera(ctx, scene.cameraTrack, t, W, H)`.
 - `AM.clamp(v, lo, hi)`, `AM.lerp(a, b, p)`, `AM.invLerp(a, b, v)`, `AM.remap(v, a, b, c, d)`
 - `AM.ease.inCubic(p)`, `AM.ease.outCubic(p)`, `AM.ease.inOutCubic(p)`, `AM.ease.outBack(p)`, `AM.ease.outExpo(p)`, `AM.ease.inOutQuart(p)`, `AM.ease.snap(p)`
 - `AM.spring(tSec, { stiffness: 180, damping: 18, mass: 1 })` -> smooth spring 0..1 with slight overshoot
+- `AM.drawBlurRevealText(ctx, text, x, y, t, tStart, dur, { maxBlur, risePx, color, inkStart, preBlurSec })` — progressive left-to-right character unblur + soft spring rise
+- `AM.drawBlurRiseWords(ctx, wordsOrText, x, y, t, tStart, { stagger, enterDur, maxBlur, risePx, color, inkStart, preBlurSec, exitAt, exitDur })`, `AM.layoutBalancedHeadline(ctx, text, maxWidth)`
+- `AM.drawTurntableObject(ctx, cx, cy, t, imgOrDrawFn, { w, h, omega, depth, tiltRad, floatPx, ringRadius, ringOmega, ringColor })` — 3D Y-axis turntable rotation + spinning dashed ring
+- `AM.drawMorphPolygon(ctx, ptsA, ptsB, p, { cx, cy, rot, scale, fill, stroke })` — smooth vertex-matched polygon morph
 - `AM.drawOpticalGlow(ctx, x, y, radius, colorHex, intensity)`, `AM.drawBloomStroke(ctx, drawPathFn, { color, lineWidth, glowRadius })`
 - `AM.drawSphericalLens(ctx, cx, cy, radius, strength, drawContentFn, opts)`, `AM.drawTaperedRibbon(ctx, points, maxWidth, opts)`
 - `AM.impactRecoil(t, hitTime, opts)` -> `{ dx, dy, rot, sx, sy }`; `AM.twistPolygon(points, angle, lagFactor)`
@@ -161,9 +170,37 @@ pub(crate) fn camera_params_to_am_apply_camera(
 }
 
 /// Builds a concise, ZERO-OCR hard-facts specification block for a single scene from `style.json`.
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_scene_hard_facts_prompt(
     style_scene: Option<&Value>,
+    film_scene: &Value,
+    scene_num: usize,
+    total_scenes: usize,
+    width: u32,
+    height: u32,
+    fps: u32,
+    bpm: f64,
+    user_brief: &str,
+) -> String {
+    build_scene_hard_facts_prompt_with_next(
+        style_scene,
+        None,
+        film_scene,
+        scene_num,
+        total_scenes,
+        width,
+        height,
+        fps,
+        bpm,
+        user_brief,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_scene_hard_facts_prompt_with_next(
+    style_scene: Option<&Value>,
+    next_style_scene: Option<&Value>,
     film_scene: &Value,
     scene_num: usize,
     total_scenes: usize,
@@ -324,6 +361,10 @@ pub(crate) fn build_scene_hard_facts_prompt(
                             camera_params_to_am_apply_camera(s0, r0, tx0, ty0, width, height);
                         let (c1s, cx1, cy1, c1r) =
                             camera_params_to_am_apply_camera(s1, r1, tx1, ty1, width, height);
+                        let ease_label = match seg.get("ease").and_then(Value::as_str) {
+                            Some(e) if !e.trim().is_empty() => e.to_string(),
+                            _ => "unmeasured (choose by role: enter=outExpo/outBack, exit=inCubic)".to_string(),
+                        };
                         format!(
                             "local {:.2}s->{:.2}s scale={:.3}->{:.3} rot={:+.2}->{:+.2}deg | AM.applyCamera FROM={{s:{:.3}, cx:{:.1}, cy:{:.1}, rot:{:+.2}}} TO={{s:{:.3}, cx:{:.1}, cy:{:.1}, rot:{:+.2}}} ease={} conf={}",
                             t0,
@@ -340,7 +381,7 @@ pub(crate) fn build_scene_hard_facts_prompt(
                             cx1,
                             cy1,
                             c1r,
-                            seg.get("ease").and_then(Value::as_str).unwrap_or("linear"),
+                            ease_label,
                             seg.get("confidence").and_then(Value::as_str).unwrap_or("medium"),
                         )
                     })
@@ -363,6 +404,14 @@ pub(crate) fn build_scene_hard_facts_prompt(
             super::direct_scene_prompt_tracks::format_motion_kinematics_block(sc)
         {
             lines.push(kin_block);
+        }
+        if let Some(blueprint_30fps) =
+            super::direct_scene_prompt_tracks::format_30fps_motion_blueprint_block(
+                sc,
+                next_style_scene,
+            )
+        {
+            lines.push(blueprint_30fps);
         }
         if let Some(mc) = sc.get("motionClues") {
             if let Some(acc) = mc.get("saturatedAccents").and_then(Value::as_array) {
@@ -573,6 +622,39 @@ pub(crate) fn build_scene_hard_facts_prompt(
                 ));
             }
         }
+        if let Some(p_regs) = sc.pointer("/layout/phaseTextRegions").and_then(Value::as_array) {
+            let phase_lines: Vec<String> = p_regs
+                .iter()
+                .take(6)
+                .filter_map(|r| {
+                    let txt = r.get("text").and_then(Value::as_str)?.trim();
+                    if txt.is_empty() {
+                        return None;
+                    }
+                    let px = r.get("px").and_then(Value::as_array).filter(|a| a.len() >= 4)?;
+                    let (px_x, px_y, px_w, px_h) = (
+                        px[0].as_i64()?,
+                        px[1].as_i64()?,
+                        px[2].as_i64()?.max(1),
+                        px[3].as_i64()?.max(1),
+                    );
+                    let cx = px_x + px_w / 2;
+                    let cy = px_y + px_h / 2;
+                    let est_font = ((px_h as f64) * 0.72).round().max(18.0) as i64;
+                    let lt = r.get("localT").and_then(Value::as_f64).unwrap_or(0.0);
+                    Some(format!(
+                        "local_t={:.2}s \"{}\" center=({},{}) box=[{},{},{}x{}] estFont≈{}px",
+                        lt, txt, cx, cy, px_x, px_y, px_w, px_h, est_font
+                    ))
+                })
+                .collect();
+            if !phase_lines.is_empty() {
+                lines.push(format!(
+                    "OTHER PHASE TYPOGRAPHY REGIONS (EXACT measured Y & X coordinates for secondary phases — match these centers within ±15px!):\n  - {}",
+                    phase_lines.join("\n  - ")
+                ));
+            }
+        }
         if let Some(sb) = sc.get("subBeats").and_then(Value::as_array) {
             let sb_strs: Vec<&str> = sb.iter().filter_map(Value::as_str).take(3).collect();
             if !sb_strs.is_empty() {
@@ -657,14 +739,6 @@ fn fmt_box(v: Option<&Value>) -> Option<String> {
     let w = arr[2].as_i64()?;
     let h = arr[3].as_i64()?;
     Some(format!("[{},{},{}x{}]", x, y, w, h))
-}
-
-fn box_dims(v: Option<&Value>) -> Option<(f64, f64)> {
-    let arr = v?.as_array()?;
-    if arr.len() < 4 {
-        return None;
-    }
-    Some((arr[2].as_f64()?, arr[3].as_f64()?))
 }
 
 /// Formats per-frame comparison metrics into actionable local-time feedback for Pass 2 & Pass 3.
@@ -773,18 +847,36 @@ pub(crate) fn format_comparison_feedback(
                         luma_corr.unwrap_or(0.0)
                     ));
                 }
-                if let (Some(rb_s), Some(pb_s), Some((rw, rh)), Some((pw, ph))) = (
+                if let (Some(rb_s), Some(pb_s), Some(r_arr), Some(p_arr)) = (
                     fmt_box(f.get("refFgBox")),
                     fmt_box(f.get("prevFgBox")),
-                    box_dims(f.get("refFgBox")),
-                    box_dims(f.get("prevFgBox")),
+                    f.get("refFgBox").and_then(Value::as_array).filter(|a| a.len() >= 4),
+                    f.get("prevFgBox").and_then(Value::as_array).filter(|a| a.len() >= 4),
                 ) {
+                    let rx = r_arr[0].as_f64().unwrap_or(0.0);
+                    let ry = r_arr[1].as_f64().unwrap_or(0.0);
+                    let rw = r_arr[2].as_f64().unwrap_or(0.0);
+                    let rh = r_arr[3].as_f64().unwrap_or(0.0);
+                    let px = p_arr[0].as_f64().unwrap_or(0.0);
+                    let py = p_arr[1].as_f64().unwrap_or(0.0);
+                    let pw = p_arr[2].as_f64().unwrap_or(0.0);
+                    let ph = p_arr[3].as_f64().unwrap_or(0.0);
+                    let r_cx = rx + rw * 0.5;
+                    let r_cy = ry + rh * 0.5;
+                    let p_cx = px + pw * 0.5;
+                    let p_cy = py + ph * 0.5;
+                    let dx = (r_cx - p_cx).round() as i64;
+                    let dy = (r_cy - p_cy).round() as i64;
                     let w_ratio = if rw > 1.0 { pw / rw } else { 1.0 };
                     let h_ratio = if rh > 1.0 { ph / rh } else { 1.0 };
-                    if !(0.72..=1.35).contains(&w_ratio) || !(0.72..=1.35).contains(&h_ratio) {
+                    let bad_scale = !(0.72..=1.35).contains(&w_ratio) || !(0.72..=1.35).contains(&h_ratio);
+                    let bad_shift = dx.abs() >= 28 || dy.abs() >= 28;
+                    if bad_scale || bad_shift {
+                        let h_dir = if dx >= 0 { "RIGHT" } else { "LEFT" };
+                        let v_dir = if dy >= 0 { "DOWN" } else { "UP" };
                         notes.push(format!(
-                            "SCALE/POSITION MISMATCH: refFgBox={} vs your prevFgBox={} — resize/reposition your hero or typography to match refFgBox!",
-                            rb_s, pb_s
+                            "SCALE/POSITION MISMATCH: ref center=({:.0},{:.0}) vs your center=({:.0},{:.0}) -> SHIFT {} {}px, {} {}px! (refFgBox={} vs prevFgBox={})",
+                            r_cx, r_cy, p_cx, p_cy, h_dir, dx.abs(), v_dir, dy.abs(), rb_s, pb_s
                         ));
                     }
                 }
@@ -880,6 +972,116 @@ pub(crate) fn detect_scene_collision_hazards(code: &str) -> Vec<String> {
         ));
     }
 
+    // 7. Raw `ctx.fillText(...)` timed text reveals (either with manual uniform `ctx.filter = 'blur(...)'` OR plain alpha pop)
+    //    instead of progressive character-by-character `AM.drawBlurRevealText` / `AM.drawBlurRiseWords`
+    let has_manual_blur_filter = code.contains("filter = 'blur(")
+        || code.contains("filter = \"blur(")
+        || code.contains("filter = `blur(");
+    let uses_blur_text_helper =
+        code.contains("drawBlurRevealText") || code.contains("drawBlurRiseWords");
+    let fill_text_count = code.matches("fillText(").count();
+    let has_timed_text_gate = (code.contains("if (t >=") || code.contains("if (t >") || code.contains("if (t <"))
+        && fill_text_count >= 3;
+    if !uses_blur_text_helper && ((has_manual_blur_filter && fill_text_count >= 1) || has_timed_text_gate) {
+        hazards.push(
+            "STIFF TEXT REVEAL HAZARD (Raw `ctx.fillText` Pop/Fade Instead of Character Blur Reveal): Your script reveals timed words/phrases via raw `ctx.fillText(...)` (causing whole words to pop/fade stiffly) without calling `AM.drawBlurRevealText` or `AM.drawBlurRiseWords`! Replace animated headline/copy `ctx.fillText(...)` calls with `AM.drawBlurRevealText(ctx, word, x, y, t, tStart, dur, { scaleFrom: 0.72, maxBlur: 16, risePx: 12, color, preBlurSec: 0.14, exitAt, exitDur: 0.26 })` or `AM.drawBlurRiseWords(...)` so EVERY word enters character-by-character out of optical blur AND exits into blur (keep raw `ctx.fillText` ONLY for rolling numeric counters)."
+                .to_string(),
+        );
+    }
+
+    // 8. Static 3D hero object helper (`draw...Brain`, `draw...Globe`, `draw...Coin`, `draw...Sphere`) without `AM.drawTurntableObject`
+    for static_3d_fn in find_static_3d_object_functions(code) {
+        if !code.contains("drawTurntableObject") {
+            hazards.push(format!(
+                "STATIC 3D OBJECT HAZARD (`function {}` Does Not Rotate in 3D): `{}` is drawn as a static 2D illustration without 3D Y-axis turntable rotation! Wrap `{}` inside `AM.drawTurntableObject(ctx, cx, cy, t, function(c) {{ {}(c, 0, 0, 1.0); }}, {{ w: 280, h: 240, omega: 2.1, depth: 0.22, ringRadius: 158, ringOmega: 0.65 }})` so the 3D hemisphere surface and folds genuinely rotate in 3D.",
+                static_3d_fn, static_3d_fn, static_3d_fn, static_3d_fn
+            ));
+        }
+    }
+
+    hazards
+}
+
+/// Generic 30fps motion expectations extracted directly from `style.json` for a scene
+/// so hazard checks are driven by measured video kinematics rather than guessed helper names.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct SceneMotionExpectations {
+    pub requires_turntable_3d: bool,
+    pub requires_corner_spin: bool,
+    pub requires_blur_text_reveal: bool,
+    pub pre_cut_active: bool,
+}
+
+impl SceneMotionExpectations {
+    pub(crate) fn from_style_scene(style_sc: Option<&Value>) -> Self {
+        let Some(sc) = style_sc else {
+            return Self::default();
+        };
+        let spinning = sc
+            .pointer("/motionTimeline30fps/spinningObjects")
+            .and_then(Value::as_array);
+        let requires_turntable_3d = spinning.is_some_and(|arr| {
+            arr.iter().any(|item| {
+                item.get("kind").and_then(Value::as_str) == Some("turntable_3d")
+                    || item.get("zone").and_then(Value::as_str) == Some("center")
+            })
+        });
+        let requires_corner_spin = spinning.is_some_and(|arr| {
+            arr.iter()
+                .any(|item| item.get("kind").and_then(Value::as_str) == Some("corner_spin"))
+        });
+        let requires_blur_text_reveal = sc
+            .pointer("/motionTimeline30fps/blurTextReveals")
+            .and_then(Value::as_array)
+            .is_some_and(|arr| !arr.is_empty());
+        let pre_cut_active = sc
+            .pointer("/motionClues/kinematics/preCutActive")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        Self {
+            requires_turntable_3d,
+            requires_corner_spin,
+            requires_blur_text_reveal,
+            pre_cut_active,
+        }
+    }
+}
+
+/// Runs static code hygiene checks PLUS 30fps signal-driven motion compliance checks
+/// (3D turntable rotation, spinning corner emblems, and blur-to-sharp text reveals).
+pub(crate) fn detect_scene_motion_hazards(
+    code: &str,
+    expectations: SceneMotionExpectations,
+) -> Vec<String> {
+    let mut hazards = detect_scene_collision_hazards(code);
+    if expectations.requires_turntable_3d
+        && !code.contains("drawTurntableObject")
+        && !hazards.iter().any(|h| h.contains("STATIC 3D OBJECT HAZARD"))
+    {
+        hazards.push(
+            "MISSING 3D TURNTABLE HAZARD: 30fps motion analysis detected a rotating 3D hero object in this scene, but your script does NOT call `AM.drawTurntableObject(...)`! Wrap your hero image or draw callback inside `AM.drawTurntableObject(ctx, cx, cy, t, heroImgOrFn, { w, h, omega: 2.0, depth: 0.24, ringRadius, ringOmega: 0.65 })` so it genuinely spins 360° in 3D."
+                .to_string(),
+        );
+    }
+    if expectations.requires_corner_spin
+        && !code.contains(".rotate(")
+        && !code.contains("drawTurntableObject")
+    {
+        hazards.push(
+            "MISSING CORNER SPIN HAZARD: 30fps motion analysis detected a spinning corner emblem/icon in this scene, but your script has no `ctx.rotate(...)` or `AM.drawTurntableObject(...)` call! Rotate the corner graphic smoothly with `ctx.rotate(t * omega)`."
+                .to_string(),
+        );
+    }
+    if expectations.requires_blur_text_reveal
+        && !code.contains("drawBlurRevealText")
+        && !code.contains("drawBlurRiseWords")
+        && !hazards.iter().any(|h| h.contains("STIFF TEXT REVEAL HAZARD"))
+    {
+        hazards.push(
+            "MISSING BLUR TEXT REVEAL HAZARD: 30fps motion analysis detected blur-to-sharp text reveal(s) in this scene, but your script does NOT call `AM.drawBlurRevealText(...)` or `AM.drawBlurRiseWords(...)`! Replace plain `ctx.fillText(...)` reveals with `AM.drawBlurRevealText(...)`."
+                .to_string(),
+        );
+    }
     hazards
 }
 
@@ -1038,6 +1240,31 @@ fn find_duplicate_function_declarations(code: &str) -> Vec<String> {
     dups
 }
 
+fn find_static_3d_object_functions(code: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in code.lines() {
+        let t = line.trim();
+        if let Some(rest) = t.strip_prefix("function ") {
+            let Some(open_p) = rest.find('(') else {
+                continue;
+            };
+            let name = rest[..open_p].trim();
+            let lower = name.to_ascii_lowercase();
+            let is_3d_hero = (lower.starts_with("draw") || lower.starts_with("render"))
+                && (lower.contains("brain")
+                    || lower.contains("globe")
+                    || lower.contains("sphere")
+                    || lower.contains("coin")
+                    || lower.contains("head")
+                    || lower.contains("planet"));
+            if is_3d_hero && !out.contains(&name.to_string()) {
+                out.push(name.to_string());
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1191,6 +1418,37 @@ mod tests {
         let dup_fn = "function draw3DStar(cx, cy) { ctx.fill(); }\nfunction draw3DStar(cx, cy) { ctx.stroke(); }";
         let h4 = detect_scene_collision_hazards(dup_fn);
         assert!(h4.iter().any(|s| s.contains("DUPLICATE CODE HAZARD") && s.contains("draw3DStar")));
+    }
+
+    #[test]
+    fn detect_scene_motion_hazards_uses_30fps_signals_generically() {
+        let style_sc = json!({
+            "motionTimeline30fps": {
+                "spinningObjects": [
+                    { "zone": "center", "kind": "turntable_3d", "omegaRadPerSec": 2.0 },
+                    { "zone": "top_left", "kind": "corner_spin", "omegaRadPerSec": 1.6 }
+                ],
+                "blurTextReveals": [
+                    { "tStart": 0.4, "tEnd": 0.9 }
+                ]
+            },
+            "motionClues": { "kinematics": { "preCutActive": true } }
+        });
+        let exp = SceneMotionExpectations::from_style_scene(Some(&style_sc));
+        assert!(exp.requires_turntable_3d);
+        assert!(exp.requires_corner_spin);
+        assert!(exp.requires_blur_text_reveal);
+        assert!(exp.pre_cut_active);
+
+        let static_code = "AM.registerScene('s', function(ctx,t){ ctx.drawImage(img, 100, 100); ctx.fillText('hi', 100, 200); });";
+        let hz = detect_scene_motion_hazards(static_code, exp);
+        assert!(hz.iter().any(|h| h.contains("MISSING 3D TURNTABLE HAZARD")));
+        assert!(hz.iter().any(|h| h.contains("MISSING CORNER SPIN HAZARD")));
+        assert!(hz.iter().any(|h| h.contains("MISSING BLUR TEXT REVEAL HAZARD")));
+
+        let animated_code = "AM.registerScene('s', function(ctx,t){ AM.drawTurntableObject(ctx, 360, 500, t, img, { w: 300, h: 260 }); AM.drawBlurRevealText(ctx, 'hi', 100, 200, t, 0.4, 0.5); });";
+        let clean = detect_scene_motion_hazards(animated_code, exp);
+        assert!(clean.is_empty(), "expected 0 hazards when primitives used, got {:?}", clean);
     }
 
     #[test]

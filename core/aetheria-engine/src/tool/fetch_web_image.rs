@@ -30,7 +30,11 @@ pub fn fetch_web_image_tool_definition() -> Value {
                     },
                     "removeBackground": {
                         "type": "boolean",
-                        "description": "Optional. Set true to automatically convert uniform white/solid corner backgrounds into smooth alpha transparency (saves PNG)."
+                        "description": "Optional. Set true to automatically cut out studio/uniform/solid backgrounds into a clean auto-trimmed transparent PNG using GrabCut."
+                    },
+                    "candidateIndex": {
+                        "type": "integer",
+                        "description": "Optional 0-based index (default 0) to pick an alternate candidate from the ranked search results if candidate 0 did not visually match."
                     }
                 },
                 "required": ["query", "outputPath"]
@@ -170,6 +174,89 @@ pub(crate) fn build_image_search_queries(raw_query: &str) -> Vec<String> {
     out
 }
 
+pub(crate) fn is_labeled_or_diagram_title(title_lower: &str) -> bool {
+    const LABELED_OR_DIAGRAM_TOKENS: &[&str] = &[
+        "diagram",
+        "chart",
+        "map",
+        "scan",
+        "mri",
+        "xray",
+        "x-ray",
+        "slice",
+        "histology",
+        "description",
+        "cut-line",
+        "cut_line",
+        "lateralization",
+        "dissected",
+        "autopsy",
+        "printed",
+        "printing",
+        "support",
+        "vat",
+        "patent",
+        "wellcome",
+        "labeled",
+        "labelled",
+        "labels",
+        "infographic",
+        "schematic",
+        "numbered",
+        "bioart",
+        "clipart",
+        "sketch",
+        "outline",
+        "black and white",
+        "black_and_white",
+        "line art",
+        "line_art",
+    ];
+    LABELED_OR_DIAGRAM_TOKENS
+        .iter()
+        .any(|tok| title_lower.contains(tok))
+}
+
+pub(crate) fn merge_commons_and_openverse_candidates(
+    mut commons_scored: Vec<(i32, String, String)>,
+    openverse_hits: Vec<(String, String)>,
+    wants_realistic: bool,
+) -> Vec<(String, String)> {
+    commons_scored.sort_by(|a, b| b.0.cmp(&a.0));
+    let mut clean_commons: Vec<(String, String)> = Vec::new();
+    let mut noisy_commons: Vec<(String, String)> = Vec::new();
+    for (score, title, url) in commons_scored {
+        let low = title.to_ascii_lowercase();
+        let is_noisy = wants_realistic && (score <= 0 || is_labeled_or_diagram_title(&low));
+        if is_noisy {
+            noisy_commons.push((title, url));
+        } else {
+            clean_commons.push((title, url));
+        }
+    }
+
+    let mut clean_ov: Vec<(String, String)> = Vec::new();
+    let mut noisy_ov: Vec<(String, String)> = Vec::new();
+    for (title, url) in openverse_hits {
+        let low = title.to_ascii_lowercase();
+        if wants_realistic && is_labeled_or_diagram_title(&low) {
+            noisy_ov.push((title, url));
+        } else {
+            clean_ov.push((title, url));
+        }
+    }
+
+    let mut merged: Vec<(String, String)> = Vec::new();
+    for bucket in [clean_commons, clean_ov, noisy_commons, noisy_ov] {
+        for (title, url) in bucket {
+            if !merged.iter().any(|(_, existing)| existing == &url) {
+                merged.push((title, url));
+            }
+        }
+    }
+    merged
+}
+
 pub(crate) fn score_commons_filename(
     title_lower: &str,
     keywords: &[String],
@@ -183,42 +270,67 @@ pub(crate) fn score_commons_filename(
         }
     }
     if prefer_png && title_lower.ends_with(".png") {
-        score += 6;
+        // When realistic photos/3D renders are desired, don't let line-art PNGs outweigh clean JPEGs.
+        score += if wants_realistic { 2 } else { 6 };
     }
     if wants_realistic {
-        if title_lower.contains("3d")
-            || title_lower.contains("render")
-            || title_lower.contains("model")
-            || title_lower.contains("photo")
-            || title_lower.contains("real")
-            || title_lower.contains("lateral")
-        {
-            score += 6;
+        for good in ["3d", "render", "model", "photo", "real", "lateral", "view", "isolated", "cutout"] {
+            if title_lower.contains(good) {
+                score += 6;
+            }
         }
-        if title_lower.contains("bioart")
-            || title_lower.contains("clipart")
-            || title_lower.contains("line")
-            || title_lower.contains("sketch")
-            || title_lower.contains("icon")
-            || title_lower.contains("cartoon")
-        {
-            score -= 6;
+        for bad_style in [
+            "bioart",
+            "clipart",
+            "line",
+            "sketch",
+            "icon",
+            "cartoon",
+            "outline",
+            "black and white",
+            "black_and_white",
+            "drawing",
+            "illustration",
+        ] {
+            if title_lower.contains(bad_style) {
+                score -= 18;
+            }
         }
     } else if title_lower.contains("3d") || title_lower.contains("render") || title_lower.contains("model") {
         score += 3;
     }
-    if title_lower.contains("diagram")
-        || title_lower.contains("chart")
-        || title_lower.contains("map")
-        || title_lower.contains("scan")
-        || title_lower.contains("mri")
-        || title_lower.contains("xray")
-        || title_lower.contains("x-ray")
-        || title_lower.contains("slice")
-        || title_lower.contains("histology")
-        || title_lower.contains("drawing")
-    {
-        score -= 5;
+    for noise in [
+        "diagram",
+        "chart",
+        "map",
+        "scan",
+        "mri",
+        "xray",
+        "x-ray",
+        "slice",
+        "histology",
+        "description",
+        "cut-line",
+        "cut_line",
+        "lateralization",
+        "dissected",
+        "autopsy",
+        "printed",
+        "printing",
+        "support",
+        "vat",
+        "patent",
+        "wellcome",
+        "labeled",
+        "labelled",
+        "labels",
+        "infographic",
+        "schematic",
+        "numbered",
+    ] {
+        if title_lower.contains(noise) {
+            score -= 45;
+        }
     }
     score
 }
@@ -246,6 +358,11 @@ pub async fn execute_fetch_web_image(workspace_dir: &str, arguments: &Value) -> 
         .or_else(|| arguments.get("remove_background"))
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    let candidate_index = arguments
+        .get("candidateIndex")
+        .or_else(|| arguments.get("candidate_index"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
 
     if query.is_empty() && direct_url.is_empty() {
         return json!({ "error": "fetch_web_image requires 'query' or 'url'." });
@@ -290,9 +407,9 @@ pub async fn execute_fetch_web_image(workspace_dir: &str, arguments: &Value) -> 
         .build()
         .unwrap_or_default();
 
-    let mut candidate_urls: Vec<String> = Vec::new();
+    let mut candidates: Vec<(String, String)> = Vec::new();
     if !direct_url.is_empty() {
-        candidate_urls.push(direct_url.to_string());
+        candidates.push(("direct_url".to_string(), direct_url.to_string()));
     }
 
     if !query.is_empty() {
@@ -313,7 +430,7 @@ pub async fn execute_fetch_web_image(workspace_dir: &str, arguments: &Value) -> 
         let fetch_commons = |q: String, prefer_png: bool, wants_realistic: bool| {
             let client = client.clone();
             async move {
-                let mut scored: Vec<(i32, String)> = Vec::new();
+                let mut scored: Vec<(i32, String, String)> = Vec::new();
                 let keywords: Vec<String> = q
                     .to_ascii_lowercase()
                     .split(|c: char| !c.is_ascii_alphanumeric())
@@ -322,18 +439,18 @@ pub async fn execute_fetch_web_image(workspace_dir: &str, arguments: &Value) -> 
                     .collect();
                 // CRITICAL: `gsrnamespace=6` restricts Wikimedia Commons search strictly to `File:` pages!
                 let commons_api = format!(
-                    "https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch={}&gsrlimit=12&prop=imageinfo&iiprop=url|mime|size&iiurlwidth=900&format=json",
+                    "https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch={}&gsrlimit=15&prop=imageinfo&iiprop=url|mime|size&iiurlwidth=900&format=json",
                     encode_query(&format!("filetype:bitmap {}", q))
                 );
                 if let Ok(resp) = client.get(&commons_api).send().await {
                     if let Ok(data) = resp.json::<Value>().await {
                         if let Some(pages) = data.pointer("/query/pages").and_then(|v| v.as_object()) {
                             for (_id, page) in pages {
-                                let title = page
+                                let raw_title = page
                                     .get("title")
                                     .and_then(Value::as_str)
-                                    .unwrap_or("")
-                                    .to_ascii_lowercase();
+                                    .unwrap_or("");
+                                let title = raw_title.to_ascii_lowercase();
                                 if title.ends_with(".svg")
                                     || title.ends_with(".tif")
                                     || title.ends_with(".tiff")
@@ -341,6 +458,7 @@ pub async fn execute_fetch_web_image(workspace_dir: &str, arguments: &Value) -> 
                                     || title.ends_with(".djvu")
                                     || title.ends_with(".webm")
                                     || title.ends_with(".ogv")
+                                    || title.ends_with(".gif")
                                 {
                                     continue;
                                 }
@@ -363,7 +481,7 @@ pub async fn execute_fetch_web_image(workspace_dir: &str, arguments: &Value) -> 
                                             .or_else(|| info.get("url"))
                                             .and_then(|v| v.as_str())
                                         {
-                                            scored.push((score, u.to_string()));
+                                            scored.push((score, raw_title.to_string(), u.to_string()));
                                         }
                                     }
                                 }
@@ -372,7 +490,7 @@ pub async fn execute_fetch_web_image(workspace_dir: &str, arguments: &Value) -> 
                     }
                 }
                 scored.sort_by(|a, b| b.0.cmp(&a.0));
-                scored.into_iter().map(|(_, u)| u).collect::<Vec<String>>()
+                scored
             }
         };
 
@@ -388,12 +506,17 @@ pub async fn execute_fetch_web_image(workspace_dir: &str, arguments: &Value) -> 
                     if let Ok(data) = resp.json::<Value>().await {
                         if let Some(pages) = data.pointer("/query/pages").and_then(|v| v.as_object()) {
                             for (_id, page) in pages {
+                                let title = page
+                                    .get("title")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("wikipedia")
+                                    .to_string();
                                 if let Some(thumb) = page.pointer("/thumbnail/source").and_then(|v| v.as_str()) {
-                                    urls.push(thumb.to_string());
+                                    urls.push((title.clone(), thumb.to_string()));
                                 }
                                 if let Some(orig) = page.pointer("/original/source").and_then(|v| v.as_str()) {
                                     if !orig.ends_with(".svg") && !orig.ends_with(".tif") && !orig.ends_with(".pdf") {
-                                        urls.push(orig.to_string());
+                                        urls.push((title, orig.to_string()));
                                     }
                                 }
                             }
@@ -404,20 +527,86 @@ pub async fn execute_fetch_web_image(workspace_dir: &str, arguments: &Value) -> 
             }
         };
 
+        let fetch_openverse = |q: String| {
+            let client = client.clone();
+            async move {
+                let mut urls = Vec::new();
+                let ov_api = format!(
+                    "https://api.openverse.org/v1/images/?q={}&page_size=8",
+                    encode_query(&q)
+                );
+                if let Ok(resp) = client.get(&ov_api).send().await {
+                    if let Ok(data) = resp.json::<Value>().await {
+                        if let Some(results) = data.get("results").and_then(Value::as_array) {
+                            for item in results {
+                                let title = item
+                                    .get("title")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("openverse")
+                                    .to_string();
+                                if let Some(u) = item
+                                    .get("url")
+                                    .or_else(|| item.get("thumbnail"))
+                                    .and_then(Value::as_str)
+                                {
+                                    if u.starts_with("https://") {
+                                        urls.push((title, u.to_string()));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                urls
+            }
+        };
+
+        fn push_unique_cands(
+            candidates: &mut Vec<(String, String)>,
+            hits: Vec<(String, String)>,
+        ) {
+            for (t, u) in hits {
+                if !candidates.iter().any(|(_, existing)| existing == &u) {
+                    candidates.push((t, u));
+                }
+            }
+        }
+
         let search_queries = build_image_search_queries(query);
         if prefer_commons {
+            let mut commons_scored_all: Vec<(i32, String, String)> = Vec::new();
             for sq in &search_queries {
                 let hits = fetch_commons(sq.clone(), true, wants_realistic).await;
-                if !hits.is_empty() {
-                    candidate_urls.extend(hits);
+                for item in hits {
+                    if !commons_scored_all.iter().any(|(_, _, u)| u == &item.2) {
+                        commons_scored_all.push(item);
+                    }
+                }
+                let has_clean_commons = commons_scored_all
+                    .iter()
+                    .any(|(sc, t, _)| *sc > 0 && (!wants_realistic || !is_labeled_or_diagram_title(&t.to_ascii_lowercase())));
+                if has_clean_commons && commons_scored_all.len() >= 6 {
                     break;
                 }
             }
-            if candidate_urls.is_empty() {
+            let has_clean_commons = commons_scored_all
+                .iter()
+                .any(|(sc, t, _)| *sc > 0 && (!wants_realistic || !is_labeled_or_diagram_title(&t.to_ascii_lowercase())));
+            let mut openverse_hits: Vec<(String, String)> = Vec::new();
+            if !has_clean_commons {
+                if let Some(sq) = search_queries.first() {
+                    openverse_hits = fetch_openverse(sq.clone()).await;
+                }
+            }
+            push_unique_cands(
+                &mut candidates,
+                merge_commons_and_openverse_candidates(commons_scored_all, openverse_hits, wants_realistic),
+            );
+            if candidates.is_empty() {
                 for sq in &search_queries {
                     let hits = fetch_wikipedia(sq.clone()).await;
                     if !hits.is_empty() {
-                        candidate_urls.extend(hits);
+                        push_unique_cands(&mut candidates, hits);
                         break;
                     }
                 }
@@ -426,23 +615,71 @@ pub async fn execute_fetch_web_image(workspace_dir: &str, arguments: &Value) -> 
             for sq in &search_queries {
                 let hits = fetch_wikipedia(sq.clone()).await;
                 if !hits.is_empty() {
-                    candidate_urls.extend(hits);
+                    push_unique_cands(&mut candidates, hits);
                     break;
                 }
             }
-            if candidate_urls.is_empty() {
+            if candidates.is_empty() {
+                let mut commons_scored_all: Vec<(i32, String, String)> = Vec::new();
                 for sq in &search_queries {
                     let hits = fetch_commons(sq.clone(), false, wants_realistic).await;
                     if !hits.is_empty() {
-                        candidate_urls.extend(hits);
+                        commons_scored_all.extend(hits);
                         break;
                     }
                 }
+                let has_clean_commons = commons_scored_all
+                    .iter()
+                    .any(|(sc, t, _)| *sc > 0 && (!wants_realistic || !is_labeled_or_diagram_title(&t.to_ascii_lowercase())));
+                let openverse_hits = if !has_clean_commons {
+                    if let Some(sq) = search_queries.first() {
+                        fetch_openverse(sq.clone()).await
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
+                };
+                push_unique_cands(
+                    &mut candidates,
+                    merge_commons_and_openverse_candidates(commons_scored_all, openverse_hits, wants_realistic),
+                );
+            }
+        }
+        if candidates.is_empty() {
+            if let Some(sq) = search_queries.first() {
+                push_unique_cands(&mut candidates, fetch_openverse(sq.clone()).await);
             }
         }
     }
 
-    for img_url in &candidate_urls {
+    let candidate_summary: Vec<Value> = candidates
+        .iter()
+        .take(5)
+        .enumerate()
+        .map(|(idx, (t, u))| json!({ "index": idx, "title": t, "url": u }))
+        .collect();
+
+    let ordered_indices: Vec<usize> = if candidates.is_empty() {
+        Vec::new()
+    } else {
+        let start = candidate_index.min(candidates.len() - 1);
+        (start..candidates.len()).chain(0..start).collect()
+    };
+
+    let mut fallback_download: Option<Value> = None;
+    let mut tried_color_fallback = false;
+    let q_lower_check = query.to_ascii_lowercase();
+    let wants_realistic_img = !query.is_empty()
+        && !q_lower_check.contains("icon")
+        && !q_lower_check.contains("flat")
+        && !q_lower_check.contains("diagram")
+        && !q_lower_check.contains("outline")
+        && !q_lower_check.contains("sketch")
+        && !q_lower_check.contains("vector");
+
+    for (attempt_pos, idx) in ordered_indices.iter().copied().enumerate() {
+        let (title, img_url) = &candidates[idx];
         if let Ok((status, bytes)) = super::webfetch::fetch_bounded_public_url(
             img_url,
             "AetheriaNexus/1.0 (https://github.com/jlsrngo/AetheriaNexus; studio@aetheria.ai)",
@@ -458,9 +695,11 @@ pub async fn execute_fetch_web_image(workspace_dir: &str, arguments: &Value) -> 
                         .await
                         .map(|m| m.len())
                         .unwrap_or(bytes.len() as u64);
-                    return json!({
+                    let resp_val = json!({
                         "success": true,
                         "query": query,
+                        "selectedIndex": idx,
+                        "selectedTitle": title,
                         "sourceUrl": img_url,
                         "outputPath": target_out.to_string_lossy().to_string(),
                         "assetPath": asset_rel,
@@ -470,27 +709,45 @@ pub async fn execute_fetch_web_image(workspace_dir: &str, arguments: &Value) -> 
                         "height": meta.1,
                         "hasAlpha": meta.2,
                         "backgroundRemoved": meta.3,
-                        "message": format!("Downloaded internet image to {} (preload via `AM.loadImage('/{}')` and draw via `AM.drawImageFit(...)`)", asset_rel, asset_rel)
+                        "satP90": meta.4,
+                        "candidates": candidate_summary,
+                        "message": format!("Downloaded internet image to {} (preload via `AM.loadImage('/{}')` and animate via `AM.drawTurntableObject(...)` or `AM.drawImageFit(...)`)", asset_rel, asset_rel)
                     });
+                    // Auto-skip achromatic B&W line-art sketches on candidate 0 when realistic color photo/3D is wanted
+                    let is_bw_sketch = wants_realistic_img
+                        && direct_url.is_empty()
+                        && candidate_index == 0
+                        && !tried_color_fallback
+                        && attempt_pos + 1 < ordered_indices.len()
+                        && meta.4.is_some_and(|sat| sat < 18.0);
+                    if is_bw_sketch {
+                        tried_color_fallback = true;
+                        fallback_download = Some(resp_val);
+                        continue;
+                    }
+                    return resp_val;
                 }
             }
         }
     }
+    if let Some(prev) = fallback_download {
+        return prev;
+    }
 
     json!({
         "success": false,
-        "error": format!("No matching raster image found on Wikimedia Commons or Wikipedia for query '{}'. Try a simpler 2-3 word English query (e.g. 'human brain lateral' or 'archery target') or draw procedurally.", query),
+        "error": format!("No matching raster image found on Wikimedia Commons, Wikipedia, or Openverse for query '{}'. Try a simpler 2-3 word English query (e.g. 'human brain lateral' or 'archery target') or draw procedurally.", query),
         "query": query,
         "assetPath": asset_rel
     })
 }
 
-/// Inspects downloaded raster image dimensions/alpha and, when `remove_bg` is requested on an
-/// opaque-corner image, flood-fills uniform corner background into clean transparent PNG alpha.
+/// Inspects downloaded raster image dimensions/alpha, performs studio-grade multi-quantile LAB border
+/// flood-fill + OpenCV GrabCut cutout when `remove_bg` is requested, and auto-trims transparent margins.
 async fn postprocess_downloaded_image(
     path: &std::path::Path,
     remove_bg: bool,
-) -> (Option<u32>, Option<u32>, bool, bool) {
+) -> (Option<u32>, Option<u32>, bool, bool, Option<f64>) {
     let python = crate::paths::locate_python_binary();
     let script = r#"
 import json, sys, cv2, numpy as np
@@ -498,30 +755,103 @@ p = sys.argv[1]
 do_rm = sys.argv[2] == "1"
 img = cv2.imread(p, cv2.IMREAD_UNCHANGED)
 if img is None:
-    print(json.dumps({"w": None, "h": None, "alpha": False, "rm": False}))
+    print(json.dumps({"w": None, "h": None, "alpha": False, "rm": False, "satP90": None}))
     sys.exit(0)
 h, w = img.shape[:2]
 has_alpha = (img.ndim == 3 and img.shape[2] == 4 and int(np.min(img[:, :, 3])) < 245)
 removed = False
-if do_rm and not has_alpha and img.ndim == 3:
-    bgr = img[:, :, :3].copy()
-    corners = np.array([bgr[0, 0], bgr[0, w - 1], bgr[h - 1, 0], bgr[h - 1, w - 1]], dtype=np.float32)
-    bg_med = np.median(corners, axis=0)
-    corner_spread = float(np.max(np.linalg.norm(corners - bg_med, axis=1)))
-    if corner_spread < 38.0:
-        dist = np.linalg.norm(bgr.astype(np.float32) - bg_med, axis=2)
-        bg_cand = (dist < 32.0).astype(np.uint8)
-        ff = np.zeros((h + 2, w + 2), dtype=np.uint8)
-        for sx, sy in [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]:
-            if bg_cand[sy, sx]:
-                cv2.floodFill(bg_cand, ff, (sx, sy), 2)
-        alpha = np.where(bg_cand == 2, 0, 255).astype(np.uint8)
-        alpha = cv2.GaussianBlur(alpha, (3, 3), 0)
-        bgra = cv2.merge([bgr[:, :, 0], bgr[:, :, 1], bgr[:, :, 2], alpha])
-        cv2.imwrite(p, bgra)
-        has_alpha = True
-        removed = True
-print(json.dumps({"w": int(w), "h": int(h), "alpha": bool(has_alpha), "rm": bool(removed)}))
+
+def trim_bgra(bgra):
+    ih, iw = bgra.shape[:2]
+    ys, xs = np.where(bgra[:, :, 3] > 16)
+    if ys.size < 16 or xs.size < 16:
+        return bgra
+    y0, y1 = max(0, int(ys.min()) - 6), min(ih, int(ys.max()) + 7)
+    x0, x1 = max(0, int(xs.min()) - 6), min(iw, int(xs.max()) + 7)
+    return bgra[y0:y1, x0:x1]
+
+final_img = img
+if has_alpha:
+    trimmed = trim_bgra(img)
+    if trimmed.shape[:2] != img.shape[:2]:
+        cv2.imwrite(p, trimmed)
+        h, w = trimmed.shape[:2]
+        final_img = trimmed
+elif do_rm and img.ndim >= 2:
+    bgr = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR) if img.ndim == 2 else img[:, :, :3].copy()
+    scale = min(1.0, 512.0 / max(h, w))
+    sw, sh = max(32, int(round(w * scale))), max(32, int(round(h * scale)))
+    small = cv2.resize(bgr, (sw, sh), interpolation=cv2.INTER_AREA)
+
+    lab = cv2.cvtColor(small, cv2.COLOR_BGR2LAB).astype(np.float32)
+    b_lab = np.concatenate([lab[0, :], lab[sh - 1, :], lab[:, 0], lab[:, sw - 1]], axis=0)
+    q_labs = np.percentile(b_lab, [10, 50, 90], axis=0)
+    d_min = np.min([np.linalg.norm(lab - ql, axis=2) for ql in q_labs], axis=0)
+    # Require border to be reasonably coherent (studio/solid/gradient backdrop)
+    b_dmin = np.concatenate([d_min[0, :], d_min[sh - 1, :], d_min[:, 0], d_min[:, sw - 1]], axis=0)
+    if float((b_dmin < 30.0).mean()) >= 0.65:
+        bg_cand = (d_min < 28.0).astype(np.uint8)
+        ff = np.zeros((sh + 2, sw + 2), dtype=np.uint8)
+        for x in range(sw):
+            if bg_cand[0, x] == 1:
+                cv2.floodFill(bg_cand, ff, (x, 0), 2)
+            if bg_cand[sh - 1, x] == 1:
+                cv2.floodFill(bg_cand, ff, (x, sh - 1), 2)
+        for y in range(sh):
+            if bg_cand[y, 0] == 1:
+                cv2.floodFill(bg_cand, ff, (0, y), 2)
+            if bg_cand[y, sw - 1] == 1:
+                cv2.floodFill(bg_cand, ff, (sw - 1, y), 2)
+
+        sure_bg = (bg_cand == 2)
+        bg_frac = float(sure_bg.mean())
+        if 0.04 <= bg_frac <= 0.92:
+            gc_mask = np.full((sh, sw), cv2.GC_PR_FGD, dtype=np.uint8)
+            sure_bg_er = cv2.erode(sure_bg.astype(np.uint8), np.ones((5, 5), np.uint8), iterations=1) > 0
+            gc_mask[sure_bg] = cv2.GC_PR_BGD
+            gc_mask[sure_bg_er] = cv2.GC_BGD
+            fg_core = cv2.erode((~sure_bg).astype(np.uint8), np.ones((15, 15), np.uint8), iterations=2) > 0
+            if int(fg_core.sum()) >= 32 and int(sure_bg_er.sum()) >= 32:
+                gc_mask[fg_core] = cv2.GC_FGD
+                try:
+                    bgd_m = np.zeros((1, 65), np.float64)
+                    fgd_m = np.zeros((1, 65), np.float64)
+                    cv2.grabCut(small, gc_mask, None, bgd_m, fgd_m, 4, cv2.GC_INIT_WITH_MASK)
+                    fg_small = np.where((gc_mask == cv2.GC_FGD) | (gc_mask == cv2.GC_PR_FGD), 255, 0).astype(np.uint8)
+                except Exception:
+                    fg_small = np.where(sure_bg, 0, 255).astype(np.uint8)
+            else:
+                fg_small = np.where(sure_bg, 0, 255).astype(np.uint8)
+
+            num_lbl, lbls, stats, _ = cv2.connectedComponentsWithStats(fg_small, connectivity=8)
+            if num_lbl > 1:
+                largest = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+                if stats[largest, cv2.CC_STAT_AREA] >= 0.03 * sw * sh:
+                    fg_small = np.where(lbls == largest, 255, 0).astype(np.uint8)
+
+            fg_frac = float((fg_small > 128).mean())
+            if 0.05 <= fg_frac <= 0.96:
+                alpha = cv2.resize(fg_small, (w, h), interpolation=cv2.INTER_LINEAR)
+                alpha = cv2.erode(alpha, np.ones((3, 3), np.uint8), iterations=1)
+                alpha = cv2.GaussianBlur(alpha, (3, 3), 0)
+                bgra = trim_bgra(cv2.merge([bgr[:, :, 0], bgr[:, :, 1], bgr[:, :, 2], alpha]))
+                cv2.imwrite(p, bgra)
+                h, w = bgra.shape[:2]
+                has_alpha = True
+                removed = True
+                final_img = bgra
+
+sat_p90 = 0.0
+if final_img.ndim == 3 and final_img.shape[2] >= 3:
+    hsv = cv2.cvtColor(final_img[:, :, :3], cv2.COLOR_BGR2HSV)
+    if final_img.shape[2] == 4:
+        mask = final_img[:, :, 3] > 32
+        s_vals = hsv[:, :, 1][mask] if np.any(mask) else hsv[:, :, 1].reshape(-1)
+    else:
+        s_vals = hsv[:, :, 1].reshape(-1)
+    sat_p90 = round(float(np.percentile(s_vals, 90)), 1) if s_vals.size > 0 else 0.0
+
+print(json.dumps({"w": int(w), "h": int(h), "alpha": bool(has_alpha), "rm": bool(removed), "satP90": sat_p90}))
 "#;
     let out = tokio::process::Command::new(python)
         .arg("-c")
@@ -538,11 +868,12 @@ print(json.dumps({"w": int(w), "h": int(h), "alpha": bool(has_alpha), "rm": bool
                     v.get("h").and_then(Value::as_u64).map(|x| x as u32),
                     v.get("alpha").and_then(Value::as_bool).unwrap_or(false),
                     v.get("rm").and_then(Value::as_bool).unwrap_or(false),
+                    v.get("satP90").and_then(Value::as_f64),
                 );
             }
         }
     }
-    (None, None, false, false)
+    (None, None, false, false, None)
 }
 
 #[cfg(test)]
@@ -585,6 +916,78 @@ mod tests {
         let bioart = score_commons_filename("file:brain lateral (nih bioart 60).png", &kws, true, true);
         let real_3d = score_commons_filename("file:human brain lateral 3d model.png", &kws, true, true);
         assert!(real_3d > bioart, "expected real_3d ({real_3d}) > bioart ({bioart})");
+
+        let clean_photo = score_commons_filename("file:human brain lateral view.jpg", &kws, true, true);
+        let labeled_desc = score_commons_filename("file:human brain lateral view description.jpg", &kws, true, true);
+        let printed_3d = score_commons_filename("file:3d printing brain with support.jpg", &kws, true, true);
+        let bw_sketch = score_commons_filename("file:lateral view of human brain (black and white).jpg", &kws, true, true);
+        let infographic = score_commons_filename("file:brain lateralization.png", &kws, true, true);
+        assert!(clean_photo > labeled_desc, "clean_photo ({clean_photo}) must beat labeled_desc ({labeled_desc})");
+        assert!(clean_photo > printed_3d, "clean_photo ({clean_photo}) must beat printed_3d ({printed_3d})");
+        assert!(clean_photo > bw_sketch, "clean_photo ({clean_photo}) must beat bw_sketch ({bw_sketch})");
+        assert!(clean_photo > infographic, "clean_photo ({clean_photo}) must beat infographic ({infographic})");
+    }
+
+    #[test]
+    fn merge_commons_and_openverse_promotes_clean_openverse_over_labeled_commons() {
+        let labeled_commons = vec![
+            (
+                -5,
+                "File:Human brain lateral view description 2.JPG".to_string(),
+                "https://commons.example/labeled.jpg".to_string(),
+            ),
+            (
+                -20,
+                "File:Brain schematic labeled.png".to_string(),
+                "https://commons.example/schematic.png".to_string(),
+            ),
+        ];
+        let openverse = vec![
+            (
+                "3D pink brain render studio".to_string(),
+                "https://openverse.example/clean_3d.png".to_string(),
+            ),
+            (
+                "Brain anatomy diagram with labels".to_string(),
+                "https://openverse.example/ov_diagram.png".to_string(),
+            ),
+        ];
+        let merged = merge_commons_and_openverse_candidates(labeled_commons, openverse, true);
+        assert_eq!(
+            merged[0].1, "https://openverse.example/clean_3d.png",
+            "clean Openverse photo must outrank labeled Commons diagrams"
+        );
+        assert_eq!(merged.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn postprocess_grabcut_removes_solid_background_and_trims_margins() {
+        let tmp = std::env::temp_dir().join(format!("aetheria_grabcut_{}.png", crate::paths::now_ms()));
+        let python = crate::paths::locate_python_binary();
+        let mk = tokio::process::Command::new(&python)
+            .arg("-c")
+            .arg(
+                "import cv2, numpy as np, sys; \
+                 img = np.full((240, 320, 3), (45, 42, 195), dtype=np.uint8); \
+                 cv2.ellipse(img, (160, 120), (80, 58), 0, 0, 360, (195, 205, 225), -1); \
+                 cv2.circle(img, (140, 110), 18, (140, 145, 160), -1); \
+                 cv2.imwrite(sys.argv[1], img)",
+            )
+            .arg(&tmp)
+            .output()
+            .await
+            .expect("create synthetic studio test image");
+        assert!(mk.status.success(), "python failed creating synthetic image");
+
+        let (w, h, has_alpha, removed, sat_p90) = postprocess_downloaded_image(&tmp, true).await;
+        let _ = std::fs::remove_file(&tmp);
+        assert!(has_alpha, "expected GrabCut cutout to produce alpha channel");
+        assert!(removed, "expected backgroundRemoved=true");
+        assert!(sat_p90.unwrap_or(0.0) >= 15.0, "expected colored synthetic object sat_p90 >= 15, got {:?}", sat_p90);
+        let w = w.expect("width");
+        let h = h.expect("height");
+        assert!(w < 230 && w > 120, "expected auto-trimmed width around ~172px, got {w}");
+        assert!(h < 190 && h > 90, "expected auto-trimmed height around ~128px, got {h}");
     }
 }
 

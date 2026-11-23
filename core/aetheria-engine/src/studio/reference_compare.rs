@@ -364,6 +364,31 @@ pub fn discover_reference_keyframes_for_film(
         return kfs;
     }
 
+    let mut ref_scenes: Vec<(String, f64, f64)> = Vec::new();
+    let style_path = ws_root.join("ref").join("extracted").join("style.json");
+    if let Ok(style_raw) = std::fs::read_to_string(&style_path) {
+        if let Ok(style_val) = serde_json::from_str::<Value>(&style_raw) {
+            if let Some(ref_arr) = style_val.get("scenes").and_then(Value::as_array) {
+                let mut r_cursor = 0.0f64;
+                for (idx, sc) in ref_arr.iter().enumerate() {
+                    let id = sc
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                        .unwrap_or_else(|| format!("scene{}", idx + 1));
+                    let start = sc.get("start").and_then(Value::as_f64).unwrap_or(r_cursor);
+                    let dur = sc
+                        .get("duration")
+                        .and_then(Value::as_f64)
+                        .filter(|&d| d.is_finite() && d > 0.05)
+                        .unwrap_or(2.0);
+                    ref_scenes.push((id, start, dur));
+                    r_cursor = start + dur;
+                }
+            }
+        }
+    }
+
     let mut seen_ref_scene_ids: Vec<String> = Vec::new();
     for kf in &kfs {
         if let Some(ref sid) = kf.scene_id {
@@ -393,14 +418,26 @@ pub fn discover_reference_keyframes_for_film(
                 };
                 film_scenes.get(mapped_idx)
             });
+        let matched_ref_scene = ref_scenes.iter().find(|(rid, _, _)| rid == sid);
         if let Some((_, f_start, f_dur)) = matched_film_scene {
             let f_end = f_start + f_dur;
-            let mapped_ts = match kf.phase.as_deref() {
-                Some("start") => f_start + (f_dur * 0.15).min(0.15),
-                Some("q1") => f_start + f_dur * 0.28,
-                Some("q3") => f_start + f_dur * 0.70,
-                Some("end") => (f_end - (f_dur * 0.15).min(0.15)).max(f_start + f_dur * 0.5),
-                _ => f_start + f_dur * 0.5,
+            let mapped_ts = if let Some((_, r_start, r_dur)) = matched_ref_scene {
+                if (f_start - r_start).abs() < 0.05 && (f_dur - r_dur).abs() < 0.05 {
+                    // 1:1 remake: preserve exact keyframe timestamp from style.json so hero/mid frames
+                    // captured at e.g. 5.65s are never moved backwards before q3 (5.09s).
+                    kf.timestamp.clamp(*f_start, f_end)
+                } else {
+                    let u = ((kf.timestamp - r_start) / r_dur.max(0.05)).clamp(0.02, 0.98);
+                    f_start + f_dur * u
+                }
+            } else {
+                match kf.phase.as_deref() {
+                    Some("start") => f_start + (f_dur * 0.15).min(0.15),
+                    Some("q1") => f_start + f_dur * 0.28,
+                    Some("q3") => f_start + f_dur * 0.70,
+                    Some("end") => (f_end - (f_dur * 0.15).min(0.15)).max(f_start + f_dur * 0.5),
+                    _ => f_start + f_dur * 0.5,
+                }
             };
             kf.timestamp = (mapped_ts * 100.0).round() / 100.0;
         }
@@ -1021,6 +1058,66 @@ mod tests {
         assert_eq!(scoped.len(), 1);
         assert_eq!(scoped[0].scene_id.as_deref(), Some("scene2_problem_or_context"));
         assert_eq!(scoped[0].ref_rel, "ref/extracted/frames/ref_scene_02_start.jpg");
+    }
+
+    #[test]
+    fn remake_keyframes_preserve_chronological_order_when_hero_mid_is_after_q3() {
+        let ws = std::env::temp_dir().join(format!("aetheria_ref_hero_order_{}", crate::paths::now_ms()));
+        let frames = ws.join("ref").join("extracted").join("frames");
+        std::fs::create_dir_all(&frames).unwrap();
+        for f in [
+            "ref_scene_02_start.jpg",
+            "ref_scene_02_q1.jpg",
+            "ref_scene_02_q3.jpg",
+            "ref_scene_02.jpg",
+            "ref_scene_02_end.jpg",
+        ] {
+            std::fs::write(frames.join(f), f.as_bytes()).unwrap();
+        }
+        std::fs::write(
+            ws.join("ref").join("extracted").join("style.json"),
+            serde_json::to_string(&json!({
+                "scenes": [{
+                    "id": "scene2_problem_or_context",
+                    "start": 2.502,
+                    "duration": 3.704,
+                    "end": 6.206,
+                    "keyframe": "frames/ref_scene_02.jpg",
+                    "keyframeTimestamp": 5.65,
+                    "keyframes": [
+                        { "t": 2.71, "path": "frames/ref_scene_02_start.jpg" },
+                        { "t": 3.54, "path": "frames/ref_scene_02_q1.jpg" },
+                        { "t": 5.09, "path": "frames/ref_scene_02_q3.jpg" },
+                        { "t": 6.00, "path": "frames/ref_scene_02_end.jpg" }
+                    ]
+                }]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let film_dir = ws.join("projects").join("remake");
+        std::fs::create_dir_all(&film_dir).unwrap();
+        std::fs::write(
+            film_dir.join("film.json"),
+            serde_json::to_string(&json!({
+                "scenes": [{
+                    "id": "scene2_problem_or_context",
+                    "start": 2.502,
+                    "duration": 3.704
+                }]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let kfs = discover_reference_keyframes_for_film(&ws, &film_dir, 6.206);
+        let ts_list: Vec<f64> = kfs.iter().map(|k| k.timestamp).collect();
+        assert_eq!(ts_list, vec![2.71, 3.54, 5.09, 5.65, 6.00]);
+        assert_eq!(kfs[2].phase.as_deref(), Some("q3"));
+        assert_eq!(kfs[3].phase.as_deref(), Some("mid"));
+
+        let _ = std::fs::remove_dir_all(&ws);
     }
 }
 
