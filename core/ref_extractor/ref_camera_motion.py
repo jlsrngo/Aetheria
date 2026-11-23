@@ -20,7 +20,7 @@ MIN_INLIER_RATIO = 0.35
 MIN_SPREAD_FRAC = 0.22
 MAX_TRACK_WIDTH = 640
 
-AM_EASE_NAMES = ("linear", "inCubic", "outCubic", "inOutCubic")
+AM_EASE_NAMES = ("linear", "inCubic", "outCubic", "inOutCubic", "outExpo", "outBack")
 
 
 def eval_am_ease(name: str, u: float) -> float:
@@ -31,6 +31,12 @@ def eval_am_ease(name: str, u: float) -> float:
         return 1.0 - (1.0 - x) ** 3
     if name == "inOutCubic":
         return 4.0 * x * x * x if x < 0.5 else 1.0 - ((-2.0 * x + 2.0) ** 3) / 2.0
+    if name == "outExpo":
+        return 1.0 if x >= 1.0 else 1.0 - (2.0 ** (-10.0 * x))
+    if name == "outBack":
+        c1 = 1.70158
+        c3 = c1 + 1.0
+        return 1.0 + c3 * ((x - 1.0) ** 3) + c1 * ((x - 1.0) ** 2)
     return x
 
 
@@ -636,6 +642,25 @@ def _estimate_dense_flow_camera_fallback(
     i1 = min(len(local_ts) - 1, active_steps[-1] + 1) if active_steps else len(local_ts) - 1
     peak_idx = int(np.argmax(np.asarray(step_mags, dtype=np.float64))) if step_mags else 0
     peak_sec = round(global_ts[min(len(global_ts) - 1, peak_idx + 1)], 3)
+
+    seg_ts = local_ts[i0 : i1 + 1]
+    seg_scales = scales[i0 : i1 + 1]
+    seg_txs = txs[i0 : i1 + 1]
+    seg_tys = tys[i0 : i1 + 1]
+    seg_rots = [0.0] * len(seg_ts)
+    if len(seg_ts) >= 4:
+        fit_ease, fit_rmse = _fit_best_ease(seg_ts, seg_scales, seg_rots, seg_txs, seg_tys)
+        if fit_rmse <= 0.16:
+            ease_out: Optional[str] = fit_ease
+            conf_out = "high" if fit_rmse <= 0.08 else "medium"
+        else:
+            ease_out = None
+            conf_out = "low"
+    else:
+        fit_rmse = 1.0
+        ease_out = None
+        conf_out = "low"
+
     return {
         "segments": [
             {
@@ -649,8 +674,9 @@ def _estimate_dense_flow_camera_fallback(
                 "txTo": round(txs[i1], 2),
                 "tyFrom": round(tys[i0], 2),
                 "tyTo": round(tys[i1], 2),
-                "ease": "inOutCubic",
-                "confidence": "medium",
+                "ease": ease_out,
+                "easeRmse": round(float(fit_rmse), 4),
+                "confidence": conf_out,
                 "backend": "dense_optical_flow",
             }
         ],
@@ -670,7 +696,11 @@ def compile_camera_motion_am_js(camera_motion: Optional[Dict[str, Any]], width: 
     t0 = float(seg.get("t0", 0.0))
     t1 = max(t0 + 0.05, float(seg.get("t1", t0 + 0.5)))
     ease = str(seg.get("ease") or "linear")
-    ease_expr = f"AM.ease.{ease}(camU)" if ease in ("inCubic", "outCubic", "inOutCubic") else "camU"
+    ease_expr = (
+        f"AM.ease.{ease}(camU)"
+        if ease in ("inCubic", "outCubic", "inOutCubic", "outExpo", "outBack")
+        else "camU"
+    )
     s0, s1 = float(seg.get("scaleFrom", 1.0)), float(seg.get("scaleTo", 1.0))
     r0, r1 = float(seg.get("rotDegFrom", 0.0)), float(seg.get("rotDegTo", 0.0))
     tx0, tx1 = float(seg.get("txFrom", 0.0)), float(seg.get("txTo", 0.0))

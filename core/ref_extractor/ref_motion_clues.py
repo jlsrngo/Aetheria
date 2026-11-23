@@ -580,6 +580,22 @@ def extract_scene_motion_clues(
         kinematics = extract_scene_motion_kinematics(frame_at_fn, start, end, width, height)
         if kinematics:
             out["kinematics"] = kinematics
+            try:
+                from ref_element_feel import extract_scene_element_feel
+
+                el_feel = extract_scene_element_feel(
+                    frame_at_fn,
+                    start,
+                    end,
+                    width,
+                    height,
+                    motion_bursts=kinematics.get("motionBursts"),
+                    fps=30.0,
+                )
+                if el_feel:
+                    out["elementFeel"] = el_feel
+            except Exception:
+                pass
     except Exception:
         pass
     if hero_card_info is not None:

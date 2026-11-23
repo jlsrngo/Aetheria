@@ -6,6 +6,7 @@ similarity, Sobel/Canny edge structure overlap, and renders a side-by-side
 """
 
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -238,6 +239,41 @@ def _mean_adjacent_frame_delta(frames: List[Tuple[float, np.ndarray]]) -> Option
     return round(float(np.mean(deltas)), 2)
 
 
+def _measure_pair_flow_metrics(
+    rg0: np.ndarray,
+    rg1: np.ndarray,
+    pg0: np.ndarray,
+    pg1: np.ndarray,
+) -> Tuple[float, float, float, float, float, float]:
+    """Computes Farneback optical flow `(ref_dx, ref_dy, ref_p90, prev_dx, prev_dy, prev_p90)` at 160px proxy width."""
+    h, w = rg0.shape[:2]
+    pw = min(160, max(48, w))
+    ph = max(36, int(round(h * (float(pw) / float(max(1, w))))))
+    sx = float(w) / float(pw)
+    sy = float(h) / float(ph)
+
+    def _stats(a: np.ndarray, b: np.ndarray) -> Tuple[float, float, float]:
+        sa = cv2.resize(a, (pw, ph), interpolation=cv2.INTER_AREA)
+        sb = cv2.resize(b, (pw, ph), interpolation=cv2.INTER_AREA)
+        fl = cv2.calcOpticalFlowFarneback(sa, sb, None, 0.5, 4, 15, 3, 5, 1.2, 0)
+        fx, fy = fl[..., 0], fl[..., 1]
+        mag = np.hypot(fx, fy)
+        act = mag > 0.35
+        if int(np.count_nonzero(act)) < 24:
+            return 0.0, 0.0, 0.0
+        strong_thr = max(0.35, float(np.percentile(mag[act], 55)))
+        strong = act & (mag >= strong_thr)
+        mask = strong if int(np.count_nonzero(strong)) >= 20 else act
+        dx = float(np.median(fx[mask])) * sx
+        dy = float(np.median(fy[mask])) * sy
+        p90 = float(np.percentile(mag[act], 90)) * ((sx + sy) * 0.5)
+        return dx, dy, p90
+
+    rdx, rdy, rp90 = _stats(rg0, rg1)
+    pdx, pdy, pp90 = _stats(pg0, pg1)
+    return rdx, rdy, rp90, pdx, pdy, pp90
+
+
 def _compute_motion_step_diagnostics(
     ref_frames: List[Tuple[float, np.ndarray]],
     prev_frames: List[Tuple[float, np.ndarray]],
@@ -248,6 +284,7 @@ def _compute_motion_step_diagnostics(
             "prevStepDeltas": [],
             "frozenIntervals": [],
             "jumpIntervals": [],
+            "motionWindowWarnings": [],
             "motionWarning": None,
         }
     ref_ord = sorted(ref_frames, key=lambda x: x[0])
@@ -256,6 +293,8 @@ def _compute_motion_step_diagnostics(
     prev_steps: List[float] = []
     frozen_intervals: List[str] = []
     jump_intervals: List[str] = []
+    window_freezes: List[Tuple[float, str]] = []
+    window_dirs: List[Tuple[float, str]] = []
     for ((rt0, rg0), (rt1, rg1)), ((pt0, pg0), (pt1, pg1)) in zip(
         zip(ref_ord, ref_ord[1:]),
         zip(prev_ord, prev_ord[1:]),
@@ -274,6 +313,23 @@ def _compute_motion_step_diagnostics(
             frozen_intervals.append(f"{pt0:.2f}s->{pt1:.2f}s (REF d={rd:.2f} vs RND d={pd:.2f})")
         elif pd >= 18.0 and pd > max(18.0, rd * 2.8) and rd < 14.0:
             jump_intervals.append(f"{pt0:.2f}s->{pt1:.2f}s (RND d={pd:.2f} vs REF d={rd:.2f})")
+
+        rdx, rdy, rp90, pdx, pdy, pp90 = _measure_pair_flow_metrics(rg0, rg1, pg0, pg1)
+        if (rp90 >= 12.0 or rd >= 1.8) and pp90 < rp90 * 0.25 and pd < rd * 0.28:
+            msg = (
+                f"MOTION WINDOW FREEZE @ {pt0:.2f}..{pt1:.2f}s: ref moves strongly "
+                f"(p90={rp90:.0f}px) while preview is nearly frozen (p90={pp90:.0f}px) — animate this beat!"
+            )
+            window_freezes.append((rp90 - pp90, msg))
+        ref_disp = float(math.hypot(rdx, rdy))
+        vec_err = float(math.hypot(rdx - pdx, rdy - pdy))
+        dot_val = rdx * pdx + rdy * pdy
+        if ref_disp >= 24.0 and vec_err >= 20.0 and dot_val < 0.35 * (ref_disp * ref_disp):
+            msg = (
+                f"MOTION DIRECTION/PAN MISMATCH @ {pt0:.2f}..{pt1:.2f}s: ref moves "
+                f"({rdx:+.0f},{rdy:+.0f})px vs preview ({pdx:+.0f},{pdy:+.0f})px"
+            )
+            window_dirs.append((vec_err, msg))
 
     mean_ref_step = round(float(np.mean(ref_steps)), 3) if ref_steps else 0.0
     mean_prev_step = round(float(np.mean(prev_steps)), 3) if prev_steps else 0.0
@@ -298,12 +354,23 @@ def _compute_motion_step_diagnostics(
             + ", ".join(jump_intervals[:4])
             + " while the reference moves smoothly — remove sudden `if (t >= X)` position/phase jumps or mid-scene `return;` cutoffs and interpolate smoothly with `AM.lerp` / `AM.ease` or a smooth `Math.sin(p * Math.PI)` envelope!"
         )
+    window_warnings: List[str] = []
+    window_freezes.sort(key=lambda x: x[0], reverse=True)
+    window_dirs.sort(key=lambda x: x[0], reverse=True)
+    for _, msg in window_freezes[:1] + window_dirs[:1]:
+        window_warnings.append(msg)
+    if len(window_warnings) < 2:
+        for _, msg in window_freezes[1:2] + window_dirs[1:2]:
+            if len(window_warnings) < 2 and msg not in window_warnings:
+                window_warnings.append(msg)
+    warnings.extend(window_warnings)
     return {
         "refStepDeltas": ref_steps,
         "prevStepDeltas": prev_steps,
         "motionEnergyRatio": motion_ratio,
         "frozenIntervals": frozen_intervals,
         "jumpIntervals": jump_intervals,
+        "motionWindowWarnings": window_warnings,
         "motionWarning": "\n".join(warnings) if warnings else None,
     }
 

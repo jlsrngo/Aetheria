@@ -739,6 +739,40 @@ class RefExtractorAndCompareTests(unittest.TestCase):
         md_live = ref_compare._compute_motion_step_diagnostics(ref_seq, ref_seq)
         self.assertNotIn("MOTION STIFFNESS WARNING", md_live["motionWarning"] or "")
 
+    def test_window_freeze_and_direction_mismatch_diagnostics(self) -> None:
+        w, h = 360, 640
+
+        def _draw_textured_card(fr: np.ndarray, cx: int, cy: int) -> None:
+            cv2.rectangle(fr, (cx - 56, cy - 48), (cx + 56, cy + 48), 40, -1)
+            cv2.circle(fr, (cx, cy), 22, 200, -1)
+            cv2.putText(fr, "GO", (cx - 28, cy + 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, 30, 2)
+
+        ref_seq = []
+        freeze_prev = []
+        opposite_prev = []
+        for k in range(5):
+            t = k * 0.25
+            r_fr = np.full((h, w), 220, dtype=np.uint8)
+            _draw_textured_card(r_fr, int(90 + k * 28), 300)
+            ref_seq.append((t, r_fr))
+
+            # Frozen beat after frame 0
+            f_fr = np.full((h, w), 220, dtype=np.uint8)
+            _draw_textured_card(f_fr, 90 if k <= 3 else 202, 300)
+            freeze_prev.append((t, f_fr))
+
+            # Moving in opposite direction (leftward instead of rightward)
+            o_fr = np.full((h, w), 220, dtype=np.uint8)
+            _draw_textured_card(o_fr, int(260 - k * 28), 300)
+            opposite_prev.append((t, o_fr))
+
+        md_frz = ref_compare._compute_motion_step_diagnostics(ref_seq, freeze_prev)
+        self.assertIn("MOTION WINDOW FREEZE", md_frz["motionWarning"] or "", md_frz)
+        self.assertTrue(len(md_frz["motionWindowWarnings"]) >= 1)
+
+        md_dir = ref_compare._compute_motion_step_diagnostics(ref_seq, opposite_prev)
+        self.assertIn("MOTION DIRECTION/PAN MISMATCH", md_dir["motionWarning"] or "", md_dir)
+
 
 if __name__ == "__main__":
     unittest.main()

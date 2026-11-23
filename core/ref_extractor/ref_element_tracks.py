@@ -63,7 +63,7 @@ def _extract_salient_components(
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(salient, connectivity=8)
     mask_area = max(1, mw * mh)
     min_area = max(24, int(mask_area * 0.0015))
-    max_box_area = int(mask_area * 0.60)
+    max_box_area = int(mask_area * 0.45)
     sx = float(full_w) / float(mw)
     sy = float(full_h) / float(mh)
 
@@ -80,6 +80,11 @@ def _extract_salient_components(
         if pix.size == 0:
             continue
         med_bgr = np.median(pix, axis=0)
+        solidity = float(area) / float(max(1, bw * bh))
+        bg_contrast = float(np.max(np.abs(med_bgr.astype(np.float32) - bg_bgr.astype(np.float32))))
+        # Reject pale low-solidity diagonal background streaks/caustics that hijack foreground tracks
+        if solidity < 0.22 and bg_contrast < 42.0 and (bw * bh) > int(mask_area * 0.12):
+            continue
         hex_col = f"#{int(med_bgr[2]):02X}{int(med_bgr[1]):02X}{int(med_bgr[0]):02X}"
         fw_box = max(1, int(round(bw * sx)))
         fh_box = max(1, int(round(bh * sy)))

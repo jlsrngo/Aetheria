@@ -36,6 +36,20 @@ function buildModularTestFilm(workspaceDir) {
         duration: 0.567,
         accent: "#F08020",
       },
+      {
+        id: "scene3_push",
+        title: "Scene 3 Push Left Bridge",
+        script: "script/scene3.js",
+        start: 1.4,
+        duration: 0.6,
+        accent: "#1850E8",
+        transitionBridge: {
+          kind: "push_left",
+          tStart: 1.333,
+          tEnd: 1.667,
+          curve: [0.0, 0.25, 0.5, 0.75, 1.0],
+        },
+      },
     ],
   };
   fs.writeFileSync(
@@ -80,7 +94,22 @@ function buildModularTestFilm(workspaceDir) {
 `;
   fs.writeFileSync(path.join(scriptDir, "scene2.js"), scene2Js);
 
-  // Uses live /script/aetheria-motion.js resolveScene (+0.002 boundary fix) without auto soft-dissolve
+  // Scene 3: Solid blue backdrop sliding in via runtime 30fps push_left transitionBridge
+  const scene3Js = `(function () {
+  var AM = window.AM;
+  AM.registerScene("scene3_push", function (ctx, t, dur) {
+    var W = 720, H = 1280;
+    ctx.fillStyle = "#1850E8";
+    ctx.fillRect(0, 0, W, H);
+    var p = AM.clamp(t / Math.max(0.1, dur), 0, 1);
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(280, 560 - 30 * p, 160, 160);
+  });
+})();
+`;
+  fs.writeFileSync(path.join(scriptDir, "scene3.js"), scene3Js);
+
+  // Uses live /script/aetheria-motion.js resolveScene + renderFrameWithTransitions without auto soft-dissolve
   const indexHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -95,6 +124,7 @@ function buildModularTestFilm(workspaceDir) {
   <script src="/script/aetheria-motion.js"></script>
   <script src="/script/scene1.js"></script>
   <script src="/script/scene2.js"></script>
+  <script src="/script/scene3.js"></script>
 </head>
 <body>
   <div id="stage"><canvas id="film" width="720" height="1280"></canvas></div>
@@ -103,7 +133,7 @@ function buildModularTestFilm(workspaceDir) {
     "use strict";
     var W = 720, H = 1280, BG = "#0B0804";
     var SCENES = ${JSON.stringify(filmManifest.scenes)};
-    window.__filmMeta = { title: "Forensic E2E", width: W, height: H, fps: 30, duration: 1.4, durationInFrames: 42, scenes: SCENES };
+    window.__filmMeta = { title: "Forensic E2E", width: W, height: H, fps: 30, duration: 2.0, durationInFrames: 60, scenes: SCENES };
     var canvas = document.getElementById("film");
     var ctx = canvas.getContext("2d");
     function runSceneSafely(targetCtx, renderFn, localT, targetScene) {
@@ -125,13 +155,18 @@ function buildModularTestFilm(workspaceDir) {
       ctx.fillStyle = BG;
       ctx.fillRect(0, 0, W, H);
       ctx.restore();
-      var resolved = window.AM.resolveScene(sec, SCENES);
-      var scene = resolved.scene;
-      var localTime = resolved.localTime;
-      var renderFn = window.AM.getSceneRenderer(scene.id, resolved.index);
-      if (renderFn) {
-        runSceneSafely(ctx, renderFn, localTime, scene);
-      }
+      var renderSceneItem = function (targetCtx, targetScene, targetIdx, targetLocalT) {
+        if (targetCtx !== ctx) {
+          targetCtx.setTransform(1, 0, 0, 1, 0, 0);
+          targetCtx.fillStyle = BG;
+          targetCtx.fillRect(0, 0, W, H);
+        }
+        var renderFn = window.AM.getSceneRenderer(targetScene.id, targetIdx);
+        if (renderFn) {
+          runSceneSafely(targetCtx, renderFn, targetLocalT, targetScene);
+        }
+      };
+      window.AM.renderFrameWithTransitions(ctx, sec, SCENES, W, H, renderSceneItem);
     };
     window.renderAt(0);
     window.__ready = true;
@@ -162,7 +197,7 @@ w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
 h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 fps = round(float(cap.get(cv2.CAP_PROP_FPS)), 2)
 frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-assert (w, h, frames) == (720, 1280, 42), f"unexpected video metadata {(w, h, fps, frames)}"
+assert (w, h, frames) == (720, 1280, 60), f"unexpected video metadata {(w, h, fps, frames)}"
 
 def read_frame(idx):
     cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
@@ -225,6 +260,16 @@ cv2.circle(drift_b, (60, 60), 34, (29, 121, 233), -1)
 drift_msg = rsc.detect_color_and_luma_drift(drift_a, drift_b)
 assert drift_msg and "COLOR DRIFT" in drift_msg, f"expected COLOR DRIFT diag, got {drift_msg}"
 
+# 5. Verify runtime 30fps push_left transitionBridge at Frame 45 (t=1.50s midpoint: orange left, blue right) and settled blue Frame 54
+fr45 = read_frame(45)
+fr54 = read_frame(54)
+left_px = fr45[200, 60]
+right_px = fr45[200, 660]
+settled_px = fr54[200, 100]
+assert int(left_px[2]) > 200 and int(left_px[0]) < 60, f"expected orange outgoing Scene 2 on left of push_left at Frame 45, got BGR={left_px.tolist()}"
+assert int(right_px[0]) > 180 and int(right_px[2]) < 60, f"expected blue incoming Scene 3 on right of push_left at Frame 45, got BGR={right_px.tolist()}"
+assert int(settled_px[0]) > 180 and int(settled_px[2]) < 60, f"expected settled blue Scene 3 at Frame 54, got BGR={settled_px.tolist()}"
+
 cap.release()
 print(json.dumps({
     "width": w,
@@ -238,6 +283,9 @@ print(json.dumps({
     "geometryGateApplied": pf0["geometryGateApplied"],
     "preCutFrame24Red": pre_cut_r,
     "exactCutFrame25Red": cut_r,
+    "pushMidLeftBGR": [int(x) for x in left_px],
+    "pushMidRightBGR": [int(x) for x in right_px],
+    "settledScene3BGR": [int(x) for x in settled_px],
     "colorDriftDiag": drift_msg,
 }))
 `;
@@ -280,7 +328,7 @@ async function main() {
           outputName: "forensic-accuracy-e2e.mp4",
           codec: "h264",
           inFrame: 0,
-          outFrame: 41,
+          outFrame: 59,
         }),
       },
     );
@@ -306,7 +354,7 @@ async function main() {
       await new Promise((r) => setTimeout(r, 400));
     }
     assert.ok(doneJob, "Timed out waiting for forensic accuracy E2E render");
-    assert.equal(doneJob.renderedFrames, 42);
+    assert.equal(doneJob.renderedFrames, 60);
 
     const outPath = doneJob.outputPath || startJson.outputPath;
     assert.ok(outPath && fs.existsSync(outPath), `Missing rendered file: ${outPath}`);

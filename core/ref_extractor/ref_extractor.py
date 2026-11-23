@@ -1625,6 +1625,47 @@ def extract_reference_blueprint(
             sub_keyframes.append({"t": ts_end, "path": f"frames/{end_name}"})
         sub_keyframes.sort(key=lambda item: float(item.get("t", 0.0)))
 
+        # Paket A.2: Multi-phase OCR typography coordinates — when a scene has distinct text in
+        # an earlier or later phase than `fr_hero` (e.g. Phase 1 card -> Phase 2 copy), measure
+        # exact pixel boxes for those secondary-phase text lines so the LLM never guesses Y/scale.
+        if ocr_engine is not None and dur >= 1.2:
+            hero_texts = {
+                str(r.get("text") or "").strip().lower()
+                for r in (layout_info.get("regions") or [])
+                if r.get("kind") == "text"
+            }
+            phase_candidates: List[Tuple[float, Any]] = []
+            if fr_end is not None and abs(ts_end - ts_hero) >= 0.55:
+                phase_candidates.append((ts_end, fr_end))
+            if fr_start is not None and abs(ts_start - ts_hero) >= 0.55:
+                phase_candidates.append((ts_start, fr_start))
+            if dur >= 2.2 and len(sub_ts_list) >= 6:
+                ts_q1_c = sub_ts_list[2]
+                if abs(ts_q1_c - ts_hero) >= 0.55:
+                    fr_q1_c = _frame_at(ts_q1_c)
+                    if fr_q1_c is not None:
+                        phase_candidates.append((ts_q1_c, fr_q1_c))
+            phase_text_regs: List[Dict[str, Any]] = []
+            seen_phase_texts = set(hero_texts)
+            for p_ts, p_fr in phase_candidates[:2]:
+                try:
+                    p_layout = analyze_frame_layout(p_fr, ocr_engine)
+                    p_local_t = round(max(0.0, float(p_ts) - float(start)), 2)
+                    for reg in (p_layout.get("regions") or []):
+                        if reg.get("kind") != "text":
+                            continue
+                        t_key = str(reg.get("text") or "").strip().lower()
+                        if not t_key or t_key in seen_phase_texts:
+                            continue
+                        seen_phase_texts.add(t_key)
+                        item = dict(reg)
+                        item["localT"] = p_local_t
+                        phase_text_regs.append(item)
+                except Exception:
+                    pass
+            if phase_text_regs:
+                layout_info["phaseTextRegions"] = phase_text_regs[:8]
+
         camera_motion = estimate_scene_camera_motion(
             cached_frames.get, cam_indices, start, fps, width, height
         )
@@ -1837,7 +1878,69 @@ def extract_reference_blueprint(
             ast_scenes.append(ast_scene_obj)
 
     contact_sheets = build_dense_contact_sheets(_frame_at, sheet_timestamps, width, height, out_dir)
-    cap.release()
+
+    transitions_30fps: List[Dict[str, Any]] = []
+    try:
+        import ref_motion_transitions
+
+        mt_res = ref_motion_transitions.analyze_video_30fps_motion(v_path, scenes, width, height, fps)
+        if mt_res.get("ok"):
+            per_sc_mt = mt_res.get("perScene") or {}
+            transitions_30fps = mt_res.get("transitions") or []
+            for s in scenes:
+                sc_mt = per_sc_mt.get(int(s["index"]))
+                if not sc_mt:
+                    continue
+                if sc_mt.get("transitionBridge"):
+                    s["transitionBridge"] = sc_mt["transitionBridge"]
+                if sc_mt.get("motionTimeline30fps"):
+                    s["motionTimeline30fps"] = sc_mt["motionTimeline30fps"]
+                if sc_mt.get("cameraTrack"):
+                    s["cameraTrack"] = sc_mt["cameraTrack"]
+
+            # Refresh per-scene _start.jpg / _end.jpg keyframes if they fell inside an active
+            # cross-scene push/zoom transition bridge so isolated per-scene previews never compare
+            # against the adjacent scene's sliding elements.
+            for idx_s, s in enumerate(scenes):
+                sc_start_v = float(s.get("start", 0.0))
+                sc_end_v = float(s.get("end", sc_start_v + float(s.get("duration", 1.0))))
+                sc_dur_v = max(0.2, sc_end_v - sc_start_v)
+                in_tb = s.get("transitionBridge") or {}
+                in_kind = str(in_tb.get("kind") or "")
+                safe_lo = sc_start_v
+                if (in_kind.startswith("push_") or in_kind == "zoom_blur") and in_tb.get("tEnd") is not None:
+                    safe_lo = min(sc_start_v + sc_dur_v * 0.45, max(sc_start_v, float(in_tb["tEnd"]) + 0.04))
+                elif in_kind == "hard_cut" and float(in_tb.get("leadInBlankSec") or 0.0) >= 0.04:
+                    safe_lo = min(sc_start_v + sc_dur_v * 0.40, sc_start_v + float(in_tb["leadInBlankSec"]) + 0.04)
+
+                safe_hi = sc_end_v
+                if idx_s + 1 < len(scenes):
+                    out_tb = scenes[idx_s + 1].get("transitionBridge") or {}
+                    out_kind = str(out_tb.get("kind") or "")
+                    if (out_kind.startswith("push_") or out_kind == "zoom_blur") and out_tb.get("tStart") is not None:
+                        safe_hi = max(sc_start_v + sc_dur_v * 0.55, min(sc_end_v, float(out_tb["tStart"]) - 0.04))
+
+                for kf in s.get("keyframes") or []:
+                    kp = str(kf.get("path") or "")
+                    kt = float(kf.get("t") or sc_start_v)
+                    new_t: Optional[float] = None
+                    if kp.endswith("_start.jpg") and kt < safe_lo:
+                        new_t = round(safe_lo, 3)
+                    elif kp.endswith("_end.jpg") and kt > safe_hi:
+                        new_t = round(safe_hi, 3)
+                    if new_t is not None and abs(new_t - kt) >= 0.02:
+                        fr_new = _frame_at(new_t)
+                        if fr_new is not None:
+                            fname = Path(kp).name
+                            cv2.imwrite(str(frames_dir / fname), fr_new, [cv2.IMWRITE_JPEG_QUALITY, 88])
+                            _write_vision_copy(fr_new, vision_dir, fname, max_edge=540, quality=78)
+                            kf["t"] = new_t
+                if s.get("keyframes"):
+                    s["keyframes"].sort(key=lambda item: float(item.get("t", 0.0)))
+    except Exception:
+        transitions_30fps = []
+    finally:
+        cap.release()
 
     filmstrip_info: Optional[Dict[str, Any]] = None
     if os.environ.get("AETHERIA_DISABLE_FILMSTRIP") != "1":
@@ -1857,7 +1960,7 @@ def extract_reference_blueprint(
                     "indexPath": "ref/extracted/filmstrip_index.json",
                     "mode": fs_res["mode"],
                     "framesPerSheet": fs_res["framesPerSheet"],
-                    "holdEps": fs_res["holdEps"],
+                    "holdEps": fs_eps,
                     "totalFrames": fs_res["totalFrames"],
                     "keptTiles": fs_res["keptTiles"],
                     "sheetCount": fs_res["sheetCount"],
@@ -1868,6 +1971,17 @@ def extract_reference_blueprint(
                     sc_fs = fs_by_idx.get(s["index"])
                     if sc_fs:
                         s["filmstripSheets"] = sc_fs["sheetPaths"]
+                        bursts = list(sc_fs.get("activeBursts") or [])
+                        mt = s.get("motionTimeline30fps") or {}
+                        sc_start = float(s.get("start", 0.0))
+                        for aw in mt.get("actionWindows") or []:
+                            bt0 = round(sc_start + float(aw.get("t0", 0.0)), 2)
+                            bt1 = round(sc_start + float(aw.get("t1", 0.0)), 2)
+                            pk = round(max(4.0, float(aw.get("peakP90", 0.0)) * 0.25), 2)
+                            if not any(abs(float(b.get("tStart", -9.0)) - bt0) <= 0.25 for b in bursts):
+                                bursts.append({"tStart": bt0, "tEnd": bt1, "peakDelta": pk})
+                        bursts.sort(key=lambda b: float(b.get("tStart", 0.0)))
+                        sc_fs["activeBursts"] = bursts[:14]
                         s["motionProfile"] = {
                             "meanDelta": sc_fs["meanDelta"],
                             "medianDelta": sc_fs["medianDelta"],
@@ -1875,6 +1989,11 @@ def extract_reference_blueprint(
                             "nearZeroPct": sc_fs["nearZeroPct"],
                             "activeBursts": sc_fs["activeBursts"],
                         }
+                idx_json_p = out_dir / "filmstrip_index.json"
+                if idx_json_p.is_file():
+                    idx_payload = json.loads(idx_json_p.read_text(encoding="utf-8"))
+                    idx_payload["scenes"] = fs_res.get("scenes") or []
+                    idx_json_p.write_text(json.dumps(idx_payload, indent=2), encoding="utf-8")
         except Exception:
             filmstrip_info = None
 
@@ -1974,6 +2093,7 @@ def extract_reference_blueprint(
         "extractorBackend": extractor_backend,
         "astPath": "ref/extracted/style_ast.json" if ast_json_path is not None else None,
         "filmstrip": filmstrip_info,
+        "transitions": transitions_30fps,
         "scenes": scenes,
     }
 

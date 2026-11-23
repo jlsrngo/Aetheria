@@ -82,13 +82,13 @@ def extract_scene_motion_kinematics(
         fl = cv2.calcOpticalFlowFarneback(g_a, g_b, None, 0.5, 2, 13, 2, 5, 1.1, 0)
         fx, fy = fl[..., 0], fl[..., 1]
         mag = np.hypot(fx, fy)
-        active = mag > 0.35
+        active = mag > 0.45
         act_count = int(np.count_nonzero(active))
         diff_abs = np.abs(g_b.astype(np.float32) - g_a.astype(np.float32))
         diff_mask = active | (diff_abs > 10.0)
         fg_diff = float(np.mean(diff_abs[diff_mask])) if np.any(diff_mask) else float(np.mean(diff_abs))
 
-        if act_count >= 30:
+        if act_count >= max(30, int(work_w * work_h * 0.004)):
             p75_px = float(np.percentile(mag[active], 75)) * ((sx + sy) * 0.5)
             dx_px = float(np.median(fx[active])) * sx
             dy_px = float(np.median(fy[active])) * sy
@@ -120,7 +120,7 @@ def extract_scene_motion_kinematics(
             or area_ratio >= 1.18
             or area_ratio <= 0.84
         )
-        is_active_hold = act_count >= 24 or fg_diff >= 2.2
+        is_active_hold = act_count >= max(24, int(work_w * work_h * 0.004)) or fg_diff >= 2.6
         steps.append(
             {
                 "lt0": round(max(0.0, t_a - start), 2),
@@ -180,30 +180,125 @@ def extract_scene_motion_kinematics(
 
     hold_steps = [s for s in steps if not s["isBurst"]]
     active_pct = round(100.0 * sum(1 for s in steps if s["isActive"]) / float(len(steps)), 1)
+
+    # Discriminative lag-long (~0.48s ≈ lag-15 at 30fps) vs lag-1 foreground liveness:
+    # Compression noise stays flat across lag-1 and lag-long, while true slow drift/rotation grows with lag.
+    lag_k = max(2, min(len(samples) - 1, int(round(0.48 / max(0.08, step_sec)))))
+    hold_step_indices = [idx_s for idx_s, s in enumerate(steps) if not s["isBurst"]]
+    lag1_shares: List[float] = []
+    lag_long_shares: List[float] = []
+    fg_centroids: List[Tuple[float, float]] = []
+    living_regions: List[Dict[str, Any]] = []
+
+    region_defs = [
+        ("center", int(work_w * 0.22), int(work_h * 0.22), int(work_w * 0.78), int(work_h * 0.78)),
+        ("top", 0, 0, work_w, int(work_h * 0.30)),
+        ("bottom", 0, int(work_h * 0.70), work_w, work_h),
+    ]
+    region_long_shares: Dict[str, List[float]] = {r[0]: [] for r in region_defs}
+    region_lag1_shares: Dict[str, List[float]] = {r[0]: [] for r in region_defs}
+
+    eval_indices = hold_step_indices if len(hold_step_indices) >= 2 else list(range(len(steps)))
+    for st_i in eval_indices:
+        cur_sample_i = st_i + 1
+        prev_sample_i = st_i
+        g_cur = samples[cur_sample_i][1].astype(np.int16)
+        g_prev = samples[prev_sample_i][1].astype(np.int16)
+        l1 = float((np.abs(g_cur - g_prev) > 10).mean())
+        lag1_shares.append(l1)
+        if cur_sample_i >= lag_k:
+            g_old = samples[cur_sample_i - lag_k][1].astype(np.int16)
+            ll = float((np.abs(g_cur - g_old) > 10).mean())
+            lag_long_shares.append(ll)
+            for rname, rx0, ry0, rx1, ry1 in region_defs:
+                rl1 = float((np.abs(g_cur[ry0:ry1, rx0:rx1] - g_prev[ry0:ry1, rx0:rx1]) > 10).mean())
+                rll = float((np.abs(g_cur[ry0:ry1, rx0:rx1] - g_old[ry0:ry1, rx0:rx1]) > 10).mean())
+                region_lag1_shares[rname].append(rl1)
+                region_long_shares[rname].append(rll)
+        bx = samples[cur_sample_i][2]
+        if bx is not None:
+            fg_centroids.append(((bx[0] + bx[2] * 0.5) * sx, (bx[1] + bx[3] * 0.5) * sy))
+
+    mean_lag1 = float(np.mean(lag1_shares)) if lag1_shares else 0.0
+    mean_lag_long = float(np.mean(lag_long_shares)) if lag_long_shares else 0.0
+    lag_growth = mean_lag_long / max(1e-4, mean_lag1) if lag_long_shares else 0.0
+
+    amp_px = 0.0
+    period_sec: Optional[float] = None
+    if len(fg_centroids) >= 3:
+        cxs = np.array([c[0] for c in fg_centroids], dtype=np.float64)
+        cys = np.array([c[1] for c in fg_centroids], dtype=np.float64)
+        amp_x = float(np.ptp(cxs)) * 0.5
+        amp_y = float(np.ptp(cys)) * 0.5
+        amp_px = round(max(amp_x, amp_y), 1)
+        sig = cys - float(np.mean(cys)) if amp_y >= amp_x else cxs - float(np.mean(cxs))
+        if float(np.max(np.abs(sig))) >= 2.0:
+            signs = np.sign(sig)
+            crossings = [k for k in range(1, len(signs)) if signs[k] * signs[k - 1] < 0]
+            if len(crossings) >= 2:
+                avg_half_steps = float(np.mean(np.diff(crossings)))
+                period_sec = round(max(0.4, avg_half_steps * 2.0 * step_sec), 2)
+
+    for rname, _, _, _, _ in region_defs:
+        r_longs = region_long_shares[rname]
+        r_l1s = region_lag1_shares[rname]
+        if not r_longs:
+            continue
+        rm_long = float(np.mean(r_longs))
+        rm_l1 = float(np.mean(r_l1s))
+        if rm_long >= 0.012 and rm_long >= max(rm_l1 * 1.25, 0.012):
+            reg_entry: Dict[str, Any] = {
+                "zone": rname,
+                "lag15Share": round(rm_long, 4),
+                "ampPx": amp_px if rname == "center" else round(max(2.0, amp_px * 0.6), 1),
+            }
+            if period_sec is not None and rname == "center":
+                reg_entry["periodSec"] = period_sec
+            living_regions.append(reg_entry)
+    living_regions.sort(key=lambda r: r["lag15Share"], reverse=True)
+    living_regions = living_regions[:2]
+
     if hold_steps:
         hold_active_pct = round(
             100.0 * sum(1 for s in hold_steps if s["isActive"]) / float(len(hold_steps)), 1
         )
         hold_fg_diff = round(float(np.mean([s["fgDiff"] for s in hold_steps])), 2)
-        has_living_hold = bool(
-            hold_active_pct >= 40.0
-            or hold_fg_diff >= 2.2
-            or (active_pct >= 80.0 and len(hold_steps) <= 1 and len(steps) >= 5)
-        )
-        rotational_hold = bool(
-            has_living_hold and any(abs(s["curl"]) >= 0.02 for s in (hold_steps if len(hold_steps) > 1 else steps))
-        )
     else:
         hold_active_pct = active_pct
         hold_fg_diff = round(float(np.mean([s["fgDiff"] for s in steps])), 2)
-        has_living_hold = bool(len(steps) >= 3 and active_pct >= 65.0)
-        rotational_hold = bool(has_living_hold and any(abs(s["curl"]) >= 0.02 for s in steps))
+
+    max_hold_curl = max(
+        (abs(s["curl"]) for s in (hold_steps if len(hold_steps) > 1 else steps)),
+        default=0.0,
+    )
+    has_living_hold = bool(
+        (mean_lag_long >= 0.010 and lag_growth >= 1.25)
+        or len(living_regions) > 0
+        or max_hold_curl >= 0.028
+    )
+    rotational_hold = bool(has_living_hold and max_hold_curl >= 0.025)
+
+    # M4: Pre-cut motion energy (last ~0.40s before scene end) with noise floor rejection (>8 gray delta)
+    # so compression jitter does not trigger false preCutActive while genuine motion right before a cut does.
+    tail_n = max(1, min(len(steps), int(round(0.40 / max(0.08, step_sec)))))
+    tail_diffs: List[float] = []
+    for k in range(max(1, len(samples) - tail_n), len(samples)):
+        d_mat = np.abs(samples[k][1].astype(np.float32) - samples[k - 1][1].astype(np.float32))
+        gd = float(np.where(d_mat > 8.0, d_mat, 0.0).mean())
+        tail_diffs.append(gd)
+    pre_cut_diff = round(float(np.median(tail_diffs)) if tail_diffs else 0.0, 3)
+    pre_cut_active = bool(pre_cut_diff >= 0.35)
 
     return {
         "motionBursts": formatted_bursts,
         "activeFramePct": active_pct,
         "holdActivePct": hold_active_pct,
         "holdMeanFgDiff": hold_fg_diff,
+        "holdLag1Share": round(mean_lag1, 4),
+        "holdLag15Share": round(mean_lag_long, 4),
         "hasLivingHold": has_living_hold,
         "rotationalHold": rotational_hold,
+        "livingHoldRegions": living_regions,
+        "preCutDiff": pre_cut_diff,
+        "preCutActive": pre_cut_active,
     }
