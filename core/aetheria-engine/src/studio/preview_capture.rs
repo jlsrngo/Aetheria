@@ -82,6 +82,8 @@ pub struct PreviewCaptureOptions {
     pub visual_inspect_only: Option<bool>,
     pub include_full_res_frames: Option<bool>,
     pub disable_auto_rollback: bool,
+    pub forced_scene_id: Option<String>,
+    pub write_scene_beat_strips: Option<bool>,
 }
 
 /// Returns `true` when the active film uses `stageMode: "hybrid"` or is a self-contained HTML
@@ -245,7 +247,7 @@ pub(crate) fn normalize_preview_timestamps(raw: &[f64], duration: f64) -> Vec<f6
     };
 
     for t in candidates {
-        let clamped = ((t.min(max_t) * 100.0).round()) / 100.0;
+        let clamped = ((t.min(max_t) * 1000.0).round()) / 1000.0;
         if !out.iter().any(|existing: &f64| (*existing - clamped).abs() < 0.02) {
             out.push(clamped);
         }
@@ -329,6 +331,8 @@ pub async fn capture_film_preview_with_options(
             visual_inspect_only: Some(false),
             include_full_res_frames: Some(false),
             disable_auto_rollback: false,
+            forced_scene_id: None,
+            write_scene_beat_strips: None,
         },
     )
     .await
@@ -856,6 +860,8 @@ pub async fn capture_film_preview_with_full_options(
             meta.duration,
             &frames,
             options.pass_threshold.unwrap_or(DEFAULT_REFERENCE_PASS_THRESHOLD),
+            options.forced_scene_id.as_deref(),
+            options.write_scene_beat_strips.unwrap_or(true),
         )
         .await
         {
@@ -973,6 +979,9 @@ mod tests {
         let many: Vec<f64> = (1..=20).map(|i| i as f64 * 0.5).collect();
         let capped = normalize_preview_timestamps(&many, 20.0);
         assert_eq!(capped.len(), MAX_PREVIEW_FRAMES);
+
+        let exact_cuts = normalize_preview_timestamps(&[1.667, 4.967], 10.0);
+        assert_eq!(exact_cuts, vec![1.667, 4.967]);
     }
 
     #[test]

@@ -251,7 +251,11 @@ pub(crate) async fn maybe_auto_scaffold_for_direct_filmstrip_remake_with_mode(
                 .and_then(Value::as_f64)
                 .filter(|d| d.is_finite() && *d > 0.05)
                 .unwrap_or(2.0);
-            json!({ "id": sid, "duration": dur })
+            let mut row = json!({ "id": sid, "duration": dur });
+            if let Some(tp) = s.get("transitionFromPrev").and_then(Value::as_str) {
+                row["transitionFromPrev"] = Value::String(tp.to_string());
+            }
+            row
         })
         .collect();
     let title = style_val
@@ -387,8 +391,81 @@ fn collect_scene_pass1_images(ws_root: &Path, scene_num: usize) -> Vec<String> {
         .collect()
 }
 
-/// Loads up to 8 evenly spaced 1/1 filmstrip sheets spanning `scene_num` from start to end
-/// (plus settled scene hero JPEG) when `AETHERIA_DIRECT_FILMSTRIP=1` is active;
+/// Selects up to `max_sheets` Pass 1 sheets chronologically, always keeping start/end and
+/// prioritizing sheets covering the highest-delta `activeBursts` before filling largest gaps.
+pub(crate) fn select_pass1_filmstrip_sheets<'a>(
+    matching: &[&'a Value],
+    active_bursts: &[(f64, f64, f64)],
+    max_sheets: usize,
+) -> Vec<&'a Value> {
+    if max_sheets == 0 {
+        return Vec::new();
+    }
+    if matching.len() <= max_sheets {
+        return matching.to_vec();
+    }
+    let n = matching.len();
+    let mut chosen = std::collections::BTreeSet::new();
+    chosen.insert(0);
+    if max_sheets > 1 {
+        chosen.insert(n - 1);
+    }
+
+    let mut sorted_bursts = active_bursts.to_vec();
+    sorted_bursts.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+    for (bt0, bt1, _) in sorted_bursts {
+        if chosen.len() >= max_sheets {
+            break;
+        }
+        let best_idx = (0..n)
+            .filter(|idx| !chosen.contains(idx))
+            .filter(|&idx| {
+                let s0 = matching[idx].get("tStart").and_then(Value::as_f64).unwrap_or(0.0);
+                let s1 = matching[idx].get("tEnd").and_then(Value::as_f64).unwrap_or(s0);
+                s1 >= bt0 && s0 <= bt1
+            })
+            .max_by(|&a, &b| {
+                let da = matching[a]
+                    .get("maxDelta")
+                    .or_else(|| matching[a].get("meanDelta"))
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0);
+                let db = matching[b]
+                    .get("maxDelta")
+                    .or_else(|| matching[b].get("meanDelta"))
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0);
+                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+            });
+        if let Some(idx) = best_idx {
+            chosen.insert(idx);
+        }
+    }
+
+    while chosen.len() < max_sheets {
+        let vec_chosen: Vec<usize> = chosen.iter().copied().collect();
+        let mut best_mid = None;
+        let mut best_gap = 1usize;
+        for win in vec_chosen.windows(2) {
+            let gap = win[1] - win[0];
+            if gap > best_gap {
+                best_gap = gap;
+                best_mid = Some((win[0] + win[1]) / 2);
+            }
+        }
+        match best_mid {
+            Some(mid) if !chosen.contains(&mid) => {
+                chosen.insert(mid);
+            }
+            _ => break,
+        }
+    }
+
+    chosen.into_iter().map(|i| matching[i]).collect()
+}
+
+/// Loads up to 6 key 1/1 filmstrip sheets spanning `scene_num` (burst-prioritized from start to end,
+/// plus settled scene hero JPEGs) when `AETHERIA_DIRECT_FILMSTRIP=1` is active;
 /// falls back cleanly to `collect_scene_pass1_images`.
 fn collect_scene_filmstrip_pass1_images(ws_root: &Path, scene_num: usize) -> Vec<String> {
     let extracted_dir = ws_root.join("ref").join("extracted");
@@ -404,16 +481,32 @@ fn collect_scene_filmstrip_pass1_images(ws_root: &Path, scene_num: usize) -> Vec
         .and_then(Value::as_array)
         .map(Vec::as_slice)
         .unwrap_or(&[]);
-    let wanted: std::collections::HashSet<u64> = idx_val
+    let scene_obj = idx_val
         .get("scenes")
         .and_then(Value::as_array)
         .and_then(|arr| {
             arr.iter()
                 .find(|s| s.get("index").and_then(Value::as_u64) == Some(scene_num as u64))
-        })
+        });
+    let wanted: std::collections::HashSet<u64> = scene_obj
         .and_then(|sc| sc.get("sheetIndices"))
         .and_then(Value::as_array)
         .map(|arr| arr.iter().filter_map(Value::as_u64).collect())
+        .unwrap_or_default();
+    let active_bursts: Vec<(f64, f64, f64)> = scene_obj
+        .and_then(|sc| sc.get("activeBursts"))
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|b| {
+                    Some((
+                        b.get("tStart")?.as_f64()?,
+                        b.get("tEnd")?.as_f64()?,
+                        b.get("peakDelta").and_then(Value::as_f64).unwrap_or(0.0),
+                    ))
+                })
+                .collect()
+        })
         .unwrap_or_default();
 
     let matching: Vec<&Value> = if !wanted.is_empty() {
@@ -436,14 +529,7 @@ fn collect_scene_filmstrip_pass1_images(ws_root: &Path, scene_num: usize) -> Vec
         return collect_scene_pass1_images(ws_root, scene_num);
     }
 
-    let picked: Vec<&Value> = if matching.len() <= 6 {
-        matching
-    } else {
-        let last = matching.len() - 1;
-        (0..6)
-            .map(|k| matching[(k * last) / 5])
-            .collect()
-    };
+    let picked = select_pass1_filmstrip_sheets(&matching, &active_bursts, 6);
 
     let mut urls = Vec::with_capacity(picked.len() + 3);
     for sh in picked {
@@ -453,9 +539,15 @@ fn collect_scene_filmstrip_pass1_images(ws_root: &Path, scene_num: usize) -> Vec
         let vis_p = extracted_dir.join(rel_vis);
         // Prefer full-tile `relPath` (240x426 / 384x216 tiles, ~48 KB) over downscaled `visionRelPath`
         // so micro-typography and shapes on the 1/1 filmstrip stay sharp!
-        let chosen = if !rel_raw.is_empty() && raw_p.is_file() {
+        let chosen = if !rel_raw.is_empty()
+            && crate::paths::contains_path(&extracted_dir, &raw_p)
+            && raw_p.is_file()
+        {
             Some(raw_p)
-        } else if !rel_vis.is_empty() && vis_p.is_file() {
+        } else if !rel_vis.is_empty()
+            && crate::paths::contains_path(&extracted_dir, &vis_p)
+            && vis_p.is_file()
+        {
             Some(vis_p)
         } else {
             None
@@ -540,6 +632,23 @@ fn collect_scene_keyframe_timestamps(
     ]
 }
 
+/// Pure checkpoint comparison helper shared across step renders and post-loop dirty verification.
+pub(crate) fn is_better_checkpoint(
+    best_score: f64,
+    best_errs: &[String],
+    best_hazards: usize,
+    cand_score: f64,
+    cand_errs: &[String],
+    cand_hazards: usize,
+) -> bool {
+    best_score < 0.0
+        || (!best_errs.is_empty() && cand_errs.is_empty())
+        || (best_errs.is_empty()
+            && cand_errs.is_empty()
+            && (cand_score >= best_score - 0.002
+                || (cand_hazards < best_hazards && cand_score >= best_score - 0.04)))
+}
+
 /// Pure end-of-scene safety-restore predicate (baseline rule P4).
 pub(crate) fn should_restore_best_checkpoint(
     best_score: f64,
@@ -554,7 +663,35 @@ pub(crate) fn should_restore_best_checkpoint(
         && !best_code.is_empty()
         && !crate::tool::film_state::is_scaffold_stub_content(best_code)
         && ((best_errs.is_empty() && !latest_errs.is_empty())
+            || (latest_score + 0.04 < best_score)
             || (latest_score + 0.03 < best_score && final_hazards >= best_hazards))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn should_early_exit_scene(
+    active_filmstrip: bool,
+    is_mock_model: bool,
+    step_rendered: bool,
+    latest_errs: &[String],
+    active_hazards: &[String],
+    has_motion_warning: bool,
+    has_structural_diagnosis: bool,
+    renders_completed: usize,
+    latest_score: f64,
+    latest_edge: f64,
+    latest_min_frame_score: f64,
+) -> bool {
+    active_filmstrip
+        && !is_mock_model
+        && step_rendered
+        && latest_errs.is_empty()
+        && active_hazards.is_empty()
+        && !has_motion_warning
+        && !has_structural_diagnosis
+        && latest_edge >= 0.35
+        && latest_min_frame_score >= 0.62
+        && ((renders_completed >= 2 && latest_score >= 0.76)
+            || (renders_completed >= 1 && latest_score >= 0.84))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -580,7 +717,7 @@ fn select_post_write_tool_phase(
     if !dirty_since_render && has_runtime_errors && probes_since_edit >= 1 {
         return PostWriteToolPhase::FixRuntimeErrorsNow;
     }
-    if !dirty_since_render && !has_runtime_errors && probes_since_edit >= 2 {
+    if !dirty_since_render && !has_runtime_errors && probes_since_edit >= 1 {
         return PostWriteToolPhase::ApplyPolishOrFinish;
     }
     PostWriteToolPhase::AllTools
@@ -723,6 +860,9 @@ async fn run_single_direct_scene(
     let mut best_errs: Vec<String> = Vec::new();
     let mut best_hazards = usize::MAX;
     let mut latest_score = 0.0f64;
+    let mut latest_edge = 0.0f64;
+    let mut latest_min_frame_score = 0.0f64;
+    let mut latest_has_struct_diag = false;
     let mut latest_errs: Vec<String> = Vec::new();
     let mut has_written = false;
     let mut dirty_since_render = false;
@@ -742,6 +882,7 @@ async fn run_single_direct_scene(
         film_root: &shared.film_root,
         script_path: &script_path,
         script_rel: &script_rel,
+        scene_id: &scene_id,
         scene_num,
         scene_start: sc_start,
         scene_dur: sc_dur,
@@ -1046,7 +1187,12 @@ async fn run_single_direct_scene(
                         ssim: 0.0,
                         color: 0.0,
                         edge: 0.0,
+                        min_frame_score: sc_val,
+                        has_structural_diagnosis: false,
                     });
+                    latest_edge = metrics.edge;
+                    latest_min_frame_score = metrics.min_frame_score;
+                    latest_has_struct_diag = metrics.has_structural_diagnosis;
                     render_records.push(RenderTraceRecord {
                         step: step_idx + 1,
                         overall: metrics.overall,
@@ -1056,13 +1202,14 @@ async fn run_single_direct_scene(
                         runtime_errors: errs.len(),
                         hazards: cur_haz,
                     });
-                    let better_checkpoint = best_score < 0.0
-                        || (!best_errs.is_empty() && errs.is_empty())
-                        || (best_errs.is_empty()
-                            && errs.is_empty()
-                            && (sc_val >= best_score - 0.002
-                                || (cur_haz < best_hazards && sc_val >= best_score - 0.04)));
-                    if better_checkpoint {
+                    if is_better_checkpoint(
+                        best_score,
+                        &best_errs,
+                        best_hazards,
+                        sc_val,
+                        &errs,
+                        cur_haz,
+                    ) {
                         best_code = cur_code;
                         best_score = sc_val;
                         best_errs = errs;
@@ -1169,19 +1316,28 @@ async fn run_single_direct_scene(
             };
             let has_motion_warning = step_captions
                 .iter()
-                .any(|c| c.contains("MOTION FROZEN WARNING") || c.contains("MOTION JUMP / TELEPORT WARNING") || c.contains("MOTION ACTIVITY WARNING"));
+                .any(|c| {
+                    c.contains("MOTION FROZEN WARNING")
+                        || c.contains("MOTION STIFFNESS WARNING")
+                        || c.contains("MOTION JUMP / TELEPORT WARNING")
+                        || c.contains("MOTION ACTIVITY WARNING")
+                });
 
-            // Fast early-exit for live filmstrip remakes once visual score is high AND zero runtime errors,
-            // zero code hazards, and zero motion freeze/jump warnings remain (saves 1 full LLM call per scene).
-            if shared.active_filmstrip
-                && !scene_model_id.starts_with("mock-")
-                && step_rendered
-                && latest_errs.is_empty()
-                && active_hazards.is_empty()
-                && !has_motion_warning
-                && ((renders_completed >= 2 && latest_score >= 0.76)
-                    || (renders_completed >= 1 && latest_score >= 0.84))
-            {
+            // Fast early-exit for live filmstrip remakes once visual score, edge overlap, worst-frame
+            // floor, and zero structural diagnosis are all clean AND zero runtime errors/hazards remain.
+            if should_early_exit_scene(
+                shared.active_filmstrip,
+                scene_model_id.starts_with("mock-"),
+                step_rendered,
+                &latest_errs,
+                &active_hazards,
+                has_motion_warning,
+                latest_has_struct_diag,
+                renders_completed,
+                latest_score,
+                latest_edge,
+                latest_min_frame_score,
+            ) {
                 break;
             }
 
@@ -1217,10 +1373,13 @@ async fn run_single_direct_scene(
                     ))
                 } else if step_rendered
                     && latest_errs.is_empty()
+                    && !latest_has_struct_diag
                     && latest_score >= 0.78
+                    && latest_edge >= 0.35
+                    && latest_min_frame_score >= 0.62
                     && renders_completed >= 2
                 {
-                    Some("Score is >= 0.78 with 0 runtime errors. Reply briefly in text to finalize this scene and move on, unless a glaring visual/motion defect remains.".to_string())
+                    Some("Score is >= 0.78 with strong edge/worst-frame alignment and 0 runtime errors. Reply briefly in text to finalize this scene and move on, unless a glaring visual/motion defect remains.".to_string())
                 } else {
                     match next_post_phase {
                         PostWriteToolPhase::VerifyDirtyScriptNow => Some(
@@ -1299,7 +1458,12 @@ async fn run_single_direct_scene(
                 ssim: 0.0,
                 color: 0.0,
                 edge: 0.0,
+                min_frame_score: sc_val,
+                has_structural_diagnosis: false,
             });
+            latest_edge = metrics.edge;
+            latest_min_frame_score = metrics.min_frame_score;
+            latest_has_struct_diag = metrics.has_structural_diagnosis;
             render_records.push(RenderTraceRecord {
                 step: step_idx + 1,
                 overall: metrics.overall,
@@ -1309,16 +1473,26 @@ async fn run_single_direct_scene(
                 runtime_errors: errs.len(),
                 hazards: cur_haz,
             });
-            let better = best_score < 0.0
-                || (!best_errs.is_empty() && errs.is_empty())
-                || (best_errs.is_empty() && errs.is_empty() && sc_val >= best_score - 0.002);
-            if better {
+            if is_better_checkpoint(
+                best_score,
+                &best_errs,
+                best_hazards,
+                sc_val,
+                &errs,
+                cur_haz,
+            ) {
                 best_code = code_block;
                 best_score = sc_val;
                 best_errs = errs;
                 best_hazards = cur_haz;
             }
-            if latest_errs.is_empty() && latest_score >= 0.86 && cur_haz == 0 {
+            if latest_errs.is_empty()
+                && !latest_has_struct_diag
+                && latest_score >= 0.86
+                && latest_edge >= 0.35
+                && latest_min_frame_score >= 0.62
+                && cur_haz == 0
+            {
                 break;
             }
             if step_idx + 1 < max_scene_steps {
@@ -1368,7 +1542,11 @@ async fn run_single_direct_scene(
             ssim: 0.0,
             color: 0.0,
             edge: 0.0,
+            min_frame_score: latest_score,
+            has_structural_diagnosis: false,
         });
+        latest_edge = metrics.edge;
+        latest_min_frame_score = metrics.min_frame_score;
         render_records.push(RenderTraceRecord {
             step: passes_run,
             overall: metrics.overall,
@@ -1378,12 +1556,20 @@ async fn run_single_direct_scene(
             runtime_errors: latest_errs.len(),
             hazards: final_dirty_haz,
         });
-        if best_score < 0.0 {
+        if is_better_checkpoint(
+            best_score,
+            &best_errs,
+            best_hazards,
+            latest_score,
+            &latest_errs,
+            final_dirty_haz,
+        ) {
             best_code = final_dirty_code;
             best_score = latest_score;
             best_errs = latest_errs.clone();
             best_hazards = final_dirty_haz;
         }
+        let _ = (latest_edge, latest_min_frame_score);
     }
 
     let final_code_now = tokio::fs::read_to_string(&script_path)
@@ -1719,6 +1905,8 @@ pub(crate) async fn run_direct_per_scene_remake_with_switches(
                 visual_inspect_only: Some(false),
                 include_full_res_frames: Some(false),
                 disable_auto_rollback: true,
+                forced_scene_id: None,
+                write_scene_beat_strips: Some(false),
             },
         )
         .await
@@ -1864,6 +2052,16 @@ mod tests {
             0,
             0.20,
             &["ReferenceError".to_string()],
+            0
+        ));
+        // Even if final_hazards < best_hazards, a large visual drop (> 0.04) must trigger rollback.
+        assert!(should_restore_best_checkpoint(
+            0.78,
+            "good",
+            &[],
+            1,
+            0.30,
+            &[],
             0
         ));
     }
@@ -2586,12 +2784,144 @@ mod tests {
             PostWriteToolPhase::FixRuntimeErrorsNow
         );
         assert_eq!(
-            select_post_write_tool_phase(true, false, false, 1),
+            select_post_write_tool_phase(true, false, false, 0),
             PostWriteToolPhase::AllTools
+        );
+        assert_eq!(
+            select_post_write_tool_phase(true, false, false, 1),
+            PostWriteToolPhase::ApplyPolishOrFinish
         );
         assert_eq!(
             select_post_write_tool_phase(true, false, false, 2),
             PostWriteToolPhase::ApplyPolishOrFinish
         );
+    }
+
+    #[test]
+    fn is_better_checkpoint_and_early_exit_enforce_edge_and_worst_frame_gates() {
+        // B-03 progression: even when best_score >= 0.0, higher candidate score must win!
+        assert!(is_better_checkpoint(0.55, &[], 0, 0.82, &[], 0));
+        assert!(!is_better_checkpoint(0.82, &[], 0, 0.55, &[], 0));
+        assert!(is_better_checkpoint(0.40, &["err".to_string()], 0, 0.30, &[], 0));
+
+        // Early exit blocked when edge < 0.35, min_frame_score < 0.62, or structuralDiagnosis is present
+        assert!(!should_early_exit_scene(true, false, true, &[], &[], false, false, 2, 0.78, 0.12, 0.68));
+        assert!(!should_early_exit_scene(true, false, true, &[], &[], false, false, 2, 0.78, 0.45, 0.52));
+        assert!(!should_early_exit_scene(true, false, true, &[], &[], false, true, 2, 0.88, 0.72, 0.85));
+        assert!(should_early_exit_scene(true, false, true, &[], &[], false, false, 2, 0.78, 0.42, 0.66));
+    }
+
+    #[test]
+    fn select_pass1_filmstrip_sheets_prioritizes_bursts_and_spread() {
+        let sheets: Vec<Value> = (1..=17)
+            .map(|idx| {
+                let s0 = (idx - 1) as f64 * 0.33;
+                let s1 = s0 + 0.30;
+                json!({
+                    "sheetIndex": idx,
+                    "tStart": s0,
+                    "tEnd": s1,
+                    "maxDelta": if idx == 7 || idx == 12 { 18.5 } else { 1.2 },
+                    "meanDelta": if idx == 7 || idx == 12 { 11.0 } else { 0.8 },
+                })
+            })
+            .collect();
+        let refs: Vec<&Value> = sheets.iter().collect();
+        let bursts = vec![(2.0, 2.3, 18.5), (3.6, 3.9, 14.0)];
+        let picked = select_pass1_filmstrip_sheets(&refs, &bursts, 6);
+        let idxs: Vec<u64> = picked
+            .iter()
+            .filter_map(|v| v.get("sheetIndex").and_then(Value::as_u64))
+            .collect();
+        assert_eq!(idxs.len(), 6);
+        assert_eq!(idxs.first().copied(), Some(1));
+        assert_eq!(idxs.last().copied(), Some(17));
+        assert!(idxs.contains(&7), "expected burst sheet 7 in {:?}", idxs);
+        assert!(idxs.contains(&12), "expected burst sheet 12 in {:?}", idxs);
+        assert!(idxs.windows(2).all(|w| w[0] < w[1]), "expected strictly sorted {:?}", idxs);
+    }
+
+    #[tokio::test]
+    async fn final_dirty_step_updates_best_checkpoint_and_recovers_from_error() {
+        let ws = setup_test_remake_workspace("b03_final_dirty", 1);
+        let broken_js = "(function(){ var AM=window.AM; AM.registerScene(\"scene1_unit\", function(ctx,t){ throw new Error('step0_broken'); }); })();\n";
+        let fixed_js = "(function(){ var AM=window.AM; AM.registerScene(\"scene1_unit\", function(ctx,t){ ctx.fillStyle='#FFFFFF'; ctx.fillRect(0,0,320,180); ctx.fillStyle='#1155EE'; ctx.fillRect(20+t*80,40,60,60); }); })();\n";
+
+        let broken_c = broken_js.to_string();
+        let fixed_c = fixed_js.to_string();
+        let (mut base_url, _captured, srv) = start_scripted_mock_llm(move |idx, _| match idx {
+            0 => json!({
+                "choices": [{
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "role": "assistant", "content": "",
+                        "tool_calls": [{
+                            "id": "w_broken", "type": "function",
+                            "function": { "name": "write_scene_script", "arguments": json!({ "code": broken_c }).to_string() }
+                        }]
+                    }
+                }]
+            }),
+            1 => json!({
+                "choices": [{
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "role": "assistant", "content": "",
+                        "tool_calls": [{
+                            "id": "r_broken", "type": "function",
+                            "function": { "name": "render_and_compare_scene", "arguments": "{}" }
+                        }]
+                    }
+                }]
+            }),
+            // Step 2 is the LAST allowed step (`max_steps = 3`), leaving dirty_since_render = true!
+            _ => json!({
+                "choices": [{
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "role": "assistant", "content": "",
+                        "tool_calls": [{
+                            "id": "w_fixed_last", "type": "function",
+                            "function": { "name": "write_scene_script", "arguments": json!({ "code": fixed_c }).to_string() }
+                        }]
+                    }
+                }]
+            }),
+        })
+        .await;
+
+        let switches = DirectSceneSwitches {
+            probe_steps: Some(0),
+            max_steps: 3,
+            filmstrip_pass1: false,
+            ..Default::default()
+        };
+        let client = reqwest::Client::new();
+        let mut api_key = "k".to_string();
+        let mut model_id = "mock-dirty-b03".to_string();
+        let mut parts = Vec::new();
+        let sum = run_direct_per_scene_remake_with_switches(
+            "sess_b03_dirty",
+            &ws.to_string_lossy(),
+            "B-03 final dirty recovery test",
+            &client,
+            &mut base_url,
+            &mut api_key,
+            &mut model_id,
+            &mut parts,
+            switches,
+        )
+        .await
+        .expect("b03 dirty test ok");
+        srv.abort();
+
+        assert_eq!(sum.scenes.len(), 1);
+        assert!(sum.scenes[0].runtime_errors.is_empty(), "expected recovered 0 runtime errors, got {:?}", sum.scenes[0].runtime_errors);
+        assert!(!sum.scenes[0].rolled_back);
+        let disk_code = std::fs::read_to_string(ws.join("projects").join("demo").join("script").join("scene1.js"))
+            .expect("scene1 on disk");
+        assert!(disk_code.contains("#1155EE"), "expected final step fix persisted, got: {}", disk_code);
+
+        let _ = std::fs::remove_dir_all(&ws);
     }
 }

@@ -9,6 +9,7 @@
 pub mod command_resolvers;
 pub mod context;
 pub(crate) mod direct_scene_prompt;
+pub(crate) mod direct_scene_prompt_tracks;
 pub(crate) mod direct_scene_remake;
 pub(crate) mod direct_scene_switches;
 pub(crate) mod direct_scene_tools;

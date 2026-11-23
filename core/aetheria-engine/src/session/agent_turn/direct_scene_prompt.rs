@@ -12,13 +12,13 @@ You are NOT restricted to a single blind shot. You have direct investigative and
 - `inspect_ref_frame({ timestampSec, crop? })` — view ANY full-resolution reference frame (or zoom-crop `{x,y,w,h}`) whenever a small icon, text label, silhouette, or fast transition looks unclear in the 6-panel strip.
 - `sample_ref_region({ timestampSec, box? })` — measure exact pixel hex colors, luminance polarity, and tight foreground bounding box inside any rectangle (also works for non-vision models).
 - `fetch_web_image({ query, outputPath, removeBackground? })` — search & download real internet photos, realistic 3D renders, portraits, or icons into `img/<name>.png` (set `removeBackground: true` to cut out solid white/uniform corners into transparent PNG!). Preload once at top of your script via `var myImg = AM.loadImage('/img/<name>.png');` and draw via `AM.drawImageFit(ctx, myImg, x, y, w, h)`. Use this whenever the reference shows a realistic 3D object/photo (e.g. realistic brain, dartboard, portrait, product) that flat Canvas ovals cannot match!
-- `bash({ command, workdir? })` — run workspace-isolated shell/Python/OpenCV/FFmpeg commands whenever you want custom pixel/geometry measurements or quick checks.
+- `bash({ command, workdir? })` — optional workspace-isolated shell command (disabled by default in Filmstrip Mode since `inspect_ref_frame`, `sample_ref_region`, and `read_filmstrip` already provide full pixel & frame access).
 - `write_scene_script({ code })` — write your initial complete `script/sceneK.js` (or do a clean structural rewrite if needed).
 - `patch_scene_script({ oldText, newText })` — make SURGICAL exact search-and-replace edits to fix one mismatch without breaking working code. ALWAYS prefer `patch_scene_script` over rewriting the whole file during refinement!
 - `render_and_compare_scene({ timestamps?, fullResTimestamp? })` — render your script in headless Chrome/Edge and inspect the 3-row visual comparison (`Row 1 REFERENCE | Row 2 YOUR RENDER | Row 3 DIFF HEATMAP`) + full-res preview of the worst frame + SSIM/Color/Edge diagnostics.
 
 RECOMMENDED PER-SCENE LOOP (PACED SO YOU ALWAYS WRITE, RENDER & POLISH):
-1. Step 1 (optional — max 1–2 probe steps total): The 6-panel storyboard strip + 3 full-res keyframes + measured facts are ALREADY attached above. Call `inspect_ref_frame` / `sample_ref_region` for unclear details, AND call `fetch_web_image({ query, outputPath: 'img/...png', removeBackground: true })` right away if this scene contains a photographic or realistic 3D object (you may batch up to 3 calls in parallel in ONE step). Do NOT waste steps running exploratory `bash` `ls`/`cat` commands.
+1. Step 1 (optional — max 1 probe step total): The filmstrip storyboard strip + 3 full-res keyframes + measured facts are ALREADY attached above. Call `inspect_ref_frame` / `sample_ref_region` / `read_filmstrip` for unclear details, AND call `fetch_web_image({ query, outputPath: 'img/...png', removeBackground: true })` right away if this scene contains a photographic or realistic 3D object (you may batch up to 3 calls in parallel in ONE step). Never waste steps running exploratory shell commands.
 2. Step 2 (write code early!): Call `write_scene_script` with your complete, modular, studio-grade Canvas 2D implementation for this scene.
 3. Step 3: Call `render_and_compare_scene` to inspect your actual rendered pixels against Row 1 (REFERENCE) and Row 3 (DIFF) plus the attached full-res frame.
 4. Steps 4–11: Do NOT stop early just because SSIM looks like `0.70+` — plain white/light backgrounds inflate SSIM even when typography, timing, or icons look wrong! Compare EVERY panel left-to-right (including opening frame `t=0`, font sizes/weights, element exit timing, dashed selection boxes vs solid pills, and motion blur). Use `patch_scene_script` + `render_and_compare_scene` (typically 2–4 polish rounds) until visuals, proportions, timing, and motion closely match Row 1 with 0 runtime errors, then reply briefly.
@@ -41,14 +41,14 @@ FIVE UNIVERSAL ZERO-COLLISION & MOTION HYGIENE LAWS:
 3. SMOOTH MONOTONIC MOTION, PROGRESSIVE CURVE TRACING & ENVELOPED OSCILLATIONS:
    - Whenever a helper accepts a `progress` / `traceProgress` / `p` parameter (e.g. a hopping arc or a dot tracing a capsule perimeter or tether curve), you MUST actually use `progress` inside the drawing loop (e.g. `var u = (step / 32) * progress;` or `ctx.setLineDash([perim * progress, perim]);`) so the curve/arc/outline grows progressively with the moving tip — NEVER draw a 100% static full-length wire/arc/pill at `t=0` and slide a dot on top of it!
    - Whenever you apply a windowed wave/sine oscillation `if (t >= t0 && t < t1)`, ALWAYS multiply its amplitude by a smooth window envelope `var env = Math.sin(AM.clamp((t - t0) / (t1 - t0), 0, 1) * Math.PI);` (`0` at `t0` and `t1`) so elements NEVER snap/jump in 1 frame at `t = t0`!
-   - During any 'hold' phase where a card/pill/logo stays near center, keep subtle continuous floating/breathing drift alive (`cx + Math.sin(t * 2.2) * 5`, `cy + Math.cos(t * 1.7) * 4`, or gentle `AM.applyCamera` breathing) so the scene never freezes dead-still for 30+ frames.
+   - During any 'hold' phase where a card/pill/logo stays steady, add subtle ambient background glow or light-ray drift ONLY where Row 1 shows ambient luminance — NEVER oscillate or wobble precision-locked focal geometry (logos, equalizer baselines, steady hold typography) away from their measured coordinates when Row 1 holds them steady.
 4. SOFT VOLUMETRIC CAUSTICS & SURFACE CONTRAST: Draw background light streaks/caustics/metaballs with `ctx.filter = 'blur(28px)'` (resetting `ctx.filter = 'none'`) or wide multi-stop radial gradients — NEVER draw unblurred sharp diagonal bars or hard concentric bullseye circles.
 5. CLEAN BOUNDARY FRAMES & STRICT SCENE SCOPE: Render a valid visual frame at both `t = 0` and `t = dur` matching `BOUNDARY CONTINUITY LOCK` (`OPENING FRAME local_t=0.00s` and `CLOSING FRAME local_t=dur`). Never re-animate an already-exited card from the previous scene at a different Y position, and never prematurely draw the next scene's hero logo/text unless it is visibly present in THIS scene's final filmstrip tile.
 
 OPTICAL MATERIAL & LIVING MOTION CRAFT:
-- **Zero dead static holds:** Never freeze on flat solid colors (`staticFramesPct` kills cinematic feel). Keep subtle continuous ambient radial glow/light-ray drift, gentle camera breathing (`AM.applyCamera`), or spring settling motion alive across `0..dur`, with crisp fast transitions (`AM.ease.snap` / `AM.spring`).
+- **Snappy Zoom-Zoom, Springs & Living Holds:** Drive punchy entrances/pops with `AM.ease.outBack` / `AM.spring` / `AM.ease.outExpo` (`0.85 -> 1.04 -> 1.0`), exit zooms/wipes with `AM.ease.inCubic`, and camera or stage zooms/scrolls via `AM.applyCamera(ctx, { s, cx, cy, rot }, W, H)` whenever `MEASURED ZOOM / PAN / HOLD DYNAMICS` reports a `zoom_in`, `zoom_out`, or `pan_*` burst. Whenever `CONTINUOUS LIVING HOLD REQUIRED` appears (or orbital rings / floating objects exist in Row 1), keep dashed/orbital rings rotating (`ctx.rotate(t * omega)` or `lineDashOffset = -t * speed`) and floating objects gently breathing/swaying (`Math.sin(t * 2.5)`) instead of freezing dead-still — while keeping steady locked headlines/bars aligned!
 - **Volumetric soft light vs sharp geometry:** For luminous clouds/portals/glows, use wide smooth radial gradients fading to `alpha=0` with `lighter` (`AM.drawOpticalGlow` / `AM.drawBloomStroke`) — never thin harsh oval outlines or stepped unblurred rings.
-- **Optical lens & tapered ribbons:** When Row 1 shows water-bubble / spherical glass distortion bending text or edges, use `AM.drawSphericalLens(ctx, cx, cy, r, k, drawFn, opts)`. When Row 1 shows a glowing arc, hopping comet, or light swoosh, use `AM.drawTaperedRibbon(ctx, pts, maxW, opts)`.
+- **Optical lens & tapered ribbons:** When Row 1 shows water-bubble / spherical glass distortion bending text or edges, use `AM.drawSphericalLens(ctx, cx, cy, r, k, function(c) { ... }, opts)` (`drawFn(c)` draws in main canvas coords around `(cx, cy)`, or 2-arg `drawFn(lc, size)` draws in local `0..size`). When Row 1 shows a glowing arc, hopping comet, or light swoosh, use `AM.drawTaperedRibbon(ctx, pts, maxW, opts)`.
 - **Micro-physics & crisp shapes:** Use `AM.impactRecoil` for dot/tether collisions and `AM.twistPolygon` for elastic 3D-sheared polygon spins. Match concave vs convex geometry faithfully (e.g. pinched 4-point concave stars/diamonds vs rounded circles).
 - **Boundary continuity:** Match `t = 0` and `t = dur` to the exact opening and closing frames of the beat strip (`ref_scene_XX_beats.jpg`) so flashes, wipes, and shape handoffs flow seamlessly across cuts.
 
@@ -93,7 +93,7 @@ COMPACT `window.AM` API:
 - `AM.clamp(v, lo, hi)`, `AM.lerp(a, b, p)`, `AM.invLerp(a, b, v)`, `AM.remap(v, a, b, c, d)`
 - `AM.ease.{inCubic,outCubic,inOutCubic,outBack,outExpo,inOutQuart,snap}(p)`
 - `AM.spring(tSec, { stiffness, damping, mass })`, `AM.impactRecoil(t, hitTime, opts)`, `AM.twistPolygon(points, angle, lagFactor)`
-- `AM.drawOpticalGlow(ctx, x, y, r, hex, inten)`, `AM.drawBloomStroke(ctx, fn, opts)`, `AM.drawSphericalLens(ctx, cx, cy, r, k, fn, opts)`, `AM.drawTaperedRibbon(ctx, pts, w, opts)`
+- `AM.drawOpticalGlow(ctx, x, y, r, hex, inten)`, `AM.drawBloomStroke(ctx, fn, opts)`, `AM.drawSphericalLens(ctx, cx, cy, r, k, fn, opts)` (`fn(c)` scene coords; `fn(lc,sz)` `0..sz`), `AM.drawTaperedRibbon(ctx, pts, w, opts)`
 - `AM.rng(seed)` -> deterministic PRNG (`r()`, `r.range(min, max)`, `r.pick(arr)`)
 - `AM.drawCursor(ctx, x, y, opts)`, `AM.drawExtrudedArrow3D(ctx, cx, cy, r, opts)`, `AM.drawLaptopFrame(ctx, rect, fn)`, `AM.drawWordWheel(ctx, opts)`, `AM.drawSVGPath(ctx, d, opts)`
 - `AM.loadImage('/img/asset.png')`, `AM.drawImageFit(ctx, img, x, y, w, h, 'contain')`";
@@ -136,6 +136,28 @@ pub(crate) fn format_trajectory_local_time(raw: &str, scene_start: f64) -> Strin
     } else {
         out.join(" -> ")
     }
+}
+
+/// Converts `(scale, rotDeg, panX, panY)` into exact `AM.applyCamera(ctx, { s, cx, cy, rot }, W, H)` args
+/// matching `ref_camera_motion.py::camera_params_to_am_apply_camera`.
+pub(crate) fn camera_params_to_am_apply_camera(
+    scale: f64,
+    rot_deg: f64,
+    tx: f64,
+    ty: f64,
+    width: u32,
+    height: u32,
+) -> (f64, f64, f64, f64) {
+    let s = scale.max(1e-4);
+    let rad = rot_deg.to_radians();
+    let a = s * rad.cos();
+    let b = -s * rad.sin();
+    let c = s * rad.sin();
+    let d = s * rad.cos();
+    let s2 = s * s;
+    let cx = (width as f64) * 0.5 - (a * tx + c * ty) / s2;
+    let cy = (height as f64) * 0.5 - (b * tx + d * ty) / s2;
+    (s, cx, cy, rot_deg)
 }
 
 /// Builds a concise, ZERO-OCR hard-facts specification block for a single scene from `style.json`.
@@ -281,40 +303,66 @@ pub(crate) fn build_scene_hard_facts_prompt(
                 ));
             }
         }
+        let mut has_measured_camera_motion = false;
         if let Some(cm) = sc.get("cameraMotion").or_else(|| sc.pointer("/layout/cameraMotion")) {
             if let Some(segs) = cm.get("segments").and_then(Value::as_array) {
                 let parts: Vec<String> = segs
                     .iter()
                     .filter(|seg| seg.get("confidence").and_then(Value::as_str) != Some("low"))
                     .map(|seg| {
+                        let t0 = seg.get("t0").and_then(Value::as_f64).unwrap_or(0.0);
+                        let t1 = seg.get("t1").and_then(Value::as_f64).unwrap_or(dur);
+                        let s0 = seg.get("scaleFrom").and_then(Value::as_f64).unwrap_or(1.0);
+                        let s1 = seg.get("scaleTo").and_then(Value::as_f64).unwrap_or(1.0);
+                        let r0 = seg.get("rotDegFrom").and_then(Value::as_f64).unwrap_or(0.0);
+                        let r1 = seg.get("rotDegTo").and_then(Value::as_f64).unwrap_or(0.0);
+                        let tx0 = seg.get("txFrom").and_then(Value::as_f64).unwrap_or(0.0);
+                        let ty0 = seg.get("tyFrom").and_then(Value::as_f64).unwrap_or(0.0);
+                        let tx1 = seg.get("txTo").and_then(Value::as_f64).unwrap_or(0.0);
+                        let ty1 = seg.get("tyTo").and_then(Value::as_f64).unwrap_or(0.0);
+                        let (c0s, cx0, cy0, c0r) =
+                            camera_params_to_am_apply_camera(s0, r0, tx0, ty0, width, height);
+                        let (c1s, cx1, cy1, c1r) =
+                            camera_params_to_am_apply_camera(s1, r1, tx1, ty1, width, height);
                         format!(
-                            "local {:.2}s->{:.2}s scale={:.3}->{:.3} rot={:+.2}->{:+.2}deg pan=({:+.1},{:+.1})->({:+.1},{:+.1})px ease={} conf={}",
-                            seg.get("t0").and_then(Value::as_f64).unwrap_or(0.0),
-                            seg.get("t1").and_then(Value::as_f64).unwrap_or(dur),
-                            seg.get("scaleFrom").and_then(Value::as_f64).unwrap_or(1.0),
-                            seg.get("scaleTo").and_then(Value::as_f64).unwrap_or(1.0),
-                            seg.get("rotDegFrom").and_then(Value::as_f64).unwrap_or(0.0),
-                            seg.get("rotDegTo").and_then(Value::as_f64).unwrap_or(0.0),
-                            seg.get("txFrom").and_then(Value::as_f64).unwrap_or(0.0),
-                            seg.get("tyFrom").and_then(Value::as_f64).unwrap_or(0.0),
-                            seg.get("txTo").and_then(Value::as_f64).unwrap_or(0.0),
-                            seg.get("tyTo").and_then(Value::as_f64).unwrap_or(0.0),
+                            "local {:.2}s->{:.2}s scale={:.3}->{:.3} rot={:+.2}->{:+.2}deg | AM.applyCamera FROM={{s:{:.3}, cx:{:.1}, cy:{:.1}, rot:{:+.2}}} TO={{s:{:.3}, cx:{:.1}, cy:{:.1}, rot:{:+.2}}} ease={} conf={}",
+                            t0,
+                            t1,
+                            s0,
+                            s1,
+                            r0,
+                            r1,
+                            c0s,
+                            cx0,
+                            cy0,
+                            c0r,
+                            c1s,
+                            cx1,
+                            cy1,
+                            c1r,
                             seg.get("ease").and_then(Value::as_str).unwrap_or("linear"),
                             seg.get("confidence").and_then(Value::as_str).unwrap_or("medium"),
                         )
                     })
                     .collect();
                 if !parts.is_empty() {
-                    let px = cm.pointer("/pivot/x").and_then(Value::as_f64).unwrap_or(0.5);
-                    let py = cm.pointer("/pivot/y").and_then(Value::as_f64).unwrap_or(0.5);
+                    has_measured_camera_motion = true;
                     lines.push(format!(
-                        "MEASURED GLOBAL CAMERA MOTION (apply via `AM.applyCamera(ctx, {{ s, cx, cy, rot }}, W, H)`): {} | pivot=({:.3}, {:.3})",
+                        "MEASURED GLOBAL CAMERA MOTION (interpolate FROM -> TO into `AM.applyCamera(ctx, {{ s, cx, cy, rot }}, W, H)`): {}",
                         parts.join(" ; "),
-                        px,
-                        py,
                     ));
                 }
             }
+        }
+        if let Some(track_block) =
+            super::direct_scene_prompt_tracks::format_element_tracks_block(sc, has_measured_camera_motion)
+        {
+            lines.push(track_block);
+        }
+        if let Some(kin_block) =
+            super::direct_scene_prompt_tracks::format_motion_kinematics_block(sc)
+        {
+            lines.push(kin_block);
         }
         if let Some(mc) = sc.get("motionClues") {
             if let Some(acc) = mc.get("saturatedAccents").and_then(Value::as_array) {
@@ -414,6 +462,133 @@ pub(crate) fn build_scene_hard_facts_prompt(
                     ));
                 }
             }
+            if let Some(kc) = mc.get("kineticClues").and_then(Value::as_array) {
+                let clue_strs: Vec<&str> = kc.iter().filter_map(Value::as_str).take(3).collect();
+                if !clue_strs.is_empty() {
+                    lines.push(format!("KINETIC CLUES: {}", clue_strs.join(" | ")));
+                }
+            }
+            if let Some(dt) = mc.get("denseTimeline").and_then(Value::as_array) {
+                let mut rows: Vec<String> = Vec::new();
+                for slice in dt.iter().take(8) {
+                    let local_t = slice
+                        .get("localT")
+                        .and_then(Value::as_f64)
+                        .or_else(|| {
+                            slice
+                                .get("t")
+                                .and_then(Value::as_f64)
+                                .map(|gt| (gt - start).max(0.0))
+                        })
+                        .unwrap_or(0.0);
+                    let mut seg_parts: Vec<String> = Vec::new();
+                    if let Some(objs) = slice.get("objects").and_then(Value::as_array) {
+                        let obj_desc: Vec<String> = objs
+                            .iter()
+                            .take(3)
+                            .enumerate()
+                            .filter_map(|(oi, obj)| {
+                                let bx = fmt_box(obj.get("box"))?;
+                                let c = obj.get("center").and_then(Value::as_array)?;
+                                let cx = c.first()?.as_i64()?;
+                                let cy = c.get(1)?.as_i64()?;
+                                Some(format!("obj{}:center=({},{}) {}", oi + 1, cx, cy, bx))
+                            })
+                            .collect();
+                        if !obj_desc.is_empty() {
+                            seg_parts.push(obj_desc.join(", "));
+                        }
+                    }
+                    if seg_parts.is_empty() {
+                        if let Some(bx) = fmt_box(slice.get("box")) {
+                            seg_parts.push(format!("box={}", bx));
+                        } else if let Some(bd) = slice.get("backdrop").and_then(Value::as_str) {
+                            seg_parts.push(format!("backdrop={}", bd));
+                        }
+                    }
+                    if let Some(words) = slice.get("words").and_then(Value::as_array) {
+                        let w_list: Vec<&str> = words.iter().filter_map(Value::as_str).collect();
+                        if !w_list.is_empty() {
+                            seg_parts.push(format!("words={:?}", w_list));
+                        }
+                    }
+                    if !seg_parts.is_empty() {
+                        rows.push(format!("local_t={:.2}s: {}", local_t, seg_parts.join(" | ")));
+                    }
+                }
+                if !rows.is_empty() {
+                    lines.push(format!(
+                        "DENSE SUB-BEAT TIMELINE (local_t, foreground objects, active words):\n  - {}",
+                        rows.join("\n  - ")
+                    ));
+                }
+            }
+        }
+        if let Some(regs) = sc.pointer("/layout/regions").and_then(Value::as_array) {
+            let text_regs: Vec<String> = regs
+                .iter()
+                .filter(|r| r.get("kind").and_then(Value::as_str) == Some("text"))
+                .take(6)
+                .filter_map(|r| {
+                    let txt = r.get("text").and_then(Value::as_str)?.trim();
+                    if txt.is_empty() {
+                        return None;
+                    }
+                    let (px_x, px_y, px_w, px_h) = if let Some(px) =
+                        r.get("px").and_then(Value::as_array).filter(|a| a.len() >= 4)
+                    {
+                        (
+                            px[0].as_i64()?,
+                            px[1].as_i64()?,
+                            px[2].as_i64()?.max(1),
+                            px[3].as_i64()?.max(1),
+                        )
+                    } else {
+                        let nx = r.get("x").and_then(Value::as_f64)?;
+                        let ny = r.get("y").and_then(Value::as_f64)?;
+                        let nw = r.get("w").and_then(Value::as_f64)?;
+                        let nh = r.get("h").and_then(Value::as_f64)?;
+                        (
+                            (nx * width as f64).round() as i64,
+                            (ny * height as f64).round() as i64,
+                            (nw * width as f64).round().max(1.0) as i64,
+                            (nh * height as f64).round().max(1.0) as i64,
+                        )
+                    };
+                    let cx = px_x + px_w / 2;
+                    let cy = px_y + px_h / 2;
+                    let est_font = ((px_h as f64) * 0.72).round().max(18.0) as i64;
+                    let weight = r.get("fontWeight").and_then(Value::as_str).unwrap_or("600");
+                    let zone = r.get("zone").and_then(Value::as_str).unwrap_or("hero");
+                    Some(format!(
+                        "\"{}\" center=({},{}) box=[{},{},{}x{}] estFont≈{}px weight={} zone={}",
+                        txt, cx, cy, px_x, px_y, px_w, px_h, est_font, weight, zone
+                    ))
+                })
+                .collect();
+            if !text_regs.is_empty() {
+                lines.push(format!(
+                    "MEASURED TYPOGRAPHY REGIONS (from hero frame — verify exact spelling visually against attached images):\n  - {}",
+                    text_regs.join("\n  - ")
+                ));
+            }
+        }
+        if let Some(sb) = sc.get("subBeats").and_then(Value::as_array) {
+            let sb_strs: Vec<&str> = sb.iter().filter_map(Value::as_str).take(3).collect();
+            if !sb_strs.is_empty() {
+                lines.push(format!("SUB-BEAT PHASE SHIFTS: {}", sb_strs.join(" ; ")));
+            }
+        }
+        let is_soft_entry = sc
+            .get("transitionFromPrev")
+            .and_then(Value::as_str)
+            .is_some_and(|v| v.eq_ignore_ascii_case("soft"))
+            || sc
+                .get("cutEvidence")
+                .and_then(Value::as_str)
+                .is_some_and(|v| v.eq_ignore_ascii_case("soft"));
+        if is_soft_entry {
+            lines.push("SOFT CUT TRANSITION FROM PREVIOUS SCENE: scene enters from a continuous morph/dissolve — match OPENING anchor pose at local_t=0.00s cleanly so the transition never teleports.".to_string());
         }
         if let Some(mp) = sc.get("motionProfile") {
             let mean_d = mp.get("meanDelta").and_then(Value::as_f64).unwrap_or(0.0);
@@ -440,8 +615,8 @@ pub(crate) fn build_scene_hard_facts_prompt(
             lines.push(format!(
                 "MEASURED 1/1 MOTION PROFILE: meanDelta={mean_d:.2}, staticPct={static_pct:.1}%, activeLocalBursts=[{}], filmstripSheets={sheet_count}{}",
                 bursts.join(", "),
-                if sheet_count > 5 {
-                    " (5 key sheets + 3 full-res early/mid/late keyframes attached above; call `read_filmstrip({ sceneIndex, startSheet })` for remaining sheets)"
+                if sheet_count > 6 {
+                    " (6 key burst-aligned sheets + 3 full-res early/mid/late keyframes attached above; call `read_filmstrip({ sceneIndex, startSheet })` for remaining sheets)"
                 } else {
                     " (chronological 1/1 filmstrip sheets + 3 full-res early/mid/late keyframes attached above)"
                 }
@@ -1066,5 +1241,72 @@ mod tests {
         assert!(DIRECT_SCENE_SYSTEM_PROMPT_MINIMAL.contains("AM.rng(seed)"));
         assert!(DIRECT_SCENE_SYSTEM_PROMPT_MINIMAL.contains("write_scene_script"));
         assert!(DIRECT_SCENE_SYSTEM_PROMPT_MINIMAL.contains("render_and_compare_scene"));
+    }
+
+    #[test]
+    fn hard_facts_prompt_emits_dense_timeline_typography_regions_and_converted_camera() {
+        let (s, cx, cy, rot) = camera_params_to_am_apply_camera(1.2, 0.0, 60.0, -30.0, 720, 1280);
+        assert!((s - 1.2).abs() < 1e-6);
+        assert!((cx - 310.0).abs() < 1e-6);
+        assert!((cy - 665.0).abs() < 1e-6);
+        assert!(rot.abs() < 1e-6);
+
+        let style_sc = json!({
+            "start": 4.967,
+            "duration": 2.4,
+            "cutEvidence": "soft",
+            "transitionFromPrev": "soft",
+            "subBeats": ["early@5.12s:[Finding form] -> late@7.15s:[White capsule]"],
+            "motionClues": {
+                "kineticClues": ["t=5.50s star morphs into wide capsule"],
+                "denseTimeline": [{
+                    "t": 5.5,
+                    "localT": 0.533,
+                    "objects": [
+                        { "center": [360, 420], "box": [320, 380, 80, 80] },
+                        { "center": [360, 562], "box": [190, 520, 340, 84] }
+                    ],
+                    "words": ["Finding", "form"]
+                }]
+            },
+            "cameraMotion": {
+                "segments": [{
+                    "t0": 0.0, "t1": 2.4,
+                    "scaleFrom": 1.0, "scaleTo": 1.2,
+                    "rotDegFrom": 0.0, "rotDegTo": 0.0,
+                    "txFrom": 0.0, "tyFrom": 0.0, "txTo": 60.0, "tyTo": -30.0,
+                    "ease": "inOutCubic", "confidence": "high"
+                }]
+            },
+            "layout": {
+                "regions": [{
+                    "kind": "text",
+                    "zone": "hero",
+                    "text": "Finding form",
+                    "fontWeight": "600",
+                    "px": [190, 520, 340, 84]
+                }]
+            }
+        });
+        let film_sc = json!({ "id": "scene3_proof", "start": 4.967, "duration": 2.4 });
+        let prompt = build_scene_hard_facts_prompt(
+            Some(&style_sc),
+            &film_sc,
+            3,
+            9,
+            720,
+            1280,
+            30,
+            120.0,
+            "Reconstruct reference motion",
+        );
+        assert!(prompt.contains("DENSE SUB-BEAT TIMELINE"));
+        assert!(prompt.contains("local_t=0.53s: obj1:center=(360,420) [320,380,80x80], obj2:center=(360,562) [190,520,340x84] | words=[\"Finding\", \"form\"]"));
+        assert!(prompt.contains("MEASURED TYPOGRAPHY REGIONS"));
+        assert!(prompt.contains("\"Finding form\" center=(360,562) box=[190,520,340x84] estFont≈60px weight=600 zone=hero"));
+        assert!(prompt.contains("AM.applyCamera FROM={s:1.000, cx:360.0, cy:640.0, rot:+0.00} TO={s:1.200, cx:310.0, cy:665.0, rot:+0.00}"));
+        assert!(prompt.contains("SOFT CUT TRANSITION FROM PREVIOUS SCENE"));
+        assert!(prompt.contains("KINETIC CLUES"));
+        assert!(prompt.contains("SUB-BEAT PHASE SHIFTS"));
     }
 }

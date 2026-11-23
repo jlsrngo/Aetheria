@@ -224,6 +224,8 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
             visual_inspect_only,
             include_full_res_frames,
             disable_auto_rollback: false,
+            forced_scene_id: None,
+            write_scene_beat_strips: None,
         },
     )
     .await

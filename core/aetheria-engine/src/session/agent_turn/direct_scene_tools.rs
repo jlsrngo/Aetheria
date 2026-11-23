@@ -24,6 +24,7 @@ pub(crate) struct SceneToolContext<'a> {
     pub film_root: &'a Path,
     pub script_path: &'a Path,
     pub script_rel: &'a str,
+    pub scene_id: &'a str,
     pub scene_num: usize,
     pub scene_start: f64,
     pub scene_dur: f64,
@@ -40,6 +41,8 @@ pub(crate) struct RenderedMetrics {
     pub ssim: f64,
     pub color: f64,
     pub edge: f64,
+    pub min_frame_score: f64,
+    pub has_structural_diagnosis: bool,
 }
 
 pub(crate) struct SceneToolOutcome {
@@ -174,12 +177,31 @@ pub(crate) fn build_scene_tool_definitions() -> Vec<Value> {
     ]
 }
 
-pub(crate) fn build_scene_tool_definitions_with_filmstrip(include_filmstrip: bool) -> Vec<Value> {
+pub(crate) fn build_scene_tool_definitions_with_options(
+    include_filmstrip: bool,
+    allow_bash: bool,
+) -> Vec<Value> {
     let mut defs = build_scene_tool_definitions();
+    if !allow_bash {
+        defs.retain(|d| {
+            d.pointer("/function/name").and_then(Value::as_str) != Some("bash")
+        });
+    }
     if include_filmstrip {
         defs.push(crate::tool::ref_filmstrip::read_filmstrip_tool_definition());
     }
     defs
+}
+
+pub(crate) fn build_scene_tool_definitions_with_filmstrip(include_filmstrip: bool) -> Vec<Value> {
+    let allow_bash = if include_filmstrip {
+        std::env::var("AETHERIA_DIRECT_ALLOW_BASH")
+            .ok()
+            .is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+    } else {
+        true
+    };
+    build_scene_tool_definitions_with_options(include_filmstrip, allow_bash)
 }
 
 /// Rejects solid-background or empty stub placeholders written only to bypass the write gate.
@@ -291,6 +313,39 @@ fn encode_file_jpeg_data_url(path: &Path) -> Option<String> {
     Some(format!(
         "data:image/jpeg;base64,{}",
         BASE64_STANDARD.encode(&bytes)
+    ))
+}
+
+fn build_unused_downloaded_asset_hint(film_root: &Path, code: &str) -> Option<String> {
+    if code.contains("AM.loadImage(") {
+        return None;
+    }
+    let img_dir = film_root.join("img");
+    let entries = std::fs::read_dir(img_dir).ok()?;
+    let mut names = Vec::new();
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if !p.is_file() {
+            continue;
+        }
+        if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
+            let low = ext.to_ascii_lowercase();
+            if matches!(low.as_str(), "png" | "jpg" | "jpeg" | "webp") {
+                if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                    names.push(format!("/img/{}", name));
+                }
+            }
+        }
+        if names.len() >= 3 {
+            break;
+        }
+    }
+    if names.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "Downloaded image asset(s) exist [{}] but your script did not call `AM.loadImage(...)`. Preload and animate the real image (`AM.drawImageFit` with float/scale/rotation) instead of a flat hand-drawn cartoon fallback!",
+        names.join(", ")
     ))
 }
 
@@ -556,14 +611,19 @@ pub(crate) async fn execute_scene_micro_tool(
             }
             let hazards = detect_scene_collision_hazards(&normalized);
             let lines_count = normalized.lines().count();
+            let asset_hint = build_unused_downloaded_asset_hint(ctx.film_root, &normalized);
+            let mut rj = json!({
+                "ok": true,
+                "file": ctx.script_rel,
+                "lines": lines_count,
+                "collisionHazards": hazards,
+                "nextStep": "Call `render_and_compare_scene` to visually verify your render against the reference."
+            });
+            if let Some(hint) = asset_hint {
+                rj["assetHint"] = json!(hint);
+            }
             SceneToolOutcome {
-                result_json: json!({
-                    "ok": true,
-                    "file": ctx.script_rel,
-                    "lines": lines_count,
-                    "collisionHazards": hazards,
-                    "nextStep": "Call `render_and_compare_scene` to visually verify your render against the reference."
-                }),
+                result_json: rj,
                 vision_images: Vec::new(),
                 vision_caption: None,
                 script_modified: true,
@@ -626,14 +686,19 @@ pub(crate) async fn execute_scene_micro_tool(
                         };
                     }
                     let hazards = detect_scene_collision_hazards(&updated);
+                    let asset_hint = build_unused_downloaded_asset_hint(ctx.film_root, &updated);
+                    let mut rj = json!({
+                        "ok": true,
+                        "file": ctx.script_rel,
+                        "patchedAtLine": start_line,
+                        "lines": updated.lines().count(),
+                        "collisionHazards": hazards
+                    });
+                    if let Some(hint) = asset_hint {
+                        rj["assetHint"] = json!(hint);
+                    }
                     SceneToolOutcome {
-                        result_json: json!({
-                            "ok": true,
-                            "file": ctx.script_rel,
-                            "patchedAtLine": start_line,
-                            "lines": updated.lines().count(),
-                            "collisionHazards": hazards
-                        }),
+                        result_json: rj,
                         vision_images: Vec::new(),
                         vision_caption: None,
                         script_modified: true,
@@ -729,6 +794,8 @@ pub(crate) async fn execute_scene_micro_tool(
                     visual_inspect_only: Some(false),
                     include_full_res_frames: Some(false),
                     disable_auto_rollback: true,
+                    forced_scene_id: Some(ctx.scene_id.to_string()),
+                    write_scene_beat_strips: Some(true),
                 },
             )
             .await
@@ -790,13 +857,33 @@ pub(crate) async fn execute_scene_micro_tool(
                             }
                         }
                     }
-                    let caption = Some(format!(
-                        "Visual render comparison for Scene {} (`Row 1 = REFERENCE | Row 2 = YOUR RENDER | Row 3 = DIFF HEATMAP`{}). Measured overall={:.3}, runtimeErrors={}.",
-                        ctx.scene_num,
-                        if imgs.len() > 1 { " + motion strip / full-res frame" } else { "" },
-                        score,
-                        res.runtime_errors.len()
-                    ));
+                    let motion_warn_lines: Vec<&str> = feedback
+                        .lines()
+                        .filter(|l| {
+                            l.contains("MOTION FROZEN WARNING")
+                                || l.contains("MOTION STIFFNESS WARNING")
+                                || l.contains("MOTION JUMP / TELEPORT WARNING")
+                                || l.contains("MOTION ACTIVITY WARNING")
+                        })
+                        .collect();
+                    let caption = Some(if motion_warn_lines.is_empty() {
+                        format!(
+                            "Visual render comparison for Scene {} (`Row 1 = REFERENCE | Row 2 = YOUR RENDER | Row 3 = DIFF HEATMAP`{}). Measured overall={:.3}, runtimeErrors={}.",
+                            ctx.scene_num,
+                            if imgs.len() > 1 { " + motion strip / full-res frame" } else { "" },
+                            score,
+                            res.runtime_errors.len()
+                        )
+                    } else {
+                        format!(
+                            "Visual render comparison for Scene {} (`Row 1 = REFERENCE | Row 2 = YOUR RENDER | Row 3 = DIFF HEATMAP`{}). Measured overall={:.3}, runtimeErrors={}.\n{}",
+                            ctx.scene_num,
+                            if imgs.len() > 1 { " + motion strip / full-res frame" } else { "" },
+                            score,
+                            res.runtime_errors.len(),
+                            motion_warn_lines.join("\n")
+                        )
+                    });
                     let ssim_mean = res
                         .reference_comparison
                         .as_ref()
@@ -812,9 +899,37 @@ pub(crate) async fn execute_scene_micro_tool(
                         .as_ref()
                         .and_then(|c| c.get("edgeMatchMean").and_then(Value::as_f64))
                         .unwrap_or(0.0);
+                    let min_frame_score = res
+                        .reference_comparison
+                        .as_ref()
+                        .and_then(|c| {
+                            c.get("overallMin").and_then(Value::as_f64).or_else(|| {
+                                c.get("perFrame").and_then(Value::as_array).and_then(|arr| {
+                                    arr.iter()
+                                        .filter_map(|f| f.get("combinedScore").and_then(Value::as_f64))
+                                        .reduce(f64::min)
+                                })
+                            })
+                        })
+                        .unwrap_or(score);
+                    let has_structural_diagnosis = res
+                        .reference_comparison
+                        .as_ref()
+                        .and_then(|c| c.get("perFrame"))
+                        .and_then(Value::as_array)
+                        .is_some_and(|arr| {
+                            arr.iter().any(|f| {
+                                f.get("structuralDiagnosis")
+                                    .and_then(Value::as_str)
+                                    .is_some_and(|d| !d.trim().is_empty())
+                            })
+                        });
                     let mut rj = json!({
                         "ok": true,
                         "overallFidelity": (score * 1000.0).round() / 1000.0,
+                        "edgeMatchMean": (edge_mean * 1000.0).round() / 1000.0,
+                        "minFrameScore": (min_frame_score * 1000.0).round() / 1000.0,
+                        "hasStructuralDiagnosis": has_structural_diagnosis,
                         "runtimeErrors": res.runtime_errors,
                         "diagnostics": feedback,
                         "canvas": format!("{}x{}", ctx.width, ctx.height),
@@ -834,6 +949,8 @@ pub(crate) async fn execute_scene_micro_tool(
                             ssim: ssim_mean,
                             color: color_mean,
                             edge: edge_mean,
+                            min_frame_score,
+                            has_structural_diagnosis,
                         }),
                         rendered_errors: Some(res.runtime_errors),
                     }
@@ -849,6 +966,8 @@ pub(crate) async fn execute_scene_micro_tool(
                         ssim: 0.0,
                         color: 0.0,
                         edge: 0.0,
+                        min_frame_score: 0.0,
+                        has_structural_diagnosis: true,
                     }),
                     rendered_errors: Some(vec![err]),
                 },
@@ -955,5 +1074,25 @@ mod tests {
 
         let rollback_broken = "(function(){ var AM=window.AM; AM.registerScene(\"scene1_unit\", function(ctx,t){ throw new Error('intentional_regression'); }); })();\n";
         assert!(!is_trivial_static_placeholder(rollback_broken));
+    }
+
+    #[test]
+    fn scene_tool_definitions_omit_bash_when_filmstrip_enabled_unless_explicitly_allowed() {
+        let filmstrip_no_bash = build_scene_tool_definitions_with_options(true, false);
+        let names_no_bash: Vec<&str> = filmstrip_no_bash
+            .iter()
+            .filter_map(|d| d.pointer("/function/name").and_then(Value::as_str))
+            .collect();
+        assert!(!names_no_bash.contains(&"bash"));
+        assert!(names_no_bash.contains(&"read_filmstrip"));
+        assert!(names_no_bash.contains(&"inspect_ref_frame"));
+
+        let filmstrip_with_bash = build_scene_tool_definitions_with_options(true, true);
+        let names_with_bash: Vec<&str> = filmstrip_with_bash
+            .iter()
+            .filter_map(|d| d.pointer("/function/name").and_then(Value::as_str))
+            .collect();
+        assert!(names_with_bash.contains(&"bash"));
+        assert!(names_with_bash.contains(&"read_filmstrip"));
     }
 }

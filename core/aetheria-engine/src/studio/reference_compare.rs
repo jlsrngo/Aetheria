@@ -639,30 +639,92 @@ fn select_timestamps_from_keyframes(kfs: &[ReferenceKeyframe], max_frames: usize
     chosen
 }
 
+fn extract_scene_ordinal(id: &str) -> Option<u32> {
+    let lower = id.trim().to_ascii_lowercase();
+    if let Some(rest) = lower.strip_prefix("scene") {
+        let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if !digits.is_empty() {
+            return digits.parse().ok();
+        }
+    }
+    let digits: String = lower.chars().filter(|c| c.is_ascii_digit()).collect();
+    if !digits.is_empty() {
+        return digits.parse().ok();
+    }
+    None
+}
+
+fn scene_keyframe_matches_target(kf: &ReferenceKeyframe, target_sid: &str) -> bool {
+    let target_ord = extract_scene_ordinal(target_sid);
+    if let Some(ref ks) = kf.scene_id {
+        if ks.eq_ignore_ascii_case(target_sid) {
+            return true;
+        }
+        if let (Some(to), Some(ko)) = (target_ord, extract_scene_ordinal(ks)) {
+            if to == ko {
+                return true;
+            }
+        }
+    }
+    if let Some(to) = target_ord {
+        let pat = format!("ref_scene_{to:02}");
+        if kf.rel_path.to_ascii_lowercase().contains(&pat) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Pairs each captured preview frame with its nearest timestamp reference keyframe.
 pub fn pair_preview_with_reference(
     film_root: &Path,
     preview_frames: &[PreviewFrameCapture],
     ref_frames: &[ReferenceKeyframe],
 ) -> Vec<FrameComparePair> {
+    pair_preview_with_reference_scoped(film_root, preview_frames, ref_frames, None)
+}
+
+/// Pairs each captured preview frame with its nearest reference keyframe, optionally locking
+/// both the candidate keyframe pool and emitted `scene_id` to `forced_scene_id`.
+pub fn pair_preview_with_reference_scoped(
+    film_root: &Path,
+    preview_frames: &[PreviewFrameCapture],
+    ref_frames: &[ReferenceKeyframe],
+    forced_scene_id: Option<&str>,
+) -> Vec<FrameComparePair> {
     if ref_frames.is_empty() {
         return Vec::new();
     }
+    let scoped_pool: Vec<&ReferenceKeyframe> = if let Some(target_sid) = forced_scene_id {
+        let matching: Vec<&ReferenceKeyframe> = ref_frames
+            .iter()
+            .filter(|kf| scene_keyframe_matches_target(kf, target_sid))
+            .collect();
+        if matching.is_empty() {
+            ref_frames.iter().collect()
+        } else {
+            matching
+        }
+    } else {
+        ref_frames.iter().collect()
+    };
+
     let mut pairs = Vec::with_capacity(preview_frames.len());
     for (idx, pf) in preview_frames.iter().enumerate() {
-        let best_ref = if ref_frames.len() == preview_frames.len()
-            && (ref_frames[idx].timestamp - pf.timestamp).abs() < 0.25
+        let best_ref = if scoped_pool.len() == preview_frames.len()
+            && (scoped_pool[idx].timestamp - pf.timestamp).abs() < 0.25
         {
-            &ref_frames[idx]
+            scoped_pool[idx]
         } else {
-            ref_frames
+            scoped_pool
                 .iter()
+                .copied()
                 .min_by(|a, b| {
                     let da = (a.timestamp - pf.timestamp).abs();
                     let db = (b.timestamp - pf.timestamp).abs();
                     da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
                 })
-                .unwrap_or(&ref_frames[0])
+                .unwrap_or(scoped_pool[0])
         };
         pairs.push(FrameComparePair {
             timestamp: pf.timestamp,
@@ -671,7 +733,9 @@ pub fn pair_preview_with_reference(
             ref_rel: best_ref.rel_path.clone(),
             preview_abs: film_root.join(&pf.saved_rel_path),
             preview_rel: pf.saved_rel_path.clone(),
-            scene_id: best_ref.scene_id.clone(),
+            scene_id: forced_scene_id
+                .map(str::to_string)
+                .or_else(|| best_ref.scene_id.clone()),
             phase: best_ref.phase.clone(),
         });
     }
@@ -685,13 +749,16 @@ pub async fn compare_preview_to_reference(
     film_duration: f64,
     preview_frames: &[PreviewFrameCapture],
     pass_threshold: f64,
+    forced_scene_id: Option<&str>,
+    write_scene_beat_strips: bool,
 ) -> Result<(Value, Option<String>), String> {
     let ref_kfs = discover_reference_keyframes_for_film(ws_root, film_root, film_duration);
     if ref_kfs.is_empty() {
         return Err("No extracted reference keyframes found under ref/ to compare against.".to_string());
     }
 
-    let pairs = pair_preview_with_reference(film_root, preview_frames, &ref_kfs);
+    let pairs =
+        pair_preview_with_reference_scoped(film_root, preview_frames, &ref_kfs, forced_scene_id);
     if pairs.is_empty() {
         return Err("No preview frames available for reference comparison.".to_string());
     }
@@ -723,6 +790,7 @@ pub async fn compare_preview_to_reference(
     let payload = json!({
         "passThreshold": pass_threshold,
         "stripOutputPath": strip_path.to_string_lossy().to_string(),
+        "writeSceneBeatStrips": write_scene_beat_strips,
         "refVideoPath": ref_video_path.as_ref().map(|p| p.to_string_lossy().to_string()),
         "pairs": pairs_json,
     });
@@ -905,6 +973,54 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn scoped_pairing_locks_boundary_frames_to_target_scene_id() {
+        let ws = std::env::temp_dir().join(format!("aetheria_scoped_pair_{}", crate::paths::now_ms()));
+        let kfs = vec![
+            ReferenceKeyframe {
+                timestamp: 1.65,
+                abs_path: ws.join("ref/extracted/frames/ref_scene_01_end.jpg"),
+                rel_path: "ref/extracted/frames/ref_scene_01_end.jpg".to_string(),
+                scene_id: Some("scene1_hook".to_string()),
+                phase: Some("end".to_string()),
+            },
+            ReferenceKeyframe {
+                timestamp: 1.82,
+                abs_path: ws.join("ref/extracted/frames/ref_scene_02_start.jpg"),
+                rel_path: "ref/extracted/frames/ref_scene_02_start.jpg".to_string(),
+                scene_id: Some("scene2_problem_or_context".to_string()),
+                phase: Some("start".to_string()),
+            },
+            ReferenceKeyframe {
+                timestamp: 3.30,
+                abs_path: ws.join("ref/extracted/frames/ref_scene_02.jpg"),
+                rel_path: "ref/extracted/frames/ref_scene_02.jpg".to_string(),
+                scene_id: Some("scene2_problem_or_context".to_string()),
+                phase: Some("mid".to_string()),
+            },
+        ];
+        // Boundary preview at 1.68s is physically closer to scene1_hook_end (1.65s) than scene2_start (1.82s).
+        let boundary_preview = vec![PreviewFrameCapture {
+            timestamp: 1.68,
+            relative_ratio: 0.33,
+            saved_rel_path: ".aetheria/preview/preview_0.jpg".to_string(),
+            data_url: String::new(),
+        }];
+
+        let unscoped = pair_preview_with_reference(&ws, &boundary_preview, &kfs);
+        assert_eq!(unscoped[0].scene_id.as_deref(), Some("scene1_hook"));
+
+        let scoped = pair_preview_with_reference_scoped(
+            &ws,
+            &boundary_preview,
+            &kfs,
+            Some("scene2_problem_or_context"),
+        );
+        assert_eq!(scoped.len(), 1);
+        assert_eq!(scoped[0].scene_id.as_deref(), Some("scene2_problem_or_context"));
+        assert_eq!(scoped[0].ref_rel, "ref/extracted/frames/ref_scene_02_start.jpg");
     }
 }
 
