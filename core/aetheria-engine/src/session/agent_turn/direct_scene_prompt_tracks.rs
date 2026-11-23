@@ -243,7 +243,7 @@ pub(crate) fn format_30fps_motion_blueprint_block(
                 .and_then(Value::as_f64)
                 .unwrap_or(0.5);
             lines.push(format!(
-                "OUTGOING 30FPS TRANSITION ({} over {:.2}s): keep this scene's settled layout alive right to the end; runtime slides the whole canvas out seamlessly.",
+                "OUTGOING 30FPS TRANSITION ({} over {:.2}s): keep this scene's settled layout alive right to the end; runtime slides the whole canvas out seamlessly — do NOT also add manual preCutX/preCutY slide offsets (prevents double-push).",
                 next_kind, dur_s
             ));
         }
@@ -290,7 +290,7 @@ pub(crate) fn format_30fps_motion_blueprint_block(
             }
             if !sp_strs.is_empty() {
                 lines.push(format!(
-                    "30FPS ROTATING / TURNTABLE OBJECTS DETECTED ({}): rotate corner stars/accents continuously (`ctx.rotate(baseAngle + t * omegaRad)`) and animate central 3D objects + dashed rings via `AM.drawTurntableObject(ctx, cx, cy, t, imgOrFn, {{ w, h, omega, depth, ringRadius, ringOmega }})` — NEVER leave them non-rotating!",
+                    "30FPS ROTATING / TURNTABLE OBJECTS DETECTED ({}): rotate corner stars/accents continuously (`ctx.rotate(baseAngle + t * omegaRad)`), and ONLY wrap genuine rotating 3D hemisphere objects (e.g. rotating brain/globe) in `AM.drawTurntableObject(ctx, cx, cy, t, imgOrFn, {{ w, h, omega, depth, ringRadius, ringOmega }})` — NEVER wrap flat 2D targets, icons, or stars with `omega: 0`!",
                     sp_strs.join(", ")
                 ));
             }
@@ -301,7 +301,7 @@ pub(crate) fn format_30fps_motion_blueprint_block(
                 let t0 = b0.get("t0").and_then(Value::as_f64).unwrap_or(0.0);
                 let t1 = b0.get("t1").and_then(Value::as_f64).unwrap_or(t0 + 0.45);
                 lines.push(format!(
-                    "PROGRESSIVE LEFT-TO-RIGHT BLUR TEXT REVEAL & 3D DEPTH ZOOM (local {:.2}..{:.2}s): MANDATORY — call `AM.drawBlurRevealText(ctx, text, x, y, t, tStart, dur, {{ scaleFrom: 0.28, maxBlur: 18, risePx: 14, color, preBlurSec: 0.18, exitAt }})` or `AM.drawBlurRiseWords(...)` for ALL text entrances and exits so words zoom from far/small/blurred (`scaleFrom: 0.28 -> 1.0`) to close/solid character-by-character AND blur out on exit (NEVER use raw `ctx.fillText` snaps)!",
+                    "PROGRESSIVE LEFT-TO-RIGHT BLUR TEXT REVEAL (local {:.2}..{:.2}s): MANDATORY — call `AM.drawBlurRevealText(ctx, text, x, y, t, tStart, dur, {{ scaleFrom: 0.92, maxBlur: 14, risePx: 10, color, preBlurSec: 0.14, exitAt }})` or `AM.drawBlurRiseWords(...)` for animated headlines so words unblur smoothly character-by-character (only pass a smaller `scaleFrom` like `0.45` if the reference visibly zooms text from far away; NEVER use raw `ctx.fillText` snaps)!",
                     t0, t1
                 ));
             }

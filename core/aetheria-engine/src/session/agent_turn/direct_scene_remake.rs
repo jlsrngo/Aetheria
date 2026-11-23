@@ -756,10 +756,10 @@ pub(crate) fn should_early_exit_scene(
         && active_hazards.is_empty()
         && !has_motion_warning
         && !has_structural_diagnosis
-        && latest_edge >= 0.35
-        && latest_min_frame_score >= 0.62
-        && ((renders_completed >= 2 && latest_score >= 0.76)
-            || (renders_completed >= 1 && latest_score >= 0.84))
+        && latest_edge >= 0.42
+        && latest_min_frame_score >= 0.66
+        && ((renders_completed >= 2 && latest_score >= 0.80)
+            || (renders_completed >= 1 && latest_score >= 0.87))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1002,6 +1002,8 @@ async fn run_single_direct_scene(
             && step_idx + 2 >= max_scene_steps
         {
             PostWriteToolPhase::ApplyPolishOrFinish
+        } else if step_idx + 2 >= max_scene_steps && has_written && dirty_since_render {
+            PostWriteToolPhase::VerifyDirtyScriptNow
         } else if step_idx + 1 == max_scene_steps && has_written && !dirty_since_render {
             PostWriteToolPhase::ApplyPolishOrFinish
         } else {
@@ -1324,12 +1326,14 @@ async fn run_single_direct_scene(
                         "OVERSIZED",
                         "MISALIGNED",
                         "COLOR DRIFT",
+                        "HOTSPOT MISMATCH",
                         "MOTION FROZEN WARNING",
                         "MOTION STIFFNESS WARNING",
                         "MOTION JUMP / TELEPORT WARNING",
                         "MOTION WINDOW FREEZE",
                         "MOTION DIRECTION/PAN MISMATCH",
                         "MOTION ACTIVITY WARNING",
+                        "PRE-CUT FREEZE WARNING",
                     ] {
                         if text.contains(tag) && !out.iter().any(|x| x == tag) {
                             out.push(tag.to_string());
@@ -1446,6 +1450,7 @@ async fn run_single_direct_scene(
                         || c.contains("MOTION ACTIVITY WARNING")
                         || c.contains("MOTION WINDOW FREEZE")
                         || c.contains("MOTION DIRECTION/PAN MISMATCH")
+                        || c.contains("PRE-CUT FREEZE WARNING")
                 });
 
             // Fast early-exit for live filmstrip remakes once visual score, edge overlap, worst-frame
@@ -1869,7 +1874,7 @@ pub(crate) async fn run_direct_per_scene_remake_with_switches(
             effective_switches.probe_steps = Some(1);
         }
         if !effective_switches.max_steps_explicit {
-            effective_switches.max_steps = 7;
+            effective_switches.max_steps = 10;
         }
         if !effective_switches.cross_context_explicit {
             effective_switches.cross_context = CrossContextMode::Summary;
@@ -3025,11 +3030,12 @@ mod tests {
         assert!(!should_restore_best_checkpoint(0.669, real_code, &[], 2, 0.622, &[], 0));
         assert!(should_restore_best_checkpoint(0.70, real_code, &[], 0, 0.60, &[], 0));
 
-        // Early exit blocked when edge < 0.35, min_frame_score < 0.62, or structuralDiagnosis is present
-        assert!(!should_early_exit_scene(true, false, true, &[], &[], false, false, 2, 0.78, 0.12, 0.68));
-        assert!(!should_early_exit_scene(true, false, true, &[], &[], false, false, 2, 0.78, 0.45, 0.52));
+        // Early exit blocked when edge < 0.42, min_frame_score < 0.66, score < 0.80, or structuralDiagnosis is present
+        assert!(!should_early_exit_scene(true, false, true, &[], &[], false, false, 2, 0.82, 0.35, 0.68));
+        assert!(!should_early_exit_scene(true, false, true, &[], &[], false, false, 2, 0.82, 0.45, 0.62));
+        assert!(!should_early_exit_scene(true, false, true, &[], &[], false, false, 2, 0.78, 0.42, 0.66));
         assert!(!should_early_exit_scene(true, false, true, &[], &[], false, true, 2, 0.88, 0.72, 0.85));
-        assert!(should_early_exit_scene(true, false, true, &[], &[], false, false, 2, 0.78, 0.42, 0.66));
+        assert!(should_early_exit_scene(true, false, true, &[], &[], false, false, 2, 0.81, 0.42, 0.66));
     }
 
     #[test]

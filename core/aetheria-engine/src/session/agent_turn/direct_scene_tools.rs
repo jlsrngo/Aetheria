@@ -199,13 +199,15 @@ pub(crate) fn build_scene_tool_definitions_with_options(
 }
 
 pub(crate) fn build_scene_tool_definitions_with_filmstrip(include_filmstrip: bool) -> Vec<Value> {
-    let allow_bash = if include_filmstrip {
-        std::env::var("AETHERIA_DIRECT_ALLOW_BASH")
-            .ok()
-            .is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
-    } else {
-        true
-    };
+    let allow_bash = std::env::var("AETHERIA_DIRECT_ALLOW_BASH")
+        .ok()
+        .map(|v| {
+            !matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "0" | "false" | "no" | "off" | "disabled"
+            )
+        })
+        .unwrap_or(true);
     build_scene_tool_definitions_with_options(include_filmstrip, allow_bash)
 }
 
@@ -515,9 +517,19 @@ pub(crate) async fn execute_scene_micro_tool(
                                     (Some(w), Some(h)) => format!("{}x{}", w, h),
                                     _ => "unknown".to_string(),
                                 };
+                                let tone_note = match (
+                                    res.get("meanLuma").and_then(Value::as_f64),
+                                    res.get("meanSat").and_then(Value::as_f64),
+                                    res.get("meanHex").and_then(Value::as_str),
+                                ) {
+                                    (Some(l), Some(s), Some(hx)) => {
+                                        format!(" | assetTone: meanHex={} luma={:.0}/255 sat={:.0}/255", hx, l, s)
+                                    }
+                                    _ => String::new(),
+                                };
                                 caption = Some(format!(
-                                    "Downloaded internet image `{}` ({}, hasAlpha={}, cutout={}) attached above. Preload it at module top level via `var heroImg = AM.loadImage('{}');` and render/rotate it cleanly via `AM.drawTurntableObject(ctx, cx, cy, t, heroImg, {{ w, h, omega: 2.1, depth: 0.24, ringRadius }})` or `AM.drawImageFit(...)` — adjust color tone with `ctx.filter = 'saturate(...) brightness(...)'` to match the reference palette! If this candidate looks wrong, call `fetch_web_image` with `candidateIndex: 1` (or a `url` from `candidates`).",
-                                    asset_url, dims, has_alpha, bg_rm, asset_url
+                                    "Downloaded internet image `{}` ({}, hasAlpha={}, cutout={}{}) attached above. Preload it at module top level via `var heroImg = AM.loadImage('{}');` and render/rotate it cleanly via `AM.drawTurntableObject(ctx, cx, cy, t, heroImg, {{ w, h, omega: 2.1, depth: 0.24, ringRadius }})` or `AM.drawImageFit(...)` — match tone to Row 1 using `ctx.filter = 'brightness(...) contrast(...) saturate(...)'` (or re-fetch with `targetLuma`/`targetSat` from `sample_ref_region`). If this candidate looks wrong, call `fetch_web_image` with `candidateIndex: 1` (or a `url` from `candidates`).",
+                                    asset_url, dims, has_alpha, bg_rm, tone_note, asset_url
                                 ));
                             }
                         }
@@ -793,6 +805,12 @@ pub(crate) async fn execute_scene_micro_tool(
                             ts_list.push(cand);
                         }
                     }
+                    if ctx.motion_expectations.pre_cut_active && (max_t - min_t) >= 0.45 {
+                        let pre_tail = ((max_t - 0.30).max(min_t) * 1000.0).round() / 1000.0;
+                        if !ts_list.iter().any(|x| (*x - pre_tail).abs() < 0.04) && ts_list.len() < 7 {
+                            ts_list.push(pre_tail);
+                        }
+                    }
                     if !ts_list.iter().any(|x| (*x - max_t).abs() < 0.04) {
                         ts_list.push(max_t);
                     }
@@ -887,7 +905,7 @@ pub(crate) async fn execute_scene_micro_tool(
                             }
                         }
                     }
-                    let motion_warn_lines: Vec<&str> = feedback
+                    let mut motion_warn_lines: Vec<String> = feedback
                         .lines()
                         .filter(|l| {
                             l.contains("MOTION FROZEN WARNING")
@@ -897,7 +915,30 @@ pub(crate) async fn execute_scene_micro_tool(
                                 || l.contains("MOTION WINDOW FREEZE")
                                 || l.contains("MOTION DIRECTION/PAN MISMATCH")
                         })
+                        .map(str::to_string)
                         .collect();
+                    let pre_cut_frozen = ctx.motion_expectations.pre_cut_active
+                        && motion_check.as_ref().is_some_and(|mc| {
+                            let ref_last = mc
+                                .get("refStepDeltas")
+                                .and_then(Value::as_array)
+                                .and_then(|a| a.last())
+                                .and_then(Value::as_f64)
+                                .unwrap_or(0.0);
+                            let prev_last = mc
+                                .get("prevStepDeltas")
+                                .and_then(Value::as_array)
+                                .and_then(|a| a.last())
+                                .and_then(Value::as_f64)
+                                .unwrap_or(1.0);
+                            ref_last >= 0.45 && prev_last < 0.15
+                        });
+                    if pre_cut_frozen {
+                        motion_warn_lines.push(
+                            "PRE-CUT FREEZE WARNING: The reference is STILL actively moving in the final 0.35s before the cut (`preCutActive=true`), but your rendered tail froze nearly dead-still (delta < 0.15)! Keep motion/parallax/ribbons/elements moving smoothly all the way to `t = dur` to avoid a jarring seam pop."
+                                .to_string(),
+                        );
+                    }
                     let caption = Some(if motion_warn_lines.is_empty() {
                         format!(
                             "Visual render comparison for Scene {} (`Row 1 = REFERENCE | Row 2 = YOUR RENDER | Row 3 = DIFF HEATMAP`{}). Measured overall={:.3}, runtimeErrors={}.",
@@ -1109,7 +1150,7 @@ mod tests {
     }
 
     #[test]
-    fn scene_tool_definitions_omit_bash_when_filmstrip_enabled_unless_explicitly_allowed() {
+    fn scene_tool_definitions_keep_bash_active_by_default_and_respect_opt_out() {
         let filmstrip_no_bash = build_scene_tool_definitions_with_options(true, false);
         let names_no_bash: Vec<&str> = filmstrip_no_bash
             .iter()
@@ -1119,12 +1160,12 @@ mod tests {
         assert!(names_no_bash.contains(&"read_filmstrip"));
         assert!(names_no_bash.contains(&"inspect_ref_frame"));
 
-        let filmstrip_with_bash = build_scene_tool_definitions_with_options(true, true);
-        let names_with_bash: Vec<&str> = filmstrip_with_bash
+        let filmstrip_default = build_scene_tool_definitions_with_filmstrip(true);
+        let names_default: Vec<&str> = filmstrip_default
             .iter()
             .filter_map(|d| d.pointer("/function/name").and_then(Value::as_str))
             .collect();
-        assert!(names_with_bash.contains(&"bash"));
-        assert!(names_with_bash.contains(&"read_filmstrip"));
+        assert!(names_default.contains(&"bash"));
+        assert!(names_default.contains(&"read_filmstrip"));
     }
 }

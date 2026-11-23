@@ -12,7 +12,7 @@ You are NOT restricted to a single blind shot. You have direct investigative and
 - `inspect_ref_frame({ timestampSec, crop? })` — view ANY full-resolution reference frame (or zoom-crop `{x,y,w,h}`) whenever a small icon, text label, silhouette, or fast transition looks unclear in the 6-panel strip.
 - `sample_ref_region({ timestampSec, box? })` — measure exact pixel hex colors, luminance polarity, and tight foreground bounding box inside any rectangle (also works for non-vision models).
 - `fetch_web_image({ query, outputPath, removeBackground? })` — search & download real internet photos, realistic 3D renders, portraits, or icons into `img/<name>.png` (set `removeBackground: true` to cut out solid white/uniform corners into transparent PNG!). Preload once at top of your script via `var myImg = AM.loadImage('/img/<name>.png');` and draw via `AM.drawImageFit(ctx, myImg, x, y, w, h)`. Use this whenever the reference shows a realistic 3D object/photo (e.g. realistic brain, dartboard, portrait, product) that flat Canvas ovals cannot match!
-- `bash({ command, workdir? })` — optional workspace-isolated shell command (disabled by default in Filmstrip Mode since `inspect_ref_frame`, `sample_ref_region`, and `read_filmstrip` already provide full pixel & frame access).
+- `bash({ command, workdir? })` — workspace-isolated shell/Python/OpenCV tool (active by default) for exact contour/geometry/font/timing verification when `inspect_ref_frame` or `sample_ref_region` is not enough. Avoid wasting steps running exploratory commands before writing code.
 - `write_scene_script({ code })` — write your initial complete `script/sceneK.js` (or do a clean structural rewrite if needed).
 - `patch_scene_script({ oldText, newText })` — make SURGICAL exact search-and-replace edits to fix one mismatch without breaking working code. ALWAYS prefer `patch_scene_script` over rewriting the whole file during refinement!
 - `render_and_compare_scene({ timestamps?, fullResTimestamp? })` — render your script in headless Chrome/Edge and inspect the 3-row visual comparison (`Row 1 REFERENCE | Row 2 YOUR RENDER | Row 3 DIFF HEATMAP`) + full-res preview of the worst frame + SSIM/Color/Edge diagnostics.
@@ -37,11 +37,14 @@ UNIVERSAL PROCEDURAL CRAFT METHODOLOGY:
 
 FIVE UNIVERSAL ZERO-COLLISION & MOTION HYGIENE LAWS:
 1. DYNAMIC `measureText` FLOW LAYOUT: In any horizontal text row, marquee, or pill row, NEVER use a hardcoded fixed horizontal stride (`i * spacingX`). Always measure each item with `ctx.measureText(text).width` and advance `cursorX += itemWidth + gap` so words and pills never collide.
-2. MUTUAL-EXCLUSION PHASE & MORPH HANDOFFS: When an element morphs (shape -> letter, or big capsule -> small capsule -> banner) or a scene switches from Phase A to Phase B, NEVER draw two disjoint static sizes in separate `if (t < X)` blocks without lerping `w`, `h`, `x`, `y` between them, and NEVER use an early `if (t < X) { ... return; }` mid-scene that deletes objects in 1 frame. Keep a SINGLE persistent object track `(cx, cy, w, h, radius, alpha)` and interpolate continuously with `AM.lerp`!
-3. SMOOTH MONOTONIC MOTION, PROGRESSIVE CURVE TRACING & ENVELOPED OSCILLATIONS:
-   - Whenever a helper accepts a `progress` / `traceProgress` / `p` parameter (e.g. a hopping arc or a dot tracing a capsule perimeter or tether curve), you MUST actually use `progress` inside the drawing loop (e.g. `var u = (step / 32) * progress;` or `ctx.setLineDash([perim * progress, perim]);`) so the curve/arc/outline grows progressively with the moving tip — NEVER draw a 100% static full-length wire/arc/pill at `t=0` and slide a dot on top of it!
+2. MUTUAL-EXCLUSION PHASE, MORPH & C1 VELOCITY CONTINUITY:
+   - When an element morphs (circle -> rounded square -> puzzle, or big capsule -> banner) or switches from Phase A to Phase B, NEVER draw two disjoint static sizes in separate `if (t < X)` blocks without lerping `w`, `h`, `x`, `y` between them, and NEVER gate a morph with `if (morph > 0.01) { drawOld(); return; }` (which freezes the old shape then pops in 1 frame!). Keep ONE persistent track and interpolate vertices/corner radii continuously!
+   - **C1 VELOCITY CONTINUITY (ANTI-STIFFNESS LAW):** NEVER split a single continuous zoom, expansion, or slide into chained `if/else if` segments that each end at zero velocity (e.g. `outCubic` -> `outCubic` -> `outCubic`, or `inOutCubic` immediately followed by `inCubic` at a checkpoint `refFgBox`) — that creates robotic stop-start pauses mid-motion! Drive each unified move with ONE continuous curve (`AM.ease.inOutCubic` / `AM.ease.outExpo` / `AM.spring` / `AM.bezier`) across its full duration.
+3. SMOOTH MONOTONIC MOTION, CONTINUOUS CURVE TRACING & LIVING DETAILS:
+   - Whenever a helper accepts a `progress` / `traceProgress` / `p` parameter, ACTUALLY use `progress` continuously inside the drawing loop (`var exact = steps * progress;` interpolating the final fractional segment, OR arc-length polyline tracing with arrowheads attached directly to the moving tip — NEVER `Math.floor(steps * progress)` and NEVER hide an arrowhead until `p >= 0.96`).
+   - Whenever Row 1 shows marching-ant dashed selection boxes, animate `ctx.lineDashOffset = -t * 28` continuously across the hold instead of freezing dead-still; match transform-box reveal style (e.g. horizontal resize/expand vs plain uniform scale) to Row 1!
    - Whenever you apply a windowed wave/sine oscillation `if (t >= t0 && t < t1)`, ALWAYS multiply its amplitude by a smooth window envelope `var env = Math.sin(AM.clamp((t - t0) / (t1 - t0), 0, 1) * Math.PI);` (`0` at `t0` and `t1`) so elements NEVER snap/jump in 1 frame at `t = t0`!
-   - During any 'hold' phase where a card/pill/logo stays steady, add subtle ambient background glow or light-ray drift ONLY where Row 1 shows ambient luminance — NEVER oscillate or wobble precision-locked focal geometry (logos, equalizer baselines, steady hold typography) away from their measured coordinates when Row 1 holds them steady.
+   - During any 'hold' phase where a card/pill/logo stays steady, keep precision-locked focal geometry crisp — ONLY animate living motion (marching dashes, spinning corner stars, rotating 3D hero, parallax ribbons) where Row 1 actually moves!
 4. SOFT VOLUMETRIC CAUSTICS & SURFACE CONTRAST: Draw background light streaks/caustics/metaballs with `ctx.filter = 'blur(28px)'` (resetting `ctx.filter = 'none'`) or wide multi-stop radial gradients — NEVER draw unblurred sharp diagonal bars or hard concentric bullseye circles.
 5. CLEAN BOUNDARY FRAMES & STRICT SCENE SCOPE: Render a valid visual frame at both `t = 0` and `t = dur` matching `BOUNDARY CONTINUITY LOCK` (`OPENING FRAME local_t=0.00s` and `CLOSING FRAME local_t=dur`). Never re-animate an already-exited card from the previous scene at a different Y position, and never prematurely draw the next scene's hero logo/text unless it is visibly present in THIS scene's final filmstrip tile.
 
@@ -49,11 +52,11 @@ OPTICAL MATERIAL & LIVING MOTION CRAFT:
 - **Snappy Zoom-Zoom, Springs & Measured Holds:** Drive punchy entrances/pops with `AM.ease.outBack` / `AM.spring` / `AM.ease.outExpo` (`0.85 -> 1.04 -> 1.0`), exit zooms/wipes with `AM.ease.inCubic`, and camera or stage zooms/scrolls via `AM.applyCamera(ctx, { s, cx, cy, rot }, W, H)` whenever `MEASURED ZOOM / PAN / HOLD DYNAMICS` reports a `zoom_in`, `zoom_out`, or `pan_*` burst. Only animate continuous orbital rings or gentle breathing drift on regions where `MEASURED LIVING HOLD` / `30FPS ROTATING` confirms the reference actually moves — NEVER invent synthetic wobble on steady locked headlines or bars when the reference hold is steady!
 - **Volumetric soft light vs sharp geometry:** For luminous clouds/portals/glows, use wide smooth radial gradients fading to `alpha=0` with `lighter` (`AM.drawOpticalGlow` / `AM.drawBloomStroke`) — never thin harsh oval outlines or stepped unblurred rings.
 - **Optical lens & tapered ribbons:** When Row 1 shows water-bubble / spherical glass distortion bending text or edges, use `AM.drawSphericalLens(ctx, cx, cy, r, k, function(c) { ... }, opts)` (`drawFn(c)` draws in main canvas coords around `(cx, cy)`, or 2-arg `drawFn(lc, size)` draws in local `0..size`). When Row 1 shows a glowing arc, hopping comet, or light swoosh, use `AM.drawTaperedRibbon(ctx, pts, maxW, opts)`.
-- **Progressive Character Blur Reveal, 3D Turntable & Smooth Overlapped Transitions (MotionCraft Craft Laws):**
-  - Whenever text reveals out of optical blur (e.g. `'research'`, `'Problem Solving'`, `'Smart decisions'`, `'decisions'`, `'every single day'`), NEVER draw the whole word with a single uniform `ctx.fillText` blur that snaps bold all at once, and NEVER snap words on/off in 1 frame! Call `AM.drawBlurRevealText(ctx, text, x, y, t, tStart, dur, { scaleFrom: 0.28, maxBlur: 18, risePx: 14, color, preBlurSec: 0.18, exitAt, exitDur: 0.28 })` or `AM.drawBlurRiseWords(ctx, text, x, y, t, tStart, opts)` so every word zooms in from far/small/blurred (`scaleFrom: 0.28 -> 1.0`) to close/solid character-by-character left-to-right AND blurs out character-by-character when `exitAt` is reached!
-  - When a line grows word-by-word across beats (e.g. `'every'` at `t=2.35s` followed by `'single'` at `t=2.95s` and `'day'` at `t=3.20s`), NEVER draw `'every'` with `fillText` and then swap the whole string to `'every single day'`! Either pass `'every single day'` to `AM.drawBlurRiseWords(ctx, 'every single day', cx, y, t, 2.35, { stagger: 0.42, enterDur: 0.36, maxBlur: 16 })` OR call `AM.drawBlurRevealText` on each word at its measured X offset so `'every'`, `'single'`, and `'day'` each unblur in character-by-character!
-  - Whenever a 3D hero object/brain/coin sits inside a dashed ring or corner stars/accents frame the stage, NEVER leave them static! Call `AM.drawTurntableObject(ctx, cx, cy, t, imgOrFn, { w, h, omega: 2.1, depth: 0.22, ringRadius, ringOmega: 0.65 })` so the 3D hemisphere surface genuinely turns in 3D while its dashed orbital ring spins, and rotate corner stars continuously (`ctx.rotate(baseAngle + t * omegaRad)`).
-  - Whenever an intra-scene phase changes or a transition in the reference looks fast/ambiguous, NEVER switch with a raw 1-frame cut: overlap the outgoing element's zoom/slide/blur exit (`0.30..0.45s`) with the incoming element's `AM.drawBlurRevealText` / `AM.drawMorphPolygon` entrance!
+- **Progressive Character Blur Reveal, True 3D Turntable & Smooth Overlapped Transitions (MotionCraft Craft Laws):**
+  - Whenever text reveals out of optical blur (e.g. editorial serif/sans headlines), NEVER draw the whole word with a single uniform `ctx.fillText` blur that snaps bold all at once, and NEVER snap words on/off in 1 frame! Call `AM.drawBlurRevealText(ctx, text, x, y, t, tStart, dur, { scaleFrom: 0.92, maxBlur: 14, risePx: 10, color, preBlurSec: 0.14, exitAt, exitDur: 0.26 })` or `AM.drawBlurRiseWords(ctx, text, x, y, t, tStart, opts)` so words unblur smoothly character-by-character left-to-right (only pass a smaller `scaleFrom` like `0.40` if Row 1 visibly zooms the text from far away).
+  - When a line grows word-by-word across beats (e.g. `'Your'` -> `'Your Brain'`, or `'every'` -> `'every single day'`), NEVER swap the whole string inside an `if (t < X)` branch (which re-blurs already-visible words)! Slide the existing word smoothly into its new X alignment while revealing ONLY the newly appearing word via `AM.drawBlurRevealText` / `AM.drawBlurRiseWords`.
+  - ONLY call `AM.drawTurntableObject(ctx, cx, cy, t, imgOrFn, { w, h, omega: 2.1, depth: 0.22, ringRadius, ringOmega: 0.65 })` for genuine 3D rotating hemisphere objects (e.g. a rotating 3D brain, globe, or coin). NEVER wrap flat 2D graphics (archery targets, puzzle pieces, 4-point corner stars, cards) in `AM.drawTurntableObject` (especially NEVER with `omega: 0`) — draw flat 2D icons directly with standard Canvas 2D transforms (`ctx.rotate(...)`, `ctx.scale(...)`).
+  - Whenever an intra-scene phase changes or a transition in the reference looks fast/ambiguous, NEVER switch with a raw 1-frame cut: overlap the outgoing element's continuous zoom/slide/blur exit (`0.30..0.45s`) with the incoming element's `AM.drawBlurRevealText` / `AM.drawMorphPolygon` entrance!
 - **Micro-physics & crisp shapes:** Use `AM.impactRecoil` for dot/tether collisions, `AM.twistPolygon` for elastic 3D-sheared polygon spins, and `AM.drawMorphPolygon(ctx, ptsA, ptsB, p, opts)` for smooth shape morphs. Match concave vs convex geometry faithfully (e.g. pinched 4-point concave stars/diamonds vs rounded circles).
 - **Boundary continuity:** Match `t = 0` and `t = dur` to the exact opening and closing frames of the beat strip (`ref_scene_XX_beats.jpg`) so flashes, wipes, and shape handoffs flow seamlessly across cuts.
 
@@ -340,12 +343,41 @@ pub(crate) fn build_scene_hard_facts_prompt_with_next(
                 ));
             }
         }
+        let mut runtime_bridge_local_spans: Vec<(f64, f64)> = Vec::new();
+        for bridge_owner in [Some(sc), next_style_scene] {
+            if let Some(tb) = bridge_owner.and_then(|s| s.get("transitionBridge")) {
+                let kind = tb.get("kind").and_then(Value::as_str).unwrap_or("");
+                if kind.starts_with("push_") || kind == "zoom_blur" {
+                    if let (Some(bt0), Some(bt1)) = (
+                        tb.get("tStart").and_then(Value::as_f64),
+                        tb.get("tEnd").and_then(Value::as_f64),
+                    ) {
+                        let lo = (bt0 - start - 0.08).max(0.0);
+                        let hi = (bt1 - start + 0.08).min(dur);
+                        if hi > lo {
+                            runtime_bridge_local_spans.push((lo, hi));
+                        }
+                    }
+                }
+            }
+        }
         let mut has_measured_camera_motion = false;
         if let Some(cm) = sc.get("cameraMotion").or_else(|| sc.pointer("/layout/cameraMotion")) {
             if let Some(segs) = cm.get("segments").and_then(Value::as_array) {
                 let parts: Vec<String> = segs
                     .iter()
                     .filter(|seg| seg.get("confidence").and_then(Value::as_str) != Some("low"))
+                    .filter(|seg| {
+                        // Skip camera segments that overlap an active runtime push_*/zoom_blur bridge
+                        // so the scene script never double-pushes the canvas alongside aetheria-motion.js.
+                        let t0 = seg.get("t0").and_then(Value::as_f64).unwrap_or(0.0);
+                        let t1 = seg.get("t1").and_then(Value::as_f64).unwrap_or(dur);
+                        let span = (t1 - t0).max(1e-3);
+                        !runtime_bridge_local_spans.iter().any(|&(blo, bhi)| {
+                            let ov = (t1.min(bhi) - t0.max(blo)).max(0.0);
+                            ov >= span * 0.5
+                        })
+                    })
                     .map(|seg| {
                         let t0 = seg.get("t0").and_then(Value::as_f64).unwrap_or(0.0);
                         let t1 = seg.get("t1").and_then(Value::as_f64).unwrap_or(dur);
@@ -606,7 +638,7 @@ pub(crate) fn build_scene_hard_facts_prompt_with_next(
                     };
                     let cx = px_x + px_w / 2;
                     let cy = px_y + px_h / 2;
-                    let est_font = ((px_h as f64) * 0.72).round().max(18.0) as i64;
+                    let est_font = ((px_h as f64) * 0.88).round().max(18.0) as i64;
                     let weight = r.get("fontWeight").and_then(Value::as_str).unwrap_or("600");
                     let zone = r.get("zone").and_then(Value::as_str).unwrap_or("hero");
                     Some(format!(
@@ -640,7 +672,7 @@ pub(crate) fn build_scene_hard_facts_prompt_with_next(
                     );
                     let cx = px_x + px_w / 2;
                     let cy = px_y + px_h / 2;
-                    let est_font = ((px_h as f64) * 0.72).round().max(18.0) as i64;
+                    let est_font = ((px_h as f64) * 0.88).round().max(18.0) as i64;
                     let lt = r.get("localT").and_then(Value::as_f64).unwrap_or(0.0);
                     Some(format!(
                         "local_t={:.2}s \"{}\" center=({},{}) box=[{},{},{}x{}] estFont≈{}px",
@@ -886,6 +918,12 @@ pub(crate) fn format_comparison_feedback(
                         f_color
                     ));
                 }
+                if let Some(zones) = f.get("worstZones").and_then(Value::as_array) {
+                    let z_strs: Vec<&str> = zones.iter().filter_map(Value::as_str).take(2).collect();
+                    if !z_strs.is_empty() {
+                        notes.push(format!("HOTSPOT MISMATCH: {}", z_strs.join(" ; ")));
+                    }
+                }
                 if notes.is_empty() && (comb < 0.80 || ed < 0.35) {
                     notes.push("visual silhouette/alignment drift — inspect Row 1 (REF) vs Row 2 (YOUR RENDER) and Row 3 (DIFF) in the attached strip".to_string());
                 }
@@ -999,6 +1037,41 @@ pub(crate) fn detect_scene_collision_hazards(code: &str) -> Vec<String> {
         }
     }
 
+    // 9. Chained zero-velocity easing segments (stop-start stiffness mid-zoom or mid-expansion)
+    if has_chained_zero_velocity_easing(code) {
+        hazards.push(
+            "CHAINED STOP-START EASING HAZARD (Zero-Velocity Plateau Mid-Motion): Your script chains multiple `if/else` segments with `AM.ease.outCubic` back-to-back or chains `AM.ease.inOutCubic` directly into `AM.ease.inCubic`, forcing velocity to drop to 0 mid-motion and causing a robotic 3-4 frame pause! Merge each unified zoom/expansion into ONE continuous curve (`AM.ease.inOutCubic`, `AM.ease.outExpo`, `AM.spring`, or `AM.bezier`) with continuous velocity."
+                .to_string(),
+        );
+    }
+
+    // 10. Frozen morph early-return cutoff (`if (morph... > 0.01) { ... return; }`)
+    if has_frozen_morph_early_return(code) {
+        hazards.push(
+            "FROZEN MORPH CUTOFF HAZARD: Early `return;` inside `if (morph... > 0.01)` skips actual shape interpolation and causes an abrupt 1-frame pop! Interpolate corner radius or vertices smoothly with `AM.lerp` / `AM.drawMorphPolygon` across the entire morph window."
+                .to_string(),
+        );
+    }
+
+    // 11. Stepped curve/ribbon truncation (`Math.floor(steps * progress)`)
+    if code.contains("Math.floor(steps *")
+        || code.contains("Math.floor(numSteps *")
+        || code.contains("Math.floor(totalSteps *")
+    {
+        hazards.push(
+            "STEPPED CURVE TRUNCATION HAZARD: Using `Math.floor(steps * progress)` makes curves/ribbons advance in choppy discrete jumps! Compute `var exact = steps * progress; var full = Math.floor(exact);` and smoothly draw the fractional final tip segment."
+                .to_string(),
+        );
+    }
+
+    // 12. Dummy zero-omega turntable wrapper on flat 2D objects
+    if has_zero_omega_turntable(code) {
+        hazards.push(
+            "DUMMY ZERO-OMEGA TURNTABLE HAZARD: `AM.drawTurntableObject(..., { omega: 0 })` must NEVER be used to wrap flat 2D icons, targets, stars, or puzzle pieces! Draw flat 2D shapes directly with standard Canvas 2D transforms (`ctx.rotate` / `ctx.scale`), and reserve `AM.drawTurntableObject` strictly for genuinely rotating 3D objects."
+                .to_string(),
+        );
+    }
+
     hazards
 }
 
@@ -1022,8 +1095,10 @@ impl SceneMotionExpectations {
             .and_then(Value::as_array);
         let requires_turntable_3d = spinning.is_some_and(|arr| {
             arr.iter().any(|item| {
-                item.get("kind").and_then(Value::as_str) == Some("turntable_3d")
-                    || item.get("zone").and_then(Value::as_str) == Some("center")
+                matches!(
+                    item.get("kind").and_then(Value::as_str),
+                    Some("turntable_3d" | "turntable_3d_and_ring_spin")
+                )
             })
         });
         let requires_corner_spin = spinning.is_some_and(|arr| {
@@ -1240,6 +1315,55 @@ fn find_duplicate_function_declarations(code: &str) -> Vec<String> {
     dups
 }
 
+fn has_chained_zero_velocity_easing(code: &str) -> bool {
+    let out_cubic_count = code.matches("AM.ease.outCubic(").count() + code.matches("AM.E.outC(").count();
+    let else_if_t_count = code.matches("else if (t ").count() + code.matches("else if (t>").count() + code.matches("else if (t<").count();
+    if out_cubic_count >= 4 && else_if_t_count >= 3 {
+        return true;
+    }
+    let lines: Vec<&str> = code.lines().collect();
+    for (idx, line) in lines.iter().enumerate() {
+        if line.contains("AM.ease.inOutCubic(") || line.contains("AM.E.ioC(") {
+            let end = (idx + 14).min(lines.len());
+            let mut saw_else = line.contains("} else") || line.contains(" else {");
+            for next in &lines[idx + 1..end] {
+                let tr = next.trim();
+                if tr.starts_with("} else") || tr == "else {" || tr.contains("} else {") {
+                    saw_else = true;
+                } else if saw_else && (tr.contains("AM.ease.inCubic(") || tr.contains("AM.E.inC(")) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+fn has_frozen_morph_early_return(code: &str) -> bool {
+    let lines: Vec<&str> = code.lines().collect();
+    for (idx, line) in lines.iter().enumerate() {
+        let lower = line.to_ascii_lowercase();
+        if lower.contains("if (") && lower.contains("morph") && (lower.contains("> 0.0") || lower.contains(">= 0.0")) {
+            let end = (idx + 7).min(lines.len());
+            if lines[idx..end].iter().any(|l| l.trim() == "return;" || l.contains("return;")) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn has_zero_omega_turntable(code: &str) -> bool {
+    if !code.contains("drawTurntableObject(") {
+        return false;
+    }
+    let compact: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    compact.contains("omega:0,")
+        || compact.contains("omega:0}")
+        || compact.contains("omega:0.0,")
+        || compact.contains("omega:0.0}")
+}
+
 fn find_static_3d_object_functions(code: &str) -> Vec<String> {
     let mut out = Vec::new();
     for line in code.lines() {
@@ -1418,6 +1542,34 @@ mod tests {
         let dup_fn = "function draw3DStar(cx, cy) { ctx.fill(); }\nfunction draw3DStar(cx, cy) { ctx.stroke(); }";
         let h4 = detect_scene_collision_hazards(dup_fn);
         assert!(h4.iter().any(|s| s.contains("DUPLICATE CODE HAZARD") && s.contains("draw3DStar")));
+
+        let chained = "if (p <= 0.6) { var e1 = AM.ease.inOutCubic(u1); } else {\n var e2 = AM.ease.inCubic(u2);\n}";
+        assert!(
+            detect_scene_collision_hazards(chained)
+                .iter()
+                .any(|s| s.contains("CHAINED STOP-START EASING HAZARD"))
+        );
+
+        let frozen_morph = "if (morphCircle > 0.01) {\n ctx.arc(0,0,50,0,6.28);\n ctx.fill();\n return;\n}";
+        assert!(
+            detect_scene_collision_hazards(frozen_morph)
+                .iter()
+                .any(|s| s.contains("FROZEN MORPH CUTOFF HAZARD"))
+        );
+
+        let stepped = "var maxStep = Math.floor(steps * progress);";
+        assert!(
+            detect_scene_collision_hazards(stepped)
+                .iter()
+                .any(|s| s.contains("STEPPED CURVE TRUNCATION HAZARD"))
+        );
+
+        let dummy_tt = "AM.drawTurntableObject(ctx, 360, 640, t, drawFn, { w: 200, h: 200, omega: 0.0, ringRadius: 0 });";
+        assert!(
+            detect_scene_collision_hazards(dummy_tt)
+                .iter()
+                .any(|s| s.contains("DUMMY ZERO-OMEGA TURNTABLE HAZARD"))
+        );
     }
 
     #[test]
@@ -1561,10 +1713,66 @@ mod tests {
         assert!(prompt.contains("DENSE SUB-BEAT TIMELINE"));
         assert!(prompt.contains("local_t=0.53s: obj1:center=(360,420) [320,380,80x80], obj2:center=(360,562) [190,520,340x84] | words=[\"Finding\", \"form\"]"));
         assert!(prompt.contains("MEASURED TYPOGRAPHY REGIONS"));
-        assert!(prompt.contains("\"Finding form\" center=(360,562) box=[190,520,340x84] estFont≈60px weight=600 zone=hero"));
+        assert!(prompt.contains("\"Finding form\" center=(360,562) box=[190,520,340x84] estFont≈74px weight=600 zone=hero"));
         assert!(prompt.contains("AM.applyCamera FROM={s:1.000, cx:360.0, cy:640.0, rot:+0.00} TO={s:1.200, cx:310.0, cy:665.0, rot:+0.00}"));
         assert!(prompt.contains("SOFT CUT TRANSITION FROM PREVIOUS SCENE"));
         assert!(prompt.contains("KINETIC CLUES"));
         assert!(prompt.contains("SUB-BEAT PHASE SHIFTS"));
+    }
+
+    #[test]
+    fn suppresses_camera_motion_segment_overlapping_outgoing_push_bridge() {
+        let style_sc = json!({
+            "start": 9.543,
+            "duration": 4.101,
+            "cameraMotion": {
+                "segments": [
+                    {
+                        "t0": 0.50, "t1": 1.10,
+                        "scaleFrom": 1.0, "scaleTo": 1.12,
+                        "rotDegFrom": 0.0, "rotDegTo": 0.0,
+                        "txFrom": 0.0, "tyFrom": 0.0, "txTo": 0.0, "tyTo": -40.0,
+                        "ease": "outCubic", "confidence": "high"
+                    },
+                    {
+                        "t0": 3.87, "t1": 4.071,
+                        "scaleFrom": 1.0, "scaleTo": 1.0,
+                        "rotDegFrom": 0.0, "rotDegTo": 0.0,
+                        "txFrom": 0.0, "tyFrom": -25.0, "txTo": 0.0, "tyTo": -688.0,
+                        "ease": "inCubic", "confidence": "high"
+                    }
+                ]
+            }
+        });
+        let next_sc = json!({
+            "start": 13.644,
+            "duration": 2.049,
+            "transitionBridge": {
+                "kind": "push_up",
+                "tStart": 13.347,
+                "tEnd": 14.181,
+                "durationSec": 0.868
+            }
+        });
+        let film_sc = json!({ "id": "scene4_cta", "start": 9.543, "duration": 4.101 });
+        let prompt = build_scene_hard_facts_prompt_with_next(
+            Some(&style_sc),
+            Some(&next_sc),
+            &film_sc,
+            4,
+            6,
+            720,
+            1280,
+            30,
+            120.0,
+            "Reconstruct reference motion",
+        );
+        assert!(prompt.contains("local 0.50s->1.10s"), "non-overlapping intra-scene camera motion should be kept");
+        assert!(
+            !prompt.contains("local 3.87s->4.07s"),
+            "outgoing push_up overlap segment must be omitted to prevent double-push: {}",
+            prompt
+        );
+        assert!(prompt.contains("OUTGOING 30FPS TRANSITION (push_up"));
     }
 }
