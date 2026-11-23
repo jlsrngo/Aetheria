@@ -1,0 +1,317 @@
+{
+  "ok": true,
+  "sessionId": "ses_1a2087682d5074c0001",
+  "wallSec": 1078.5,
+  "assistantErr": null,
+  "sceneCount": 6,
+  "sceneTraceStats": [
+    {
+      "type": "scene_summary",
+      "scene": 1,
+      "sceneId": "scene1_hook",
+      "stepsUsed": 7,
+      "firstWriteStep": 3,
+      "probeCallsBeforeWrite": 4,
+      "toolHistogram": {
+        "inspect_ref_frame": 2,
+        "render_and_compare_scene": 2,
+        "sample_ref_region": 3,
+        "write_scene_script": 3
+      },
+      "renders": [
+        {
+          "step": 4,
+          "overall": 0.443,
+          "ssim": 0.7214,
+          "color": 0.8814,
+          "edge": 0.2795,
+          "runtimeErrors": 0,
+          "hazards": 2
+        },
+        {
+          "step": 6,
+          "overall": 0.539,
+          "ssim": 0.755,
+          "color": 0.8989,
+          "edge": 0.369,
+          "runtimeErrors": 0,
+          "hazards": 0
+        },
+        {
+          "step": 7,
+          "overall": 0.6787,
+          "ssim": 0.7955,
+          "color": 0.8973,
+          "edge": 0.5931,
+          "runtimeErrors": 0,
+          "hazards": 0
+        }
+      ],
+      "restoredBest": false,
+      "finalScore": 0.6787,
+      "wallMs": 517216
+    },
+    {
+      "type": "scene_summary",
+      "scene": 2,
+      "sceneId": "scene2_problem_or_context",
+      "stepsUsed": 7,
+      "firstWriteStep": 2,
+      "probeCallsBeforeWrite": 3,
+      "toolHistogram": {
+        "fetch_web_image": 2,
+        "patch_scene_script": 1,
+        "render_and_compare_scene": 2,
+        "sample_ref_region": 2,
+        "write_scene_script": 2
+      },
+      "renders": [
+        {
+          "step": 3,
+          "overall": 0.692,
+          "ssim": 0.7664,
+          "color": 0.9303,
+          "edge": 0.5394,
+          "runtimeErrors": 0,
+          "hazards": 2
+        },
+        {
+          "step": 6,
+          "overall": 0.667,
+          "ssim": 0.766,
+          "color": 0.9277,
+          "edge": 0.5354,
+          "runtimeErrors": 0,
+          "hazards": 0
+        },
+        {
+          "step": 7,
+          "overall": 0.7733,
+          "ssim": 0.7757,
+          "color": 0.9263,
+          "edge": 0.5947,
+          "runtimeErrors": 0,
+          "hazards": 0
+        }
+      ],
+      "restoredBest": false,
+      "finalScore": 0.7733,
+      "wallMs": 436780
+    },
+    {
+      "type": "scene_summary",
+      "scene": 3,
+      "sceneId": "scene3_proof_or_demo",
+      "stepsUsed": 7,
+      "firstWriteStep": 3,
+      "probeCallsBeforeWrite": 3,
+      "toolHistogram": {
+        "inspect_ref_frame": 4,
+        "render_and_compare_scene": 2,
+        "write_scene_script": 3
+      },
+      "renders": [
+        {
+          "step": 4,
+          "overall": 0.6638,
+          "ssim": 0.7372,
+          "color": 0.92,
+          "edge": 0.3879,
+          "runtimeErrors": 0,
+          "hazards": 2
+        },
+        {
+          "step": 6,
+          "overall": 0.5732,
+          "ssim": 0.7358,
+          "color": 0.8926,
+          "edge": 0.3842,
+          "runtimeErrors": 0,
+          "hazards": 0
+        },
+        {
+          "step": 7,
+          "overall": 0.7376,
+          "ssim": 0.7513,
+          "color": 0.9046,
+          "edge": 0.5028,
+          "runtimeErrors": 0,
+          "hazards": 0
+        }
+      ],
+      "restoredBest": false,
+      "finalScore": 0.7376,
+      "wallMs": 397739
+    },
+    {
+      "type": "scene_summary",
+      "scene": 4,
+      "sceneId": "scene4_cta",
+      "stepsUsed": 7,
+      "firstWriteStep": 3,
+      "probeCallsBeforeWrite": 1,
+      "toolHistogram": {
+        "inspect_ref_frame": 1,
+        "render_and_compare_scene": 2,
+        "sample_ref_region": 1,
+        "write_scene_script": 3
+      },
+      "renders": [
+        {
+          "step": 4,
+          "overall": 0.7294,
+          "ssim": 0.8189,
+          "color": 0.8062,
+          "edge": 0.6795,
+          "runtimeErrors": 0,
+          "hazards": 2
+        },
+        {
+          "step": 6,
+          "overall": 0.4777,
+          "ssim": 0.7691,
+          "color": 0.7978,
+          "edge": 0.1922,
+          "runtimeErrors": 0,
+          "hazards": 1
+        },
+        {
+          "step": 7,
+          "overall": 0.7269,
+          "ssim": 0.8213,
+          "color": 0.7933,
+          "edge": 0.787,
+          "runtimeErrors": 0,
+          "hazards": 0
+        }
+      ],
+      "restoredBest": false,
+      "finalScore": 0.7269,
+      "wallMs": 316442
+    },
+    {
+      "type": "scene_summary",
+      "scene": 5,
+      "sceneId": "scene5_beat_5",
+      "stepsUsed": 7,
+      "firstWriteStep": 3,
+      "probeCallsBeforeWrite": 3,
+      "toolHistogram": {
+        "inspect_ref_frame": 3,
+        "render_and_compare_scene": 2,
+        "sample_ref_region": 2,
+        "write_scene_script": 3
+      },
+      "renders": [
+        {
+          "step": 4,
+          "overall": 0.7597,
+          "ssim": 0.8171,
+          "color": 0.8106,
+          "edge": 0.5399,
+          "runtimeErrors": 0,
+          "hazards": 2
+        },
+        {
+          "step": 6,
+          "overall": 0.429,
+          "ssim": 0.8172,
+          "color": 0.8801,
+          "edge": 0.5121,
+          "runtimeErrors": 0,
+          "hazards": 0
+        },
+        {
+          "step": 7,
+          "overall": 0.638,
+          "ssim": 0.8067,
+          "color": 0.8558,
+          "edge": 0.3561,
+          "runtimeErrors": 0,
+          "hazards": 0
+        }
+      ],
+      "restoredBest": false,
+      "finalScore": 0.638,
+      "wallMs": 395977
+    },
+    {
+      "type": "scene_summary",
+      "scene": 6,
+      "sceneId": "scene6_beat_6",
+      "stepsUsed": 7,
+      "firstWriteStep": 2,
+      "probeCallsBeforeWrite": 3,
+      "toolHistogram": {
+        "inspect_ref_frame": 1,
+        "render_and_compare_scene": 2,
+        "sample_ref_region": 4,
+        "write_scene_script": 2
+      },
+      "renders": [
+        {
+          "step": 3,
+          "overall": 0.6962,
+          "ssim": 0.7914,
+          "color": 0.8867,
+          "edge": 0.4202,
+          "runtimeErrors": 0,
+          "hazards": 2
+        },
+        {
+          "step": 7,
+          "overall": 0.6656,
+          "ssim": 0.8039,
+          "color": 0.8546,
+          "edge": 0.4417,
+          "runtimeErrors": 0,
+          "hazards": 0
+        }
+      ],
+      "restoredBest": false,
+      "finalScore": 0.6656,
+      "wallMs": 305983
+    }
+  ],
+  "finalComparisonSummary": null,
+  "mediaCheck": {
+    "strips": {
+      "scene_01_compare_6beats.jpg": {
+        "width": 1168,
+        "height": 780
+      },
+      "scene_02_compare_6beats.jpg": {
+        "width": 1022,
+        "height": 780
+      },
+      "scene_03_compare_6beats.jpg": {
+        "width": 1168,
+        "height": 780
+      },
+      "scene_04_compare_6beats.jpg": {
+        "width": 1022,
+        "height": 780
+      },
+      "scene_05_compare_6beats.jpg": {
+        "width": 1168,
+        "height": 780
+      },
+      "scene_06_compare_6beats.jpg": {
+        "width": 1022,
+        "height": 780
+      }
+    },
+    "comparisonStrip": {
+      "width": 438,
+      "height": 4608
+    },
+    "mp4": {
+      "width": 720,
+      "height": 1280,
+      "fps": 30,
+      "frames": 537,
+      "bytes": 13470809
+    }
+  },
+  "outDir": "C:\\Users\\AMD\\.gemini\\antigravity\\brain\\c45f00c3-99e0-4e1a-9a15-95af61428086\\scratch\\live-verify-out"
+}

@@ -1,0 +1,320 @@
+{
+  "fps": 29.97002997002997,
+  "frames": {
+    "ref": 536,
+    "res": 537
+  },
+  "cutOffsets": [
+    {
+      "refFrame": 49,
+      "resFrame": 47,
+      "offsetFrames": -2
+    },
+    {
+      "refFrame": 75,
+      "resFrame": 75,
+      "offsetFrames": 0
+    },
+    {
+      "refFrame": 286,
+      "resFrame": 286,
+      "offsetFrames": 0
+    }
+  ],
+  "motionByScene": [
+    {
+      "scene": 1,
+      "t0": 0,
+      "t1": 49,
+      "meanDiffRef": 9.083,
+      "meanDiffRes": 6.713,
+      "ratioRes/Ref": 0.74,
+      "frozenShareRes": 0.14,
+      "frozenShareRef": 0.0
+    },
+    {
+      "scene": 2,
+      "t0": 49,
+      "t1": 75,
+      "meanDiffRef": 1.6,
+      "meanDiffRes": 0.435,
+      "ratioRes/Ref": 0.27,
+      "frozenShareRes": 0.0,
+      "frozenShareRef": 0.0
+    },
+    {
+      "scene": 3,
+      "t0": 75,
+      "t1": 286,
+      "meanDiffRef": 1.692,
+      "meanDiffRes": 1.22,
+      "ratioRes/Ref": 0.72,
+      "frozenShareRes": 0.02,
+      "frozenShareRef": 0.0
+    },
+    {
+      "scene": 4,
+      "t0": 286,
+      "t1": 536,
+      "meanDiffRef": 1.208,
+      "meanDiffRes": 0.706,
+      "ratioRes/Ref": 0.58,
+      "frozenShareRes": 0.3,
+      "frozenShareRef": 0.03
+    }
+  ],
+  "paletteDrift": [
+    {
+      "t": 0.0,
+      "dE76": 1.1,
+      "meanRGBRef": [
+        254,
+        254,
+        254
+      ],
+      "meanRGBRes": [
+        254,
+        254,
+        254
+      ]
+    },
+    {
+      "t": 1.0,
+      "dE76": 12.5,
+      "meanRGBRef": [
+        222,
+        217,
+        237
+      ],
+      "meanRGBRes": [
+        218,
+        213,
+        235
+      ]
+    },
+    {
+      "t": 2.0,
+      "dE76": 12.1,
+      "meanRGBRef": [
+        244,
+        244,
+        246
+      ],
+      "meanRGBRes": [
+        247,
+        247,
+        248
+      ]
+    },
+    {
+      "t": 3.0,
+      "dE76": 8.9,
+      "meanRGBRef": [
+        213,
+        212,
+        212
+      ],
+      "meanRGBRes": [
+        214,
+        213,
+        213
+      ]
+    },
+    {
+      "t": 4.0,
+      "dE76": 9.4,
+      "meanRGBRef": [
+        214,
+        209,
+        203
+      ],
+      "meanRGBRes": [
+        215,
+        212,
+        208
+      ]
+    },
+    {
+      "t": 5.0,
+      "dE76": 9.6,
+      "meanRGBRef": [
+        214,
+        209,
+        203
+      ],
+      "meanRGBRes": [
+        214,
+        211,
+        207
+      ]
+    },
+    {
+      "t": 6.01,
+      "dE76": 11.1,
+      "meanRGBRef": [
+        212,
+        207,
+        202
+      ],
+      "meanRGBRes": [
+        214,
+        211,
+        207
+      ]
+    },
+    {
+      "t": 7.01,
+      "dE76": 8.4,
+      "meanRGBRef": [
+        213,
+        208,
+        215
+      ],
+      "meanRGBRes": [
+        212,
+        208,
+        214
+      ]
+    },
+    {
+      "t": 8.01,
+      "dE76": 13.8,
+      "meanRGBRef": [
+        206,
+        201,
+        208
+      ],
+      "meanRGBRes": [
+        207,
+        202,
+        210
+      ]
+    },
+    {
+      "t": 9.01,
+      "dE76": 23.6,
+      "meanRGBRef": [
+        195,
+        190,
+        197
+      ],
+      "meanRGBRes": [
+        195,
+        190,
+        198
+      ]
+    },
+    {
+      "t": 10.01,
+      "dE76": 9.2,
+      "meanRGBRef": [
+        215,
+        215,
+        216
+      ],
+      "meanRGBRes": [
+        212,
+        208,
+        203
+      ]
+    },
+    {
+      "t": 11.01,
+      "dE76": 9.4,
+      "meanRGBRef": [
+        212,
+        209,
+        210
+      ],
+      "meanRGBRes": [
+        211,
+        204,
+        199
+      ]
+    },
+    {
+      "t": 12.01,
+      "dE76": 10.7,
+      "meanRGBRef": [
+        211,
+        208,
+        209
+      ],
+      "meanRGBRes": [
+        210,
+        203,
+        198
+      ]
+    },
+    {
+      "t": 13.01,
+      "dE76": 11.4,
+      "meanRGBRef": [
+        210,
+        207,
+        208
+      ],
+      "meanRGBRes": [
+        210,
+        203,
+        198
+      ]
+    },
+    {
+      "t": 14.01,
+      "dE76": 8.4,
+      "meanRGBRef": [
+        212,
+        211,
+        212
+      ],
+      "meanRGBRes": [
+        210,
+        209,
+        211
+      ]
+    },
+    {
+      "t": 15.02,
+      "dE76": 10.5,
+      "meanRGBRef": [
+        211,
+        210,
+        211
+      ],
+      "meanRGBRes": [
+        210,
+        209,
+        210
+      ]
+    },
+    {
+      "t": 16.02,
+      "dE76": 6.9,
+      "meanRGBRef": [
+        216,
+        215,
+        215
+      ],
+      "meanRGBRes": [
+        214,
+        212,
+        212
+      ]
+    },
+    {
+      "t": 17.02,
+      "dE76": 11.2,
+      "meanRGBRef": [
+        214,
+        210,
+        211
+      ],
+      "meanRGBRes": [
+        213,
+        209,
+        210
+      ]
+    }
+  ]
+}
