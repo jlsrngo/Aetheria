@@ -76,7 +76,9 @@ def _extract_salient_components(
         bh = int(stats[lbl, cv2.CC_STAT_HEIGHT])
         if area < min_area or bw <= 0 or bh <= 0 or (bw * bh) > max_box_area:
             continue
-        pix = small[labels == lbl]
+        comp_mask = labels == lbl
+        fg_only = comp_mask & (bgr_diff | sat_diff)
+        pix = small[fg_only] if int(np.count_nonzero(fg_only)) >= 8 else small[comp_mask]
         if pix.size == 0:
             continue
         med_bgr = np.median(pix, axis=0)
@@ -86,6 +88,11 @@ def _extract_salient_components(
         if solidity < 0.22 and bg_contrast < 42.0 and (bw * bh) > int(mask_area * 0.12):
             continue
         hex_col = f"#{int(med_bgr[2]):02X}{int(med_bgr[1]):02X}{int(med_bgr[0]):02X}"
+        sat_vals = hsv[fg_only][:, 1] if int(np.count_nonzero(fg_only)) >= 8 else hsv[comp_mask][:, 1]
+        hi_sat = float(np.percentile(sat_vals, 75))
+        sat_delta = abs(hi_sat - float(bg_hsv[1]))
+        aspect = float(bw) / float(max(1, bh))
+        is_text_like = (sat_delta < 28.0) and (solidity < 0.58 or aspect >= 1.85)
         fw_box = max(1, int(round(bw * sx)))
         fh_box = max(1, int(round(bh * sy)))
         fcx = int(round((bx + bw * 0.5) * sx))
@@ -98,6 +105,8 @@ def _extract_salient_components(
                 "h": fh_box,
                 "area": fw_box * fh_box,
                 "hex": hex_col,
+                "sat": round(sat_delta, 1),
+                "isTextLike": bool(is_text_like),
             }
         )
     out.sort(key=lambda c: c["area"], reverse=True)
@@ -173,6 +182,8 @@ def extract_scene_element_tracks(
                     "w": cp["w"],
                     "h": cp["h"],
                     "hex": cp["hex"],
+                    "sat": cp["sat"],
+                    "isTextLike": cp["isTextLike"],
                 }
             )
 
@@ -195,6 +206,8 @@ def extract_scene_element_tracks(
                             "w": cp["w"],
                             "h": cp["h"],
                             "hex": cp["hex"],
+                            "sat": cp["sat"],
+                            "isTextLike": cp["isTextLike"],
                         }
                     ]
                 }
@@ -215,7 +228,21 @@ def extract_scene_element_tracks(
         disp = round(math.hypot(float(x_range), float(y_range)), 1)
         size_ratio = round(float(max(areas)) / float(max(1, min(areas))), 2)
         dom_hex = pts[len(pts) // 2]["hex"]
-        score = disp + max(0.0, size_ratio - 1.0) * 120.0 + len(pts) * 4.0
+        med_sat = float(np.median([float(p.get("sat", 0.0)) for p in pts]))
+        text_frac = float(np.mean([1.0 if p.get("isTextLike") else 0.0 for p in pts]))
+        # Prefer moving saturated / non-text graphic elements over low-saturation text blocks
+        if med_sat >= 38.0:
+            chroma_mult = 1.75
+        elif text_frac >= 0.6:
+            chroma_mult = 0.45
+        else:
+            chroma_mult = 1.0
+        raw_motion = disp + max(0.0, size_ratio - 1.0) * 90.0 + len(pts) * 3.0
+        score = raw_motion * chroma_mult
+        clean_pts = [
+            {k: p[k] for k in ("localT", "cx", "cy", "w", "h", "hex")}
+            for p in _downsample_points(pts, max_pts=10)
+        ]
         results.append(
             (
                 score,
@@ -225,8 +252,10 @@ def extract_scene_element_tracks(
                     "yRangePx": int(y_range),
                     "sizeRatio": size_ratio,
                     "dominantHex": dom_hex,
+                    "dominantSat": round(med_sat, 1),
+                    "isTextLike": bool(text_frac >= 0.6),
                     "pointCount": len(pts),
-                    "points": _downsample_points(pts, max_pts=10),
+                    "points": clean_pts,
                 },
             )
         )

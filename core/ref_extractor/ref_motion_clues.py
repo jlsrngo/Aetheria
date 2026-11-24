@@ -598,6 +598,14 @@ def extract_scene_motion_clues(
                 pass
     except Exception:
         pass
+    try:
+        from ref_secondary_motion import extract_scene_secondary_motion
+
+        sec_motion = extract_scene_secondary_motion(frame_at_fn, start, end, width, height, fps=30.0)
+        if sec_motion:
+            out["secondaryMotion"] = sec_motion
+    except Exception:
+        pass
     if hero_card_info is not None:
         out["heroCardBox"] = hero_card_info["heroCardBox"]
         out["blurredBackdrop"] = hero_card_info["blurredBackdrop"]

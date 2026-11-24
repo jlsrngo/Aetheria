@@ -199,6 +199,21 @@ def extract_scene_motion_kinematics(
     region_lag1_shares: Dict[str, List[float]] = {r[0]: [] for r in region_defs}
 
     eval_indices = hold_step_indices if len(hold_step_indices) >= 2 else list(range(len(steps)))
+    # Use the longest contiguous hold run for centroid amplitude so multi-phase scenes
+    # do not inflate hold ampPx by jumping between Phase 1 and Phase 2 centroids.
+    longest_run: List[int] = []
+    cur_run: List[int] = []
+    for st_i in eval_indices:
+        if not cur_run or st_i == cur_run[-1] + 1:
+            cur_run.append(st_i)
+        else:
+            if len(cur_run) > len(longest_run):
+                longest_run = cur_run
+            cur_run = [st_i]
+    if len(cur_run) > len(longest_run):
+        longest_run = cur_run
+    centroid_indices = set(longest_run if len(longest_run) >= 3 else eval_indices)
+
     for st_i in eval_indices:
         cur_sample_i = st_i + 1
         prev_sample_i = st_i
@@ -215,9 +230,10 @@ def extract_scene_motion_kinematics(
                 rll = float((np.abs(g_cur[ry0:ry1, rx0:rx1] - g_old[ry0:ry1, rx0:rx1]) > 10).mean())
                 region_lag1_shares[rname].append(rl1)
                 region_long_shares[rname].append(rll)
-        bx = samples[cur_sample_i][2]
-        if bx is not None:
-            fg_centroids.append(((bx[0] + bx[2] * 0.5) * sx, (bx[1] + bx[3] * 0.5) * sy))
+        if st_i in centroid_indices:
+            bx = samples[cur_sample_i][2]
+            if bx is not None:
+                fg_centroids.append(((bx[0] + bx[2] * 0.5) * sx, (bx[1] + bx[3] * 0.5) * sy))
 
     mean_lag1 = float(np.mean(lag1_shares)) if lag1_shares else 0.0
     mean_lag_long = float(np.mean(lag_long_shares)) if lag_long_shares else 0.0
@@ -225,38 +241,20 @@ def extract_scene_motion_kinematics(
 
     amp_px = 0.0
     period_sec: Optional[float] = None
-    if len(fg_centroids) >= 3:
+    if len(fg_centroids) >= 2:
         cxs = np.array([c[0] for c in fg_centroids], dtype=np.float64)
         cys = np.array([c[1] for c in fg_centroids], dtype=np.float64)
         amp_x = float(np.ptp(cxs)) * 0.5
         amp_y = float(np.ptp(cys)) * 0.5
         amp_px = round(max(amp_x, amp_y), 1)
-        sig = cys - float(np.mean(cys)) if amp_y >= amp_x else cxs - float(np.mean(cxs))
-        if float(np.max(np.abs(sig))) >= 2.0:
-            signs = np.sign(sig)
-            crossings = [k for k in range(1, len(signs)) if signs[k] * signs[k - 1] < 0]
-            if len(crossings) >= 2:
-                avg_half_steps = float(np.mean(np.diff(crossings)))
-                period_sec = round(max(0.4, avg_half_steps * 2.0 * step_sec), 2)
-
-    for rname, _, _, _, _ in region_defs:
-        r_longs = region_long_shares[rname]
-        r_l1s = region_lag1_shares[rname]
-        if not r_longs:
-            continue
-        rm_long = float(np.mean(r_longs))
-        rm_l1 = float(np.mean(r_l1s))
-        if rm_long >= 0.012 and rm_long >= max(rm_l1 * 1.25, 0.012):
-            reg_entry: Dict[str, Any] = {
-                "zone": rname,
-                "lag15Share": round(rm_long, 4),
-                "ampPx": amp_px if rname == "center" else round(max(2.0, amp_px * 0.6), 1),
-            }
-            if period_sec is not None and rname == "center":
-                reg_entry["periodSec"] = period_sec
-            living_regions.append(reg_entry)
-    living_regions.sort(key=lambda r: r["lag15Share"], reverse=True)
-    living_regions = living_regions[:2]
+        if len(fg_centroids) >= 3:
+            sig = cys - float(np.mean(cys)) if amp_y >= amp_x else cxs - float(np.mean(cxs))
+            if float(np.max(np.abs(sig))) >= 2.0:
+                signs = np.sign(sig)
+                crossings = [k for k in range(1, len(signs)) if signs[k] * signs[k - 1] < 0]
+                if len(crossings) >= 2:
+                    avg_half_steps = float(np.mean(np.diff(crossings)))
+                    period_sec = round(max(0.4, avg_half_steps * 2.0 * step_sec), 2)
 
     if hold_steps:
         hold_active_pct = round(
@@ -271,10 +269,49 @@ def extract_scene_motion_kinematics(
         (abs(s["curl"]) for s in (hold_steps if len(hold_steps) > 1 else steps)),
         default=0.0,
     )
+
+    # Derive compression-noise floor directly from this video's quietest lag-1 baseline:
+    # compression noise stays tiny (<1.5%) and flat with ~0 centroid displacement,
+    # whereas genuine hover/drift grows from lag-1 to lag-long and continuous fast secondary
+    # motion (stars/arcs) keeps lag-1 and lag-long both high (>=4.5%) across the hold.
+    quiet_lag1 = float(np.percentile(lag1_shares, 25)) if lag1_shares else 0.0
+    amp_floor_px = 2.5
+    noise_share_floor = max(0.018, quiet_lag1 * 1.45)
+    # Check settled tail (last 40% of lag-long samples) so entrance-only scenes (e.g. bar charts
+    # that grow early and then lock completely static) do not falsely report hasLivingHold=True.
+    tail_split = max(0, int(len(lag_long_shares) * 0.60))
+    tail_lag_long = float(np.median(lag_long_shares[tail_split:])) if lag_long_shares else 0.0
+    settled_is_quiet = (len(lag_long_shares) >= 4) and (tail_lag_long < 0.016) and (max_hold_curl < 0.025)
+
+    for rname, _, _, _, _ in region_defs:
+        r_longs = region_long_shares[rname]
+        r_l1s = region_lag1_shares[rname]
+        if not r_longs:
+            continue
+        rm_long = float(np.mean(r_longs))
+        rm_l1 = float(np.mean(r_l1s))
+        r_tail_long = float(np.median(r_longs[max(0, int(len(r_longs) * 0.60)):])) if len(r_longs) >= 4 else rm_long
+        if settled_is_quiet and r_tail_long < 0.020:
+            continue
+        reg_amp = amp_px if rname == "center" else (round(amp_px * 0.6, 1) if amp_px >= amp_floor_px else 0.0)
+        has_real_amp = reg_amp >= amp_floor_px
+        has_rotational_hold = (rm_long >= max(0.055, rm_l1 * 1.40)) and (max_hold_curl >= 0.025)
+        grows_or_continuous = (rm_long >= rm_l1 * 1.25) or (rm_l1 >= 0.045 and rm_long >= 0.055)
+        if rm_long >= noise_share_floor and grows_or_continuous and (has_real_amp or has_rotational_hold):
+            reg_entry: Dict[str, Any] = {
+                "zone": rname,
+                "lag15Share": round(rm_long, 4),
+                "ampPx": reg_amp,
+            }
+            if period_sec is not None and rname == "center" and has_real_amp:
+                reg_entry["periodSec"] = period_sec
+            living_regions.append(reg_entry)
+    living_regions.sort(key=lambda r: r["lag15Share"], reverse=True)
+    living_regions = living_regions[:2]
+
     has_living_hold = bool(
-        (mean_lag_long >= 0.010 and lag_growth >= 1.25)
-        or len(living_regions) > 0
-        or max_hold_curl >= 0.028
+        len(living_regions) > 0
+        or (not settled_is_quiet and max_hold_curl >= 0.030 and mean_lag_long >= 0.045)
     )
     rotational_hold = bool(has_living_hold and max_hold_curl >= 0.025)
 
