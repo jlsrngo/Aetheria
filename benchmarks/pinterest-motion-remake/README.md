@@ -26,7 +26,8 @@ Arsip benchmark offline untuk evaluasi regresi kualitas rekonstruksi gerak (*mot
 | Run 7 | Prompt 11 M0–M4 (honest ease, living hold, feel, soft-cut) | — | — | — | — | — | `0/26` | `1/5` | Transisi lebih mulus, otak S2 masih belum GrabCut bersih |
 | Run 8 | Paket A+B (GrabCut cutout, multi-phase OCR, pixel shift, motion blur auto) | **`0.7204`** | `0.806` | `0.885` | `0.517` | **`0/36`** | `0/26` | `3/5` | Rekor 36-frame overall; S2 ter-rollback ke statis (`turntable=0`) |
 | **Run 9** | **360° continuous `AM.drawTurntableObject` + 30fps signal hazards + rollback guard + Openverse fallback** | `0.6830` | `0.787` | `0.867` | `0.498` | `3/36` | **`0/26`** | **`1/5`** | **S1 (`0.679`) & S2 (`0.773`, `energyRatio=0.96`) rekor tertinggi; otak S2 bersih & berputar 360° penuh; semua 6 scene `0` hazard & `0` rollback.** |
-| **Run 12** | **Prompt 12 M0–M4 (`secondaryMotion` 30fps, ranking `elementTracks`, kalibrasi `hasLivingHold`, gerbang optical-flow 30fps) + fix `AM.ease.inOutQuart` & blur-reveal snap** | **`0.7220`** | `0.782` | `0.882` | **`0.571`** | `2/36` | `1/26` | `3/5` (maks `4.3×`) | **Rekor baru 36-frame (`0.7220`) & Edge (`0.5709`); S1 (`0.709`, kartu melayang 23px, `frozenShare 0.26→0.04`), S3 (`p97Ratio 0.34→0.66`), S4 (`0.798`), S5 (`0.821`, `p97Ratio 0.17→0.38`, seam POP `8.6×→3.0×`), S6 target rata tajam.** |
+| **Run 12** | **Prompt 12 M0–M4 (`secondaryMotion` 30fps, ranking `elementTracks`, kalibrasi `hasLivingHold`, gerbang optical-flow 30fps) + fix `AM.ease.inOutQuart` & blur-reveal snap** | **`0.7220`** | `0.782` | `0.882` | `0.571` | `2/36` | `1/26` | `3/5` (maks `4.3×`) | Rekor 36-frame (`0.7220`); S1 kartu melayang 23px (`frozenShare 0.26→0.04`), S3 (`p97Ratio 0.34→0.66`), S5 (`0.821`, `p97Ratio 0.17→0.38`). |
+| **Run 13** | **Compositor `push_*` side-by-side kontinu + 180° clamped shutter blur default + kurva AE (`aeGlide`/`outQuint`) + gerbang 30fps tiap render + rollback simetris + `SceneMotionSpec` (`16a899a`)** | `0.7152` | `0.789` | `0.878` | **`0.585`** | `2/36` | **`0/26`** | **`0/5` (maks `2.2×`)** | **Rekor baru Edge (`0.5846`), `0/5` Seam POP pertama kali, `0/26` Dead Holds, `fastSeconds` melonjak 2× (`2.07s→4.40s`), S3 `fastShare 0.35` (`p97Ratio 1.01`), S5 `fastShare 1.00/1.00` (`p97Ratio 0.86`) diselamatkan rollback simetris.** |
 
 ## Skor Per-Scene Run 9 (`summary_run9.json`)
 
@@ -43,19 +44,19 @@ Arsip benchmark offline untuk evaluasi regresi kualitas rekonstruksi gerak (*mot
 - **Scene 2** mencapai kualitas terbaik sepanjang seluruh pengujian: foto otak 3D bersih tanpa label/latar merah (`img/brain.png`), berputar kontinu 360° via `AM.drawTurntableObject`, seluruh kata memakai `AM.drawBlurRevealText`, dan rasio energi gerak `res/ref = 0.96`.
 - **Scene 6** mencatat *false positive* minor dari detektor `turntable_3d` pada pop-in target panahan sehingga target datar ikut dibungkus `AM.drawTurntableObject` (sedikit melengkung secara sferis). Ini menjadi temuan bersih untuk penyempurnaan detektor `ref_motion_transitions.py` berikutnya.
 
-## Perbandingan Motion Smoothness (`scripts/motion-smooth-report.py`, Baseline Run 11 vs Run 12)
+## Perbandingan Motion Smoothness (`scripts/motion-smooth-report.py`, Baseline Run 11 vs Run 12 vs Run 13)
 
 > **Catatan batasan alat ukur:** `motion-smooth-report.py` adalah proksi optical flow Farneback pada 360×640 (bukan ukuran rasa subjektif, tidak menghapus derau kompresi, tidak mengukur bentuk kurva kecepatan satu elemen atau kualitas blur).
 
-| Scene | `fastShare` Ref | `fastShare` Run 11 | `fastShare` Run 12 | `p97Ratio` Run 11 | `p97Ratio` Run 12 | `active` Ref / Run 11 / Run 12 |
-|---|---:|---:|---:|---:|---:|---|
-| S1 | `0.52` | `0.30` | `0.27` | `0.70` | `0.52` | `0.158 / 0.096 / 0.125` |
-| S2 | `0.29` | `0.20` | `0.16` | `1.17` | `0.63` | `0.174 / 0.159 / 0.096` |
-| S3 | `0.61` | `0.05` | `0.07` | `0.34` | **`0.66`** | `0.105 / 0.064 / 0.107` |
-| S4 | `0.07` | `0.05` | `0.03` | `0.98` | `0.80` | `0.025 / 0.018 / 0.017` |
-| S5 | `1.00` | `0.08` | **`0.15`** | `0.17` | **`0.38`** | `0.113 / 0.152 / 0.158` |
-| S6 | `0.32` | `0.19` | `0.15` | `0.84` | `0.79` | `0.081 / 0.058 / 0.065` |
-| **Total `fastSeconds`** | **`6.61s`** | `2.20s` | `2.07s` | — | — | `midMotionDup`: Ref `[49]`, Run 12 `[43, 487, 493]` |
+| Scene | `fastShare` Ref | Run 11 | Run 12 | **Run 13** | `p97Ratio` R11 → R12 → **R13** | `active` Ref / R12 / **R13** |
+|---|---:|---:|---:|---:|---|---|
+| S1 | `0.52` | `0.30` | `0.27` | `0.24` | `0.70 → 0.52 → 0.48` | `0.158 / 0.125 / 0.104` |
+| S2 | `0.29` | `0.20` | `0.16` | `0.15` | `1.17 → 0.63 → `**`0.92`** | `0.174 / 0.096 / 0.108` |
+| S3 | `0.61` | `0.05` | `0.07` | **`0.35`** | `0.34 → 0.66 → `**`1.01`** | `0.105 / 0.107 / 0.073` |
+| S4 | `0.07` | `0.05` | `0.03` | **`0.06`** | `0.98 → 0.80 → `**`0.95`** | `0.025 / 0.017 / 0.018` |
+| S5 | `1.00` | `0.08` | `0.15` | **`1.00`** | `0.17 → 0.38 → `**`0.86`** | `0.113 / 0.158 / 0.129` |
+| S6 | `0.32` | `0.19` | `0.15` | `0.13` | `0.84 → 0.79 → 0.55` | `0.081 / 0.065 / 0.050` |
+| **Total `fastSeconds`** | **`6.61s`** | `2.20s` | `2.07s` | **`4.40s`** | `midMotionDup`: Ref `[49]`, R12 `[43,487,493]`, **R13 `[3,47]`** | **Seam POP: `0/5`, Dead Holds: `0/26`** |
 
 ## Cara Reproduksi Evaluasi Offline
 

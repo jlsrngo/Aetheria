@@ -1,0 +1,340 @@
+{
+  "fps": 29.97002997002997,
+  "frames": {
+    "ref": 536,
+    "res": 537
+  },
+  "cutOffsets": [
+    {
+      "refFrame": 49,
+      "resFrame": 45,
+      "offsetFrames": -4
+    },
+    {
+      "refFrame": 75,
+      "resFrame": 75,
+      "offsetFrames": 0
+    },
+    {
+      "refFrame": 286,
+      "resFrame": 286,
+      "offsetFrames": 0
+    }
+  ],
+  "motionByScene": [
+    {
+      "scene": 1,
+      "t0": 0,
+      "t1": 75,
+      "meanDiffRef": 7.432,
+      "meanDiffRes": 4.304,
+      "ratioRes/Ref": 0.58,
+      "frozenShareRes": 0.11,
+      "frozenShareRef": 0.0
+    },
+    {
+      "scene": 2,
+      "t0": 75,
+      "t1": 186,
+      "meanDiffRef": 1.804,
+      "meanDiffRes": 0.973,
+      "ratioRes/Ref": 0.54,
+      "frozenShareRes": 0.0,
+      "frozenShareRef": 0.0
+    },
+    {
+      "scene": 3,
+      "t0": 186,
+      "t1": 286,
+      "meanDiffRef": 1.192,
+      "meanDiffRes": 0.998,
+      "ratioRes/Ref": 0.84,
+      "frozenShareRes": 0.0,
+      "frozenShareRef": 0.0
+    },
+    {
+      "scene": 4,
+      "t0": 286,
+      "t1": 405,
+      "meanDiffRef": 0.469,
+      "meanDiffRes": 0.483,
+      "ratioRes/Ref": 1.03,
+      "frozenShareRes": 0.11,
+      "frozenShareRef": 0.0
+    },
+    {
+      "scene": 5,
+      "t0": 405,
+      "t1": 470,
+      "meanDiffRef": 1.776,
+      "meanDiffRes": 2.203,
+      "ratioRes/Ref": 1.24,
+      "frozenShareRes": 0.0,
+      "frozenShareRef": 0.0
+    },
+    {
+      "scene": 6,
+      "t0": 470,
+      "t1": 536,
+      "meanDiffRef": 1.126,
+      "meanDiffRes": 0.612,
+      "ratioRes/Ref": 0.54,
+      "frozenShareRes": 0.38,
+      "frozenShareRef": 0.11
+    }
+  ],
+  "paletteDrift": [
+    {
+      "t": 0.0,
+      "dE76": 1.1,
+      "meanRGBRef": [
+        254,
+        254,
+        254
+      ],
+      "meanRGBRes": [
+        254,
+        254,
+        254
+      ]
+    },
+    {
+      "t": 1.0,
+      "dE76": 14.0,
+      "meanRGBRef": [
+        222,
+        217,
+        237
+      ],
+      "meanRGBRes": [
+        218,
+        213,
+        235
+      ]
+    },
+    {
+      "t": 2.0,
+      "dE76": 11.3,
+      "meanRGBRef": [
+        244,
+        244,
+        246
+      ],
+      "meanRGBRes": [
+        246,
+        246,
+        243
+      ]
+    },
+    {
+      "t": 3.0,
+      "dE76": 8.6,
+      "meanRGBRef": [
+        213,
+        212,
+        212
+      ],
+      "meanRGBRes": [
+        212,
+        210,
+        208
+      ]
+    },
+    {
+      "t": 4.0,
+      "dE76": 11.1,
+      "meanRGBRef": [
+        214,
+        209,
+        203
+      ],
+      "meanRGBRes": [
+        211,
+        208,
+        204
+      ]
+    },
+    {
+      "t": 5.0,
+      "dE76": 10.4,
+      "meanRGBRef": [
+        214,
+        209,
+        203
+      ],
+      "meanRGBRes": [
+        212,
+        208,
+        204
+      ]
+    },
+    {
+      "t": 6.01,
+      "dE76": 12.2,
+      "meanRGBRef": [
+        212,
+        207,
+        202
+      ],
+      "meanRGBRes": [
+        211,
+        207,
+        204
+      ]
+    },
+    {
+      "t": 7.01,
+      "dE76": 8.0,
+      "meanRGBRef": [
+        213,
+        208,
+        215
+      ],
+      "meanRGBRes": [
+        210,
+        205,
+        213
+      ]
+    },
+    {
+      "t": 8.01,
+      "dE76": 14.4,
+      "meanRGBRef": [
+        206,
+        201,
+        208
+      ],
+      "meanRGBRes": [
+        207,
+        202,
+        210
+      ]
+    },
+    {
+      "t": 9.01,
+      "dE76": 28.8,
+      "meanRGBRef": [
+        195,
+        190,
+        197
+      ],
+      "meanRGBRes": [
+        183,
+        178,
+        186
+      ]
+    },
+    {
+      "t": 10.01,
+      "dE76": 5.8,
+      "meanRGBRef": [
+        215,
+        215,
+        216
+      ],
+      "meanRGBRes": [
+        212,
+        212,
+        214
+      ]
+    },
+    {
+      "t": 11.01,
+      "dE76": 6.5,
+      "meanRGBRef": [
+        212,
+        209,
+        210
+      ],
+      "meanRGBRes": [
+        210,
+        207,
+        208
+      ]
+    },
+    {
+      "t": 12.01,
+      "dE76": 8.3,
+      "meanRGBRef": [
+        211,
+        208,
+        209
+      ],
+      "meanRGBRes": [
+        209,
+        206,
+        207
+      ]
+    },
+    {
+      "t": 13.01,
+      "dE76": 8.6,
+      "meanRGBRef": [
+        210,
+        207,
+        208
+      ],
+      "meanRGBRes": [
+        209,
+        205,
+        206
+      ]
+    },
+    {
+      "t": 14.01,
+      "dE76": 14.6,
+      "meanRGBRef": [
+        212,
+        211,
+        212
+      ],
+      "meanRGBRes": [
+        209,
+        207,
+        209
+      ]
+    },
+    {
+      "t": 15.02,
+      "dE76": 9.8,
+      "meanRGBRef": [
+        211,
+        210,
+        211
+      ],
+      "meanRGBRes": [
+        208,
+        207,
+        209
+      ]
+    },
+    {
+      "t": 16.02,
+      "dE76": 5.8,
+      "meanRGBRef": [
+        216,
+        215,
+        215
+      ],
+      "meanRGBRes": [
+        215,
+        214,
+        214
+      ]
+    },
+    {
+      "t": 17.02,
+      "dE76": 11.7,
+      "meanRGBRef": [
+        214,
+        210,
+        211
+      ],
+      "meanRGBRes": [
+        213,
+        208,
+        209
+      ]
+    }
+  ]
+}
