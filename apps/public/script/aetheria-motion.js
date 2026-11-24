@@ -2106,6 +2106,27 @@
   }
 
   /**
+   * Creates a unified multi-renderer compositing stage (Canvas 2D, Assets, SVG/DOM, Three.js,
+   * WebGL2 post-processing) with parent-child transforms & shared camera via `/script/aetheria-stage.js`.
+   */
+  function createStage(opts = {}) {
+    if (global.AetheriaStage && typeof global.AetheriaStage.createStage === "function") {
+      return global.AetheriaStage.createStage(opts);
+    }
+    return null;
+  }
+
+  /**
+   * Synchronizes one canonical camera pose across Canvas 2D, DOM/SVG elements, and Three.js cameras.
+   */
+  function syncCamera(camState, targets = {}) {
+    if (global.AetheriaStage && typeof global.AetheriaStage.syncCamera === "function") {
+      return global.AetheriaStage.syncCamera(camState, targets);
+    }
+    return null;
+  }
+
+  /**
    * Renders a physically inspired 3-layer additive optical glow/bloom orb
    * (wide atmospheric halo + saturated mid bloom + over-exposed white hot core).
    */
@@ -3119,6 +3140,8 @@
     getAsset,
     drawAsset,
     postProcess,
+    createStage,
+    syncCamera,
     drawOpticalGlow,
     drawBloomStroke,
     drawSphericalLens,

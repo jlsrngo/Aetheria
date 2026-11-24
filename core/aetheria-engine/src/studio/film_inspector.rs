@@ -337,10 +337,14 @@ fn collect_ordered_scripts(html_path: &Path) -> Vec<(String, String, String)> {
             let lower = name.to_ascii_lowercase();
             let order_key = if lower == "three.min.js" || lower == "three.js" {
                 (0u8, 0usize)
-            } else if lower == "aetheria-post.js" {
+            } else if lower == "story-camera.js" {
                 (1, 0)
-            } else if lower == "aetheria-motion.js" {
+            } else if lower == "aetheria-post.js" {
                 (1, 1)
+            } else if lower == "aetheria-stage.js" {
+                (1, 2)
+            } else if lower == "aetheria-motion.js" {
+                (1, 3)
             } else if let Some(html_pos) = extract_html_script_order(&html_lower, &name) {
                 (2, html_pos)
             } else {

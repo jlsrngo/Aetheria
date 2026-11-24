@@ -229,7 +229,9 @@ pub(crate) fn render_managed_index_html(
     if manifest.use_three {
         script_tags.push_str("  <script src=\"/script/three.min.js\"></script>\n");
     }
+    script_tags.push_str("  <script src=\"/script/story-camera.js\"></script>\n");
     script_tags.push_str("  <script src=\"/script/aetheria-post.js\"></script>\n");
+    script_tags.push_str("  <script src=\"/script/aetheria-stage.js\"></script>\n");
     script_tags.push_str("  <script src=\"/script/aetheria-motion.js\"></script>\n");
     for sc in &manifest.scenes {
         script_tags.push_str(&format!("  <script src=\"/{}\"></script>\n", sc.script));
@@ -238,6 +240,14 @@ pub(crate) fn render_managed_index_html(
     let scenes_json = serde_json::to_string_pretty(&manifest.scenes).unwrap_or_else(|_| "[]".into());
     let title_json = serde_json::to_string(&manifest.title).unwrap_or_else(|_| "\"Motion Film\"".into());
     let bg_json = serde_json::to_string(safe_bg).unwrap_or_else(|_| "\"#0f1115\"".into());
+    let webgl_canvas_tag = if manifest.use_three {
+        format!(
+            "    <canvas id=\"stage-webgl\" width=\"{}\" height=\"{}\" style=\"position:absolute;inset:0;width:{}px;height:{}px;pointer-events:none;\"></canvas>\n",
+            manifest.width, manifest.height, manifest.width, manifest.height
+        )
+    } else {
+        String::new()
+    };
 
     format!(
         r##"<!DOCTYPE html>
@@ -269,6 +279,7 @@ pub(crate) fn render_managed_index_html(
       transform-origin: center center;
     }}
     #film {{
+      position: relative;
       display: block;
       width: {w}px;
       height: {h}px;
@@ -277,7 +288,7 @@ pub(crate) fn render_managed_index_html(
 {scripts}</head>
 <body>
   <div id="stage">
-    <canvas id="film" width="{w}" height="{h}"></canvas>
+{webgl_canvas}    <canvas id="film" width="{w}" height="{h}"></canvas>
   </div>
   <script>
   (function () {{
@@ -318,6 +329,7 @@ pub(crate) fn render_managed_index_html(
     window.addEventListener("resize", fitStage);
 
     var canvas = document.getElementById("film");
+    window.__webglCanvas = document.getElementById("stage-webgl") || null;
     var ctx = canvas.getContext("2d");
     var __origSave = ctx.save.bind(ctx);
     var __origRestore = ctx.restore.bind(ctx);
@@ -480,6 +492,7 @@ pub(crate) fn render_managed_index_html(
         bg = safe_bg,
         bg_json = bg_json,
         scripts = script_tags,
+        webgl_canvas = webgl_canvas_tag,
         microstock = is_microstock,
         scenes = scenes_json,
         title_json = title_json,

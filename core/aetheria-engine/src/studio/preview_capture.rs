@@ -114,6 +114,8 @@ pub(crate) fn is_hybrid_or_standalone_html_film(film_root: &Path) -> bool {
                 .filter(|rel| {
                     !rel.eq_ignore_ascii_case("script/aetheria-motion.js")
                         && !super::builtin_runtime::is_builtin_post_path(rel)
+                        && !super::builtin_runtime::is_builtin_stage_path(rel)
+                        && !super::builtin_runtime::is_builtin_story_camera_path(rel)
                         && !super::builtin_runtime::is_builtin_three_path(rel)
                 })
                 .collect();

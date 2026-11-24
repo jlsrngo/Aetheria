@@ -207,6 +207,8 @@ fn check_html_scene_wiring(
         .filter(|rel| {
             !rel.eq_ignore_ascii_case("script/aetheria-motion.js")
                 && !crate::studio::builtin_runtime::is_builtin_post_path(rel)
+                && !crate::studio::builtin_runtime::is_builtin_stage_path(rel)
+                && !crate::studio::builtin_runtime::is_builtin_story_camera_path(rel)
                 && !crate::studio::builtin_runtime::is_builtin_three_path(rel)
         })
         .collect();
@@ -417,6 +419,8 @@ fn check_microstock_js_diagnostics(
     let lower_name = file_name.to_ascii_lowercase();
     if lower_name == "aetheria-motion.js"
         || lower_name == "aetheria-post.js"
+        || lower_name == "aetheria-stage.js"
+        || lower_name == "story-camera.js"
         || lower_name == "three.min.js"
     {
         return;
@@ -803,6 +807,8 @@ pub fn collect_file_feedback(workspace_dir: &str, target: &Path) -> FileFeedback
             for script_rel in extract_local_script_srcs(&content) {
                 if script_rel.eq_ignore_ascii_case("script/aetheria-motion.js")
                     || crate::studio::builtin_runtime::is_builtin_post_path(&script_rel)
+                    || crate::studio::builtin_runtime::is_builtin_stage_path(&script_rel)
+                    || crate::studio::builtin_runtime::is_builtin_story_camera_path(&script_rel)
                     || crate::studio::builtin_runtime::is_builtin_three_path(&script_rel)
                 {
                     continue;

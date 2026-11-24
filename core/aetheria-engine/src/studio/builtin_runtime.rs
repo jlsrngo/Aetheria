@@ -10,6 +10,9 @@ pub const AETHERIA_MOTION_JS: &str = include_str!("../../../../apps/public/scrip
 /// Embedded Modular WebGL2 Post-Processing runtime (`window.AetheriaPost`) fallback when disk `apps/public` is absent.
 pub const AETHERIA_POST_JS: &str = include_str!("../../../../apps/public/script/aetheria-post.js");
 
+/// Embedded Universal Layer Compositor & Camera Adapter (`window.AetheriaStage`) fallback when disk `apps/public` is absent.
+pub const AETHERIA_STAGE_JS: &str = include_str!("../../../../apps/public/script/aetheria-stage.js");
+
 /// Embedded Declarative Story Core runtime (`window.StoryCore`) fallback when disk `apps/public` is absent.
 pub const STORY_CORE_JS: &str = include_str!("../../../../apps/public/script/story-core.js");
 
@@ -57,6 +60,23 @@ pub fn resolve_post_runtime_code(project_root: &std::path::Path) -> String {
     std::fs::read_to_string(disk_path).unwrap_or_else(|_| AETHERIA_POST_JS.to_string())
 }
 
+/// Returns true when the requested relative path refers to the built-in `aetheria-stage.js` runtime.
+pub fn is_builtin_stage_path(rel: &str) -> bool {
+    let trimmed = rel.trim().trim_start_matches('/').replace('\\', "/");
+    trimmed.eq_ignore_ascii_case("script/aetheria-stage.js")
+        || trimmed.eq_ignore_ascii_case("aetheria-stage.js")
+}
+
+/// Resolves `aetheria-stage.js` from repo `apps/public/script/` when present, falling back to embedded bytes.
+pub fn resolve_stage_runtime_code(project_root: &std::path::Path) -> String {
+    let disk_path = project_root
+        .join("apps")
+        .join("public")
+        .join("script")
+        .join("aetheria-stage.js");
+    std::fs::read_to_string(disk_path).unwrap_or_else(|_| AETHERIA_STAGE_JS.to_string())
+}
+
 /// Returns true when the requested relative path refers to the built-in `story-core.js` runtime.
 pub fn is_builtin_story_core_path(rel: &str) -> bool {
     let trimmed = rel.trim().trim_start_matches('/').replace('\\', "/");
@@ -96,6 +116,7 @@ pub fn is_vendor_script_name(name: &str) -> bool {
     let base = name.trim();
     base.eq_ignore_ascii_case("aetheria-motion.js")
         || base.eq_ignore_ascii_case("aetheria-post.js")
+        || base.eq_ignore_ascii_case("aetheria-stage.js")
         || base.eq_ignore_ascii_case("story-core.js")
         || base.eq_ignore_ascii_case("story-camera.js")
         || base.eq_ignore_ascii_case("three.min.js")
@@ -211,6 +232,9 @@ mod tests {
         assert!(AETHERIA_POST_JS.contains("AetheriaPost"));
         assert!(is_builtin_post_path("/script/aetheria-post.js"));
         assert!(is_vendor_script_name("aetheria-post.js"));
+        assert!(AETHERIA_STAGE_JS.contains("AetheriaStage"));
+        assert!(is_builtin_stage_path("/script/aetheria-stage.js"));
+        assert!(is_vendor_script_name("aetheria-stage.js"));
     }
 
     #[test]
