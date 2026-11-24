@@ -114,7 +114,7 @@ pub fn validate_writable_runtime_path(target: &Path) -> Result<(), String> {
     let lower_name = file_name.to_ascii_lowercase();
     if !matches!(
         lower_name.as_str(),
-        "aetheria-motion.js" | "aetheria-post.js" | "aetheria-stage.js" | "three.min.js" | "three.js"
+        "aetheria-motion.js" | "aetheria-post.js" | "aetheria-stage.js" | "aetheria-tracks.js" | "three.min.js" | "three.js"
     ) {
         return Ok(());
     }
@@ -134,6 +134,7 @@ pub fn validate_writable_runtime_path(target: &Path) -> Result<(), String> {
     if norm.ends_with("/apps/public/script/aetheria-motion.js")
         || norm.ends_with("/apps/public/script/aetheria-post.js")
         || norm.ends_with("/apps/public/script/aetheria-stage.js")
+        || norm.ends_with("/apps/public/script/aetheria-tracks.js")
         || norm.ends_with("/assets/script/three.min.js")
     {
         return Ok(());

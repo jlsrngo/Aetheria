@@ -149,8 +149,11 @@ pub async fn handle_film_bundle(
     let has_stage_lib = ordered
         .iter()
         .any(|(name, _, _)| name.eq_ignore_ascii_case("aetheria-stage.js"));
+    let has_tracks_lib = ordered
+        .iter()
+        .any(|(name, _, _)| name.eq_ignore_ascii_case("aetheria-tracks.js"));
 
-    let mut scripts: Vec<FilmScriptAsset> = Vec::with_capacity(ordered.len() + 4);
+    let mut scripts: Vec<FilmScriptAsset> = Vec::with_capacity(ordered.len() + 5);
     if needs_three {
         scripts.push(FilmScriptAsset {
             name: "three.min.js".to_string(),
@@ -163,6 +166,13 @@ pub async fn handle_film_bundle(
             name: "aetheria-post.js".to_string(),
             relative_path: "script/aetheria-post.js".to_string(),
             code: super::builtin_runtime::resolve_post_runtime_code(&crate::paths::project_root()),
+        });
+    }
+    if !has_tracks_lib {
+        scripts.push(FilmScriptAsset {
+            name: "aetheria-tracks.js".to_string(),
+            relative_path: "script/aetheria-tracks.js".to_string(),
+            code: super::builtin_runtime::resolve_tracks_runtime_code(&crate::paths::project_root()),
         });
     }
     if !has_stage_lib {
@@ -251,6 +261,9 @@ pub async fn handle_film_html(
     let mut injected = String::new();
     if !html.contains("aetheria-post.js") {
         injected.push_str("<script src=\"/api/studio/ws-asset/script/aetheria-post.js\"></script>\n");
+    }
+    if !html.contains("aetheria-tracks.js") {
+        injected.push_str("<script src=\"/api/studio/ws-asset/script/aetheria-tracks.js\"></script>\n");
     }
     if !html.contains("aetheria-stage.js") {
         injected.push_str("<script src=\"/api/studio/ws-asset/script/aetheria-stage.js\"></script>\n");

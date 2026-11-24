@@ -13,6 +13,101 @@
   "use strict";
 
   const DEG = Math.PI / 180;
+  const ALLOWED_TRACK_NAMES = [
+    "x",
+    "y",
+    "position",
+    "scale",
+    "scaleX",
+    "scaleY",
+    "rotation",
+    "rotationDeg",
+    "opacity",
+    "anchor",
+    "width",
+    "height",
+  ];
+  let reportedMissingTracks = false;
+
+  function reportMissingTracksOnce() {
+    if (reportedMissingTracks) return;
+    reportedMissingTracks = true;
+    const text = "[aetheria-stage] layer.tracks ignored because window.AetheriaTracks is not loaded.";
+    if (global && typeof global === "object") {
+      global.__aetheriaErrors = Array.isArray(global.__aetheriaErrors) ? global.__aetheriaErrors : [];
+      if (global.__aetheriaErrors.length < 16 && global.__aetheriaErrors.indexOf(text) === -1) {
+        global.__aetheriaErrors.push(text);
+      }
+    }
+  }
+
+  function validateLayerTracks(layerId, rawTracks) {
+    if (rawTracks === undefined || rawTracks === null) return null;
+    if (typeof rawTracks !== "object" || Array.isArray(rawTracks)) {
+      throw new Error("AetheriaStage.addLayer('" + layerId + "'): 'tracks' must be a plain object.");
+    }
+    const names = Object.keys(rawTracks);
+    const clean = Object.create(null);
+    for (let i = 0; i < names.length; i++) {
+      const name = names[i];
+      if (ALLOWED_TRACK_NAMES.indexOf(name) === -1) {
+        throw new Error(
+          "AetheriaStage.addLayer('" +
+            layerId +
+            "'): unknown track '" +
+            name +
+            "'. Allowed tracks: " +
+            ALLOWED_TRACK_NAMES.join(", ") +
+            "."
+        );
+      }
+      const keys = rawTracks[name];
+      if (!Array.isArray(keys) || keys.length === 0) {
+        throw new Error(
+          "AetheriaStage.addLayer('" + layerId + "'): track '" + name + "' must be a non-empty array."
+        );
+      }
+      clean[name] = keys;
+    }
+    return clean;
+  }
+
+  function applyTracksToLayer(layer, t, tracksApi) {
+    const tr = layer.tracks;
+    if (!tr) return;
+    if (tr.x) layer.x = Number(tracksApi.evaluateTrack(tr.x, t));
+    if (tr.y) layer.y = Number(tracksApi.evaluateTrack(tr.y, t));
+    if (tr.position) {
+      const pos = tracksApi.evaluateTrack(tr.position, t, { spatial: true });
+      if (Array.isArray(pos) && pos.length >= 2) {
+        layer.x = Number(pos[0]);
+        layer.y = Number(pos[1]);
+      }
+    }
+    if (tr.scale) {
+      const sc = tracksApi.evaluateTrack(tr.scale, t);
+      if (Array.isArray(sc)) {
+        layer.scaleX = Number(sc[0]);
+        layer.scaleY = Number(sc.length >= 2 ? sc[1] : sc[0]);
+      } else {
+        layer.scaleX = Number(sc);
+        layer.scaleY = Number(sc);
+      }
+    }
+    if (tr.scaleX) layer.scaleX = Number(tracksApi.evaluateTrack(tr.scaleX, t));
+    if (tr.scaleY) layer.scaleY = Number(tracksApi.evaluateTrack(tr.scaleY, t));
+    if (tr.rotation) layer.rotation = Number(tracksApi.evaluateTrack(tr.rotation, t));
+    if (tr.rotationDeg) layer.rotation = Number(tracksApi.evaluateTrack(tr.rotationDeg, t)) * DEG;
+    if (tr.opacity) layer.opacity = clamp(Number(tracksApi.evaluateTrack(tr.opacity, t)), 0, 1);
+    if (tr.anchor) {
+      const anc = tracksApi.evaluateTrack(tr.anchor, t);
+      if (Array.isArray(anc) && anc.length >= 2) {
+        layer.anchor = [Number(anc[0]), Number(anc[1])];
+      }
+    }
+    if (tr.width) layer.width = Number(tracksApi.evaluateTrack(tr.width, t));
+    if (tr.height) layer.height = Number(tracksApi.evaluateTrack(tr.height, t));
+  }
 
   function clamp(v, lo, hi) {
     return v < lo ? lo : v > hi ? hi : v;
@@ -250,6 +345,7 @@
         throw new Error("AetheriaStage cyclic parentId detected for layer '" + id + "' -> '" + parentId + "'.");
       }
       const existing = byId[id];
+      const tracks = validateLayerTracks(id, spec.tracks);
       const layer = {
         id,
         parentId,
@@ -277,6 +373,7 @@
         baseLookAt: spec.baseLookAt || null,
         draw: typeof spec.draw === "function" ? spec.draw : null,
         update: typeof spec.update === "function" ? spec.update : null,
+        tracks,
         _order: existing ? existing._order : layers.length,
       };
       if (existing) {
@@ -314,6 +411,20 @@
     }
 
     function resolveWorldState(t) {
+      // Evaluate declarative AE keyframe tracks before layer.update so update() can still override
+      const tracksApi =
+        global.AetheriaTracks && typeof global.AetheriaTracks.evaluateTrack === "function"
+          ? global.AetheriaTracks
+          : null;
+      for (let i = 0; i < layers.length; i++) {
+        if (layers[i].tracks) {
+          if (tracksApi) {
+            applyTracksToLayer(layers[i], t, tracksApi);
+          } else {
+            reportMissingTracksOnce();
+          }
+        }
+      }
       // Allow per-layer dynamic update(layer, t) before world matrix resolution
       for (let i = 0; i < layers.length; i++) {
         if (layers[i].update) {

@@ -2117,6 +2117,17 @@
   }
 
   /**
+   * Evaluates an After Effects-style keyframe track (`[{ t, v, ease?, outEase?, inEase?, hold? }]`)
+   * via `/script/aetheria-tracks.js` (`window.AetheriaTracks`).
+   */
+  function evalTrack(keys, t, opts = {}) {
+    if (global.AetheriaTracks && typeof global.AetheriaTracks.evaluateTrack === "function") {
+      return global.AetheriaTracks.evaluateTrack(keys, t, opts);
+    }
+    return null;
+  }
+
+  /**
    * Synchronizes one canonical camera pose across Canvas 2D, DOM/SVG elements, and Three.js cameras.
    */
   function syncCamera(camState, targets = {}) {
@@ -3141,6 +3152,7 @@
     drawAsset,
     postProcess,
     createStage,
+    evalTrack,
     syncCamera,
     drawOpticalGlow,
     drawBloomStroke,

@@ -185,6 +185,7 @@ fn collect_scene_specs(film_dir: &Path) -> Option<Vec<(String, String)>> {
                 !rel.eq_ignore_ascii_case("script/aetheria-motion.js")
                     && !crate::studio::builtin_runtime::is_builtin_post_path(rel)
                     && !crate::studio::builtin_runtime::is_builtin_stage_path(rel)
+                    && !crate::studio::builtin_runtime::is_builtin_tracks_path(rel)
                     && !crate::studio::builtin_runtime::is_builtin_story_camera_path(rel)
                     && !crate::studio::builtin_runtime::is_builtin_three_path(rel)
             })
