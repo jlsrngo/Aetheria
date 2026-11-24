@@ -40,7 +40,13 @@ pub(crate) struct SceneToolContext<'a> {
     pub use_filmstrip: bool,
     pub motion_expectations: SceneMotionExpectations,
     pub secondary_motion: &'a [Value],
-    pub motion_gate_runs: &'a std::sync::atomic::AtomicUsize,
+}
+
+/// Returns true when the 30fps optical-flow motion gate should verify a scene render.
+/// Every error-free filmstrip render must be checked so later edits cannot bypass the gate
+/// and register as false-clean (`motion_flow_deficit = false`).
+pub(crate) fn should_run_motion_flow_gate(use_filmstrip: bool, runtime_error_count: usize) -> bool {
+    use_filmstrip && runtime_error_count == 0
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -943,21 +949,13 @@ pub(crate) async fn execute_scene_micro_tool(
                                 .to_string(),
                         );
                     }
-                    // M3: Run lightweight 30fps optical-flow motion gate (at most twice per scene:
-                    // initial check + post-fix verification) so weak secondary motion is caught even
-                    // when static keyframe SSIM looks high.
+                    // M3: Run lightweight 30fps optical-flow motion gate on every error-free
+                    // filmstrip render so no post-fix or late edit can slip past unchecked as
+                    // false-clean (`motion_flow_deficit = false`) when static SSIM looks high.
                     let mut motion_flow_deficit = false;
                     let mut motion_flow_json: Option<Value> = None;
                     let mut feedback = feedback;
-                    if ctx.use_filmstrip
-                        && res.runtime_errors.is_empty()
-                        && ctx
-                            .motion_gate_runs
-                            .load(std::sync::atomic::Ordering::Relaxed)
-                            < 2
-                    {
-                        ctx.motion_gate_runs
-                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if should_run_motion_flow_gate(ctx.use_filmstrip, res.runtime_errors.len()) {
                         if let Some(gate) = crate::studio::motion_gate::run_scene_motion_flow_gate(
                             ctx.workspace_dir,
                             ctx.ws_root,
@@ -1233,5 +1231,12 @@ mod tests {
             .collect();
         assert!(names_default.contains(&"bash"));
         assert!(names_default.contains(&"read_filmstrip"));
+    }
+
+    #[test]
+    fn motion_flow_gate_runs_on_every_error_free_filmstrip_render() {
+        assert!(should_run_motion_flow_gate(true, 0));
+        assert!(!should_run_motion_flow_gate(true, 1));
+        assert!(!should_run_motion_flow_gate(false, 0));
     }
 }

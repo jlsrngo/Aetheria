@@ -711,13 +711,16 @@ pub(crate) fn is_better_checkpoint(
         || (!best_errs.is_empty() && cand_errs.is_empty())
         || (best_errs.is_empty()
             && cand_errs.is_empty()
-            && (cand_score >= best_score - 0.002
-                || (cand_hazards < best_hazards && cand_score >= best_score - 0.12)))
+            && ((cand_hazards <= best_hazards && cand_score >= best_score - 0.002)
+                || (cand_hazards < best_hazards && cand_score >= best_score - 0.12)
+                || (cand_hazards > best_hazards && cand_score >= best_score + 0.12)))
 }
 
 /// Pure end-of-scene safety-restore predicate (baseline rule P4).
 /// Protects clean animated scripts (`final_hazards < best_hazards`, e.g. fixed 3D turntable / blur reveal)
-/// from being rolled back to an older static/hazardous checkpoint unless pixel score severely collapsed.
+/// from being rolled back to an older static/hazardous checkpoint unless pixel score severely collapsed,
+/// and restores a motion-clean best checkpoint if the final render introduced a motion hazard/deficit
+/// without a major visual score rescue (`+0.12`).
 pub(crate) fn should_restore_best_checkpoint(
     best_score: f64,
     best_code: &str,
@@ -731,7 +734,8 @@ pub(crate) fn should_restore_best_checkpoint(
         && !best_code.is_empty()
         && !crate::tool::film_state::is_scaffold_stub_content(best_code)
         && ((best_errs.is_empty() && !latest_errs.is_empty())
-            || (final_hazards >= best_hazards && latest_score + 0.008 < best_score)
+            || (final_hazards > best_hazards && latest_score < best_score + 0.12)
+            || (final_hazards == best_hazards && latest_score + 0.008 < best_score)
             || (final_hazards < best_hazards && latest_score + 0.14 < best_score))
 }
 
@@ -966,7 +970,6 @@ async fn run_single_direct_scene(
         })
         .cloned()
         .unwrap_or_default();
-    let motion_gate_runs = std::sync::atomic::AtomicUsize::new(0);
     let mut motion_deficit_rounds: usize = 0;
     let tool_ctx = SceneToolContext {
         session_id: &shared.session_id,
@@ -989,7 +992,6 @@ async fn run_single_direct_scene(
         use_filmstrip: shared.active_filmstrip,
         motion_expectations,
         secondary_motion: &secondary_motion,
-        motion_gate_runs: &motion_gate_runs,
     };
 
     let mut scene_msgs = vec![
@@ -1613,6 +1615,9 @@ async fn run_single_direct_scene(
                 has_structural_diagnosis: false,
                 motion_flow_deficit: false,
             });
+            if metrics.motion_flow_deficit {
+                motion_deficit_rounds += 1;
+            }
             latest_motion_flow_deficit = metrics.motion_flow_deficit;
             let cur_haz = detect_scene_motion_hazards(&code_block, motion_expectations).len()
                 + usize::from(metrics.motion_flow_deficit);
@@ -3058,6 +3063,14 @@ mod tests {
         let real_code = "AM.registerScene('s', function(ctx,t){ ctx.fillRect(0,0,10,10); ctx.arc(5,5,2,0,6); });";
         assert!(!should_restore_best_checkpoint(0.669, real_code, &[], 2, 0.622, &[], 0));
         assert!(should_restore_best_checkpoint(0.70, real_code, &[], 0, 0.60, &[], 0));
+
+        // Regression guard (Run 12 S5): a render that introduces a motion-flow deficit (hazards=1)
+        // must NOT overwrite a motion-clean checkpoint (hazards=0) for a tiny visual score bump,
+        // and end-of-scene restore must roll back to the motion-clean checkpoint unless score jumped >= +0.12.
+        assert!(!is_better_checkpoint(0.8118, &[], 0, 0.8207, &[], 1));
+        assert!(should_restore_best_checkpoint(0.8118, real_code, &[], 0, 0.8207, &[], 1));
+        assert!(is_better_checkpoint(0.50, &[], 0, 0.70, &[], 1));
+        assert!(!should_restore_best_checkpoint(0.50, real_code, &[], 0, 0.70, &[], 1));
 
         // Early exit blocked when edge < 0.42, min_frame_score < 0.66, score < 0.80, or structuralDiagnosis is present
         assert!(!should_early_exit_scene(true, false, true, &[], &[], false, false, 2, 0.82, 0.35, 0.68));
