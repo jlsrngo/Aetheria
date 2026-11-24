@@ -87,7 +87,24 @@ describe("Harness F1 spec guards (skill-lint & AM API parity)", () => {
   it("ensures every AM.<symbol> in AM_API.md, prompts, and mg-* skills exists in aetheria-motion.js", () => {
     const exported = parseRuntimeAmApiExports();
     expect(exported.size).toBeGreaterThanOrEqual(46);
-    for (const sym of ["drawCursor", "drawExtrudedArrow3D", "drawLaptopFrame", "drawWordWheel"]) {
+    for (const sym of [
+      "drawCursor",
+      "drawExtrudedArrow3D",
+      "drawLaptopFrame",
+      "drawWordWheel",
+      "evalTrack",
+      "wiggle",
+      "loopTrack",
+      "drawAnimatedText",
+      "trimPaths",
+      "roundCorners",
+      "puckerBloat",
+      "wigglePaths",
+      "morphPath",
+      "drawShapePath",
+      "repeatDraw",
+      "polystarPath",
+    ]) {
       expect(exported.has(sym)).toBe(true);
     }
 

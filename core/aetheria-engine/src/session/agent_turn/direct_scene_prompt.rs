@@ -81,7 +81,10 @@ COMPACT `window.AM` RUNTIME API (already loaded globally before your script):
 - `AM.drawWordWheel(ctx, { words, activeFloat, cx, cy, spacing, activeFont, dimFont, activeColor, dimColor })`
 - `AM.drawSVGPath(ctx, d, { x, y, scale, fill, stroke, lineWidth })`
 - `AM.loadImage('/img/asset.png')` -> preloaded `HTMLImageElement` (automatically awaited before Frame 0); `AM.drawImageFit(ctx, img, x, y, w, h, 'contain')`; `AM.drawAsset(ctx, idOrPath, x, y, w, h, { rot, scale, flipX, shadow })` (auto-uses `alphaBbox` & `pivot` from `assets.json` registered by `fetch_web_image`)
-- `AM.postProcess(ctx, t, { bloom, bloomThreshold, chromatic, contrast, saturation, vignette, grain, tonemap })` — optional WebGL2 post-processing pass; `AM.createStage({ width, height })` & `AM.syncCamera(cam, targets)` — optional parent-child layer compositor
+- `AM.postProcess(ctx, t, { bloom, bloomThreshold, chromatic, contrast, saturation, vignette, grain, tonemap, directionalBlur, directionalAngle, radialBlur, radialCenter, dof, dofFocus, dofRadius, dofFeather })` — optional WebGL2 post-processing pass
+- `AM.createStage({ width, height })` & `AM.syncCamera(cam, targets)` — declarative multi-layer compositor supporting `parentId`, secondary-motion `followLag`, AE speed-graph `tracks` (`position`, `scale`, `rotationDeg`, `opacity`), 22 additive `behaviors` (`floatUpDown`, `breathe`, `pendulum`, `heartbeat`, `wiggleSoft`, `shake`, `sway`, `orbit`, `pulse`, `rubberBand`, `fadePulse`, ...), `matte: { layerId, mode: 'alpha'|'alphaInverted'|'luma'|'lumaInverted' }`, `echo` trails, and `kind: 'text'|'shape'`
+- `AM.evalTrack(keys, t, { spatial? })`, `AM.loopTrack(keys, t, { type, direction })`, `AM.wiggle(t, freq, amp, opts)` — After Effects speed-graph tracks, looping & deterministic wiggle
+- `AM.drawAnimatedText(ctx, text, x, y, t, { preset, startSec, durationSec })` (`typewriter`, `fadeUpCharacters`, `bounceInWords`, `trackingIn`, `scramble`, `blurIn`, `jitter`, `dropInLines`), `AM.trimPaths`, `AM.repeatDraw`, `AM.roundCorners`, `AM.puckerBloat`, `AM.wigglePaths`, `AM.morphPath`, `AM.drawShapePath`, `AM.polystarPath`
 - Safe Canvas 2D: keep `ctx.save()`/`ctx.restore()` balanced and never reference undeclared variables.";
 
 /// Compact "minimal / IDE-like" system prompt (`<= 2500` bytes) for Phase X2 ablation.

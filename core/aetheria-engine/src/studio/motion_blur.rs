@@ -83,7 +83,7 @@ impl MotionBlurMode {
             Self::Fixed { samples, .. } => *samples,
             Self::Auto { samples, windows, .. } => {
                 if windows.iter().any(|&(lo, hi)| t >= lo && t <= hi) {
-                    *samples
+                    adaptive_samples(*samples as f64, 4, *samples)
                 } else {
                     1
                 }

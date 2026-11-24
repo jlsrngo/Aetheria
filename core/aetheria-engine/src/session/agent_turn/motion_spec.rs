@@ -68,6 +68,18 @@ pub(crate) struct MotionElementSpec {
     #[serde(default)]
     pub parent_id: Option<String>,
     #[serde(default)]
+    pub follow_lag: Option<f64>,
+    #[serde(default)]
+    pub behaviors: Vec<String>,
+    #[serde(default)]
+    pub text_preset: Option<String>,
+    #[serde(default)]
+    pub matte_layer_id: Option<String>,
+    #[serde(default)]
+    pub matte_mode: Option<String>,
+    #[serde(default)]
+    pub use_stage_tracks: bool,
+    #[serde(default)]
     pub evidence_ref: Option<String>,
     #[serde(default)]
     pub intent: Option<String>,
@@ -114,7 +126,7 @@ const VALID_MOTION_KINDS: [&str; 10] = [
     "marching_dash",
     "static_plate",
 ];
-const VALID_EASINGS: [&str; 15] = [
+const VALID_EASINGS: [&str; 27] = [
     "aeGlide",
     "outQuint",
     "inOutQuint",
@@ -130,7 +142,54 @@ const VALID_EASINGS: [&str; 15] = [
     "outCubic",
     "outQuad",
     "linear",
+    "easy",
+    "smooth",
+    "easeInOutSoft",
+    "easeInOut",
+    "easeInOutStrong",
+    "accelerate",
+    "accelerateStrong",
+    "decelerate",
+    "decelerateStrong",
+    "expoInOut",
+    "expoAccelerate",
+    "expoDecelerate",
 ];
+const VALID_BEHAVIOR_PRESETS: [&str; 22] = [
+    "wiggleSoft",
+    "shake",
+    "floatUpDown",
+    "sway",
+    "orbit",
+    "figureEight",
+    "bouncingBall",
+    "driftRight",
+    "driftDiagonal",
+    "pendulum",
+    "wobble",
+    "spinSlow",
+    "spinFast",
+    "pulse",
+    "heartbeat",
+    "breathe",
+    "rubberBand",
+    "jitterScale",
+    "blink",
+    "strobe",
+    "flicker",
+    "fadePulse",
+];
+const VALID_TEXT_PRESETS: [&str; 8] = [
+    "typewriter",
+    "fadeUpCharacters",
+    "bounceInWords",
+    "trackingIn",
+    "scramble",
+    "blurIn",
+    "jitter",
+    "dropInLines",
+];
+const VALID_MATTE_MODES: [&str; 4] = ["alpha", "alphaInverted", "luma", "lumaInverted"];
 
 /// Derives `script/sceneK.motion_spec.json` sibling path from `script/sceneK.js`.
 pub(crate) fn spec_path_for_script(script_path: &Path) -> PathBuf {
@@ -184,10 +243,16 @@ pub(crate) fn write_motion_spec_tool_definition() -> Value {
                                 "motionKind": { "type": "string", "enum": ["enter_settle", "blur_reveal", "turntable_3d", "rotate", "sweep", "orbit", "morph", "counter", "marching_dash", "static_plate"] },
                                 "startSec": { "type": "number" },
                                 "endSec": { "type": "number" },
-                                "easing": { "type": "string", "enum": ["aeGlide", "outQuint", "inOutQuint", "aeSnap", "outExpo", "inOutExpo", "outQuart", "inOutQuart", "outBack", "spring", "inOutCubic", "inCubic", "outCubic", "outQuad", "linear"] },
+                                "easing": { "type": "string", "enum": ["aeGlide", "outQuint", "inOutQuint", "aeSnap", "outExpo", "inOutExpo", "outQuart", "inOutQuart", "outBack", "spring", "inOutCubic", "inCubic", "outCubic", "outQuad", "linear", "easy", "smooth", "easeInOutSoft", "easeInOut", "easeInOutStrong", "accelerate", "accelerateStrong", "decelerate", "decelerateStrong", "expoInOut", "expoAccelerate", "expoDecelerate"] },
                                 "holdBehavior": { "type": "string", "enum": ["steady", "living"] },
                                 "omegaDegPerSec": { "type": "number" },
                                 "parentId": { "type": "string" },
+                                "followLag": { "type": "number", "description": "Optional secondary-motion lag behind parentId in seconds (e.g. 0.05..0.15)." },
+                                "behaviors": { "type": "array", "items": { "type": "string" }, "description": "Optional additive behavior presets (e.g. breathe, floatUpDown, pendulum, heartbeat, wiggleSoft)." },
+                                "textPreset": { "type": "string", "enum": ["typewriter", "fadeUpCharacters", "bounceInWords", "trackingIn", "scramble", "blurIn", "jitter", "dropInLines"] },
+                                "matteLayerId": { "type": "string" },
+                                "matteMode": { "type": "string", "enum": ["alpha", "alphaInverted", "luma", "lumaInverted"] },
+                                "useStageTracks": { "type": "boolean" },
                                 "evidenceRef": { "type": "string" },
                                 "intent": { "type": "string" }
                             },
@@ -339,6 +404,36 @@ pub(crate) fn parse_and_validate_motion_spec(
                 ));
             }
         }
+        if let Some(lag) = el.follow_lag {
+            if !lag.is_finite() || lag < 0.0 {
+                errors.push(format!("element '{}' has invalid followLag '{}'", el.id, lag));
+            } else if lag > 0.0 && el.parent_id.as_deref().unwrap_or("").trim().is_empty() {
+                errors.push(format!("element '{}' declares followLag > 0 without parentId", el.id));
+            }
+        }
+        for beh in &el.behaviors {
+            if !VALID_BEHAVIOR_PRESETS.contains(&beh.as_str()) {
+                errors.push(format!("element '{}' has invalid behavior preset '{}'", el.id, beh));
+            }
+        }
+        if let Some(ref tp) = el.text_preset {
+            if !tp.trim().is_empty() && !VALID_TEXT_PRESETS.contains(&tp.as_str()) {
+                errors.push(format!("element '{}' has invalid textPreset '{}'", el.id, tp));
+            }
+        }
+        if let Some(ref mid) = el.matte_layer_id {
+            if !mid.trim().is_empty() && (!ids.contains(mid) || mid == &el.id) {
+                errors.push(format!(
+                    "element '{}' references invalid/self matteLayerId '{}'",
+                    el.id, mid
+                ));
+            }
+        }
+        if let Some(ref mm) = el.matte_mode {
+            if !mm.trim().is_empty() && !VALID_MATTE_MODES.contains(&mm.as_str()) {
+                errors.push(format!("element '{}' has invalid matteMode '{}'", el.id, mm));
+            }
+        }
     }
 
     let has_kind = |k: &str| spec.elements.iter().any(|e| e.motion_kind == k);
@@ -441,7 +536,23 @@ pub(crate) fn check_code_against_motion_spec(spec: &SceneMotionSpec, code: &str)
     let declared_ae_curves = spec.elements.iter().any(|e| {
         matches!(
             e.easing.as_str(),
-            "aeGlide" | "outQuint" | "inOutQuint" | "aeSnap" | "outExpo" | "spring"
+            "aeGlide"
+                | "outQuint"
+                | "inOutQuint"
+                | "aeSnap"
+                | "outExpo"
+                | "spring"
+                | "easy"
+                | "smooth"
+                | "easeInOut"
+                | "easeInOutStrong"
+                | "accelerate"
+                | "accelerateStrong"
+                | "decelerate"
+                | "decelerateStrong"
+                | "expoInOut"
+                | "expoAccelerate"
+                | "expoDecelerate"
         )
     });
     if declared_ae_curves {
@@ -454,12 +565,37 @@ pub(crate) fn check_code_against_motion_spec(spec: &SceneMotionSpec, code: &str)
             || code.contains("ioQn")
             || code.contains("outX")
             || code.contains("AM.spring(")
-            || code.contains("AM.bezier(");
+            || code.contains("AM.bezier(")
+            || code.contains("AM.evalTrack(")
+            || code.contains("AM.loopTrack(")
+            || code.contains("tracks:");
         if !uses_any_ae && code.contains("outCubic") {
             issues.push(
-                "SPEC COMPLIANCE HAZARD: Your Motion Spec planned After Effects speed-graph curves (`aeGlide`/`outQuint`/`aeSnap`/`outExpo`/`spring`), but `script` fell back exclusively to plain `outCubic` — use the planned curves!".to_string(),
+                "SPEC COMPLIANCE HAZARD: Your Motion Spec planned After Effects speed-graph curves (`aeGlide`/`outQuint`/`aeSnap`/`outExpo`/`spring` or AE tracks), but `script` fell back exclusively to plain `outCubic` — use the planned curves!".to_string(),
             );
         }
+    }
+
+    let declared_stage_features = spec.elements.iter().any(|e| {
+        e.use_stage_tracks
+            || !e.behaviors.is_empty()
+            || e.follow_lag.is_some_and(|l| l > 0.0)
+            || e.matte_layer_id.as_deref().is_some_and(|m| !m.trim().is_empty())
+    });
+    if declared_stage_features && !code.contains("createStage(") && !code.contains("AM.evalTrack(") && !code.contains("AM.wiggle(") {
+        issues.push(
+            "SPEC COMPLIANCE HAZARD: Your Motion Spec declared declarative stage tracks/behaviors/followLag/matte, but `script` does NOT call `AM.createStage(...)`!".to_string(),
+        );
+    }
+
+    let declared_text_preset = spec
+        .elements
+        .iter()
+        .any(|e| e.text_preset.as_deref().is_some_and(|p| !p.trim().is_empty()));
+    if declared_text_preset && !code.contains("drawAnimatedText") && !code.contains("textOpts") {
+        issues.push(
+            "SPEC COMPLIANCE HAZARD: Your Motion Spec declared a `textPreset`, but `script` does NOT call `AM.drawAnimatedText(...)` or a `kind: 'text'` stage layer with `textOpts`!".to_string(),
+        );
     }
 
     issues
@@ -606,5 +742,47 @@ mod tests {
         let (_, res_ok) = parse_and_validate_motion_spec(&lively_orig, "orig_1", 2.5, empty_exp).unwrap();
         assert!(res_ok.valid);
         assert!(res_ok.warnings.is_empty());
+
+        let stage_spec = json!({
+            "schemaVersion": 1,
+            "sceneId": "orig_stage",
+            "durationSec": 2.5,
+            "mode": "original",
+            "elements": [
+                { "id": "mask", "role": "accent", "motionKind": "static_plate", "startSec": 0.0, "endSec": 2.5 },
+                {
+                    "id": "card",
+                    "role": "hero",
+                    "motionKind": "enter_settle",
+                    "startSec": 0.0,
+                    "endSec": 1.0,
+                    "easing": "decelerate",
+                    "behaviors": ["breathe", "floatUpDown"],
+                    "matteLayerId": "mask",
+                    "matteMode": "alpha",
+                    "useStageTracks": true
+                },
+                {
+                    "id": "title",
+                    "role": "text",
+                    "motionKind": "enter_settle",
+                    "startSec": 0.2,
+                    "endSec": 1.2,
+                    "parentId": "card",
+                    "followLag": 0.06,
+                    "textPreset": "bounceInWords"
+                }
+            ]
+        });
+        let (parsed_stage, stage_res) = parse_and_validate_motion_spec(&stage_spec, "orig_stage", 2.5, empty_exp).unwrap();
+        assert!(stage_res.valid, "expected valid declarative stage spec: {:?}", stage_res.errors);
+        let missing_stage = check_code_against_motion_spec(&parsed_stage, "ctx.fillRect(0,0,10,10);");
+        assert!(missing_stage.iter().any(|m| m.contains("AM.createStage")));
+        assert!(missing_stage.iter().any(|m| m.contains("drawAnimatedText")));
+        let good_stage = check_code_against_motion_spec(
+            &parsed_stage,
+            "var s = AM.createStage({ width: 640, height: 360 }); s.addLayer({ id: 'card', tracks: {}, behaviors: ['breathe'] }); AM.drawAnimatedText(ctx, 'HI', 0, 0, t, { preset: 'bounceInWords' });",
+        );
+        assert!(good_stage.is_empty(), "unexpected issues: {:?}", good_stage);
     }
 }
