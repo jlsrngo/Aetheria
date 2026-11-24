@@ -34,6 +34,7 @@ pub(crate) struct DirectSceneSwitches {
     pub max_steps: usize,
     pub filmstrip_pass1: bool,
     pub motion_spec: bool,
+    pub independent_auditor: bool,
     pub concurrency: usize,
     #[serde(skip)]
     pub concurrency_explicit: bool,
@@ -57,6 +58,7 @@ impl Default for DirectSceneSwitches {
             max_steps: 12,
             filmstrip_pass1: true,
             motion_spec: true,
+            independent_auditor: true,
             concurrency: 1,
             concurrency_explicit: false,
             probe_steps_explicit: false,
@@ -166,6 +168,18 @@ impl DirectSceneSwitches {
             None => true,
         };
 
+        let independent_auditor = match lookup("AETHERIA_INDEPENDENT_AUDITOR") {
+            Some(raw) => {
+                let s = raw.trim().to_ascii_lowercase();
+                if s.is_empty() {
+                    true
+                } else {
+                    !matches!(s.as_str(), "0" | "false" | "off" | "no" | "disabled")
+                }
+            }
+            None => true,
+        };
+
         let (concurrency, concurrency_explicit) = match lookup("AETHERIA_DIRECT_CONCURRENCY")
             .and_then(|v| v.trim().parse::<usize>().ok())
         {
@@ -183,6 +197,7 @@ impl DirectSceneSwitches {
             max_steps,
             filmstrip_pass1,
             motion_spec,
+            independent_auditor,
             concurrency,
             concurrency_explicit,
             probe_steps_explicit,

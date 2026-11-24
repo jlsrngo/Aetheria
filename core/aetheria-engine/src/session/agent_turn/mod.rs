@@ -15,6 +15,7 @@ pub(crate) mod direct_scene_switches;
 pub(crate) mod direct_scene_tools;
 pub(crate) mod direct_scene_trace;
 pub(crate) mod motion_spec;
+pub(crate) mod scene_auditor;
 pub mod dynamic_context;
 pub mod history;
 pub mod kiro_standby;

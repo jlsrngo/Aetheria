@@ -1004,6 +1004,7 @@ async fn run_single_direct_scene(
         .cloned()
         .unwrap_or_default();
     let mut motion_deficit_rounds: usize = 0;
+    let mut audits_run: usize = 0;
     let mut renders_without_gain: usize = 0;
     let tool_ctx = SceneToolContext {
         session_id: &shared.session_id,
@@ -1634,6 +1635,72 @@ async fn run_single_direct_scene(
                 } else {
                     step_captions.join("\n")
                 };
+                if super::scene_auditor::should_trigger_independent_auditor(
+                    shared.switches.independent_auditor,
+                    scene_model_id.starts_with("mock-"),
+                    step_rendered,
+                    audits_run,
+                    renders_completed,
+                    !step_images.is_empty(),
+                    latest_errs.is_empty(),
+                    latest_score,
+                    latest_edge,
+                    has_motion_warning,
+                    latest_has_struct_diag,
+                ) {
+                    audits_run += 1;
+                    match super::scene_auditor::run_independent_scene_audit(
+                        &shared.client,
+                        &scene_base_url,
+                        &scene_api_key,
+                        &scene_model_id,
+                        &scene_id,
+                        sc_start,
+                        sc_dur,
+                        latest_score,
+                        latest_edge,
+                        &caption,
+                        &step_images,
+                    )
+                    .await
+                    {
+                        Ok(report) => {
+                            let _ = super::scene_auditor::persist_scene_audit_record(
+                                &script_path,
+                                renders_completed,
+                                latest_score,
+                                latest_edge,
+                                &report,
+                            );
+                            if let Some(brief) =
+                                super::scene_auditor::format_auditor_revision_brief(&report)
+                            {
+                                caption.push_str("\n\n");
+                                caption.push_str(&brief);
+                            }
+                            crate::paths::log_engine(
+                                "direct_remake",
+                                &format!(
+                                    "Scene {}/{} ({}) independent audit -> verdict={} findings={}",
+                                    scene_num,
+                                    total_scenes,
+                                    scene_id,
+                                    report.verdict,
+                                    report.findings.len()
+                                ),
+                            );
+                        }
+                        Err(err) => {
+                            crate::paths::log_engine(
+                                "direct_remake",
+                                &format!(
+                                    "⚠️ Scene {}/{} ({}) independent audit skipped: {}",
+                                    scene_num, total_scenes, scene_id, err
+                                ),
+                            );
+                        }
+                    }
+                }
                 if let Some(nudge) = nudge_opt {
                     caption.push_str("\n\n");
                     caption.push_str(&nudge);
