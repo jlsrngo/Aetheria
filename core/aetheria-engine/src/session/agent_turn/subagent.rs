@@ -37,7 +37,7 @@ pub fn spawn_subagent_tool_definition() -> Value {
                     "prompt": { "type": "string", "description": "Detailed, self-contained instructions for the subagent, including exact file paths and expected output" },
                     "subagent_type": { "type": "string", "enum": ["general", "explore", "motion-designer", "audio-director", "qa-verifier"], "description": "The specialized persona and toolset for this subagent" },
                     "sessionID": { "type": "string", "description": "Optional child sessionID from a previous `task` result to continue/resume that subagent's conversation instead of starting fresh" },
-                    "background": { "type": "boolean", "description": "Optional (defaults to true, OpenCode pattern). Runs the subagent asynchronously in the background without blocking the parent turn and delivers a <subagent-notification> into the parent SessionInbox when complete. Pass false only when a synchronous blocking wait is strictly required." }
+                    "background": { "type": "boolean", "description": "Optional (defaults to true). Runs the subagent asynchronously in the background without blocking the parent turn and delivers a <subagent-notification> into the parent SessionInbox when complete. Pass false only when a synchronous blocking wait is strictly required." }
                 },
                 "required": ["description", "prompt", "subagent_type"]
             }

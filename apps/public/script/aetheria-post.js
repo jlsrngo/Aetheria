@@ -552,6 +552,7 @@
   }
 
   let _sharedPipeline = null;
+  let _sharedForceFallback = false;
 
   function apply(ctx, t, passOpts) {
     if (!ctx) return false;
@@ -559,8 +560,15 @@
     if (!hasActiveEffect(p)) return false;
     const w = (ctx.canvas && ctx.canvas.width) || 1080;
     const h = (ctx.canvas && ctx.canvas.height) || 1920;
-    if (!_sharedPipeline || _sharedPipeline.getStats().disposed) {
-      _sharedPipeline = createPipeline(w, h, { forceFallback2D: p.forceFallback2D });
+    const wantFallback = Boolean(p.forceFallback2D);
+    if (
+      !_sharedPipeline ||
+      _sharedPipeline.getStats().disposed ||
+      wantFallback !== _sharedForceFallback
+    ) {
+      if (_sharedPipeline) _sharedPipeline.dispose();
+      _sharedForceFallback = wantFallback;
+      _sharedPipeline = createPipeline(w, h, { forceFallback2D: wantFallback });
     }
     return _sharedPipeline.apply(ctx.canvas, ctx, t, p);
   }

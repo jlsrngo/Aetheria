@@ -10,7 +10,7 @@ pub fn snapshot_tool_definition() -> Value {
         "type": "function",
         "function": {
             "name": "snapshot",
-            "description": "Inspect or roll back workspace file changes using the automatic baseline snapshot system (mirrors OpenCode VCS/Worktree snapshot recovery).",
+            "description": "Inspect or roll back workspace file changes using the automatic baseline snapshot system.",
             "parameters": {
                 "type": "object",
                 "properties": {

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 pub(crate) const DIRECT_SCENE_SYSTEM_PROMPT: &str = "\
 You are a Senior Procedural Motion Graphics Engineer writing studio-grade deterministic HTML5 Canvas 2D scene scripts for the Aetheria Motion Engine (`window.AM`).
 
-ANTIGRAVITY-GRADE INTERACTIVE WORKFLOW (YOU HAVE REAL MICRO-TOOLS — USE THEM!):
+STUDIO-GRADE INTERACTIVE WORKFLOW (YOU HAVE REAL MICRO-TOOLS — USE THEM!):
 You are NOT restricted to a single blind shot. You have direct investigative and surgical editing tools for this scene:
 - `inspect_ref_frame({ timestampSec, crop? })` — view ANY full-resolution reference frame (or zoom-crop `{x,y,w,h}`) whenever a small icon, text label, silhouette, or fast transition looks unclear in the 6-panel strip.
 - `sample_ref_region({ timestampSec, box? })` — measure exact pixel hex colors, luminance polarity, and tight foreground bounding box inside any rectangle (also works for non-vision models).
@@ -80,7 +80,8 @@ COMPACT `window.AM` RUNTIME API (already loaded globally before your script):
 - `AM.drawLaptopFrame(ctx, { x, y, w, h, bezelColor, baseColor }, function(c, scr) { /* draw clipped inside scr.x, scr.y, scr.w, scr.h */ })`
 - `AM.drawWordWheel(ctx, { words, activeFloat, cx, cy, spacing, activeFont, dimFont, activeColor, dimColor })`
 - `AM.drawSVGPath(ctx, d, { x, y, scale, fill, stroke, lineWidth })`
-- `AM.loadImage('/img/asset.png')` -> preloaded `HTMLImageElement` (automatically awaited before Frame 0); `AM.drawImageFit(ctx, img, x, y, w, h, 'contain')`
+- `AM.loadImage('/img/asset.png')` -> preloaded `HTMLImageElement` (automatically awaited before Frame 0); `AM.drawImageFit(ctx, img, x, y, w, h, 'contain')`; `AM.drawAsset(ctx, idOrPath, x, y, w, h, { rot, scale, flipX, shadow })` (auto-uses `alphaBbox` & `pivot` from `assets.json` registered by `fetch_web_image`)
+- `AM.postProcess(ctx, t, { bloom, bloomThreshold, chromatic, contrast, saturation, vignette, grain, tonemap })` — optional WebGL2 post-processing pass; `AM.createStage({ width, height })` & `AM.syncCamera(cam, targets)` — optional parent-child layer compositor
 - Safe Canvas 2D: keep `ctx.save()`/`ctx.restore()` balanced and never reference undeclared variables.";
 
 /// Compact "minimal / IDE-like" system prompt (`<= 2500` bytes) for Phase X2 ablation.
@@ -89,27 +90,26 @@ pub(crate) const DIRECT_SCENE_SYSTEM_PROMPT_MINIMAL: &str = "\
 Reconstruct the target scene procedurally in HTML5 Canvas 2D (`script/sceneK.js`) matching the attached reference images and measured scene facts; never copy pixels or load `ref/*` paths.
 
 SCRIPT CONTRACT:
-Wrap the script in `(function () { var AM = window.AM; ... AM.registerScene(\"<sceneId>\", function (ctx, t, dur, scene, AM) { ... }); })();`. Every frame must be deterministic from local scene time `t` (`0 <= t <= dur`) and `AM.rng(seed)`, never calling `Math.random()`, `Date.now()`, `requestAnimationFrame`, `setTimeout`, `<video>`, or `ref/*` URLs. Preloaded fonts: `'Playfair Display'`, `'Anton'`, `'Inter'`, `'Montserrat'`. Keep `ctx.save()`/`ctx.restore()` balanced.
+Wrap in `(function () { var AM = window.AM; ... AM.registerScene(\"<sceneId>\", function (ctx, t, dur, scene, AM) { ... }); })();`. Deterministic from `t` (`0 <= t <= dur`) and `AM.rng(seed)` (no `Math.random`, `Date.now`, `requestAnimationFrame`, `setTimeout`, `<video>`, or `ref/*`). Fonts: `'Playfair Display'`, `'Anton'`, `'Inter'`, `'Montserrat'`. Balance `ctx.save()`/`ctx.restore()`.
 
 TOOLS:
 - `inspect_ref_frame({ timestampSec, crop? })` — view full-res reference frame or zoom crop `{x,y,w,h}`.
 - `sample_ref_region({ timestampSec, box? })` — measure hex colors, luminance, and foreground bbox.
-- `fetch_web_image({ query, outputPath, removeBackground? })` — download an image/asset into `/img/<name>.png`.
-- `bash({ command, workdir? })` — run workspace-isolated shell/Python commands.
-- `write_scene_script({ code })` — write `script/sceneK.js`.
-- `patch_scene_script({ oldText, newText })` — exact search-and-replace edit on `script/sceneK.js`.
-- `render_and_compare_scene({ timestamps?, fullResTimestamp? })` — render headless preview and return comparison strip, worst full-res frame, and scores/errors.
+- `fetch_web_image({ query, outputPath, removeBackground? })` — download image into `/img/<name>.png`.
+- `bash({ command, workdir? })` — workspace-isolated shell/Python.
+- `write_scene_script({ code })` / `patch_scene_script({ oldText, newText })` — write or surgically edit `script/sceneK.js`.
+- `render_and_compare_scene({ timestamps?, fullResTimestamp? })` — render preview strip, worst frame, and scores.
 
 COMPACT `window.AM` API:
 - `AM.registerScene(id, fn)` — `fn(ctx, t, dur, scene, AM)`
-- `AM.applyCamera(ctx, { s, cx, cy, rot }, W, H)` — global zoom/pan/rotation (`rot` in deg)
+- `AM.applyCamera(ctx, { s, cx, cy, rot }, W, H)`, `AM.syncCamera(cam, targets)`, `AM.createStage(opts)`
 - `AM.clamp(v, lo, hi)`, `AM.lerp(a, b, p)`, `AM.invLerp(a, b, v)`, `AM.remap(v, a, b, c, d)`
-- `AM.ease.{inCubic,outCubic,inOutCubic,outBack,outExpo,inOutQuart,snap}(p)`
+- `AM.ease.{inCubic,outCubic,inOutCubic,outBack,outExpo,inOutQuart,aeGlide,outQuint,snap}(p)`
 - `AM.spring(tSec, { stiffness, damping, mass })`, `AM.impactRecoil(t, hitTime, opts)`, `AM.twistPolygon(points, angle, lagFactor)`
-- `AM.drawOpticalGlow(ctx, x, y, r, hex, inten)`, `AM.drawBloomStroke(ctx, fn, opts)`, `AM.drawSphericalLens(ctx, cx, cy, r, k, fn, opts)` (`fn(c)` scene coords; `fn(lc,sz)` `0..sz`), `AM.drawTaperedRibbon(ctx, pts, w, opts)`
+- `AM.drawOpticalGlow(ctx, x, y, r, hex, inten)`, `AM.drawBloomStroke(ctx, fn, opts)`, `AM.drawSphericalLens(ctx, cx, cy, r, k, fn, opts)`, `AM.drawTaperedRibbon(ctx, pts, w, opts)`
 - `AM.rng(seed)` -> deterministic PRNG (`r()`, `r.range(min, max)`, `r.pick(arr)`)
 - `AM.drawCursor(ctx, x, y, opts)`, `AM.drawExtrudedArrow3D(ctx, cx, cy, r, opts)`, `AM.drawLaptopFrame(ctx, rect, fn)`, `AM.drawWordWheel(ctx, opts)`, `AM.drawSVGPath(ctx, d, opts)`
-- `AM.loadImage('/img/asset.png')`, `AM.drawImageFit(ctx, img, x, y, w, h, 'contain')`";
+- `AM.loadImage('/img/asset.png')`, `AM.drawImageFit(ctx, img, x, y, w, h, 'contain')`, `AM.drawAsset(ctx, id, x, y, w, h, opts)`, `AM.postProcess(ctx, t, opts)`";
 
 /// Converts `t=6.72s:box=[64,292,423x272] -> ...` from global timestamps into explicit
 /// scene-local timestamps plus computed centers `(cx, cy)` and sizes `w×h`.
@@ -1735,7 +1735,7 @@ mod tests {
             DIRECT_SCENE_SYSTEM_PROMPT_MINIMAL.len()
         );
         for forbidden in [
-            "ANTIGRAVITY-GRADE",
+            "STUDIO-GRADE INTERACTIVE WORKFLOW",
             "FIVE UNIVERSAL",
             "METHODOLOGY",
             "Step 1",

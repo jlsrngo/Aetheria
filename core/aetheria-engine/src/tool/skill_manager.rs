@@ -23,7 +23,7 @@ pub fn skill_tool_definitions() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "plugin_install",
-                "description": "Installs an agent plugin or skill bundle directly from a GitHub repository following OpenCode harness syntax (e.g. 'github:owner/repo', 'owner/repo', 'git+https://...#path:packages/...'), Git URL, or local path. Automatically clones, discovers skills, registers agent rules, and activates it in `.aetheria/plugins/`.",
+                "description": "Installs an agent plugin or skill bundle directly from a GitHub repository following shorthand syntax (e.g. 'github:owner/repo', 'owner/repo', 'git+https://...#path:packages/...'), Git URL, or local path. Automatically clones, discovers skills, registers agent rules, and activates it in `.aetheria/plugins/`.",
                 "parameters": {
                     "type": "object",
                     "properties": {

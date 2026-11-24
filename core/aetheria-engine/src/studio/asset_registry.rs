@@ -617,28 +617,54 @@ pub async fn handle_asset_registry(
     }
 }
 
+fn is_forbidden_asset_root(dir: &Path) -> bool {
+    if dir.parent().is_none() {
+        return true;
+    }
+    if dir.join("Cargo.toml").is_file() && dir.join("src-tauri").is_dir() {
+        return true;
+    }
+    false
+}
+
 fn resolve_asset_film_root(workspace_dir: Option<&str>) -> Result<PathBuf, String> {
     if let Some(raw) = workspace_dir.map(str::trim).filter(|s| !s.is_empty()) {
-        let candidate = PathBuf::from(raw);
-        if candidate.is_dir() {
-            if candidate.join("index.html").is_file()
-                || candidate.join("film.json").is_file()
-                || candidate.join("img").is_dir()
-            {
-                return Ok(candidate);
-            }
-            if let Some(html_path) = super::motion::resolve_active_html_film_path(Some(raw)) {
-                if let Some(parent) = html_path.parent() {
+        let norm = crate::paths::normalize_workspace_path(raw);
+        let candidate = PathBuf::from(&norm);
+        if !candidate.is_dir() {
+            return Err(format!("Workspace directory does not exist: '{}'", raw));
+        }
+        if is_forbidden_asset_root(&candidate) {
+            return Err(
+                "Access Denied: refusing to run asset registry on filesystem root or IDE engine repository."
+                    .to_string(),
+            );
+        }
+        if candidate.join("index.html").is_file()
+            || candidate.join("film.json").is_file()
+            || candidate.join("img").is_dir()
+        {
+            return Ok(candidate);
+        }
+        if let Some(html_path) = super::motion::resolve_active_html_film_path(Some(&norm)) {
+            if let Some(parent) = html_path.parent() {
+                if !is_forbidden_asset_root(parent) {
                     return Ok(parent.to_path_buf());
                 }
             }
-            return Ok(candidate);
         }
-        return Err(format!("Workspace directory does not exist: '{}'", raw));
+        return Ok(candidate);
     }
-    super::motion::resolve_active_html_film_path(None)
+    let resolved = super::motion::resolve_active_html_film_path(None)
         .and_then(|p| p.parent().map(Path::to_path_buf))
-        .ok_or_else(|| "No active HTML motion film project found.".to_string())
+        .ok_or_else(|| "No active HTML motion film project found.".to_string())?;
+    if is_forbidden_asset_root(&resolved) {
+        return Err(
+            "Access Denied: refusing to run asset registry on filesystem root or IDE engine repository."
+                .to_string(),
+        );
+    }
+    Ok(resolved)
 }
 
 #[cfg(test)]
@@ -775,5 +801,12 @@ mod tests {
         let b = upsert_asset_record(&mut manifest, make_rec("img/logo.svg"));
         assert_eq!(a.id, "logo");
         assert_eq!(b.id, "logo_2");
+    }
+
+    #[test]
+    fn rejects_engine_repo_root_and_filesystem_root_as_asset_registry_target() {
+        let repo_root = crate::paths::project_root();
+        let err = resolve_asset_film_root(Some(&repo_root.to_string_lossy()));
+        assert!(err.is_err(), "IDE source repo root must be rejected");
     }
 }

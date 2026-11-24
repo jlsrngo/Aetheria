@@ -1,4 +1,4 @@
-//! Interactive Antigravity-grade micro-tools for the Smart Per-Scene Agentic Harness.
+//! Interactive studio-grade micro-tools for the Smart Per-Scene Agentic Harness.
 //!
 //! Gives the scene-authoring LLM direct, workspace-isolated investigative and surgical editing
 //! capabilities on a single scene (zero subagent bureaucracy):

@@ -77,10 +77,11 @@ describe("AetheriaPost Modular WebGL2 Post-Processing Runtime (Phase 2)", () => 
     // Identical timestamp produces bit-for-bit identical grain & vignette draw ops
     expect(opsRun1).toEqual(opsRun2);
 
-    // AM.postProcess bridge works seamlessly
+    // AM.postProcess bridge works seamlessly and recreates shared pipeline when forceFallback2D toggles
     const bridgeOps: string[] = [];
     expect(AM.postProcess(makeMockCtx(bridgeOps), 1.5, opts)).toBe(true);
     expect(bridgeOps.length).toBeGreaterThan(20);
+    expect(AM.postProcess(makeMockCtx([]), 1.5, { bloom: 0.4, fps: 30, forceFallback2D: false })).toBe(true);
 
     pipe.resize(640, 360);
     expect(pipe.getStats().width).toBe(640);
