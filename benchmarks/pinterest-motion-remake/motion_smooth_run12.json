@@ -1,0 +1,67 @@
+{
+ "fps": 29.97002997002997,
+ "scenes": [
+  {
+   "scene": 1,
+   "fastShareRef": 0.524,
+   "fastShareRes": 0.27,
+   "p97Ratio": 0.52,
+   "activeRef": 0.158,
+   "activeRes": 0.125
+  },
+  {
+   "scene": 2,
+   "fastShareRef": 0.293,
+   "fastShareRes": 0.162,
+   "p97Ratio": 0.63,
+   "activeRef": 0.174,
+   "activeRes": 0.096
+  },
+  {
+   "scene": 3,
+   "fastShareRef": 0.614,
+   "fastShareRes": 0.068,
+   "p97Ratio": 0.66,
+   "activeRef": 0.105,
+   "activeRes": 0.107
+  },
+  {
+   "scene": 4,
+   "fastShareRef": 0.065,
+   "fastShareRes": 0.028,
+   "p97Ratio": 0.8,
+   "activeRef": 0.025,
+   "activeRes": 0.017
+  },
+  {
+   "scene": 5,
+   "fastShareRef": 1.0,
+   "fastShareRes": 0.151,
+   "p97Ratio": 0.38,
+   "activeRef": 0.113,
+   "activeRes": 0.158
+  },
+  {
+   "scene": 6,
+   "fastShareRef": 0.321,
+   "fastShareRes": 0.151,
+   "p97Ratio": 0.79,
+   "activeRef": 0.081,
+   "activeRes": 0.065
+  }
+ ],
+ "fastSeconds": {
+  "ref": 6.61,
+  "res": 2.07
+ },
+ "midMotionDup": {
+  "ref": [
+   49
+  ],
+  "res": [
+   43,
+   487,
+   493
+  ]
+ }
+}
