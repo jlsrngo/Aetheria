@@ -345,10 +345,12 @@ fn collect_ordered_scripts(html_path: &Path) -> Vec<(String, String, String)> {
                 (1, 2)
             } else if lower == "aetheria-behaviors.js" {
                 (1, 3)
-            } else if lower == "aetheria-stage.js" {
+            } else if lower == "aetheria-shapes-text.js" {
                 (1, 4)
-            } else if lower == "aetheria-motion.js" {
+            } else if lower == "aetheria-stage.js" {
                 (1, 5)
+            } else if lower == "aetheria-motion.js" {
+                (1, 6)
             } else if let Some(html_pos) = extract_html_script_order(&html_lower, &name) {
                 (2, html_pos)
             } else {

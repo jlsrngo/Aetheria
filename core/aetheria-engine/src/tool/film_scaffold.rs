@@ -233,6 +233,7 @@ pub(crate) fn render_managed_index_html(
     script_tags.push_str("  <script src=\"/script/aetheria-post.js\"></script>\n");
     script_tags.push_str("  <script src=\"/script/aetheria-tracks.js\"></script>\n");
     script_tags.push_str("  <script src=\"/script/aetheria-behaviors.js\"></script>\n");
+    script_tags.push_str("  <script src=\"/script/aetheria-shapes-text.js\"></script>\n");
     script_tags.push_str("  <script src=\"/script/aetheria-stage.js\"></script>\n");
     script_tags.push_str("  <script src=\"/script/aetheria-motion.js\"></script>\n");
     for sc in &manifest.scenes {

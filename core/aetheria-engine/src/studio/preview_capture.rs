@@ -117,6 +117,7 @@ pub(crate) fn is_hybrid_or_standalone_html_film(film_root: &Path) -> bool {
                         && !super::builtin_runtime::is_builtin_stage_path(rel)
                         && !super::builtin_runtime::is_builtin_tracks_path(rel)
                         && !super::builtin_runtime::is_builtin_behaviors_path(rel)
+                        && !super::builtin_runtime::is_builtin_shapes_text_path(rel)
                         && !super::builtin_runtime::is_builtin_story_camera_path(rel)
                         && !super::builtin_runtime::is_builtin_three_path(rel)
                 })

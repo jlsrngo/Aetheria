@@ -405,6 +405,10 @@
         mask: spec.mask || null,
         assetId: spec.assetId || null,
         assetOpts: spec.assetOpts || null,
+        text: spec.text !== undefined ? String(spec.text) : null,
+        textOpts: spec.textOpts || null,
+        shape: spec.shape || null,
+        shapeOpts: spec.shapeOpts || null,
         element: spec.element || null,
         threeCanvas: spec.threeCanvas || null,
         threeCamera: spec.threeCamera || null,
@@ -678,6 +682,17 @@
           const aw = layer.width || 200;
           const ah = layer.height || 200;
           global.AM.drawAsset(ctx, layer.assetId, 0, 0, aw, ah, layer.assetOpts || {});
+        } else if (layer.kind === "text" && layer.text !== null && global.AetheriaShapesText) {
+          global.AetheriaShapesText.drawAnimatedText(ctx, layer.text, 0, 0, sec, layer.textOpts || {});
+        } else if (layer.kind === "shape" && layer.shape && global.AetheriaShapesText) {
+          const sOpts = Object.assign({ t: sec }, layer.shapeOpts || {});
+          if (sOpts.repeater) {
+            global.AetheriaShapesText.repeatDraw(ctx, sOpts.repeater, function (c) {
+              global.AetheriaShapesText.drawShapePath(c, layer.shape, sOpts);
+            });
+          } else {
+            global.AetheriaShapesText.drawShapePath(ctx, layer.shape, sOpts);
+          }
         } else if (layer.draw) {
           layer.draw(ctx, sec, world, layer, cam);
         }

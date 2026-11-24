@@ -19,6 +19,9 @@ pub const AETHERIA_TRACKS_JS: &str = include_str!("../../../../apps/public/scrip
 /// Embedded Additive Behaviors, Wiggle & Loop Engine (`window.AetheriaBehaviors`) fallback when disk `apps/public` is absent.
 pub const AETHERIA_BEHAVIORS_JS: &str = include_str!("../../../../apps/public/script/aetheria-behaviors.js");
 
+/// Embedded AE Text Animator Selectors & Vector Path Operators (`window.AetheriaShapesText`) fallback when disk `apps/public` is absent.
+pub const AETHERIA_SHAPES_TEXT_JS: &str = include_str!("../../../../apps/public/script/aetheria-shapes-text.js");
+
 /// Embedded Declarative Story Core runtime (`window.StoryCore`) fallback when disk `apps/public` is absent.
 pub const STORY_CORE_JS: &str = include_str!("../../../../apps/public/script/story-core.js");
 
@@ -117,6 +120,23 @@ pub fn resolve_behaviors_runtime_code(project_root: &std::path::Path) -> String 
     std::fs::read_to_string(disk_path).unwrap_or_else(|_| AETHERIA_BEHAVIORS_JS.to_string())
 }
 
+/// Returns true when the requested relative path refers to the built-in `aetheria-shapes-text.js` runtime.
+pub fn is_builtin_shapes_text_path(rel: &str) -> bool {
+    let trimmed = rel.trim().trim_start_matches('/').replace('\\', "/");
+    trimmed.eq_ignore_ascii_case("script/aetheria-shapes-text.js")
+        || trimmed.eq_ignore_ascii_case("aetheria-shapes-text.js")
+}
+
+/// Resolves `aetheria-shapes-text.js` from repo `apps/public/script/` when present, falling back to embedded bytes.
+pub fn resolve_shapes_text_runtime_code(project_root: &std::path::Path) -> String {
+    let disk_path = project_root
+        .join("apps")
+        .join("public")
+        .join("script")
+        .join("aetheria-shapes-text.js");
+    std::fs::read_to_string(disk_path).unwrap_or_else(|_| AETHERIA_SHAPES_TEXT_JS.to_string())
+}
+
 /// Returns true when the requested relative path refers to the built-in `story-core.js` runtime.
 pub fn is_builtin_story_core_path(rel: &str) -> bool {
     let trimmed = rel.trim().trim_start_matches('/').replace('\\', "/");
@@ -159,6 +179,7 @@ pub fn is_vendor_script_name(name: &str) -> bool {
         || base.eq_ignore_ascii_case("aetheria-stage.js")
         || base.eq_ignore_ascii_case("aetheria-tracks.js")
         || base.eq_ignore_ascii_case("aetheria-behaviors.js")
+        || base.eq_ignore_ascii_case("aetheria-shapes-text.js")
         || base.eq_ignore_ascii_case("story-core.js")
         || base.eq_ignore_ascii_case("story-camera.js")
         || base.eq_ignore_ascii_case("three.min.js")
@@ -284,6 +305,9 @@ mod tests {
         assert!(AETHERIA_BEHAVIORS_JS.contains("AetheriaBehaviors"));
         assert!(is_builtin_behaviors_path("/script/aetheria-behaviors.js"));
         assert!(is_vendor_script_name("aetheria-behaviors.js"));
+        assert!(AETHERIA_SHAPES_TEXT_JS.contains("AetheriaShapesText"));
+        assert!(is_builtin_shapes_text_path("/script/aetheria-shapes-text.js"));
+        assert!(is_vendor_script_name("aetheria-shapes-text.js"));
     }
 
     #[test]

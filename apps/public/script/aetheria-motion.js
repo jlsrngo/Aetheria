@@ -2148,6 +2148,46 @@
     return evalTrack(keys, t, opts);
   }
 
+  /** AE Text Animator Selector typography renderer via `/script/aetheria-shapes-text.js`. */
+  function drawAnimatedText(ctx, text, x, y, t, opts = {}) {
+    if (global.AetheriaShapesText && typeof global.AetheriaShapesText.drawAnimatedText === "function") {
+      return global.AetheriaShapesText.drawAnimatedText(ctx, text, x, y, t, opts);
+    }
+    return { renderedChars: 0 };
+  }
+
+  function trimPaths(paths, opts = {}) {
+    return global.AetheriaShapesText ? global.AetheriaShapesText.trimPaths(paths, opts) : paths;
+  }
+
+  function roundCorners(paths, radius) {
+    return global.AetheriaShapesText ? global.AetheriaShapesText.roundCorners(paths, radius) : paths;
+  }
+
+  function puckerBloat(paths, amount) {
+    return global.AetheriaShapesText ? global.AetheriaShapesText.puckerBloat(paths, amount) : paths;
+  }
+
+  function wigglePaths(paths, params, t = 0) {
+    return global.AetheriaShapesText ? global.AetheriaShapesText.wigglePaths(paths, params, t) : paths;
+  }
+
+  function morphPath(pathA, pathB, u, opts = {}) {
+    return global.AetheriaShapesText ? global.AetheriaShapesText.morphPath(pathA, pathB, u, opts) : pathA;
+  }
+
+  function drawShapePath(ctx, paths, opts = {}) {
+    return global.AetheriaShapesText ? global.AetheriaShapesText.drawShapePath(ctx, paths, opts) : [];
+  }
+
+  function repeatDraw(ctx, opts, drawFn) {
+    return global.AetheriaShapesText ? global.AetheriaShapesText.repeatDraw(ctx, opts, drawFn) : 0;
+  }
+
+  function polystarPath(opts = {}) {
+    return global.AetheriaShapesText ? global.AetheriaShapesText.polystarPath(opts) : null;
+  }
+
   /**
    * Synchronizes one canonical camera pose across Canvas 2D, DOM/SVG elements, and Three.js cameras.
    */
@@ -3176,6 +3216,15 @@
     evalTrack,
     wiggle,
     loopTrack,
+    drawAnimatedText,
+    trimPaths,
+    roundCorners,
+    puckerBloat,
+    wigglePaths,
+    morphPath,
+    drawShapePath,
+    repeatDraw,
+    polystarPath,
     syncCamera,
     drawOpticalGlow,
     drawBloomStroke,

@@ -187,6 +187,7 @@ fn collect_scene_specs(film_dir: &Path) -> Option<Vec<(String, String)>> {
                     && !crate::studio::builtin_runtime::is_builtin_stage_path(rel)
                     && !crate::studio::builtin_runtime::is_builtin_tracks_path(rel)
                     && !crate::studio::builtin_runtime::is_builtin_behaviors_path(rel)
+                    && !crate::studio::builtin_runtime::is_builtin_shapes_text_path(rel)
                     && !crate::studio::builtin_runtime::is_builtin_story_camera_path(rel)
                     && !crate::studio::builtin_runtime::is_builtin_three_path(rel)
             })

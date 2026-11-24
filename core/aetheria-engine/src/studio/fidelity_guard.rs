@@ -137,7 +137,7 @@ pub fn validate_film_anti_cheat(film_root: &Path) -> AntiCheatReport {
                 let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
                 if matches!(
                     name.to_ascii_lowercase().as_str(),
-                    "aetheria-motion.js" | "aetheria-post.js" | "aetheria-stage.js" | "aetheria-tracks.js" | "aetheria-behaviors.js" | "story-camera.js" | "three.min.js"
+                    "aetheria-motion.js" | "aetheria-post.js" | "aetheria-stage.js" | "aetheria-tracks.js" | "aetheria-behaviors.js" | "aetheria-shapes-text.js" | "story-camera.js" | "three.min.js"
                 ) {
                     continue;
                 }

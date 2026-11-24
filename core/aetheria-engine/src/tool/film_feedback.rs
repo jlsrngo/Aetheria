@@ -210,6 +210,7 @@ fn check_html_scene_wiring(
                 && !crate::studio::builtin_runtime::is_builtin_stage_path(rel)
                 && !crate::studio::builtin_runtime::is_builtin_tracks_path(rel)
                 && !crate::studio::builtin_runtime::is_builtin_behaviors_path(rel)
+                && !crate::studio::builtin_runtime::is_builtin_shapes_text_path(rel)
                 && !crate::studio::builtin_runtime::is_builtin_story_camera_path(rel)
                 && !crate::studio::builtin_runtime::is_builtin_three_path(rel)
         })
@@ -424,6 +425,7 @@ fn check_microstock_js_diagnostics(
         || lower_name == "aetheria-stage.js"
         || lower_name == "aetheria-tracks.js"
         || lower_name == "aetheria-behaviors.js"
+        || lower_name == "aetheria-shapes-text.js"
         || lower_name == "story-camera.js"
         || lower_name == "three.min.js"
     {
@@ -814,6 +816,7 @@ pub fn collect_file_feedback(workspace_dir: &str, target: &Path) -> FileFeedback
                     || crate::studio::builtin_runtime::is_builtin_stage_path(&script_rel)
                     || crate::studio::builtin_runtime::is_builtin_tracks_path(&script_rel)
                     || crate::studio::builtin_runtime::is_builtin_behaviors_path(&script_rel)
+                    || crate::studio::builtin_runtime::is_builtin_shapes_text_path(&script_rel)
                     || crate::studio::builtin_runtime::is_builtin_story_camera_path(&script_rel)
                     || crate::studio::builtin_runtime::is_builtin_three_path(&script_rel)
                 {

@@ -80,6 +80,15 @@ Do NOT call `Math.random()`, `Date.now()`, `performance.now()`, `requestAnimatio
 - `AM.evalTrack(keys, t, opts?)` — evaluates After Effects speed-graph tracks `[{ t, v, ease?, outEase?, inEase?, hold? }]` (`ease`: `"linear" | "easy" | "smooth" | "easeInOutSoft" | "easeInOut" | "easeInOutStrong" | "accelerate" | "accelerateStrong" | "decelerate" | "decelerateStrong" | "expoInOut" | "expoAccelerate" | "expoDecelerate"`, plus `{ spatial: true }` for 2D/3D Catmull-Rom arc-length motion paths) via `/script/aetheria-tracks.js`
 - `AM.wiggle(t, freq, amp, opts?)` — deterministic SplitMix64 C2 octave wiggle offset(s) (`{ octaves, ampMult, dims, seed, base }`) via `/script/aetheria-behaviors.js`
 - `AM.loopTrack(keys, t, opts?)` — evaluates looping AE tracks (`{ type: "cycle" | "pingpong" | "offset" | "continue", direction: "out" | "in", numKeyframes, duration, spatial }`) via `/script/aetheria-behaviors.js`
+- `AM.drawAnimatedText(ctx, text, x, y, t, opts?)` — After Effects Range/Wiggly Text Animator renderer with 8 presets (`typewriter`, `fadeUpCharacters`, `bounceInWords`, `trackingIn`, `scramble`, `blurIn`, `jitter`, `dropInLines`) and symmetrical tracking via `/script/aetheria-shapes-text.js`
+- `AM.trimPaths(paths, opts?)` — exact arc-length Cubic Bezier Trim Paths (`{ start, end, offset, mode: "simultaneous" | "individually" }`)
+- `AM.roundCorners(paths, radius)` — exact circular-arc corner rounding for arbitrary `ShapePath` outlines
+- `AM.puckerBloat(paths, amount)` — vertex/handle warp (`-100..100`) turning shapes into organic blooms or sparkles
+- `AM.wigglePaths(paths, params, t)` — deterministic C1 Catmull-Rom organic boiling path displacement
+- `AM.morphPath(pathA, pathB, u, opts?)` — arc-length de Casteljau + 2D Procrustes rigid-similarity shape morph (`{ bendingResistance }`)
+- `AM.drawShapePath(ctx, paths, opts?)` — renders `ShapePath` or polygon lists with composable `trim`, `roundCorners`, `puckerBloat`, `wigglePaths`, `fill`, `stroke`
+- `AM.repeatDraw(ctx, opts, drawFn)` — After Effects Repeater (`{ copies, offset, anchor, position, scale, rotation, startOpacity, endOpacity, composite }`)
+- `AM.polystarPath(opts?)` — generates AE star/polygon `ShapePath` (`{ points, outerRadius, innerRadius, cx, cy, rotationDeg, star }`)
 - `AM.textReveal(text, reveal = 1)` — slice text deterministically by character ratio (`0..1`)
 - `AM.clipWipe(ctx, x, y, w, h, reveal, drawFn)` — horizontal clip-rect wipe around `drawFn()`
 - `AM.drawSVGPath(ctx, pathStr, x, y, w, h, opts?)` — stroke/fill SVG path via `Path2D` (`{ viewBoxW, viewBoxH, fill, stroke, progress, lineWidth, lineCap, lineJoin, approxLength }`)
