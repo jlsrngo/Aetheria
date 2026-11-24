@@ -27,6 +27,44 @@
     "width",
     "height",
   ];
+  const ALLOWED_MATTE_MODES = ["alpha", "alphaInverted", "luma", "lumaInverted"];
+
+  function validateLayerMatte(layerId, rawMatte) {
+    if (rawMatte === undefined || rawMatte === null) return null;
+    if (typeof rawMatte !== "object" || !rawMatte.layerId) {
+      throw new Error("AetheriaStage.addLayer('" + layerId + "'): 'matte' requires { layerId, mode }.");
+    }
+    const targetId = String(rawMatte.layerId);
+    if (targetId === layerId) {
+      throw new Error("AetheriaStage.addLayer('" + layerId + "'): layer cannot use itself as a track matte.");
+    }
+    const mode = String(rawMatte.mode || "alpha");
+    if (ALLOWED_MATTE_MODES.indexOf(mode) === -1) {
+      throw new Error(
+        "AetheriaStage.addLayer('" +
+          layerId +
+          "'): unknown matte mode '" +
+          mode +
+          "'. Allowed modes: " +
+          ALLOWED_MATTE_MODES.join(", ") +
+          "."
+      );
+    }
+    return { layerId: targetId, mode };
+  }
+
+  function validateLayerEcho(layerId, rawEcho) {
+    if (rawEcho === undefined || rawEcho === null) return null;
+    if (typeof rawEcho !== "object") {
+      throw new Error("AetheriaStage.addLayer('" + layerId + "'): 'echo' must be an object.");
+    }
+    const count = Math.max(0, Math.min(16, Math.round(Number(rawEcho.count ?? 4))));
+    const echoTime = Number.isFinite(Number(rawEcho.echoTime)) ? Number(rawEcho.echoTime) : -1 / 30;
+    const startIntensity = clamp(Number(rawEcho.startIntensity ?? 0.75), 0, 1);
+    const decay = clamp(Number(rawEcho.decay ?? 0.65), 0, 1);
+    const operator = String(rawEcho.operator || "compositeInBack");
+    return { count, echoTime, startIntensity, decay, operator };
+  }
   let reportedMissingTracks = false;
   let reportedMissingBehaviors = false;
 
@@ -356,6 +394,8 @@
       }
       const existing = byId[id];
       const tracks = validateLayerTracks(id, spec.tracks);
+      const matte = validateLayerMatte(id, spec.matte);
+      const echo = validateLayerEcho(id, spec.echo);
       let behaviors = null;
       if (spec.behaviors !== undefined && spec.behaviors !== null) {
         if (!Array.isArray(spec.behaviors)) {
@@ -403,6 +443,9 @@
         visible: initVisible,
         parallax: Number.isFinite(Number(spec.parallax)) ? Number(spec.parallax) : 1,
         mask: spec.mask || null,
+        matte,
+        matteSource: Boolean(spec.matteSource),
+        echo,
         assetId: spec.assetId || null,
         assetOpts: spec.assetOpts || null,
         text: spec.text !== undefined ? String(spec.text) : null,
@@ -596,6 +639,108 @@
       return normalizeCamera(cameraRaw, width, height);
     }
 
+    const scratchPool = Object.create(null);
+    function getScratch(key) {
+      if (typeof document === "undefined" || typeof document.createElement !== "function") return null;
+      let c = scratchPool[key];
+      if (!c) {
+        c = document.createElement("canvas");
+        scratchPool[key] = c;
+      }
+      if (c.width !== width || c.height !== height) {
+        c.width = width;
+        c.height = height;
+      }
+      return c;
+    }
+
+    function drawCanvasLayerContent(targetCtx, layer, sec, world, cam) {
+      if (layer.kind === "asset" && layer.assetId && global.AM && typeof global.AM.drawAsset === "function") {
+        const aw = layer.width || 200;
+        const ah = layer.height || 200;
+        global.AM.drawAsset(targetCtx, layer.assetId, 0, 0, aw, ah, layer.assetOpts || {});
+      } else if (layer.kind === "text" && layer.text !== null && global.AetheriaShapesText) {
+        global.AetheriaShapesText.drawAnimatedText(targetCtx, layer.text, 0, 0, sec, layer.textOpts || {});
+      } else if (layer.kind === "shape" && layer.shape && global.AetheriaShapesText) {
+        const sOpts = Object.assign({ t: sec }, layer.shapeOpts || {});
+        if (sOpts.repeater) {
+          global.AetheriaShapesText.repeatDraw(targetCtx, sOpts.repeater, function (c) {
+            global.AetheriaShapesText.drawShapePath(c, layer.shape, sOpts);
+          });
+        } else {
+          global.AetheriaShapesText.drawShapePath(targetCtx, layer.shape, sOpts);
+        }
+      } else if (layer.draw) {
+        layer.draw(targetCtx, sec, world, layer, cam);
+      }
+    }
+
+    function compositeWithTrackMatte(mainCtx, layer, sec, world, finalMat, cam, worldMap) {
+      const matteLayer = layer.matte ? byId[layer.matte.layerId] : null;
+      const iso = getScratch("iso");
+      const matCan = getScratch("matte");
+      if (!matteLayer || !iso || !matCan) return false;
+      const isoCtx = iso.getContext("2d");
+      const matCtx = matCan.getContext("2d");
+      if (!isoCtx || !matCtx) return false;
+
+      isoCtx.setTransform(1, 0, 0, 1, 0, 0);
+      isoCtx.clearRect(0, 0, width, height);
+      isoCtx.save();
+      isoCtx.setTransform(finalMat[0], finalMat[1], finalMat[2], finalMat[3], finalMat[4], finalMat[5]);
+      isoCtx.globalAlpha = 1;
+      isoCtx.globalCompositeOperation = "source-over";
+      if (layer.mask) applyLayerMask(isoCtx, layer.mask);
+      drawCanvasLayerContent(isoCtx, layer, sec, world, cam);
+      isoCtx.restore();
+
+      const mWorld = worldMap[matteLayer.id];
+      matCtx.setTransform(1, 0, 0, 1, 0, 0);
+      matCtx.clearRect(0, 0, width, height);
+      if (mWorld) {
+        const mCamMat = cameraMatrix2D(cam, width, height, matteLayer.parallax);
+        const mFinalMat = matMultiply(mCamMat, mWorld.matrix);
+        matCtx.save();
+        matCtx.setTransform(mFinalMat[0], mFinalMat[1], mFinalMat[2], mFinalMat[3], mFinalMat[4], mFinalMat[5]);
+        matCtx.globalAlpha = clamp(mWorld.opacity, 0, 1);
+        matCtx.globalCompositeOperation = "source-over";
+        if (matteLayer.mask) applyLayerMask(matCtx, matteLayer.mask);
+        drawCanvasLayerContent(matCtx, matteLayer, sec, mWorld, cam);
+        matCtx.restore();
+      }
+
+      const mode = layer.matte.mode;
+      if (mode === "alpha" || mode === "alphaInverted") {
+        isoCtx.save();
+        isoCtx.setTransform(1, 0, 0, 1, 0, 0);
+        isoCtx.globalCompositeOperation = mode === "alpha" ? "destination-in" : "destination-out";
+        isoCtx.drawImage(matCan, 0, 0);
+        isoCtx.restore();
+      } else {
+        // Exact Rec.709 luminance matte (`crates/render/src/layers.rs` L560-571)
+        const isoImg = isoCtx.getImageData(0, 0, width, height);
+        const matImg = matCtx.getImageData(0, 0, width, height);
+        const id = isoImg.data;
+        const md = matImg.data;
+        const invert = mode === "lumaInverted";
+        for (let p = 0; p < id.length; p += 4) {
+          const ma = md[p + 3] / 255;
+          const lum = (0.2126 * md[p] + 0.7152 * md[p + 1] + 0.0722 * md[p + 2]) / 255;
+          const k = clamp(invert ? 1 - lum * ma : lum * ma, 0, 1);
+          id[p + 3] = Math.round(id[p + 3] * k);
+        }
+        isoCtx.putImageData(isoImg, 0, 0);
+      }
+
+      mainCtx.save();
+      mainCtx.setTransform(1, 0, 0, 1, 0, 0);
+      mainCtx.globalAlpha = world.opacity;
+      mainCtx.globalCompositeOperation = layer.blendMode || "source-over";
+      mainCtx.drawImage(iso, 0, 0);
+      mainCtx.restore();
+      return true;
+    }
+
     function render(ctx, t, renderOpts) {
       const opts = renderOpts && typeof renderOpts === "object" ? renderOpts : {};
       const sec = Number(t) || 0;
@@ -609,6 +754,7 @@
       const renderedLayers = [];
       for (let i = 0; i < ordered.length; i++) {
         const layer = ordered[i];
+        if (layer.matteSource) continue;
         const world = worldMap[layer.id];
         if (!world || !world.visible || world.opacity <= 1e-4) {
           if ((layer.kind === "dom" || layer.kind === "svg") && layer.element && layer.element.style) {
@@ -672,30 +818,42 @@
         }
 
         if (!ctx) continue;
+
+        if (layer.echo && layer.echo.count > 0) {
+          const ec = layer.echo;
+          const compOp = ec.operator === "add" ? "lighter" : ec.operator === "screen" ? "screen" : layer.blendMode || "source-over";
+          for (let ei = ec.count; ei >= 1; ei--) {
+            const eSec = Math.max(0, sec + ei * ec.echoTime);
+            const eWorldMap = resolveWorldState(eSec);
+            const eWorld = eWorldMap[layer.id];
+            if (!eWorld || !eWorld.visible) continue;
+            const eCam = resolveActiveCamera(eSec);
+            const eFinalMat = matMultiply(cameraMatrix2D(eCam, width, height, layer.parallax), eWorld.matrix);
+            const eAlpha = clamp(eWorld.opacity * ec.startIntensity * Math.pow(ec.decay, ei), 0, 1);
+            if (eAlpha <= 1e-3) continue;
+            ctx.save();
+            ctx.setTransform(eFinalMat[0], eFinalMat[1], eFinalMat[2], eFinalMat[3], eFinalMat[4], eFinalMat[5]);
+            ctx.globalAlpha = eAlpha;
+            ctx.globalCompositeOperation = compOp;
+            if (layer.mask) applyLayerMask(ctx, layer.mask);
+            drawCanvasLayerContent(ctx, layer, eSec, eWorld, eCam);
+            ctx.restore();
+          }
+          // Restore current-frame state after lagged echo sampling
+          resolveWorldState(sec);
+        }
+
+        if (layer.matte && compositeWithTrackMatte(ctx, layer, sec, world, finalMat, cam, worldMap)) {
+          renderedLayers.push(layer.id);
+          continue;
+        }
+
         ctx.save();
         ctx.setTransform(finalMat[0], finalMat[1], finalMat[2], finalMat[3], finalMat[4], finalMat[5]);
         ctx.globalAlpha = world.opacity;
         ctx.globalCompositeOperation = layer.blendMode || "source-over";
         if (layer.mask) applyLayerMask(ctx, layer.mask);
-
-        if (layer.kind === "asset" && layer.assetId && global.AM && typeof global.AM.drawAsset === "function") {
-          const aw = layer.width || 200;
-          const ah = layer.height || 200;
-          global.AM.drawAsset(ctx, layer.assetId, 0, 0, aw, ah, layer.assetOpts || {});
-        } else if (layer.kind === "text" && layer.text !== null && global.AetheriaShapesText) {
-          global.AetheriaShapesText.drawAnimatedText(ctx, layer.text, 0, 0, sec, layer.textOpts || {});
-        } else if (layer.kind === "shape" && layer.shape && global.AetheriaShapesText) {
-          const sOpts = Object.assign({ t: sec }, layer.shapeOpts || {});
-          if (sOpts.repeater) {
-            global.AetheriaShapesText.repeatDraw(ctx, sOpts.repeater, function (c) {
-              global.AetheriaShapesText.drawShapePath(c, layer.shape, sOpts);
-            });
-          } else {
-            global.AetheriaShapesText.drawShapePath(ctx, layer.shape, sOpts);
-          }
-        } else if (layer.draw) {
-          layer.draw(ctx, sec, world, layer, cam);
-        }
+        drawCanvasLayerContent(ctx, layer, sec, world, cam);
         ctx.restore();
         renderedLayers.push(layer.id);
       }

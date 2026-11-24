@@ -11,6 +11,18 @@
 use serde_json::Value;
 use std::path::Path;
 
+/// EffectCraft-derived adaptive shutter sub-sample calculator (`crates/render/src/frames.rs`).
+/// Returns `1` when corner travel during shutter is sub-pixel (`< 1.0` px), otherwise scales
+/// smoothly ~1 sample per pixel clamped within `[per_frame, limit]`.
+pub(crate) fn adaptive_samples(travel_px: f64, per_frame: u32, limit: u32) -> u32 {
+    if !travel_px.is_finite() || travel_px < 1.0 {
+        return 1;
+    }
+    let lo = per_frame.clamp(2, 12) as f64;
+    let hi = (limit.clamp(4, 16) as f64).max(lo);
+    travel_px.ceil().clamp(lo, hi) as u32
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum MotionBlurMode {
     Off,
@@ -393,6 +405,12 @@ mod tests {
         assert!(expr8.contains("__aeMbCanvas"));
         assert!(expr8.contains("const N = 8;"));
         assert!(expr8.contains("wk / wSum"));
+
+        assert_eq!(adaptive_samples(0.0, 4, 12), 1);
+        assert_eq!(adaptive_samples(0.8, 4, 12), 1);
+        assert_eq!(adaptive_samples(2.2, 4, 12), 4);
+        assert_eq!(adaptive_samples(8.5, 4, 12), 9);
+        assert_eq!(adaptive_samples(50.0, 4, 12), 12);
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

@@ -70,6 +70,13 @@
   uniform float uVignette;
   uniform float uVignetteSoft;
   uniform float uGrain;
+  uniform vec2 uDirBlurVec;
+  uniform float uRadialBlur;
+  uniform vec2 uRadialCenter;
+  uniform float uDofAmt;
+  uniform vec2 uDofFocus;
+  uniform float uDofRadius;
+  uniform float uDofFeather;
   out vec4 o;
 
   float hash12(vec2 p) {
@@ -87,17 +94,57 @@
     return mix(c, vec3(mt), wh * 0.75);
   }
 
+  vec3 sampleOptical(vec2 uv) {
+    vec3 col = texture(uSrc, uv).rgb;
+    float dirLen = length(uDirBlurVec);
+    if (dirLen > 1e-5) {
+      vec3 acc = col * 0.20;
+      for (int i = 1; i <= 4; i++) {
+        float w = (5.0 - float(i)) / 25.0;
+        vec2 off = uDirBlurVec * (float(i) / 4.0);
+        acc += (texture(uSrc, clamp(uv + off, 0.0, 1.0)).rgb + texture(uSrc, clamp(uv - off, 0.0, 1.0)).rgb) * w;
+      }
+      col = acc;
+    }
+    if (uRadialBlur > 1e-4) {
+      vec2 toCenter = uv - uRadialCenter;
+      vec3 racc = vec3(0.0);
+      for (int i = 0; i < 9; i++) {
+        float f = float(i) / 8.0;
+        racc += texture(uSrc, clamp(uv - toCenter * uRadialBlur * f, 0.0, 1.0)).rgb;
+      }
+      col = mix(col, racc / 9.0, 0.85);
+    }
+    if (uDofAmt > 0.05) {
+      vec2 df = uv - uDofFocus;
+      df.x *= uRes.x / max(1.0, uRes.y);
+      float coc = smoothstep(uDofRadius, uDofRadius + max(0.05, uDofFeather), length(df));
+      if (coc > 1e-3) {
+        vec2 pxRad = (uDofAmt * coc) / max(uRes, vec2(1.0));
+        vec3 bacc = col;
+        for (int i = 0; i < 8; i++) {
+          float ang = float(i) * 0.78539816;
+          vec2 dir = vec2(cos(ang), sin(ang)) * pxRad;
+          bacc += texture(uSrc, clamp(uv + dir, 0.0, 1.0)).rgb;
+          bacc += texture(uSrc, clamp(uv + dir * 0.5, 0.0, 1.0)).rgb;
+        }
+        col = mix(col, bacc / 17.0, coc);
+      }
+    }
+    return col;
+  }
+
   void main() {
     vec2 centered = vUv - 0.5;
     vec4 baseSample = texture(uSrc, vUv);
     vec3 col;
     if (uChromatic > 1e-5) {
       vec2 shift = centered * uChromatic;
-      col.r = texture(uSrc, clamp(vUv + shift, 0.0, 1.0)).r;
-      col.g = baseSample.g;
-      col.b = texture(uSrc, clamp(vUv - shift, 0.0, 1.0)).b;
+      col.r = sampleOptical(clamp(vUv + shift, 0.0, 1.0)).r;
+      col.g = sampleOptical(vUv).g;
+      col.b = sampleOptical(clamp(vUv - shift, 0.0, 1.0)).b;
     } else {
-      col = baseSample.rgb;
+      col = sampleOptical(vUv);
     }
 
     if (uBloomAmt > 1e-4) {
@@ -173,6 +220,18 @@
       vignette: clamp(Number(o.vignette) || 0, 0, 0.95),
       vignetteSoftness: clamp(Number.isFinite(Number(o.vignetteSoftness)) ? Number(o.vignetteSoftness) : 0.65, 0.15, 1.5),
       grain: clamp(Number(o.grain) || 0, 0, 0.25),
+      directionalBlur: clamp(Number(o.directionalBlur) || 0, 0, 64),
+      directionalAngle: Number.isFinite(Number(o.directionalAngle)) ? Number(o.directionalAngle) : 0,
+      radialBlur: clamp(Number(o.radialBlur) || 0, 0, 0.35),
+      radialCenter: Array.isArray(o.radialCenter) && o.radialCenter.length >= 2
+        ? [clamp(Number(o.radialCenter[0]), 0, 1), clamp(Number(o.radialCenter[1]), 0, 1)]
+        : [0.5, 0.5],
+      dof: clamp(Number(o.dof) || 0, 0, 32),
+      dofFocus: Array.isArray(o.dofFocus) && o.dofFocus.length >= 2
+        ? [clamp(Number(o.dofFocus[0]), 0, 1), clamp(Number(o.dofFocus[1]), 0, 1)]
+        : [0.5, 0.5],
+      dofRadius: clamp(Number.isFinite(Number(o.dofRadius)) ? Number(o.dofRadius) : 0.22, 0.0, 1.0),
+      dofFeather: clamp(Number.isFinite(Number(o.dofFeather)) ? Number(o.dofFeather) : 0.35, 0.05, 1.5),
       fps: Math.max(1, Number(o.fps) || 30),
       forceFallback2D: Boolean(o.forceFallback2D),
     };
@@ -190,7 +249,10 @@
       Math.abs(p.tint) > 1e-4 ||
       p.tonemap ||
       p.vignette > 1e-4 ||
-      p.grain > 1e-4
+      p.grain > 1e-4 ||
+      p.directionalBlur > 1e-3 ||
+      p.radialBlur > 1e-4 ||
+      p.dof > 1e-3
     );
   }
 
@@ -525,6 +587,18 @@
           gl.uniform1f(res.pComp.u.uVignette, p.vignette);
           gl.uniform1f(res.pComp.u.uVignetteSoft, p.vignetteSoftness);
           gl.uniform1f(res.pComp.u.uGrain, p.grain);
+          const dirRad = (p.directionalAngle * Math.PI) / 180;
+          gl.uniform2f(
+            res.pComp.u.uDirBlurVec,
+            (Math.cos(dirRad) * p.directionalBlur) / Math.max(1, w),
+            (Math.sin(dirRad) * p.directionalBlur) / Math.max(1, h)
+          );
+          gl.uniform1f(res.pComp.u.uRadialBlur, p.radialBlur);
+          gl.uniform2f(res.pComp.u.uRadialCenter, p.radialCenter[0], 1.0 - p.radialCenter[1]);
+          gl.uniform1f(res.pComp.u.uDofAmt, p.dof);
+          gl.uniform2f(res.pComp.u.uDofFocus, p.dofFocus[0], 1.0 - p.dofFocus[1]);
+          gl.uniform1f(res.pComp.u.uDofRadius, p.dofRadius);
+          gl.uniform1f(res.pComp.u.uDofFeather, p.dofFeather);
           drawQuad();
           gl.finish();
 
