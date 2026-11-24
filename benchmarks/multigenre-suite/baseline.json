@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "commit": "a53f24d",
+  "recordedAt": "2026-11-24T07:56:54.271Z",
+  "renderer": "headless-cdp-browser-only",
+  "failurePathTraversalRejected": true,
+  "genresEvaluated": 4,
+  "allPassed": true,
+  "results": [
+    {
+      "genre": "kinetic_typography",
+      "visual": {
+        "activeForegroundShare": 0.0449,
+        "determinismMae": 0
+      },
+      "motion": {
+        "frameCount": 24,
+        "motionMeanDiff": 1.387,
+        "frozenPairs": 0
+      },
+      "runtimeStability": {
+        "runtimeErrors": 0,
+        "passed": true
+      },
+      "performance": {
+        "renderMsRunA": 3954,
+        "renderMsRunB": 2908,
+        "effectiveFps": 6.07,
+        "outputBytes": 110326
+      }
+    },
+    {
+      "genre": "cutout_collage",
+      "visual": {
+        "activeForegroundShare": 0.0644,
+        "determinismMae": 0
+      },
+      "motion": {
+        "frameCount": 24,
+        "motionMeanDiff": 2.377,
+        "frozenPairs": 0
+      },
+      "runtimeStability": {
+        "runtimeErrors": 0,
+        "passed": true
+      },
+      "performance": {
+        "renderMsRunA": 2666,
+        "renderMsRunB": 2533,
+        "effectiveFps": 9,
+        "outputBytes": 113928
+      }
+    },
+    {
+      "genre": "3d_multilayer_compositing",
+      "visual": {
+        "activeForegroundShare": 0.2424,
+        "determinismMae": 0
+      },
+      "motion": {
+        "frameCount": 24,
+        "motionMeanDiff": 3.676,
+        "frozenPairs": 0
+      },
+      "runtimeStability": {
+        "runtimeErrors": 0,
+        "passed": true
+      },
+      "performance": {
+        "renderMsRunA": 3141,
+        "renderMsRunB": 2971,
+        "effectiveFps": 7.64,
+        "outputBytes": 281743
+      }
+    },
+    {
+      "genre": "shader_heavy",
+      "visual": {
+        "activeForegroundShare": 0.3543,
+        "determinismMae": 0
+      },
+      "motion": {
+        "frameCount": 24,
+        "motionMeanDiff": 17.679,
+        "frozenPairs": 0
+      },
+      "runtimeStability": {
+        "runtimeErrors": 0,
+        "passed": true
+      },
+      "performance": {
+        "renderMsRunA": 2977,
+        "renderMsRunB": 2739,
+        "effectiveFps": 8.06,
+        "outputBytes": 865996
+      }
+    }
+  ]
+}
