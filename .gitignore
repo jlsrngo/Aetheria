@@ -85,8 +85,6 @@ crates/**/target/
 *.key
 *.pub
 
-docs/*
-!docs/backlog-integrasi-sosial-dan-akun.md
 demo/
 demo-workspace/
 
