@@ -28,17 +28,27 @@
     "height",
   ];
   let reportedMissingTracks = false;
+  let reportedMissingBehaviors = false;
+
+  function reportStageErrorOnce(msg) {
+    if (global && typeof global === "object") {
+      global.__aetheriaErrors = Array.isArray(global.__aetheriaErrors) ? global.__aetheriaErrors : [];
+      if (global.__aetheriaErrors.length < 16 && global.__aetheriaErrors.indexOf(msg) === -1) {
+        global.__aetheriaErrors.push(msg);
+      }
+    }
+  }
 
   function reportMissingTracksOnce() {
     if (reportedMissingTracks) return;
     reportedMissingTracks = true;
-    const text = "[aetheria-stage] layer.tracks ignored because window.AetheriaTracks is not loaded.";
-    if (global && typeof global === "object") {
-      global.__aetheriaErrors = Array.isArray(global.__aetheriaErrors) ? global.__aetheriaErrors : [];
-      if (global.__aetheriaErrors.length < 16 && global.__aetheriaErrors.indexOf(text) === -1) {
-        global.__aetheriaErrors.push(text);
-      }
-    }
+    reportStageErrorOnce("[aetheria-stage] layer.tracks ignored because window.AetheriaTracks is not loaded.");
+  }
+
+  function reportMissingBehaviorsOnce() {
+    if (reportedMissingBehaviors) return;
+    reportedMissingBehaviors = true;
+    reportStageErrorOnce("[aetheria-stage] layer.behaviors ignored because window.AetheriaBehaviors is not loaded.");
   }
 
   function validateLayerTracks(layerId, rawTracks) {
@@ -346,22 +356,51 @@
       }
       const existing = byId[id];
       const tracks = validateLayerTracks(id, spec.tracks);
+      let behaviors = null;
+      if (spec.behaviors !== undefined && spec.behaviors !== null) {
+        if (!Array.isArray(spec.behaviors)) {
+          throw new Error("AetheriaStage.addLayer('" + id + "'): 'behaviors' must be an array.");
+        }
+        if (global.AetheriaBehaviors && typeof global.AetheriaBehaviors.validateBehaviors === "function") {
+          behaviors = global.AetheriaBehaviors.validateBehaviors(spec.behaviors, id);
+        } else {
+          behaviors = spec.behaviors.slice();
+        }
+      }
+      let followLag = 0;
+      if (spec.followLag !== undefined && spec.followLag !== null) {
+        const lag = Number(spec.followLag);
+        if (!Number.isFinite(lag) || lag < 0) {
+          throw new Error("AetheriaStage.addLayer('" + id + "'): 'followLag' must be a non-negative finite number.");
+        }
+        followLag = lag;
+      }
+      const initX = Number(spec.x) || 0;
+      const initY = Number(spec.y) || 0;
+      const initW = Number(spec.width) || 0;
+      const initH = Number(spec.height) || 0;
+      const initSX = Number.isFinite(Number(spec.scaleX)) ? Number(spec.scaleX) : (Number.isFinite(Number(spec.scale)) ? Number(spec.scale) : 1);
+      const initSY = Number.isFinite(Number(spec.scaleY)) ? Number(spec.scaleY) : (Number.isFinite(Number(spec.scale)) ? Number(spec.scale) : 1);
+      const initRot = Number(spec.rotation) || 0;
+      const initAnchor = Array.isArray(spec.anchor) && spec.anchor.length >= 2 ? [Number(spec.anchor[0]) || 0, Number(spec.anchor[1]) || 0] : [0.5, 0.5];
+      const initOpacity = spec.opacity !== undefined ? clamp(Number(spec.opacity), 0, 1) : 1;
+      const initVisible = spec.visible !== false;
       const layer = {
         id,
         parentId,
         kind: String(spec.kind || "canvas2d"),
-        x: Number(spec.x) || 0,
-        y: Number(spec.y) || 0,
-        width: Number(spec.width) || 0,
-        height: Number(spec.height) || 0,
-        scaleX: Number.isFinite(Number(spec.scaleX)) ? Number(spec.scaleX) : (Number.isFinite(Number(spec.scale)) ? Number(spec.scale) : 1),
-        scaleY: Number.isFinite(Number(spec.scaleY)) ? Number(spec.scaleY) : (Number.isFinite(Number(spec.scale)) ? Number(spec.scale) : 1),
-        rotation: Number(spec.rotation) || 0,
-        anchor: Array.isArray(spec.anchor) && spec.anchor.length >= 2 ? [Number(spec.anchor[0]) || 0, Number(spec.anchor[1]) || 0] : [0.5, 0.5],
+        x: initX,
+        y: initY,
+        width: initW,
+        height: initH,
+        scaleX: initSX,
+        scaleY: initSY,
+        rotation: initRot,
+        anchor: [initAnchor[0], initAnchor[1]],
         zIndex: Number.isFinite(Number(spec.zIndex)) ? Number(spec.zIndex) : layers.length,
-        opacity: spec.opacity !== undefined ? clamp(Number(spec.opacity), 0, 1) : 1,
+        opacity: initOpacity,
         blendMode: spec.blendMode || "source-over",
-        visible: spec.visible !== false,
+        visible: initVisible,
         parallax: Number.isFinite(Number(spec.parallax)) ? Number(spec.parallax) : 1,
         mask: spec.mask || null,
         assetId: spec.assetId || null,
@@ -374,6 +413,20 @@
         draw: typeof spec.draw === "function" ? spec.draw : null,
         update: typeof spec.update === "function" ? spec.update : null,
         tracks,
+        behaviors,
+        followLag,
+        _base: {
+          x: initX,
+          y: initY,
+          width: initW,
+          height: initH,
+          scaleX: initSX,
+          scaleY: initSY,
+          rotation: initRot,
+          anchor: [initAnchor[0], initAnchor[1]],
+          opacity: initOpacity,
+          visible: initVisible,
+        },
         _order: existing ? existing._order : layers.length,
       };
       if (existing) {
@@ -411,51 +464,102 @@
     }
 
     function resolveWorldState(t) {
-      // Evaluate declarative AE keyframe tracks before layer.update so update() can still override
       const tracksApi =
         global.AetheriaTracks && typeof global.AetheriaTracks.evaluateTrack === "function"
           ? global.AetheriaTracks
           : null;
-      for (let i = 0; i < layers.length; i++) {
-        if (layers[i].tracks) {
+      const behaviorsApi =
+        global.AetheriaBehaviors && typeof global.AetheriaBehaviors.applyBehaviors === "function"
+          ? global.AetheriaBehaviors
+          : null;
+
+      function evaluateLayerState(layer, sampleT, writeLive) {
+        const b = layer._base;
+        const target = writeLive
+          ? layer
+          : {
+              id: layer.id,
+              x: b.x,
+              y: b.y,
+              width: b.width,
+              height: b.height,
+              scaleX: b.scaleX,
+              scaleY: b.scaleY,
+              rotation: b.rotation,
+              anchor: [b.anchor[0], b.anchor[1]],
+              opacity: b.opacity,
+              visible: b.visible,
+              tracks: layer.tracks,
+              behaviors: layer.behaviors,
+            };
+        if (writeLive && (layer.tracks || layer.behaviors)) {
+          layer.x = b.x;
+          layer.y = b.y;
+          layer.width = b.width;
+          layer.height = b.height;
+          layer.scaleX = b.scaleX;
+          layer.scaleY = b.scaleY;
+          layer.rotation = b.rotation;
+          layer.anchor = [b.anchor[0], b.anchor[1]];
+          layer.opacity = b.opacity;
+          layer.visible = b.visible;
+        }
+        if (layer.tracks) {
           if (tracksApi) {
-            applyTracksToLayer(layers[i], t, tracksApi);
+            applyTracksToLayer(target, sampleT, tracksApi);
           } else {
             reportMissingTracksOnce();
           }
         }
-      }
-      // Allow per-layer dynamic update(layer, t) before world matrix resolution
-      for (let i = 0; i < layers.length; i++) {
-        if (layers[i].update) {
-          layers[i].update(layers[i], t);
+        if (layer.behaviors) {
+          if (behaviorsApi) {
+            behaviorsApi.applyBehaviors(target, sampleT, layer.behaviors, layer.id);
+          } else {
+            reportMissingBehaviorsOnce();
+          }
         }
+        if (layer.update) {
+          layer.update(target, sampleT);
+        }
+        return target;
+      }
+
+      for (let i = 0; i < layers.length; i++) {
+        evaluateLayerState(layers[i], t, true);
       }
 
       const worldMap = Object.create(null);
-      function computeWorld(layer, depth) {
-        if (worldMap[layer.id]) return worldMap[layer.id];
+      function computeWorldAt(layer, sampleT, depth, isCurrentFrame) {
+        if (isCurrentFrame && worldMap[layer.id]) return worldMap[layer.id];
         if (depth > 64) {
           throw new Error("AetheriaStage cycle while resolving world matrix for '" + layer.id + "'.");
         }
-        const ax = (layer.width || 0) * (layer.anchor[0] || 0);
-        const ay = (layer.height || 0) * (layer.anchor[1] || 0);
+        const st = isCurrentFrame ? layer : evaluateLayerState(layer, sampleT, false);
+        const ax = (st.width || 0) * (st.anchor[0] || 0);
+        const ay = (st.height || 0) * (st.anchor[1] || 0);
         const localMat = matFromTransform(
-          layer.x,
-          layer.y,
-          layer.rotation,
-          layer.scaleX,
-          layer.scaleY,
+          st.x,
+          st.y,
+          st.rotation,
+          st.scaleX,
+          st.scaleY,
           ax,
           ay
         );
 
         let worldMat = localMat;
-        let worldOpacity = clamp(layer.opacity, 0, 1);
-        let worldVisible = layer.visible !== false;
+        let worldOpacity = clamp(st.opacity, 0, 1);
+        let worldVisible = st.visible !== false;
 
         if (layer.parentId && byId[layer.parentId]) {
-          const parentWorld = computeWorld(byId[layer.parentId], depth + 1);
+          const lag = layer.followLag || 0;
+          const parentT = sampleT - lag;
+          const parentWorld = computeWorldAt(
+            byId[layer.parentId],
+            parentT,
+            depth + 1,
+            isCurrentFrame && lag === 0
+          );
           worldMat = matMultiply(parentWorld.matrix, localMat);
           worldOpacity *= parentWorld.opacity;
           worldVisible = worldVisible && parentWorld.visible;
@@ -469,12 +573,14 @@
             return applyMatrixToPoint(worldMat, Number(lx) || 0, Number(ly) || 0);
           },
         };
-        worldMap[layer.id] = entry;
+        if (isCurrentFrame) {
+          worldMap[layer.id] = entry;
+        }
         return entry;
       }
 
       for (let i = 0; i < layers.length; i++) {
-        computeWorld(layers[i], 0);
+        computeWorldAt(layers[i], t, 0, true);
       }
       return worldMap;
     }

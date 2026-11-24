@@ -2128,6 +2128,27 @@
   }
 
   /**
+   * Deterministic After Effects-style octave wiggle via `/script/aetheria-behaviors.js`.
+   */
+  function wiggle(t, freq, amp, opts = {}) {
+    if (global.AetheriaBehaviors && typeof global.AetheriaBehaviors.wiggle === "function") {
+      return global.AetheriaBehaviors.wiggle(t, freq, amp, opts);
+    }
+    return opts && opts.base !== undefined ? opts.base : 0;
+  }
+
+  /**
+   * Evaluates a looping AE keyframe track (`cycle`, `pingpong`, `offset`, `continue`)
+   * via `/script/aetheria-behaviors.js` + `/script/aetheria-tracks.js`.
+   */
+  function loopTrack(keys, t, opts = {}) {
+    if (global.AetheriaBehaviors && typeof global.AetheriaBehaviors.loopTrack === "function") {
+      return global.AetheriaBehaviors.loopTrack(keys, t, opts);
+    }
+    return evalTrack(keys, t, opts);
+  }
+
+  /**
    * Synchronizes one canonical camera pose across Canvas 2D, DOM/SVG elements, and Three.js cameras.
    */
   function syncCamera(camState, targets = {}) {
@@ -3153,6 +3174,8 @@
     postProcess,
     createStage,
     evalTrack,
+    wiggle,
+    loopTrack,
     syncCamera,
     drawOpticalGlow,
     drawBloomStroke,

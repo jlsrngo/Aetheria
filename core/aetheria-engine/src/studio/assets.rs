@@ -156,6 +156,18 @@ pub async fn handle_ws_asset(
             .into_response();
     }
 
+    if super::builtin_runtime::is_builtin_behaviors_path(&clean_rel) {
+        let code = super::builtin_runtime::resolve_behaviors_runtime_code(&project_root());
+        return (
+            [(
+                axum::http::header::CONTENT_TYPE,
+                "application/javascript; charset=utf-8",
+            )],
+            code,
+        )
+            .into_response();
+    }
+
     if super::builtin_runtime::is_builtin_story_core_path(&clean_rel) {
         let code = super::builtin_runtime::resolve_story_core_code(&project_root());
         return (

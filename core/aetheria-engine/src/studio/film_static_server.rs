@@ -63,6 +63,9 @@ async fn serve_static_film_file(film_root: &Path, _ws_root: &Path, rel_raw: &str
         if !html.contains("aetheria-tracks.js") {
             injected.push_str("<script src=\"/script/aetheria-tracks.js\"></script>\n");
         }
+        if !html.contains("aetheria-behaviors.js") {
+            injected.push_str("<script src=\"/script/aetheria-behaviors.js\"></script>\n");
+        }
         if !html.contains("aetheria-stage.js") {
             injected.push_str("<script src=\"/script/aetheria-stage.js\"></script>\n");
         }
@@ -137,6 +140,15 @@ async fn serve_static_film_file(film_root: &Path, _ws_root: &Path, rel_raw: &str
 
     if super::builtin_runtime::is_builtin_tracks_path(target_rel) {
         let code = super::builtin_runtime::resolve_tracks_runtime_code(&project_root());
+        return (
+            [(header::CONTENT_TYPE, "application/javascript; charset=utf-8")],
+            code,
+        )
+            .into_response();
+    }
+
+    if super::builtin_runtime::is_builtin_behaviors_path(target_rel) {
+        let code = super::builtin_runtime::resolve_behaviors_runtime_code(&project_root());
         return (
             [(header::CONTENT_TYPE, "application/javascript; charset=utf-8")],
             code,
