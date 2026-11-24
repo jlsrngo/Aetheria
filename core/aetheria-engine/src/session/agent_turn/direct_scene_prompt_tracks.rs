@@ -200,6 +200,76 @@ pub(crate) fn format_motion_kinematics_block(sc: &Value) -> Option<String> {
     Some(out)
 }
 
+const MAX_SECONDARY_MOTION_CHARS: usize = 700;
+
+/// Formats native-30fps decorative / secondary motion tracks (`secondaryMotion`) from `style.json`
+/// so corner stars, sweeping arcs, orbital dots, and breathing accents keep moving after entrance.
+pub(crate) fn format_secondary_motion_block(sc: &Value) -> Option<String> {
+    let items = sc
+        .pointer("/motionClues/secondaryMotion")
+        .or_else(|| sc.pointer("/layout/motionClues/secondaryMotion"))
+        .and_then(Value::as_array)?;
+    if items.is_empty() {
+        return None;
+    }
+
+    let mut bullets = Vec::new();
+    for item in items.iter().take(4) {
+        let kind = item.get("kind").and_then(Value::as_str).unwrap_or("motion");
+        let zone = item.get("zone").and_then(Value::as_str).unwrap_or("center");
+        let hex = item
+            .get("colorHex")
+            .and_then(Value::as_str)
+            .map(|h| format!(" {}", h))
+            .unwrap_or_default();
+        let t0 = item.get("tStart").and_then(Value::as_f64).unwrap_or(0.0);
+        let t1 = item.get("tEnd").and_then(Value::as_f64).unwrap_or(t0);
+        let period = item
+            .get("periodSec")
+            .and_then(Value::as_f64)
+            .map(|p| format!(", period≈{:.2}s", p))
+            .unwrap_or_default();
+        let detail = match kind {
+            "rotate" => {
+                let dps = item.get("ampDegPerSec").and_then(Value::as_f64).unwrap_or(0.0);
+                format!("omega={:+.0} deg/s{}", dps, period)
+            }
+            "sweep" => {
+                let amp = item.get("ampPx").and_then(Value::as_f64).unwrap_or(0.0);
+                let spd = item.get("speedPxPerSec").and_then(Value::as_f64).unwrap_or(0.0);
+                format!("sweep≈{:.0}px (~{:.0}px/s{})", amp, spd, period)
+            }
+            "orbit" => {
+                let amp = item.get("ampPx").and_then(Value::as_f64).unwrap_or(0.0);
+                format!("amp≈{:.0}px{}", amp, period)
+            }
+            "scale" => {
+                let lo = item.pointer("/scaleRange/0").and_then(Value::as_f64).unwrap_or(1.0);
+                let hi = item.pointer("/scaleRange/1").and_then(Value::as_f64).unwrap_or(1.0);
+                format!("scale={:.2}..{:.2}x{}", lo, hi, period)
+            }
+            _ => format!("active{}", period),
+        };
+        bullets.push(format!(
+            "{} [{}{}]: {} over local {:.2}..{:.2}s",
+            kind, zone, hex, detail, t0, t1
+        ));
+    }
+
+    if bullets.is_empty() {
+        return None;
+    }
+
+    let mut full = format!(
+        "MEASURED 30FPS SECONDARY / DECORATIVE MOTION (AFTER ENTRANCE, THESE ELEMENTS MUST STAY IN MOTION):\n  - {}\nKeep ONLY these measured decorative accents/arcs/stars moving continuously at their measured speed/amplitude — NEVER freeze them static after entrance, and NEVER add fake wobble where the reference hold is steady.",
+        bullets.join("\n  - ")
+    );
+    if full.chars().count() > MAX_SECONDARY_MOTION_CHARS {
+        full = full.chars().take(MAX_SECONDARY_MOTION_CHARS - 3).collect::<String>() + "...";
+    }
+    Some(full)
+}
+
 const MAX_30FPS_BLUEPRINT_CHARS: usize = 950;
 
 /// Formats 30fps cross-scene transition bridges (`push_*` / `leadInBlankSec`) and multi-pulse
@@ -338,6 +408,20 @@ mod tests {
             }
         });
         assert!(format_motion_kinematics_block(&static_sc).is_none());
+
+        let sec_sc = json!({
+            "motionClues": {
+                "secondaryMotion": [
+                    { "kind": "rotate", "zone": "top_right", "colorHex": "#9C55A4", "ampDegPerSec": 99.4, "periodSec": 3.62, "tStart": 0.33, "tEnd": 3.30 },
+                    { "kind": "sweep", "zone": "bottom_right", "ampPx": 1452.0, "speedPxPerSec": 652.7, "periodSec": 0.73, "tStart": 0.03, "tEnd": 2.13 }
+                ]
+            }
+        });
+        let sec_txt = format_secondary_motion_block(&sec_sc).expect("secondary motion formatted");
+        assert!(sec_txt.contains("MEASURED 30FPS SECONDARY / DECORATIVE MOTION"));
+        assert!(sec_txt.contains("rotate [top_right #9C55A4]: omega=+99 deg/s"));
+        assert!(sec_txt.contains("sweep [bottom_right]: sweep≈1452px"));
+        assert!(sec_txt.contains("NEVER add fake wobble where the reference hold is steady"));
 
         let live_sc = json!({
             "motionClues": {

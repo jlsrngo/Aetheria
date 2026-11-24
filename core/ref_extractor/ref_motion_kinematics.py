@@ -276,12 +276,12 @@ def extract_scene_motion_kinematics(
     # motion (stars/arcs) keeps lag-1 and lag-long both high (>=4.5%) across the hold.
     quiet_lag1 = float(np.percentile(lag1_shares, 25)) if lag1_shares else 0.0
     amp_floor_px = 2.5
-    noise_share_floor = max(0.018, quiet_lag1 * 1.45)
+    noise_share_floor = max(0.014, quiet_lag1 * 1.35)
     # Check settled tail (last 40% of lag-long samples) so entrance-only scenes (e.g. bar charts
     # that grow early and then lock completely static) do not falsely report hasLivingHold=True.
     tail_split = max(0, int(len(lag_long_shares) * 0.60))
     tail_lag_long = float(np.median(lag_long_shares[tail_split:])) if lag_long_shares else 0.0
-    settled_is_quiet = (len(lag_long_shares) >= 4) and (tail_lag_long < 0.016) and (max_hold_curl < 0.025)
+    settled_is_quiet = (len(lag_long_shares) >= 4) and (tail_lag_long < 0.012) and (max_hold_curl < 0.025)
 
     for rname, _, _, _, _ in region_defs:
         r_longs = region_long_shares[rname]
@@ -290,18 +290,20 @@ def extract_scene_motion_kinematics(
             continue
         rm_long = float(np.mean(r_longs))
         rm_l1 = float(np.mean(r_l1s))
-        r_tail_long = float(np.median(r_longs[max(0, int(len(r_longs) * 0.60)):])) if len(r_longs) >= 4 else rm_long
-        if settled_is_quiet and r_tail_long < 0.020:
+        r_tail_slice = r_longs[-2:] if len(r_longs) >= 2 else r_longs
+        r_tail_min = float(min(r_tail_slice)) if r_tail_slice else 0.0
+        if settled_is_quiet and r_tail_min < 0.018:
             continue
         reg_amp = amp_px if rname == "center" else (round(amp_px * 0.6, 1) if amp_px >= amp_floor_px else 0.0)
         has_real_amp = reg_amp >= amp_floor_px
         has_rotational_hold = (rm_long >= max(0.055, rm_l1 * 1.40)) and (max_hold_curl >= 0.025)
+        has_internal_hold = (r_tail_min >= 0.022) and (mean_lag1 >= 0.008) and (rm_long >= max(0.030, rm_l1 * 1.25))
         grows_or_continuous = (rm_long >= rm_l1 * 1.25) or (rm_l1 >= 0.045 and rm_long >= 0.055)
-        if rm_long >= noise_share_floor and grows_or_continuous and (has_real_amp or has_rotational_hold):
+        if rm_long >= noise_share_floor and grows_or_continuous and (has_real_amp or has_rotational_hold or has_internal_hold):
             reg_entry: Dict[str, Any] = {
                 "zone": rname,
                 "lag15Share": round(rm_long, 4),
-                "ampPx": reg_amp,
+                "ampPx": reg_amp if has_real_amp else round(max(amp_floor_px, rm_long * 120.0), 1),
             }
             if period_sec is not None and rname == "center" and has_real_amp:
                 reg_entry["periodSec"] = period_sec

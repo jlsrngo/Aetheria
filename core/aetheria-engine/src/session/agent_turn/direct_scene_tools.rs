@@ -33,11 +33,14 @@ pub(crate) struct SceneToolContext<'a> {
     pub film_duration: f64,
     pub width: u32,
     pub height: u32,
+    pub fps: u32,
     pub default_scene_ts: &'a [f64],
     pub safe_iso_lo: f64,
     pub safe_iso_hi: f64,
     pub use_filmstrip: bool,
     pub motion_expectations: SceneMotionExpectations,
+    pub secondary_motion: &'a [Value],
+    pub motion_gate_runs: &'a std::sync::atomic::AtomicUsize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -48,6 +51,7 @@ pub(crate) struct RenderedMetrics {
     pub edge: f64,
     pub min_frame_score: f64,
     pub has_structural_diagnosis: bool,
+    pub motion_flow_deficit: bool,
 }
 
 pub(crate) struct SceneToolOutcome {
@@ -939,6 +943,63 @@ pub(crate) async fn execute_scene_micro_tool(
                                 .to_string(),
                         );
                     }
+                    // M3: Run lightweight 30fps optical-flow motion gate (at most twice per scene:
+                    // initial check + post-fix verification) so weak secondary motion is caught even
+                    // when static keyframe SSIM looks high.
+                    let mut motion_flow_deficit = false;
+                    let mut motion_flow_json: Option<Value> = None;
+                    let mut feedback = feedback;
+                    if ctx.use_filmstrip
+                        && res.runtime_errors.is_empty()
+                        && ctx
+                            .motion_gate_runs
+                            .load(std::sync::atomic::Ordering::Relaxed)
+                            < 2
+                    {
+                        ctx.motion_gate_runs
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if let Some(gate) = crate::studio::motion_gate::run_scene_motion_flow_gate(
+                            ctx.workspace_dir,
+                            ctx.ws_root,
+                            ctx.scene_id,
+                            ctx.safe_iso_lo,
+                            ctx.safe_iso_hi,
+                            ctx.film_duration,
+                            ctx.fps,
+                            ctx.secondary_motion,
+                        )
+                        .await
+                        {
+                            crate::paths::log_engine(
+                                "direct_remake",
+                                &format!(
+                                    "Scene {} ({}) 30fps motion gate ({}ms): fastShare={:.2}/{:.2} p97Ratio={:.2} deficit={}",
+                                    ctx.scene_num,
+                                    ctx.scene_id,
+                                    gate.elapsed_ms,
+                                    gate.fast_share_res,
+                                    gate.fast_share_ref,
+                                    gate.p97_ratio,
+                                    gate.deficit
+                                ),
+                            );
+                            motion_flow_deficit = gate.deficit;
+                            motion_flow_json = Some(json!({
+                                "fastShareRef": gate.fast_share_ref,
+                                "fastShareRes": gate.fast_share_res,
+                                "p97Ratio": gate.p97_ratio,
+                                "deficit": gate.deficit,
+                                "elapsedMs": gate.elapsed_ms,
+                            }));
+                            if let Some(warn) = gate.warning {
+                                motion_warn_lines.push(warn.clone());
+                                if !feedback.is_empty() {
+                                    feedback.push('\n');
+                                }
+                                feedback.push_str(&warn);
+                            }
+                        }
+                    }
                     let caption = Some(if motion_warn_lines.is_empty() {
                         format!(
                             "Visual render comparison for Scene {} (`Row 1 = REFERENCE | Row 2 = YOUR RENDER | Row 3 = DIFF HEATMAP`{}). Measured overall={:.3}, runtimeErrors={}.",
@@ -1011,6 +1072,9 @@ pub(crate) async fn execute_scene_micro_tool(
                     if let Some(mc) = motion_check {
                         rj["motionCheck"] = mc;
                     }
+                    if let Some(mfg) = motion_flow_json {
+                        rj["motionFlowGate"] = mfg;
+                    }
                     SceneToolOutcome {
                         result_json: rj,
                         vision_images: imgs,
@@ -1024,6 +1088,7 @@ pub(crate) async fn execute_scene_micro_tool(
                             edge: edge_mean,
                             min_frame_score,
                             has_structural_diagnosis,
+                            motion_flow_deficit,
                         }),
                         rendered_errors: Some(res.runtime_errors),
                     }
@@ -1041,6 +1106,7 @@ pub(crate) async fn execute_scene_micro_tool(
                         edge: 0.0,
                         min_frame_score: 0.0,
                         has_structural_diagnosis: true,
+                        motion_flow_deficit: false,
                     }),
                     rendered_errors: Some(vec![err]),
                 },

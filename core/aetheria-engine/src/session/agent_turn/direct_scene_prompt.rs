@@ -437,6 +437,11 @@ pub(crate) fn build_scene_hard_facts_prompt_with_next(
         {
             lines.push(kin_block);
         }
+        if let Some(sec_block) =
+            super::direct_scene_prompt_tracks::format_secondary_motion_block(sc)
+        {
+            lines.push(sec_block);
+        }
         if let Some(blueprint_30fps) =
             super::direct_scene_prompt_tracks::format_30fps_motion_blueprint_block(
                 sc,

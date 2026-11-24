@@ -944,6 +944,7 @@ async fn run_single_direct_scene(
     let mut latest_edge = 0.0f64;
     let mut latest_min_frame_score = 0.0f64;
     let mut latest_has_struct_diag = false;
+    let mut latest_motion_flow_deficit = false;
     let mut latest_errs: Vec<String> = Vec::new();
     let mut has_written = false;
     let mut dirty_since_render = false;
@@ -957,6 +958,16 @@ async fn run_single_direct_scene(
     let mut render_records: Vec<RenderTraceRecord> = Vec::new();
 
     let motion_expectations = SceneMotionExpectations::from_style_scene(style_sc);
+    let secondary_motion: Vec<Value> = style_sc
+        .and_then(|sc| {
+            sc.pointer("/motionClues/secondaryMotion")
+                .or_else(|| sc.pointer("/layout/motionClues/secondaryMotion"))
+                .and_then(Value::as_array)
+        })
+        .cloned()
+        .unwrap_or_default();
+    let motion_gate_runs = std::sync::atomic::AtomicUsize::new(0);
+    let mut motion_deficit_rounds: usize = 0;
     let tool_ctx = SceneToolContext {
         session_id: &shared.session_id,
         workspace_dir: &shared.workspace_dir,
@@ -971,11 +982,14 @@ async fn run_single_direct_scene(
         film_duration: shared.total_dur,
         width: shared.width,
         height: shared.height,
+        fps: shared.fps,
         default_scene_ts: &scene_ts,
         safe_iso_lo,
         safe_iso_hi,
         use_filmstrip: shared.active_filmstrip,
         motion_expectations,
+        secondary_motion: &secondary_motion,
+        motion_gate_runs: &motion_gate_runs,
     };
 
     let mut scene_msgs = vec![
@@ -1271,7 +1285,6 @@ async fn run_single_direct_scene(
                     let cur_code = tokio::fs::read_to_string(&script_path)
                         .await
                         .unwrap_or_default();
-                    let cur_haz = detect_scene_motion_hazards(&cur_code, motion_expectations).len();
                     let metrics = outcome.rendered_metrics.unwrap_or(RenderedMetrics {
                         overall: sc_val,
                         ssim: 0.0,
@@ -1279,7 +1292,14 @@ async fn run_single_direct_scene(
                         edge: 0.0,
                         min_frame_score: sc_val,
                         has_structural_diagnosis: false,
+                        motion_flow_deficit: false,
                     });
+                    if metrics.motion_flow_deficit {
+                        motion_deficit_rounds += 1;
+                    }
+                    latest_motion_flow_deficit = metrics.motion_flow_deficit;
+                    let cur_haz = detect_scene_motion_hazards(&cur_code, motion_expectations).len()
+                        + usize::from(metrics.motion_flow_deficit);
                     latest_edge = metrics.edge;
                     latest_min_frame_score = metrics.min_frame_score;
                     latest_has_struct_diag = metrics.has_structural_diagnosis;
@@ -1334,6 +1354,7 @@ async fn run_single_direct_scene(
                         "MOTION DIRECTION/PAN MISMATCH",
                         "MOTION ACTIVITY WARNING",
                         "PRE-CUT FREEZE WARNING",
+                        "MOTION FLOW DEFICIT WARNING",
                     ] {
                         if text.contains(tag) && !out.iter().any(|x| x == tag) {
                             out.push(tag.to_string());
@@ -1451,6 +1472,7 @@ async fn run_single_direct_scene(
                         || c.contains("MOTION WINDOW FREEZE")
                         || c.contains("MOTION DIRECTION/PAN MISMATCH")
                         || c.contains("PRE-CUT FREEZE WARNING")
+                        || (c.contains("MOTION FLOW DEFICIT WARNING") && motion_deficit_rounds <= 1)
                 });
 
             // Fast early-exit for live filmstrip remakes once visual score, edge overlap, worst-frame
@@ -1582,7 +1604,6 @@ async fn run_single_direct_scene(
             let errs = render_out.rendered_errors.unwrap_or_default();
             latest_score = sc_val;
             latest_errs = errs.clone();
-            let cur_haz = detect_scene_motion_hazards(&code_block, motion_expectations).len();
             let metrics = render_out.rendered_metrics.unwrap_or(RenderedMetrics {
                 overall: sc_val,
                 ssim: 0.0,
@@ -1590,7 +1611,11 @@ async fn run_single_direct_scene(
                 edge: 0.0,
                 min_frame_score: sc_val,
                 has_structural_diagnosis: false,
+                motion_flow_deficit: false,
             });
+            latest_motion_flow_deficit = metrics.motion_flow_deficit;
+            let cur_haz = detect_scene_motion_hazards(&code_block, motion_expectations).len()
+                + usize::from(metrics.motion_flow_deficit);
             latest_edge = metrics.edge;
             latest_min_frame_score = metrics.min_frame_score;
             latest_has_struct_diag = metrics.has_structural_diagnosis;
@@ -1666,7 +1691,6 @@ async fn run_single_direct_scene(
         let final_dirty_code = tokio::fs::read_to_string(&script_path)
             .await
             .unwrap_or_default();
-        let final_dirty_haz = detect_scene_motion_hazards(&final_dirty_code, motion_expectations).len();
         let metrics = final_out.rendered_metrics.unwrap_or(RenderedMetrics {
             overall: latest_score,
             ssim: 0.0,
@@ -1674,7 +1698,11 @@ async fn run_single_direct_scene(
             edge: 0.0,
             min_frame_score: latest_score,
             has_structural_diagnosis: false,
+            motion_flow_deficit: false,
         });
+        latest_motion_flow_deficit = metrics.motion_flow_deficit;
+        let final_dirty_haz = detect_scene_motion_hazards(&final_dirty_code, motion_expectations).len()
+            + usize::from(metrics.motion_flow_deficit);
         latest_edge = metrics.edge;
         latest_min_frame_score = metrics.min_frame_score;
         render_records.push(RenderTraceRecord {
@@ -1705,7 +1733,8 @@ async fn run_single_direct_scene(
     let final_code_now = tokio::fs::read_to_string(&script_path)
         .await
         .unwrap_or_default();
-    let final_haz = detect_scene_motion_hazards(&final_code_now, motion_expectations).len();
+    let final_haz = detect_scene_motion_hazards(&final_code_now, motion_expectations).len()
+        + usize::from(latest_motion_flow_deficit);
     let should_restore_best = shared.switches.restore_best
         && should_restore_best_checkpoint(
             best_score,
