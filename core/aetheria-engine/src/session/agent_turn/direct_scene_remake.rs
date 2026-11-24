@@ -1,20 +1,21 @@
-//! Direct Per-Scene Vision-First Reference Remake Compiler (No-Subagent Pipeline).
+//! Direct Per-Scene Vision-First Reference Remake Compiler (Zero-Subagent Interactive Loop).
 //!
 //! Replaces multi-agent `Director -> Subagent motion-designer -> QA Verifier` bureaucracy
-//! on multi-scene video reference remakes with a deterministic, zero-subagent 2-to-3-pass
-//! per-scene loop:
+//! on multi-scene video reference remakes with a deterministic, single-model interactive loop
+//! (up to 12 micro-tool steps per scene):
 //!   For each Scene K = 1..N:
-//!     1. Pass 1 (Draft): 1 direct LLM vision call (no tools, no 18KB `default.txt`, no raw OCR
-//!        noise) receiving ONLY Scene K's high-res beat strip (`ref_scene_0K_beats.jpg`) +
-//!        3 full-res keyframes (`q1/mid/q3` or `start/mid/end`) + hard mathematical facts.
-//!     2. Capture Scene K's keyframes -> builds 3-row visual comparison strip
-//!        (`scene_0K_compare_6beats.jpg`: REF | PREV | DIFF) + local-time diagnostics.
-//!     3. Pass 2 (Visual Self-Correction): 1 direct LLM vision call inspecting the 3-row
-//!        comparison strip + local-time structural diagnostics + Pass 1 JS code -> writes refined code.
-//!     4. Auto-Rollback Guard: re-captures Scene K; if Pass 2 introduces runtime errors or
-//!        regresses `overallFidelity` (`< best - 0.004`), immediately restores `best_code`.
-//!     5. Optional Pass 3 (Targeted Recovery / Polish): runs if `runtime_errors > 0` or
-//!        `best_score < 0.72` (including recovering from a Pass 2 rollback without giving up).
+//!     1. Probing & Motion Planning: receives Scene K's 1/1 filmstrip sheets (or beat strip) +
+//!        3 full-res keyframes + measured 30fps hard facts; optionally inspects crops/colors/assets
+//!        and declares a validated `SceneMotionSpec` (`write_motion_spec`, toggleable via
+//!        `AETHERIA_DIRECT_MOTION_SPEC=on|off`).
+//!     2. Authoring (`write_scene_script` / `patch_scene_script`): runs instant static motion
+//!        hazards + spec-to-code compliance checks before rendering.
+//!     3. Visual & Temporal QA (`render_and_compare_scene`): captures headless CDP 6-beat
+//!        comparison strips (`REF | PREV | DIFF`) + full-res worst frame + per-render 30fps
+//!        optical-flow motion gate (`ref_motion_gate.py` with failure classification).
+//!     4. Symmetric Checkpoint & Rollback Guard: preserves motion-clean checkpoints against
+//!        visual regressions or newly introduced motion hazards (`is_better_checkpoint` /
+//!        `should_restore_best_checkpoint`).
 
 use base64::prelude::*;
 use serde_json::{json, Value};
@@ -33,7 +34,7 @@ use super::direct_scene_switches::{
     extract_cross_scene_summary, CrossContextMode, DirectSceneSwitches, PromptMode,
 };
 use super::direct_scene_tools::{
-    build_scene_tool_definitions_with_filmstrip, execute_scene_micro_tool, RenderedMetrics,
+    build_scene_tool_definitions_for_remake, execute_scene_micro_tool, RenderedMetrics,
     SceneToolContext,
 };
 use super::direct_scene_trace::{
@@ -1301,6 +1302,7 @@ async fn run_single_direct_scene(
                     }
                     latest_motion_flow_deficit = metrics.motion_flow_deficit;
                     let cur_haz = detect_scene_motion_hazards(&cur_code, motion_expectations).len()
+                        + super::motion_spec::load_and_check_motion_spec_compliance(&script_path, &cur_code).len()
                         + usize::from(metrics.motion_flow_deficit);
                     latest_edge = metrics.edge;
                     latest_min_frame_score = metrics.min_frame_score;
@@ -1357,6 +1359,8 @@ async fn run_single_direct_scene(
                         "MOTION ACTIVITY WARNING",
                         "PRE-CUT FREEZE WARNING",
                         "MOTION FLOW DEFICIT WARNING",
+                        "MOTION VELOCITY SNAP WARNING",
+                        "SPEC COMPLIANCE HAZARD",
                     ] {
                         if text.contains(tag) && !out.iter().any(|x| x == tag) {
                             out.push(tag.to_string());
@@ -1459,11 +1463,17 @@ async fn run_single_direct_scene(
             } else {
                 String::new()
             };
-            let active_hazards = if !cur_code_after_step.is_empty() {
+            let mut active_hazards = if !cur_code_after_step.is_empty() {
                 detect_scene_motion_hazards(&cur_code_after_step, motion_expectations)
             } else {
                 Vec::new()
             };
+            if !cur_code_after_step.is_empty() {
+                active_hazards.extend(super::motion_spec::load_and_check_motion_spec_compliance(
+                    &script_path,
+                    &cur_code_after_step,
+                ));
+            }
             let has_motion_warning = step_captions
                 .iter()
                 .any(|c| {
@@ -1474,7 +1484,9 @@ async fn run_single_direct_scene(
                         || c.contains("MOTION WINDOW FREEZE")
                         || c.contains("MOTION DIRECTION/PAN MISMATCH")
                         || c.contains("PRE-CUT FREEZE WARNING")
-                        || (c.contains("MOTION FLOW DEFICIT WARNING") && motion_deficit_rounds <= 1)
+                        || ((c.contains("MOTION FLOW DEFICIT WARNING")
+                            || c.contains("MOTION VELOCITY SNAP WARNING"))
+                            && motion_deficit_rounds <= 1)
                 });
 
             // Fast early-exit for live filmstrip remakes once visual score, edge overlap, worst-frame
@@ -1739,6 +1751,8 @@ async fn run_single_direct_scene(
         .await
         .unwrap_or_default();
     let final_haz = detect_scene_motion_hazards(&final_code_now, motion_expectations).len()
+        + super::motion_spec::load_and_check_motion_spec_compliance(&script_path, &final_code_now)
+            .len()
         + usize::from(latest_motion_flow_deficit);
     let should_restore_best = shared.switches.restore_best
         && should_restore_best_checkpoint(
@@ -1932,7 +1946,10 @@ pub(crate) async fn run_direct_per_scene_remake_with_switches(
         system_prompt,
         started,
     );
-    let scene_tools = build_scene_tool_definitions_with_filmstrip(active_filmstrip);
+    let scene_tools = build_scene_tool_definitions_for_remake(
+        active_filmstrip,
+        effective_switches.motion_spec && active_filmstrip,
+    );
     let write_only_tools: Vec<Value> = scene_tools
         .iter()
         .filter(|t| {

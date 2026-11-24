@@ -104,10 +104,32 @@ def evaluate_scene_motion_gate(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     fast_deficit = (fast_ref >= 0.18) and (fast_res < 0.50 * fast_ref)
     p97_deficit = (mean_ref >= 1.8) and (p97_ratio < 0.50)
-    deficit = bool(fast_deficit or p97_deficit)
+
+    # Velocity continuity & mid-motion freeze diagnostics (Prompt QA P0-2):
+    # - duplicatePairCount: ref is clearly moving (>= 2.0 px/fr) while preview is frozen (< 0.25 px/fr)
+    # - velocitySnapCount: preview flow plunges <15% of previous pair while ref stays >=50% active
+    duplicate_pairs = int(np.sum((r_arr >= 2.0) & (s_arr < 0.25)))
+    velocity_snaps = 0
+    for i in range(1, len(r_arr)):
+        if r_arr[i - 1] >= 2.5 and r_arr[i] >= 0.50 * r_arr[i - 1]:
+            if s_arr[i - 1] >= 1.5 and s_arr[i] < 0.15 * s_arr[i - 1]:
+                velocity_snaps += 1
+
+    low_ref_motion = (fast_ref < 0.18) and (mean_ref < 1.8)
+    snap_deficit = (not low_ref_motion) and (duplicate_pairs >= 2)
+    deficit = bool(fast_deficit or p97_deficit or snap_deficit)
+
+    if low_ref_motion:
+        failure_class = "extraction_low_confidence"
+    elif fast_deficit or p97_deficit:
+        failure_class = "implementation_motion_deficit"
+    elif snap_deficit or velocity_snaps >= 2:
+        failure_class = "implementation_velocity_snap"
+    else:
+        failure_class = "none"
 
     warning = ""
-    if deficit:
+    if fast_deficit or p97_deficit:
         sec_list = [_format_secondary_item(item) for item in sec_motion[:4]]
         sec_hint = (
             f" Animate the measured secondary elements continuously after entrance: {', '.join(sec_list)}!"
@@ -115,8 +137,13 @@ def evaluate_scene_motion_gate(payload: Dict[str, Any]) -> Dict[str, Any]:
             else " Keep decorative accents, arcs/ribbons, and camera/parallax motion alive across the full scene duration!"
         )
         warning = (
-            f"MOTION FLOW DEFICIT WARNING (30fps optical flow): your render is much stiffer/more static than the reference "
-            f"(fastShare={fast_res:.2f} vs ref={fast_ref:.2f}, p97Ratio={p97_ratio:.2f} < 0.50; meanP97={mean_res:.2f} vs ref={mean_ref:.2f} px/frame).{sec_hint}"
+            f"MOTION FLOW DEFICIT WARNING (30fps optical flow, class={failure_class}): your render is much stiffer/more static than the reference "
+            f"(fastShare={fast_res:.2f} vs ref={fast_ref:.2f}, p97Ratio={p97_ratio:.2f}; meanP97={mean_res:.2f} vs ref={mean_ref:.2f} px/frame, frozenPairs={duplicate_pairs}).{sec_hint}"
+        )
+    elif snap_deficit or velocity_snaps >= 2:
+        warning = (
+            f"MOTION VELOCITY SNAP WARNING (30fps optical flow, class={failure_class}): detected {duplicate_pairs} mid-motion frozen pairs and {velocity_snaps} abrupt velocity drops "
+            f"while the reference keeps moving continuously — remove zero-velocity `if/else` plateaus and keep motion continuous across `t`!"
         )
 
     return {
@@ -127,6 +154,9 @@ def evaluate_scene_motion_gate(payload: Dict[str, Any]) -> Dict[str, Any]:
         "p97MeanRef": round(mean_ref, 2),
         "p97MeanRes": round(mean_res, 2),
         "p97Ratio": round(p97_ratio, 2),
+        "duplicatePairCount": duplicate_pairs,
+        "velocitySnapCount": velocity_snaps,
+        "failureClass": failure_class,
         "deficit": deficit,
         "warning": warning,
     }

@@ -33,6 +33,7 @@ pub(crate) struct DirectSceneSwitches {
     pub only_scenes: Option<Vec<usize>>,
     pub max_steps: usize,
     pub filmstrip_pass1: bool,
+    pub motion_spec: bool,
     pub concurrency: usize,
     #[serde(skip)]
     pub concurrency_explicit: bool,
@@ -55,6 +56,7 @@ impl Default for DirectSceneSwitches {
             only_scenes: None,
             max_steps: 12,
             filmstrip_pass1: true,
+            motion_spec: true,
             concurrency: 1,
             concurrency_explicit: false,
             probe_steps_explicit: false,
@@ -152,6 +154,18 @@ impl DirectSceneSwitches {
             None => true,
         };
 
+        let motion_spec = match lookup("AETHERIA_DIRECT_MOTION_SPEC") {
+            Some(raw) => {
+                let s = raw.trim().to_ascii_lowercase();
+                if s.is_empty() {
+                    true
+                } else {
+                    !matches!(s.as_str(), "0" | "false" | "off" | "no" | "disabled")
+                }
+            }
+            None => true,
+        };
+
         let (concurrency, concurrency_explicit) = match lookup("AETHERIA_DIRECT_CONCURRENCY")
             .and_then(|v| v.trim().parse::<usize>().ok())
         {
@@ -168,6 +182,7 @@ impl DirectSceneSwitches {
             only_scenes,
             max_steps,
             filmstrip_pass1,
+            motion_spec,
             concurrency,
             concurrency_explicit,
             probe_steps_explicit,
@@ -493,6 +508,7 @@ mod tests {
             ("AETHERIA_REMAKE_ONLY_SCENES", "6, 2, 2, 3"),
             ("AETHERIA_SCENE_MAX_STEPS", "99"),
             ("AETHERIA_DIRECT_FILMSTRIP", "0"),
+            ("AETHERIA_DIRECT_MOTION_SPEC", "off"),
             ("AETHERIA_DIRECT_CONCURRENCY", "9"),
         ];
         let sw = DirectSceneSwitches::from_lookup(lookup_from(&pairs));
@@ -504,6 +520,7 @@ mod tests {
         assert_eq!(sw.only_scenes, Some(vec![2, 3, 6]));
         assert_eq!(sw.max_steps, 18);
         assert!(!sw.filmstrip_pass1);
+        assert!(!sw.motion_spec);
         assert_eq!(sw.concurrency, 4);
         assert!(sw.concurrency_explicit);
         assert!(sw.probe_steps_explicit);

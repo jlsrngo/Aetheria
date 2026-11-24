@@ -63,6 +63,8 @@ class MotionGateTests(unittest.TestCase):
             })
             self.assertTrue(rep_weak["ok"])
             self.assertTrue(rep_weak["deficit"], f"weak render must trigger deficit: {rep_weak}")
+            self.assertEqual(rep_weak["failureClass"], "implementation_motion_deficit")
+            self.assertGreaterEqual(rep_weak["duplicatePairCount"], 4)
             self.assertIn("MOTION FLOW DEFICIT WARNING", rep_weak["warning"])
             self.assertIn("rotate[top_right +99deg/s", rep_weak["warning"])
 
@@ -73,7 +75,45 @@ class MotionGateTests(unittest.TestCase):
             })
             self.assertTrue(rep_ok["ok"])
             self.assertFalse(rep_ok["deficit"], f"matched render should pass gate: {rep_ok}")
+            self.assertEqual(rep_ok["failureClass"], "none")
+            self.assertEqual(rep_ok["duplicatePairCount"], 0)
             self.assertEqual(rep_ok["warning"], "")
+
+            # Velocity snap / mid-motion freeze: 4 moving pairs + 2 frozen pairs mid-scene
+            snap_pairs = []
+            for k, idx in enumerate((5, 11, 17, 23, 29, 35)):
+                s0 = td_p / f"s_{idx}_0.png"
+                s1 = td_p / f"s_{idx}_1.png"
+                is_frozen = k in (2, 4)
+                cv2.imwrite(str(s0), _draw_moving_frame(idx, static=is_frozen))
+                cv2.imwrite(str(s1), _draw_moving_frame(idx if is_frozen else idx + 1, static=is_frozen))
+                snap_pairs.append({"t0": idx / fps, "t1": (idx + 1) / fps, "prev0": str(s0), "prev1": str(s1)})
+
+            rep_snap = evaluate_scene_motion_gate({
+                "refVideoPath": str(ref_path),
+                "pairs": snap_pairs,
+                "secondaryMotion": sec,
+            })
+            self.assertTrue(rep_snap["ok"])
+            self.assertTrue(rep_snap["deficit"], f"mid-motion frozen pairs must be flagged: {rep_snap}")
+            self.assertEqual(rep_snap["failureClass"], "implementation_velocity_snap")
+            self.assertGreaterEqual(rep_snap["duplicatePairCount"], 2)
+            self.assertIn("MOTION VELOCITY SNAP WARNING", rep_snap["warning"])
+
+            # Static reference video must NOT false-alarm -> extraction_low_confidence
+            static_ref = td_p / "static_ref.mp4"
+            sw = cv2.VideoWriter(str(static_ref), cv2.VideoWriter_fourcc(*"mp4v"), fps, (360, 640))
+            for i in range(45):
+                sw.write(_draw_moving_frame(i, static=True))
+            sw.release()
+            rep_static_ref = evaluate_scene_motion_gate({
+                "refVideoPath": str(static_ref),
+                "pairs": weak_pairs,
+                "secondaryMotion": [],
+            })
+            self.assertTrue(rep_static_ref["ok"])
+            self.assertFalse(rep_static_ref["deficit"])
+            self.assertEqual(rep_static_ref["failureClass"], "extraction_low_confidence")
 
 
 if __name__ == "__main__":

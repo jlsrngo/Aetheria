@@ -17,6 +17,9 @@ pub(crate) struct SceneMotionGateResult {
     pub fast_share_ref: f64,
     pub fast_share_res: f64,
     pub p97_ratio: f64,
+    pub duplicate_pair_count: u64,
+    pub velocity_snap_count: u64,
+    pub failure_class: String,
     pub deficit: bool,
     pub warning: Option<String>,
     pub elapsed_ms: u64,
@@ -230,6 +233,13 @@ pub(crate) async fn run_scene_motion_flow_gate(
         fast_share_ref: val.get("fastShareRef").and_then(Value::as_f64).unwrap_or(0.0),
         fast_share_res: val.get("fastShareRes").and_then(Value::as_f64).unwrap_or(0.0),
         p97_ratio: val.get("p97Ratio").and_then(Value::as_f64).unwrap_or(1.0),
+        duplicate_pair_count: val.get("duplicatePairCount").and_then(Value::as_u64).unwrap_or(0),
+        velocity_snap_count: val.get("velocitySnapCount").and_then(Value::as_u64).unwrap_or(0),
+        failure_class: val
+            .get("failureClass")
+            .and_then(Value::as_str)
+            .unwrap_or("none")
+            .to_string(),
         deficit,
         warning,
         elapsed_ms: now_ms().saturating_sub(started),

@@ -208,7 +208,15 @@ pub(crate) fn build_scene_tool_definitions_with_options(
     defs
 }
 
+#[cfg(test)]
 pub(crate) fn build_scene_tool_definitions_with_filmstrip(include_filmstrip: bool) -> Vec<Value> {
+    build_scene_tool_definitions_for_remake(include_filmstrip, false)
+}
+
+pub(crate) fn build_scene_tool_definitions_for_remake(
+    include_filmstrip: bool,
+    include_motion_spec: bool,
+) -> Vec<Value> {
     let allow_bash = std::env::var("AETHERIA_DIRECT_ALLOW_BASH")
         .ok()
         .map(|v| {
@@ -218,7 +226,11 @@ pub(crate) fn build_scene_tool_definitions_with_filmstrip(include_filmstrip: boo
             )
         })
         .unwrap_or(true);
-    build_scene_tool_definitions_with_options(include_filmstrip, allow_bash)
+    let mut defs = build_scene_tool_definitions_with_options(include_filmstrip, allow_bash);
+    if include_motion_spec {
+        defs.push(super::motion_spec::write_motion_spec_tool_definition());
+    }
+    defs
 }
 
 /// Rejects solid-background or empty stub placeholders written only to bypass the write gate.
@@ -583,6 +595,70 @@ pub(crate) async fn execute_scene_micro_tool(
                 rendered_errors: None,
             }
         }
+        "write_motion_spec" => {
+            let spec_path = super::motion_spec::spec_path_for_script(ctx.script_path);
+            if !crate::paths::contains_path(ctx.ws_root, &spec_path) {
+                return SceneToolOutcome {
+                    result_json: json!({ "ok": false, "error": "Motion spec path resolved outside workspace." }),
+                    vision_images: Vec::new(),
+                    vision_caption: None,
+                    script_modified: false,
+                    rendered_score: None,
+                    rendered_metrics: None,
+                    rendered_errors: None,
+                };
+            }
+            match super::motion_spec::parse_and_validate_motion_spec(
+                args,
+                ctx.scene_id,
+                ctx.scene_dur,
+                ctx.motion_expectations,
+            ) {
+                Ok((spec, validation)) => {
+                    if validation.valid {
+                        if let Ok(pretty) = serde_json::to_string_pretty(&spec) {
+                            let _ = tokio::fs::write(&spec_path, format!("{}\n", pretty)).await;
+                        }
+                    }
+                    let next_step = if validation.valid {
+                        "Motion Specification validated and saved. Now call `write_scene_script` implementing every declared element, timing, easing, and hold behavior."
+                    } else {
+                        "Planning failure: fix the validation errors in `write_motion_spec` (or proceed directly if minor) before writing `script/sceneK.js`."
+                    };
+                    SceneToolOutcome {
+                        result_json: json!({
+                            "ok": validation.valid,
+                            "valid": validation.valid,
+                            "failureClass": validation.failure_class,
+                            "errors": validation.errors,
+                            "warnings": validation.warnings,
+                            "summary": validation.summary,
+                            "nextStep": next_step,
+                        }),
+                        vision_images: Vec::new(),
+                        vision_caption: None,
+                        script_modified: false,
+                        rendered_score: None,
+                        rendered_metrics: None,
+                        rendered_errors: None,
+                    }
+                }
+                Err(err) => SceneToolOutcome {
+                    result_json: json!({
+                        "ok": false,
+                        "valid": false,
+                        "failureClass": "planning_failure",
+                        "error": err,
+                    }),
+                    vision_images: Vec::new(),
+                    vision_caption: None,
+                    script_modified: false,
+                    rendered_score: None,
+                    rendered_metrics: None,
+                    rendered_errors: None,
+                },
+            }
+        }
         name if matches!(name, "write_scene_script" | "write" | "write_to_file")
             || name.starts_with("write_scene_script") =>
         {
@@ -655,6 +731,10 @@ pub(crate) async fn execute_scene_micro_tool(
                 };
             }
             let mut hazards = detect_scene_motion_hazards(&normalized, ctx.motion_expectations);
+            hazards.extend(super::motion_spec::load_and_check_motion_spec_compliance(
+                ctx.script_path,
+                &normalized,
+            ));
             let lines_count = normalized.lines().count();
             let asset_hint = build_unused_downloaded_asset_hint(ctx.film_root, &normalized);
             if let Some(ref hint) = asset_hint {
@@ -734,6 +814,10 @@ pub(crate) async fn execute_scene_micro_tool(
                         };
                     }
                     let mut hazards = detect_scene_motion_hazards(&updated, ctx.motion_expectations);
+                    hazards.extend(super::motion_spec::load_and_check_motion_spec_compliance(
+                        ctx.script_path,
+                        &updated,
+                    ));
                     let asset_hint = build_unused_downloaded_asset_hint(ctx.film_root, &updated);
                     if let Some(ref hint) = asset_hint {
                         hazards.push(hint.clone());
@@ -971,13 +1055,16 @@ pub(crate) async fn execute_scene_micro_tool(
                             crate::paths::log_engine(
                                 "direct_remake",
                                 &format!(
-                                    "Scene {} ({}) 30fps motion gate ({}ms): fastShare={:.2}/{:.2} p97Ratio={:.2} deficit={}",
+                                    "Scene {} ({}) 30fps motion gate ({}ms): fastShare={:.2}/{:.2} p97Ratio={:.2} dup={} snap={} class={} deficit={}",
                                     ctx.scene_num,
                                     ctx.scene_id,
                                     gate.elapsed_ms,
                                     gate.fast_share_res,
                                     gate.fast_share_ref,
                                     gate.p97_ratio,
+                                    gate.duplicate_pair_count,
+                                    gate.velocity_snap_count,
+                                    gate.failure_class,
                                     gate.deficit
                                 ),
                             );
@@ -986,6 +1073,9 @@ pub(crate) async fn execute_scene_micro_tool(
                                 "fastShareRef": gate.fast_share_ref,
                                 "fastShareRes": gate.fast_share_res,
                                 "p97Ratio": gate.p97_ratio,
+                                "duplicatePairCount": gate.duplicate_pair_count,
+                                "velocitySnapCount": gate.velocity_snap_count,
+                                "failureClass": gate.failure_class,
                                 "deficit": gate.deficit,
                                 "elapsedMs": gate.elapsed_ms,
                             }));
