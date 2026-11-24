@@ -135,6 +135,23 @@ def repo_compare(ref_path, res_path, fps, repo, step_sec=0.5):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def parse_scene_cuts(raw, fps):
+    if not raw:
+        return None
+    s = raw.strip()
+    if s.lower().endswith(".json") and os.path.isfile(s):
+        with open(s, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        cuts = data.get("cuts")
+        if isinstance(cuts, list) and cuts:
+            return [int(round(float(x) * fps)) for x in cuts if float(x) > 0.05]
+        scenes = data.get("scenes")
+        if isinstance(scenes, list) and len(scenes) > 1:
+            return [int(round(float(sc["start"]) * fps)) for sc in scenes[1:] if float(sc.get("start", 0.0)) > 0.05]
+        return []
+    return [int(round(float(x) * fps)) for x in s.split(",") if x.strip()]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("ref"); ap.add_argument("res")
@@ -145,12 +162,13 @@ def main():
     n = min(len(ref), len(res))
     rc, d_ref = hard_cuts(ref)
     sc, d_res = hard_cuts(res)
+    cut_frames = parse_scene_cuts(a.scene_cuts, fps)
     report = {
         "fps": fps, "frames": {"ref": len(ref), "res": len(res)},
         "cutOffsets": match_cuts(rc, sc),
         "motionByScene": motion_by_scene(
             d_ref, d_res,
-            scene_bounds([int(round(float(x) * fps)) for x in a.scene_cuts.split(",")] if a.scene_cuts else rc, n)),
+            scene_bounds(cut_frames if cut_frames is not None else rc, n)),
         "paletteDrift": lab_de(ref, res, fps),
     }
     if a.repo:
