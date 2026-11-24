@@ -112,7 +112,10 @@ pub fn validate_writable_runtime_path(target: &Path) -> Result<(), String> {
         return Ok(());
     };
     let lower_name = file_name.to_ascii_lowercase();
-    if !matches!(lower_name.as_str(), "aetheria-motion.js" | "three.min.js" | "three.js") {
+    if !matches!(
+        lower_name.as_str(),
+        "aetheria-motion.js" | "aetheria-post.js" | "three.min.js" | "three.js"
+    ) {
         return Ok(());
     }
     let parent_is_script = target
@@ -129,6 +132,7 @@ pub fn validate_writable_runtime_path(target: &Path) -> Result<(), String> {
         .replace('\\', "/")
         .to_ascii_lowercase();
     if norm.ends_with("/apps/public/script/aetheria-motion.js")
+        || norm.ends_with("/apps/public/script/aetheria-post.js")
         || norm.ends_with("/assets/script/three.min.js")
     {
         return Ok(());

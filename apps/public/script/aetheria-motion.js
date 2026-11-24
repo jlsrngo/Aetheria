@@ -2094,6 +2094,18 @@
   }
 
   /**
+   * Applies modular WebGL2 post-processing passes (bloom, chromatic aberration, color grading,
+   * filmic tonemap, vignette, deterministic grain) via `/script/aetheria-post.js` with safe 2D fallback.
+   */
+  function postProcess(ctx, t, opts = {}) {
+    if (!ctx || !opts || typeof opts !== "object") return false;
+    if (global.AetheriaPost && typeof global.AetheriaPost.apply === "function") {
+      return Boolean(global.AetheriaPost.apply(ctx, t, opts));
+    }
+    return false;
+  }
+
+  /**
    * Renders a physically inspired 3-layer additive optical glow/bloom orb
    * (wide atmospheric halo + saturated mid bloom + over-exposed white hot core).
    */
@@ -3106,6 +3118,7 @@
     loadAssetManifest,
     getAsset,
     drawAsset,
+    postProcess,
     drawOpticalGlow,
     drawBloomStroke,
     drawSphericalLens,

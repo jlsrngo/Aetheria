@@ -229,6 +229,7 @@ pub(crate) fn render_managed_index_html(
     if manifest.use_three {
         script_tags.push_str("  <script src=\"/script/three.min.js\"></script>\n");
     }
+    script_tags.push_str("  <script src=\"/script/aetheria-post.js\"></script>\n");
     script_tags.push_str("  <script src=\"/script/aetheria-motion.js\"></script>\n");
     for sc in &manifest.scenes {
         script_tags.push_str(&format!("  <script src=\"/{}\"></script>\n", sc.script));
@@ -418,6 +419,15 @@ pub(crate) fn render_managed_index_html(
       }} else {{
         var resolved = window.AM.resolveScene(sec, SCENES);
         renderSceneItem(ctx, resolved.scene, resolved.index, resolved.localTime);
+      }}
+      if (typeof window.AM.postProcess === "function") {{
+        var curResolved = window.AM.resolveScene(sec, SCENES);
+        var postCfg = (curResolved && curResolved.scene && curResolved.scene.postProcess)
+          || window.__postProcess
+          || null;
+        if (postCfg && typeof postCfg === "object") {{
+          window.AM.postProcess(ctx, sec, Object.assign({{ fps: FPS }}, postCfg));
+        }}
       }}
     }};
 

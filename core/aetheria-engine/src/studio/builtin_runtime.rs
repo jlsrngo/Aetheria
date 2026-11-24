@@ -7,6 +7,9 @@ pub const THREE_MIN_JS: &str = include_str!("../../assets/script/three.min.js");
 /// Embedded Aetheria Motion runtime (`window.AM`) fallback when disk `apps/public` is absent.
 pub const AETHERIA_MOTION_JS: &str = include_str!("../../../../apps/public/script/aetheria-motion.js");
 
+/// Embedded Modular WebGL2 Post-Processing runtime (`window.AetheriaPost`) fallback when disk `apps/public` is absent.
+pub const AETHERIA_POST_JS: &str = include_str!("../../../../apps/public/script/aetheria-post.js");
+
 /// Embedded Declarative Story Core runtime (`window.StoryCore`) fallback when disk `apps/public` is absent.
 pub const STORY_CORE_JS: &str = include_str!("../../../../apps/public/script/story-core.js");
 
@@ -35,6 +38,23 @@ pub fn resolve_motion_runtime_code(project_root: &std::path::Path) -> String {
         .join("script")
         .join("aetheria-motion.js");
     std::fs::read_to_string(disk_path).unwrap_or_else(|_| AETHERIA_MOTION_JS.to_string())
+}
+
+/// Returns true when the requested relative path refers to the built-in `aetheria-post.js` runtime.
+pub fn is_builtin_post_path(rel: &str) -> bool {
+    let trimmed = rel.trim().trim_start_matches('/').replace('\\', "/");
+    trimmed.eq_ignore_ascii_case("script/aetheria-post.js")
+        || trimmed.eq_ignore_ascii_case("aetheria-post.js")
+}
+
+/// Resolves `aetheria-post.js` from repo `apps/public/script/` when present, falling back to embedded bytes.
+pub fn resolve_post_runtime_code(project_root: &std::path::Path) -> String {
+    let disk_path = project_root
+        .join("apps")
+        .join("public")
+        .join("script")
+        .join("aetheria-post.js");
+    std::fs::read_to_string(disk_path).unwrap_or_else(|_| AETHERIA_POST_JS.to_string())
 }
 
 /// Returns true when the requested relative path refers to the built-in `story-core.js` runtime.
@@ -75,6 +95,7 @@ pub fn resolve_story_camera_code(project_root: &std::path::Path) -> String {
 pub fn is_vendor_script_name(name: &str) -> bool {
     let base = name.trim();
     base.eq_ignore_ascii_case("aetheria-motion.js")
+        || base.eq_ignore_ascii_case("aetheria-post.js")
         || base.eq_ignore_ascii_case("story-core.js")
         || base.eq_ignore_ascii_case("story-camera.js")
         || base.eq_ignore_ascii_case("three.min.js")
@@ -187,6 +208,9 @@ mod tests {
     fn embedded_three_min_js_is_valid_umd_bundle() {
         assert!(THREE_MIN_JS.len() > 400_000);
         assert!(THREE_MIN_JS.contains("WebGLRenderer"));
+        assert!(AETHERIA_POST_JS.contains("AetheriaPost"));
+        assert!(is_builtin_post_path("/script/aetheria-post.js"));
+        assert!(is_vendor_script_name("aetheria-post.js"));
     }
 
     #[test]

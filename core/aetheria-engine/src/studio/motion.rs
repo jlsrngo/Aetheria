@@ -143,13 +143,23 @@ pub async fn handle_film_bundle(
     let has_motion_lib = ordered
         .iter()
         .any(|(name, _, _)| name.eq_ignore_ascii_case("aetheria-motion.js"));
+    let has_post_lib = ordered
+        .iter()
+        .any(|(name, _, _)| name.eq_ignore_ascii_case("aetheria-post.js"));
 
-    let mut scripts: Vec<FilmScriptAsset> = Vec::with_capacity(ordered.len() + 2);
+    let mut scripts: Vec<FilmScriptAsset> = Vec::with_capacity(ordered.len() + 3);
     if needs_three {
         scripts.push(FilmScriptAsset {
             name: "three.min.js".to_string(),
             relative_path: "script/three.min.js".to_string(),
             code: super::builtin_runtime::THREE_MIN_JS.to_string(),
+        });
+    }
+    if !has_post_lib {
+        scripts.push(FilmScriptAsset {
+            name: "aetheria-post.js".to_string(),
+            relative_path: "script/aetheria-post.js".to_string(),
+            code: super::builtin_runtime::resolve_post_runtime_code(&crate::paths::project_root()),
         });
     }
     if !has_motion_lib {
@@ -228,12 +238,18 @@ pub async fn handle_film_html(
         &raw_html,
         Some("/api/studio/ws-asset/script/three.min.js"),
     );
+    let mut injected = String::new();
+    if !html.contains("aetheria-post.js") {
+        injected.push_str("<script src=\"/api/studio/ws-asset/script/aetheria-post.js\"></script>\n");
+    }
     if !html.contains("aetheria-motion.js") {
-        let tag = "<script src=\"/api/studio/ws-asset/script/aetheria-motion.js\"></script>\n";
+        injected.push_str("<script src=\"/api/studio/ws-asset/script/aetheria-motion.js\"></script>\n");
+    }
+    if !injected.is_empty() {
         if let Some(head_idx) = html.find("</head>") {
-            html.insert_str(head_idx, tag);
+            html.insert_str(head_idx, &injected);
         } else {
-            html = format!("{}{}", tag, html);
+            html = format!("{}{}", injected, html);
         }
     }
     ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response()

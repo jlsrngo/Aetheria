@@ -215,6 +215,10 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
         .get("includeFullResFrames")
         .and_then(|v| v.as_bool());
 
+    let apply_motion_blur = arguments
+        .get("applyMotionBlur")
+        .and_then(|v| v.as_bool());
+
     match crate::studio::preview_capture::capture_film_preview_with_full_options(
         workspace_dir,
         timestamps,
@@ -226,6 +230,7 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
             disable_auto_rollback: false,
             forced_scene_id: None,
             write_scene_beat_strips: None,
+            apply_motion_blur,
         },
     )
     .await

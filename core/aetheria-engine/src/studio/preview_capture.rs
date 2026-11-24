@@ -84,6 +84,9 @@ pub struct PreviewCaptureOptions {
     pub disable_auto_rollback: bool,
     pub forced_scene_id: Option<String>,
     pub write_scene_beat_strips: Option<bool>,
+    /// When `true` (or `AETHERIA_PREVIEW_MOTION_BLUR=1`), evaluates frames using the exact same
+    /// `motion_blur::MotionBlurMode` temporal shutter expression as `html_renderer.rs` for 1:1 parity.
+    pub apply_motion_blur: Option<bool>,
 }
 
 /// Returns `true` when the active film uses `stageMode: "hybrid"` or is a self-contained HTML
@@ -110,6 +113,7 @@ pub(crate) fn is_hybrid_or_standalone_html_film(film_root: &Path) -> bool {
                 .into_iter()
                 .filter(|rel| {
                     !rel.eq_ignore_ascii_case("script/aetheria-motion.js")
+                        && !super::builtin_runtime::is_builtin_post_path(rel)
                         && !super::builtin_runtime::is_builtin_three_path(rel)
                 })
                 .collect();
@@ -333,6 +337,7 @@ pub async fn capture_film_preview_with_options(
             disable_auto_rollback: false,
             forced_scene_id: None,
             write_scene_beat_strips: None,
+            apply_motion_blur: None,
         },
     )
     .await
@@ -461,13 +466,31 @@ async fn run_cdp_preview_capture(
         )
         .await;
 
+    let preview_motion_blur_enabled = args.options.apply_motion_blur.unwrap_or_else(|| {
+        std::env::var("AETHERIA_PREVIEW_MOTION_BLUR")
+            .ok()
+            .is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "on"))
+    });
+    let mb_mode = if preview_motion_blur_enabled {
+        super::motion_blur::MotionBlurMode::from_env_and_project(args.film_root, args.ws_root)
+    } else {
+        super::motion_blur::MotionBlurMode::Off
+    };
+    let fps_f = (meta.fps.max(1)) as f64;
+
     let mut frames = Vec::with_capacity(timestamps.len());
     let mut frame_digests = Vec::with_capacity(timestamps.len());
     for (idx, ts) in timestamps.iter().enumerate() {
-        let eval_expr = format!(
-            "(() => {{ if (typeof window.renderAt !== 'function') {{ return {{ ok: false, error: 'HTML film does not expose window.renderAt(t)' }}; }} window.renderAt({:.6}); return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r({{ ok: true }})))); }})()",
-            ts
-        );
+        let samples = mb_mode.samples_for_time(*ts);
+        let eval_expr = if samples > 1 {
+            let bounds = Some(mb_mode.shutter_bounds(*ts, fps_f));
+            super::motion_blur::build_render_frame_expr(*ts, fps_f, samples, bounds)
+        } else {
+            format!(
+                "(() => {{ if (typeof window.renderAt !== 'function') {{ return {{ ok: false, error: 'HTML film does not expose window.renderAt(t)' }}; }} window.renderAt({:.6}); return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r({{ ok: true }})))); }})()",
+                ts
+            )
+        };
         let eval_resp = cdp
             .call(
                 "Runtime.evaluate",

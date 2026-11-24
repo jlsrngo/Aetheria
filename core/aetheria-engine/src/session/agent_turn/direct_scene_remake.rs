@@ -2195,6 +2195,7 @@ pub(crate) async fn run_direct_per_scene_remake_with_switches(
                 disable_auto_rollback: true,
                 forced_scene_id: None,
                 write_scene_beat_strips: Some(false),
+                apply_motion_blur: None,
             },
         )
         .await

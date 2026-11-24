@@ -56,12 +56,18 @@ async fn serve_static_film_file(film_root: &Path, _ws_root: &Path, rel_raw: &str
         };
         let mut html =
             super::builtin_runtime::rewrite_three_cdn_tags(&raw_html, Some("/script/three.min.js"));
+        let mut injected = String::new();
+        if !html.contains("aetheria-post.js") {
+            injected.push_str("<script src=\"/script/aetheria-post.js\"></script>\n");
+        }
         if !html.contains("aetheria-motion.js") {
-            let tag = "<script src=\"/script/aetheria-motion.js\"></script>\n";
+            injected.push_str("<script src=\"/script/aetheria-motion.js\"></script>\n");
+        }
+        if !injected.is_empty() {
             if let Some(head_idx) = html.find("</head>") {
-                html.insert_str(head_idx, tag);
+                html.insert_str(head_idx, &injected);
             } else {
-                html = format!("{}{}", tag, html);
+                html = format!("{}{}", injected, html);
             }
         }
         return ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response();
@@ -98,6 +104,15 @@ async fn serve_static_film_file(film_root: &Path, _ws_root: &Path, rel_raw: &str
 
     if super::builtin_runtime::is_builtin_motion_path(target_rel) {
         let code = super::builtin_runtime::resolve_motion_runtime_code(&project_root());
+        return (
+            [(header::CONTENT_TYPE, "application/javascript; charset=utf-8")],
+            code,
+        )
+            .into_response();
+    }
+
+    if super::builtin_runtime::is_builtin_post_path(target_rel) {
+        let code = super::builtin_runtime::resolve_post_runtime_code(&project_root());
         return (
             [(header::CONTENT_TYPE, "application/javascript; charset=utf-8")],
             code,

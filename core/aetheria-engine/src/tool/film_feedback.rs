@@ -206,6 +206,7 @@ fn check_html_scene_wiring(
         .into_iter()
         .filter(|rel| {
             !rel.eq_ignore_ascii_case("script/aetheria-motion.js")
+                && !crate::studio::builtin_runtime::is_builtin_post_path(rel)
                 && !crate::studio::builtin_runtime::is_builtin_three_path(rel)
         })
         .collect();
@@ -414,7 +415,10 @@ fn check_microstock_js_diagnostics(
         return;
     };
     let lower_name = file_name.to_ascii_lowercase();
-    if lower_name == "aetheria-motion.js" || lower_name == "three.min.js" {
+    if lower_name == "aetheria-motion.js"
+        || lower_name == "aetheria-post.js"
+        || lower_name == "three.min.js"
+    {
         return;
     }
     if content.contains("fillText(")
@@ -798,6 +802,7 @@ pub fn collect_file_feedback(workspace_dir: &str, target: &Path) -> FileFeedback
 
             for script_rel in extract_local_script_srcs(&content) {
                 if script_rel.eq_ignore_ascii_case("script/aetheria-motion.js")
+                    || crate::studio::builtin_runtime::is_builtin_post_path(&script_rel)
                     || crate::studio::builtin_runtime::is_builtin_three_path(&script_rel)
                 {
                     continue;

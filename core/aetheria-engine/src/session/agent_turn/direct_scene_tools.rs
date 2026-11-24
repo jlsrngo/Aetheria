@@ -940,6 +940,7 @@ pub(crate) async fn execute_scene_micro_tool(
                     disable_auto_rollback: true,
                     forced_scene_id: Some(ctx.scene_id.to_string()),
                     write_scene_beat_strips: Some(true),
+                    apply_motion_blur: None,
                 },
             )
             .await
