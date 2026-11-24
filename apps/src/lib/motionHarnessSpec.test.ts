@@ -425,6 +425,48 @@ describe("Harness F1 spec guards (skill-lint & AM API parity)", () => {
       expect(drawn[1].id).toBe("scene2");
       expect(drawn[1].tx).toBeCloseTo(360, 2);
 
+      // Even when totalDispPx > 0 with offscreen buffers, push_left must composite bufA & bufB
+      // continuously side-by-side (tx - fx === W) with zero cutSec snap and zero clip-rect seam.
+      const pushDraws: Array<{ x: number; y: number }> = [];
+      const makeOffBuf = () => ({
+        width: 720,
+        height: 1280,
+        getContext: () => ({
+          setTransform: () => {},
+          clearRect: () => {},
+        }),
+      });
+      (globalThis as { document?: unknown }).document = { createElement: makeOffBuf };
+      const mainCanvasCtx = {
+        save: () => {},
+        restore: () => {},
+        setTransform: () => {},
+        drawImage: (_buf: unknown, dx: number, dy: number) => pushDraws.push({ x: dx, y: dy }),
+      };
+      const measuredScenes = [
+        { id: "sA", start: 0, duration: 2.0 },
+        {
+          id: "sB",
+          start: 2.0,
+          duration: 2.0,
+          transitionBridge: {
+            kind: "push_left",
+            tStart: 1.8,
+            cutSec: 2.0,
+            tEnd: 2.4,
+            totalDispPx: 353.6,
+            curve: [0, 0.25, 0.5, 0.75, 1],
+          },
+        },
+      ];
+      for (const probeT of [1.95, 2.05]) {
+        pushDraws.length = 0;
+        AM.renderFrameWithTransitions(mainCanvasCtx, probeT, measuredScenes, 720, 1280, () => {});
+        expect(pushDraws.length).toBe(2);
+        expect(pushDraws[1].x - pushDraws[0].x).toBeCloseTo(720, 3);
+      }
+      (globalThis as { document?: unknown }).document = undefined;
+
       const track = [
         { t: 0.0, tx: 0, ty: 0, s: 1.0, rot: 0 },
         { t: 0.5, tx: 0, ty: 0, s: 1.0, rot: 0 },
@@ -476,8 +518,20 @@ describe("Harness F1 spec guards (skill-lint & AM API parity)", () => {
       expect(lines[1]).toBe("aren't Luck");
 
       const amExt = AM as unknown as {
-        ease: { inOutQuart: (u: number) => number };
-        E: { ioQt: (u: number) => number };
+        ease: {
+          inOutQuart: (u: number) => number;
+          outQuint: (u: number) => number;
+          inOutQuint: (u: number) => number;
+          aeGlide: (u: number) => number;
+          aeSnap: (u: number) => number;
+        };
+        E: {
+          ioQt: (u: number) => number;
+          outQn: (u: number) => number;
+          ioQn: (u: number) => number;
+          aeGlide: (u: number) => number;
+          aeSnap: (u: number) => number;
+        };
         drawBlurRevealText: (c: unknown, txt: string, x: number, y: number, t: number, t0: number, dur: number, opts?: unknown) => void;
         drawBlurRiseWords: (c: unknown, txt: string, x: number, y: number, t: number, t0: number, opts?: unknown) => void;
         drawTurntableObject: (c: unknown, cx: number, cy: number, t: number, fn: () => void, opts?: unknown) => void;
@@ -486,6 +540,14 @@ describe("Harness F1 spec guards (skill-lint & AM API parity)", () => {
       expect(typeof amExt.ease.inOutQuart).toBe("function");
       expect(amExt.ease.inOutQuart(0.5)).toBeCloseTo(0.5, 4);
       expect(amExt.E.ioQt(0.5)).toBeCloseTo(0.5, 4);
+      expect(amExt.ease.outQuint(0.5)).toBeGreaterThan(0.95);
+      expect(amExt.ease.inOutQuint(0.5)).toBeCloseTo(0.5, 4);
+      expect(amExt.E.outQn(0.5)).toBeCloseTo(amExt.ease.outQuint(0.5), 5);
+      expect(amExt.E.ioQn(0.5)).toBeCloseTo(0.5, 4);
+      expect(amExt.ease.aeGlide(0.25)).toBeGreaterThan(0.65);
+      expect(amExt.ease.aeSnap(0.5)).toBeCloseTo(0.5, 2);
+      expect(amExt.E.aeGlide(1)).toBe(1);
+      expect(amExt.E.aeSnap(0)).toBe(0);
       let ttCalled = 0;
       const alphaTrack: number[] = [];
       const origFillText = measureCtx.fillText;

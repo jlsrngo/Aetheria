@@ -32,8 +32,8 @@ Do NOT call `Math.random()`, `Date.now()`, `performance.now()`, `requestAnimatio
 
 ## Easing & Spring Physics
 - `AM.bezier(x1, y1, x2, y2)` — returns cubic-bezier easing `(u) => y`
-- `AM.ease` — `{ linear, inQuad, outQuad, inOutQuad, inCubic, outCubic, inOutCubic, outQuart, inOutQuart, outExpo, inOutExpo, inBack, outBack, outElastic, outBounce, pop, snap }`
-- `AM.E` — shorthand aliases `{ inQ, outQ, ioQ, inC, outC, ioC, outQt, ioQt, outX, outB, inB, pop, snap }`
+- `AM.ease` — `{ linear, inQuad, outQuad, inOutQuad, inCubic, outCubic, inOutCubic, outQuart, inOutQuart, outQuint, inOutQuint, outExpo, inOutExpo, inBack, outBack, outElastic, outBounce, pop, snap, aeGlide, aeSnap }`
+- `AM.E` — shorthand aliases `{ inQ, outQ, ioQ, inC, outC, ioC, outQt, ioQt, outQn, ioQn, outX, outB, inB, pop, snap, aeGlide, aeSnap }`
 - `AM.spring(t, fOrOpts = 2, z = 0.4)` — damped spring `0 -> 1` (accepts `(t, fHz, zeta)` or `(t, { stiffness, damping, mass })`)
 - `AM.springV(t, f = 2, z = 0.4)` — closed-form spring derivative (velocity)
 - `AM.kick(t, t0 = 0, f = 3, z = 0.35)` — damped impulse wave (`0 -> peak -> 0`) starting at `t0`

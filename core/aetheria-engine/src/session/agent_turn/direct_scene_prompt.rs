@@ -39,7 +39,7 @@ FIVE UNIVERSAL ZERO-COLLISION & MOTION HYGIENE LAWS:
 1. DYNAMIC `measureText` FLOW LAYOUT: In any horizontal text row, marquee, or pill row, NEVER use a hardcoded fixed horizontal stride (`i * spacingX`). Always measure each item with `ctx.measureText(text).width` and advance `cursorX += itemWidth + gap` so words and pills never collide.
 2. MUTUAL-EXCLUSION PHASE, MORPH & C1 VELOCITY CONTINUITY:
    - When an element morphs (circle -> rounded square -> puzzle, or big capsule -> banner) or switches from Phase A to Phase B, NEVER draw two disjoint static sizes in separate `if (t < X)` blocks without lerping `w`, `h`, `x`, `y` between them, and NEVER gate a morph with `if (morph > 0.01) { drawOld(); return; }` (which freezes the old shape then pops in 1 frame!). Keep ONE persistent track and interpolate vertices/corner radii continuously!
-   - **C1 VELOCITY CONTINUITY (ANTI-STIFFNESS LAW):** NEVER split a single continuous zoom, expansion, or slide into chained `if/else if` segments that each end at zero velocity (e.g. `outCubic` -> `outCubic` -> `outCubic`, or `inOutCubic` immediately followed by `inCubic` at a checkpoint `refFgBox`) — that creates robotic stop-start pauses mid-motion! Drive each unified move with ONE continuous curve (`AM.ease.inOutCubic` / `AM.ease.outExpo` / `AM.spring` / `AM.bezier`) across its full duration.
+   - **C1 VELOCITY CONTINUITY & AE SPEED-GRAPH LAW:** NEVER split one continuous zoom, card trajectory, or ring expansion into disconnected `if (t < A) ... else if (t < B)` jumps where position or radius snaps on the boundary, and NEVER chain `outCubic` -> `outCubic` segments that stop dead mid-motion! Prefer After Effects speed-graph curves (`AM.ease.aeGlide`, `AM.ease.outQuint`, `AM.ease.inOutQuint`, `AM.ease.aeSnap`, `AM.ease.outExpo`, `AM.spring`) with overlapping follow-through so fast moves glide cleanly to rest.
 3. SMOOTH MONOTONIC MOTION, CONTINUOUS CURVE TRACING & LIVING DETAILS:
    - Whenever a helper accepts a `progress` / `traceProgress` / `p` parameter, ACTUALLY use `progress` continuously inside the drawing loop (`var exact = steps * progress;` interpolating the final fractional segment, OR arc-length polyline tracing with arrowheads attached directly to the moving tip — NEVER `Math.floor(steps * progress)` and NEVER hide an arrowhead until `p >= 0.96`).
    - Whenever Row 1 shows marching-ant dashed selection boxes, animate `ctx.lineDashOffset = -t * 28` continuously across the hold instead of freezing dead-still; match transform-box reveal style (e.g. horizontal resize/expand vs plain uniform scale) to Row 1!
@@ -64,7 +64,7 @@ COMPACT `window.AM` RUNTIME API (already loaded globally before your script):
 - `AM.registerScene(id, fn)` — `fn(ctx, t, dur, scene, AM)` where `t` is local scene seconds `0..dur`.
 - `AM.applyCamera(ctx, { s, cx, cy, rot }, W, H)` — global camera zoom/pan/rotation around `(cx, cy)` in degrees `rot`; `AM.applyTrackedCamera(ctx, scene.cameraTrack, t, W, H)`.
 - `AM.clamp(v, lo, hi)`, `AM.lerp(a, b, p)`, `AM.invLerp(a, b, v)`, `AM.remap(v, a, b, c, d)`
-- `AM.ease.inCubic(p)`, `AM.ease.outCubic(p)`, `AM.ease.inOutCubic(p)`, `AM.ease.outBack(p)`, `AM.ease.outExpo(p)`, `AM.ease.inOutQuart(p)`, `AM.ease.snap(p)`
+- `AM.ease.inCubic(p)`, `AM.ease.outCubic(p)`, `AM.ease.inOutCubic(p)`, `AM.ease.outBack(p)`, `AM.ease.outExpo(p)`, `AM.ease.inOutQuart(p)`, `AM.ease.outQuint(p)`, `AM.ease.inOutQuint(p)`, `AM.ease.aeGlide(p)`, `AM.ease.aeSnap(p)`, `AM.ease.snap(p)`
 - `AM.spring(tSec, { stiffness: 180, damping: 18, mass: 1 })` -> smooth spring 0..1 with slight overshoot
 - `AM.drawBlurRevealText(ctx, text, x, y, t, tStart, dur, { maxBlur, risePx, color, inkStart, preBlurSec })` — progressive left-to-right character unblur + soft spring rise
 - `AM.drawBlurRiseWords(ctx, wordsOrText, x, y, t, tStart, { stagger, enterDur, maxBlur, risePx, color, inkStart, preBlurSec, exitAt, exitDur })`, `AM.layoutBalancedHeadline(ctx, text, maxWidth)`
@@ -1088,6 +1088,8 @@ pub(crate) struct SceneMotionExpectations {
     pub requires_corner_spin: bool,
     pub requires_blur_text_reveal: bool,
     pub pre_cut_active: bool,
+    pub has_incoming_push_bridge: bool,
+    pub has_living_hold: bool,
 }
 
 impl SceneMotionExpectations {
@@ -1106,10 +1108,19 @@ impl SceneMotionExpectations {
                 )
             })
         });
-        let requires_corner_spin = spinning.is_some_and(|arr| {
-            arr.iter()
-                .any(|item| item.get("kind").and_then(Value::as_str) == Some("corner_spin"))
-        });
+        let secondary_rotate = sc
+            .pointer("/motionClues/secondaryMotion")
+            .or_else(|| sc.pointer("/layout/motionClues/secondaryMotion"))
+            .and_then(Value::as_array)
+            .is_some_and(|arr| {
+                arr.iter()
+                    .any(|item| item.get("kind").and_then(Value::as_str) == Some("rotate"))
+            });
+        let requires_corner_spin = secondary_rotate
+            || spinning.is_some_and(|arr| {
+                arr.iter()
+                    .any(|item| item.get("kind").and_then(Value::as_str) == Some("corner_spin"))
+            });
         let requires_blur_text_reveal = sc
             .pointer("/motionTimeline30fps/blurTextReveals")
             .and_then(Value::as_array)
@@ -1118,17 +1129,28 @@ impl SceneMotionExpectations {
             .pointer("/motionClues/kinematics/preCutActive")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        let has_incoming_push_bridge = sc
+            .pointer("/transitionBridge/kind")
+            .and_then(Value::as_str)
+            .is_some_and(|k| k.starts_with("push_"));
+        let has_living_hold = sc
+            .pointer("/motionClues/kinematics/hasLivingHold")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         Self {
             requires_turntable_3d,
             requires_corner_spin,
             requires_blur_text_reveal,
             pre_cut_active,
+            has_incoming_push_bridge,
+            has_living_hold,
         }
     }
 }
 
 /// Runs static code hygiene checks PLUS 30fps signal-driven motion compliance checks
-/// (3D turntable rotation, spinning corner emblems, and blur-to-sharp text reveals).
+/// (3D turntable rotation, spinning corner emblems, blur-to-sharp text reveals,
+/// incoming push-bridge redraw guard, and living-hold dashed-outline check).
 pub(crate) fn detect_scene_motion_hazards(
     code: &str,
     expectations: SceneMotionExpectations,
@@ -1162,7 +1184,53 @@ pub(crate) fn detect_scene_motion_hazards(
                 .to_string(),
         );
     }
+    if expectations.has_incoming_push_bridge && has_manual_prev_scene_exit_redraw(code) {
+        hazards.push(
+            "DOUBLE-PUSH / REDRAWN PREVIOUS SCENE HAZARD: This scene already has a runtime `push_*` `transitionBridge` in `film.json` that slides the real previous scene out seamlessly! Remove your manual `if (t < 0.3)` previous-scene exit-slide redraw block so the transition never jump-cuts or double-pushes."
+                .to_string(),
+        );
+    }
+    if expectations.has_living_hold
+        && code.contains("setLineDash(")
+        && !code.contains("lineDashOffset")
+        && !code.contains("Math.sin(")
+        && !code.contains(".rotate(")
+        && !code.contains("drawTurntableObject")
+    {
+        hazards.push(
+            "FROZEN DASHED OUTLINE HAZARD: `hasLivingHold` is true and your script draws dashed outlines via `ctx.setLineDash(...)`, but never animates `ctx.lineDashOffset = -t * 28`! Animate `lineDashOffset` continuously so dashed selection boxes/rings stay alive during the hold."
+                .to_string(),
+        );
+    }
     hazards
+}
+
+fn has_manual_prev_scene_exit_redraw(code: &str) -> bool {
+    let lines: Vec<&str> = code.lines().collect();
+    for (idx, line) in lines.iter().enumerate() {
+        let lower = line.to_ascii_lowercase();
+        let is_early_t_gate = lower.contains("if (t < 0.") || lower.contains("if (t <= 0.");
+        if !is_early_t_gate {
+            continue;
+        }
+        let prev_comment = if idx > 0 {
+            lines[idx - 1].to_ascii_lowercase()
+        } else {
+            String::new()
+        };
+        let end = (idx + 12).min(lines.len());
+        let window = lines[idx..end].join("\n").to_ascii_lowercase();
+        let mentions_prev = prev_comment.contains("previous scene")
+            || prev_comment.contains("prev scene")
+            || window.contains("previous scene")
+            || window.contains("prevscene");
+        let mentions_exit_slide = (window.contains("exitp") || window.contains("slidex") || window.contains("slidey"))
+            && window.contains(".translate(");
+        if mentions_prev && mentions_exit_slide {
+            return true;
+        }
+    }
+    false
 }
 
 fn is_ident_char(b: u8) -> bool {
@@ -1233,13 +1301,16 @@ fn find_unused_progress_params(code: &str) -> Vec<(String, String)> {
         };
         let body = &body_start[..body_end];
         if !fn_name.is_empty() && fn_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            let fn_lower = fn_name.to_ascii_lowercase();
+            let is_draw_helper = fn_lower.starts_with("draw") || fn_lower.starts_with("render");
             for raw_p in params_str.split(',') {
                 let p = raw_p.trim();
                 let lower = p.to_ascii_lowercase();
                 let is_progress_param = lower == "progress"
                     || lower == "prog"
                     || lower.ends_with("progress")
-                    || lower.ends_with("prog");
+                    || lower.ends_with("prog")
+                    || (is_draw_helper && matches!(lower.as_str(), "t" | "time" | "localt"));
                 if is_progress_param && count_ident_occurrences(body, p) == 0 {
                     out.push((fn_name.to_string(), p.to_string()));
                 }
@@ -1606,6 +1677,28 @@ mod tests {
         let animated_code = "AM.registerScene('s', function(ctx,t){ AM.drawTurntableObject(ctx, 360, 500, t, img, { w: 300, h: 260 }); AM.drawBlurRevealText(ctx, 'hi', 100, 200, t, 0.4, 0.5); });";
         let clean = detect_scene_motion_hazards(animated_code, exp);
         assert!(clean.is_empty(), "expected 0 hazards when primitives used, got {:?}", clean);
+
+        // Regression tests for Run 12 findings:
+        // 1. Unused `t` in draw helper (`drawSweepingRibbon(ctx, t)`)
+        let frozen_ribbon = "function drawSweepingRibbon(ctx, t) { ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(100,100); ctx.stroke(); }";
+        assert!(
+            detect_scene_collision_hazards(frozen_ribbon)
+                .iter()
+                .any(|h| h.contains("Unused Progress Parameter") && h.contains("drawSweepingRibbon"))
+        );
+
+        // 2. Manual previous-scene exit slide when runtime push_* transitionBridge is active
+        let push_sc = json!({
+            "transitionBridge": { "kind": "push_left" },
+            "motionClues": { "kinematics": { "hasLivingHold": true } }
+        });
+        let push_exp = SceneMotionExpectations::from_style_scene(Some(&push_sc));
+        assert!(push_exp.has_incoming_push_bridge);
+        assert!(push_exp.has_living_hold);
+        let double_push_code = "// Transition out previous scene elements\nif (t < 0.28) { var exitP = t / 0.24; var slideX = -exitP * 720; ctx.translate(slideX, 0); }\nctx.setLineDash([4,4]); ctx.strokeRect(0,0,100,50);";
+        let push_hz = detect_scene_motion_hazards(double_push_code, push_exp);
+        assert!(push_hz.iter().any(|h| h.contains("DOUBLE-PUSH / REDRAWN PREVIOUS SCENE HAZARD")));
+        assert!(push_hz.iter().any(|h| h.contains("FROZEN DASHED OUTLINE HAZARD")));
     }
 
     #[test]

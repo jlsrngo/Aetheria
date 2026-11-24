@@ -135,6 +135,14 @@
       const x = clamp(t, 0, 1);
       return x < 0.5 ? 8 * x * x * x * x : 1 - Math.pow(-2 * x + 2, 4) / 2;
     },
+    outQuint: (t) => {
+      const x = clamp(t, 0, 1);
+      return 1 - Math.pow(1 - x, 5);
+    },
+    inOutQuint: (t) => {
+      const x = clamp(t, 0, 1);
+      return x < 0.5 ? 16 * x * x * x * x * x : 1 - Math.pow(-2 * x + 2, 5) / 2;
+    },
     outExpo: (t) => {
       const x = clamp(t, 0, 1);
       return x >= 1 ? 1 : 1 - Math.pow(2, -10 * x);
@@ -197,6 +205,8 @@
 
   ease.pop = bezier(0.34, 1.56, 0.64, 1);
   ease.snap = bezier(0.85, 0, 0.15, 1);
+  ease.aeGlide = bezier(0.16, 1, 0.3, 1);
+  ease.aeSnap = bezier(0.76, 0, 0.24, 1);
 
   // Shorthand easing table E (compatible with 01-flat-vector / aetheria-motion demos)
   const E = {
@@ -208,6 +218,8 @@
     ioC: ease.inOutCubic,
     outQt: ease.outQuart,
     ioQt: ease.inOutQuart,
+    outQn: ease.outQuint,
+    ioQn: ease.inOutQuint,
     outX: ease.outExpo,
     outB: ease.outBack,
     inB: (u, s = 1.70158) => {
@@ -216,6 +228,8 @@
     },
     pop: ease.pop,
     snap: ease.snap,
+    aeGlide: ease.aeGlide,
+    aeSnap: ease.aeSnap,
   };
 
   /**
@@ -636,19 +650,6 @@
     return null;
   }
 
-  function _sampleCanvasBorderHex(c, W, H) {
-    if (!c || typeof c.getImageData !== "function") return null;
-    try {
-      const d = c.getImageData(Math.min(8, W - 1), Math.min(8, H - 1), 1, 1).data;
-      if (d && d.length >= 3) {
-        return `rgb(${d[0]}, ${d[1]}, ${d[2]})`;
-      }
-    } catch (_) {
-      // Ignore tainted or mocked canvas
-    }
-    return null;
-  }
-
   function renderFrameWithTransitions(ctx, sec, scenes, W = 1080, H = 1920, renderSceneFn) {
     if (!ctx || !Array.isArray(scenes) || scenes.length === 0 || typeof renderSceneFn !== "function") {
       return;
@@ -672,7 +673,7 @@
       tr.kind === "zoom_out" ||
       tr.kind === "blur_dissolve"
     ) {
-      const p = ease.inOutCubic(tr.u);
+      const p = ease.inOutQuart(tr.u);
       const outScale = tr.kind === "zoom_out" ? lerp(1.0, 0.86, p) : lerp(1.0, 1.16, p);
       const inScale = tr.kind === "zoom_out" ? lerp(1.14, 1.0, p) : lerp(0.90, 1.0, p);
       const outBlur = p * 12;
@@ -710,78 +711,8 @@
       return;
     }
 
-    // 2. Measured Two-Phase Camera Whip-Push around cutSec (when totalDispPx > 0 from 30fps reference extraction)
-    // Uses the measured 16-point optical-flow displacement curve (`tr.progress`) so velocity flows
-    // continuously across cutSec without artificial stop-start or premature half-frame exit.
-    if (cA && cB && tr.totalDispPx > 0 && Number.isFinite(tr.cutSec) && tr.cutSec > tr.tStart && tr.cutSec < tr.tEnd) {
-      const isHoriz = tr.kind === "push_left" || tr.kind === "push_right";
-      const sign = tr.kind === "push_left" || tr.kind === "push_up" ? -1 : 1;
-      const dim = isHoriz ? W : H;
-      const uAtCut = clamp((tr.cutSec - tr.tStart) / Math.max(0.015, tr.tEnd - tr.tStart), 0.1, 0.9);
-      const pAtCut = Math.max(0.08, evalCurve(tr.curve, uAtCut));
-      const exitAtCut = Math.min(dim * 0.36, Math.max(dim * 0.16, tr.totalDispPx * 0.85));
-      const exitFull = Math.min(dim * 0.68, exitAtCut + dim * 0.24);
-      const enterSettle = Math.min(dim * 0.16, Math.max(40, tr.totalDispPx * 0.34));
-
-      if (sec < tr.cutSec) {
-        const pPreNorm = clamp(tr.progress / pAtCut, 0, 1);
-        const shiftPre = sign * pPreNorm * exitAtCut;
-        cA.setTransform(1, 0, 0, 1, 0, 0);
-        cA.clearRect(0, 0, W, H);
-        renderSceneFn(cA, tr.fromScene, tr.fromIndex, tr.fromLocalTime, sec);
-        const bgCol = _sampleCanvasBorderHex(cA, W, H) || tr.fromScene.background || "#DADADA";
-
-        ctx.save();
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.fillStyle = bgCol;
-        ctx.fillRect(0, 0, W, H);
-        ctx.drawImage(bufA, isHoriz ? shiftPre : 0, isHoriz ? 0 : shiftPre);
-        ctx.restore();
-        return;
-      }
-
-      const postSpan = Math.max(0.02, tr.tEnd - tr.cutSec);
-      const pPostNorm = clamp((tr.progress - pAtCut) / Math.max(0.05, 1 - pAtCut), 0, 1);
-      const inOffset = -sign * (1 - pPostNorm) * enterSettle;
-
-      cB.setTransform(1, 0, 0, 1, 0, 0);
-      cB.clearRect(0, 0, W, H);
-      renderSceneFn(cB, tr.toScene, tr.toIndex, tr.toLocalTime, sec);
-      const inBg = _sampleCanvasBorderHex(cB, W, H) || tr.toScene.background || "#DADADA";
-
-      ctx.save();
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.fillStyle = inBg;
-      ctx.fillRect(0, 0, W, H);
-      ctx.drawImage(bufB, isHoriz ? inOffset : 0, isHoriz ? 0 : inOffset);
-
-      // Brief outgoing trailing edge overlap (first 38% of post-cut window, max 0.14s)
-      const tailDur = Math.min(0.14, Math.max(0.04, postSpan * 0.38));
-      const uTail = clamp((sec - tr.cutSec) / tailDur, 0, 1);
-      if (uTail < 1) {
-        cA.setTransform(1, 0, 0, 1, 0, 0);
-        cA.clearRect(0, 0, W, H);
-        renderSceneFn(cA, tr.fromScene, tr.fromIndex, tr.fromLocalTime, sec);
-        const tailShift = sign * lerp(exitAtCut, exitFull, ease.outQuad(uTail));
-        const visSpan = Math.max(0, dim * 0.34 * (1 - uTail));
-        if (visSpan > 2) {
-          ctx.save();
-          ctx.beginPath();
-          if (tr.kind === "push_left") ctx.rect(0, 0, visSpan, H);
-          else if (tr.kind === "push_right") ctx.rect(W - visSpan, 0, visSpan, H);
-          else if (tr.kind === "push_up") ctx.rect(0, 0, W, visSpan);
-          else ctx.rect(0, H - visSpan, W, visSpan);
-          ctx.clip();
-          ctx.globalAlpha = clamp(1 - uTail * 0.85, 0, 1);
-          ctx.drawImage(bufA, isHoriz ? tailShift : 0, isHoriz ? 0 : tailShift);
-          ctx.restore();
-        }
-      }
-      ctx.restore();
-      return;
-    }
-
-    // 3. Classic Full-Canvas Push (default when totalDispPx is omitted)
+    // 2. Continuous Full-Canvas Side-by-Side Camera Push (follows measured 16-point curve `tr.progress`
+    // seamlessly across `tStart..cutSec..tEnd` with zero blank strip, zero cutSec snap, and zero clip seam)
     const p = tr.progress;
     let fx = 0;
     let fy = 0;

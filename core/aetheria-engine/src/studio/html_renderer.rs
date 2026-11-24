@@ -344,10 +344,11 @@ async fn capture_single_frame_jpeg(
     t: f64,
     fps: f64,
     samples: u32,
+    shutter_bounds: Option<(f64, f64)>,
     frame_num: u32,
     jpeg_quality: u32,
 ) -> Result<Vec<u8>, String> {
-    let eval_expr = super::motion_blur::build_render_frame_expr(t, fps, samples);
+    let eval_expr = super::motion_blur::build_render_frame_expr(t, fps, samples, shutter_bounds);
     cdp.call(
         "Runtime.evaluate",
         json!({ "expression": eval_expr, "awaitPromise": true }),
@@ -549,12 +550,22 @@ where
                 let frame_num = start_frame + idx as u32;
                 let t = frame_num as f64 / fps_f;
                 let samples = mb_ref.samples_for_time(t);
-                if samples > 1 {
+                let bounds = if samples > 1 {
                     mb_cnt_ref.fetch_add(1, Ordering::Relaxed);
-                }
-                let res =
-                    capture_single_frame_jpeg(&mut tab, t, fps_f, samples, frame_num, jpeg_quality)
-                        .await;
+                    Some(mb_ref.shutter_bounds(t, fps_f))
+                } else {
+                    None
+                };
+                let res = capture_single_frame_jpeg(
+                    &mut tab,
+                    t,
+                    fps_f,
+                    samples,
+                    bounds,
+                    frame_num,
+                    jpeg_quality,
+                )
+                .await;
                 let is_err = res.is_err();
                 if is_err {
                     cancel_ref.store(true, Ordering::Relaxed);
