@@ -78,7 +78,9 @@ pub(crate) struct MotionElementSpec {
 pub(crate) struct SceneMotionSpec {
     #[serde(default = "default_schema_version")]
     pub schema_version: u32,
+    #[serde(default)]
     pub scene_id: String,
+    #[serde(default)]
     pub duration_sec: f64,
     #[serde(default = "default_mode")]
     pub mode: String,
@@ -112,17 +114,21 @@ const VALID_MOTION_KINDS: [&str; 10] = [
     "marching_dash",
     "static_plate",
 ];
-const VALID_EASINGS: [&str; 11] = [
+const VALID_EASINGS: [&str; 15] = [
     "aeGlide",
     "outQuint",
     "inOutQuint",
     "aeSnap",
     "outExpo",
+    "inOutExpo",
+    "outQuart",
+    "inOutQuart",
     "outBack",
     "spring",
     "inOutCubic",
     "inCubic",
     "outCubic",
+    "outQuad",
     "linear",
 ];
 
@@ -178,7 +184,7 @@ pub(crate) fn write_motion_spec_tool_definition() -> Value {
                                 "motionKind": { "type": "string", "enum": ["enter_settle", "blur_reveal", "turntable_3d", "rotate", "sweep", "orbit", "morph", "counter", "marching_dash", "static_plate"] },
                                 "startSec": { "type": "number" },
                                 "endSec": { "type": "number" },
-                                "easing": { "type": "string", "enum": ["aeGlide", "outQuint", "inOutQuint", "aeSnap", "outExpo", "outBack", "spring", "inOutCubic", "inCubic", "outCubic", "linear"] },
+                                "easing": { "type": "string", "enum": ["aeGlide", "outQuint", "inOutQuint", "aeSnap", "outExpo", "inOutExpo", "outQuart", "inOutQuart", "outBack", "spring", "inOutCubic", "inCubic", "outCubic", "outQuad", "linear"] },
                                 "holdBehavior": { "type": "string", "enum": ["steady", "living"] },
                                 "omegaDegPerSec": { "type": "number" },
                                 "parentId": { "type": "string" },
@@ -189,7 +195,7 @@ pub(crate) fn write_motion_spec_tool_definition() -> Value {
                         }
                     }
                 },
-                "required": ["sceneId", "durationSec", "elements"]
+                "required": ["elements"]
             }
         }
     })
@@ -203,7 +209,7 @@ pub(crate) fn parse_and_validate_motion_spec(
     scene_dur: f64,
     expectations: SceneMotionExpectations,
 ) -> Result<(SceneMotionSpec, MotionSpecValidation), String> {
-    let spec: SceneMotionSpec = serde_json::from_value(raw.clone())
+    let mut spec: SceneMotionSpec = serde_json::from_value(raw.clone())
         .map_err(|e| format!("Invalid Motion Specification schema: {}", e))?;
 
     let mut errors: Vec<String> = Vec::new();
@@ -213,7 +219,11 @@ pub(crate) fn parse_and_validate_motion_spec(
         errors.push(format!("schemaVersion must be 1, got {}", spec.schema_version));
     }
     if spec.scene_id.trim().is_empty() {
-        errors.push("sceneId must not be empty".to_string());
+        if !expected_scene_id.is_empty() {
+            spec.scene_id = expected_scene_id.to_string();
+        } else {
+            errors.push("sceneId must not be empty".to_string());
+        }
     } else if !expected_scene_id.is_empty() && spec.scene_id != expected_scene_id {
         warnings.push(format!(
             "sceneId '{}' differs from active scene '{}'",
@@ -221,10 +231,14 @@ pub(crate) fn parse_and_validate_motion_spec(
         ));
     }
     if !spec.duration_sec.is_finite() || spec.duration_sec <= 0.0 {
-        errors.push("durationSec must be > 0".to_string());
-    } else if scene_dur > 0.0 && (spec.duration_sec - scene_dur).abs() > 0.25 {
+        if scene_dur > 0.0 {
+            spec.duration_sec = scene_dur;
+        } else {
+            errors.push("durationSec must be > 0".to_string());
+        }
+    } else if scene_dur > 0.0 && (spec.duration_sec - scene_dur).abs() > 0.50 {
         errors.push(format!(
-            "durationSec ({:.3}s) deviates >0.25s from scene duration ({:.3}s)",
+            "durationSec ({:.3}s) deviates >0.50s from scene duration ({:.3}s)",
             spec.duration_sec, scene_dur
         ));
     }

@@ -169,7 +169,7 @@ impl DirectSceneSwitches {
         let (concurrency, concurrency_explicit) = match lookup("AETHERIA_DIRECT_CONCURRENCY")
             .and_then(|v| v.trim().parse::<usize>().ok())
         {
-            Some(n) => (n.clamp(1, 4), true),
+            Some(n) => (n.clamp(1, 6), true),
             None => (1, false),
         };
 
@@ -521,7 +521,7 @@ mod tests {
         assert_eq!(sw.max_steps, 18);
         assert!(!sw.filmstrip_pass1);
         assert!(!sw.motion_spec);
-        assert_eq!(sw.concurrency, 4);
+        assert_eq!(sw.concurrency, 6);
         assert!(sw.concurrency_explicit);
         assert!(sw.probe_steps_explicit);
         assert!(sw.cross_context_explicit);

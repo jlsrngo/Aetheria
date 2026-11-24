@@ -767,6 +767,38 @@ pub(crate) fn should_early_exit_scene(
             || (renders_completed >= 1 && latest_score >= 0.87))
 }
 
+/// Safe plateau early-stop: once a scene already holds a clean (`best_hazards == 0`) checkpoint
+/// with solid fidelity (`best_score >= 0.70`) and a subsequent clean render passes motion QA
+/// without improving over `best_score + 0.004`, stop burning tail steps that only roll back.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn should_early_exit_on_plateau(
+    active_filmstrip: bool,
+    is_mock_model: bool,
+    step_rendered: bool,
+    latest_errs: &[String],
+    active_hazards: &[String],
+    has_motion_warning: bool,
+    renders_completed: usize,
+    best_hazards: usize,
+    best_score: f64,
+    latest_score: f64,
+    latest_edge: f64,
+    renders_without_gain: usize,
+) -> bool {
+    active_filmstrip
+        && !is_mock_model
+        && step_rendered
+        && latest_errs.is_empty()
+        && active_hazards.is_empty()
+        && !has_motion_warning
+        && best_hazards == 0
+        && renders_completed >= 2
+        && best_score >= 0.70
+        && latest_edge >= 0.40
+        && renders_without_gain >= 1
+        && latest_score <= best_score + 0.004
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PostWriteToolPhase {
     AllTools,
@@ -972,6 +1004,7 @@ async fn run_single_direct_scene(
         .cloned()
         .unwrap_or_default();
     let mut motion_deficit_rounds: usize = 0;
+    let mut renders_without_gain: usize = 0;
     let tool_ctx = SceneToolContext {
         session_id: &shared.session_id,
         workspace_dir: &shared.workspace_dir,
@@ -1003,6 +1036,10 @@ async fn run_single_direct_scene(
     let force_write_choice = json!({
         "type": "function",
         "function": { "name": "write_scene_script" }
+    });
+    let force_render_choice = json!({
+        "type": "function",
+        "function": { "name": "render_and_compare_scene" }
     });
     for step_idx in 0..max_scene_steps {
         let enforce_write_now = shared.switches.should_enforce_write_gate(
@@ -1051,6 +1088,10 @@ async fn run_single_direct_scene(
         };
         let active_tool_choice = if enforce_write_now {
             Some(&force_write_choice)
+        } else if post_phase == PostWriteToolPhase::VerifyDirtyScriptNow
+            && !shared.render_only_tools.is_empty()
+        {
+            Some(&force_render_choice)
         } else {
             None
         };
@@ -1316,6 +1357,8 @@ async fn run_single_direct_scene(
                         runtime_errors: errs.len(),
                         hazards: cur_haz,
                     });
+                    let prev_best_score = best_score;
+                    let prev_best_hazards = best_hazards;
                     if is_better_checkpoint(
                         best_score,
                         &best_errs,
@@ -1324,10 +1367,20 @@ async fn run_single_direct_scene(
                         &errs,
                         cur_haz,
                     ) {
+                        let meaningful_gain = prev_best_score < 0.0
+                            || cur_haz < prev_best_hazards
+                            || sc_val > prev_best_score + 0.004;
+                        if meaningful_gain {
+                            renders_without_gain = 0;
+                        } else {
+                            renders_without_gain += 1;
+                        }
                         best_code = cur_code;
                         best_score = sc_val;
                         best_errs = errs;
                         best_hazards = cur_haz;
+                    } else {
+                        renders_without_gain += 1;
                     }
                     crate::paths::log_engine(
                         "direct_remake",
@@ -1503,6 +1556,19 @@ async fn run_single_direct_scene(
                 latest_score,
                 latest_edge,
                 latest_min_frame_score,
+            ) || should_early_exit_on_plateau(
+                shared.active_filmstrip,
+                scene_model_id.starts_with("mock-"),
+                step_rendered,
+                &latest_errs,
+                &active_hazards,
+                has_motion_warning,
+                renders_completed,
+                best_hazards,
+                best_score,
+                latest_score,
+                latest_edge,
+                renders_without_gain,
             ) {
                 break;
             }
@@ -1932,7 +1998,7 @@ pub(crate) async fn run_direct_per_scene_remake_with_switches(
     let effective_concurrency = if effective_switches.concurrency_explicit {
         effective_switches.concurrency
     } else if active_filmstrip && total_scenes >= 2 {
-        3
+        4
     } else {
         1
     };
@@ -3095,6 +3161,14 @@ mod tests {
         assert!(!should_early_exit_scene(true, false, true, &[], &[], false, false, 2, 0.78, 0.42, 0.66));
         assert!(!should_early_exit_scene(true, false, true, &[], &[], false, true, 2, 0.88, 0.72, 0.85));
         assert!(should_early_exit_scene(true, false, true, &[], &[], false, false, 2, 0.81, 0.42, 0.66));
+
+        // Plateau early-stop saves tail steps once a clean >=0.70 checkpoint stops improving,
+        // while NEVER cutting short a scene with remaining hazards, motion warnings, or low score.
+        assert!(should_early_exit_on_plateau(true, false, true, &[], &[], false, 3, 0, 0.7902, 0.7411, 0.45, 1));
+        assert!(!should_early_exit_on_plateau(true, false, true, &[], &[], false, 2, 1, 0.7902, 0.7411, 0.45, 1));
+        assert!(!should_early_exit_on_plateau(true, false, true, &[], &[], true, 3, 0, 0.7902, 0.7411, 0.45, 1));
+        assert!(!should_early_exit_on_plateau(true, false, true, &[], &[], false, 2, 0, 0.68, 0.65, 0.45, 1));
+        assert!(!should_early_exit_on_plateau(true, false, true, &[], &[], false, 2, 0, 0.75, 0.78, 0.55, 0));
     }
 
     #[test]
