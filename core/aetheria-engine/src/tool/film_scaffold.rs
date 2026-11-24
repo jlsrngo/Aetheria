@@ -434,6 +434,9 @@ pub(crate) fn render_managed_index_html(
     }}
 
     var readyWaiters = wordPromises.slice();
+    if (window.AM && typeof window.AM.loadAssetManifest === "function") {{
+      readyWaiters.push(window.AM.loadAssetManifest("/assets.json").catch(function () {{}}));
+    }}
     if (window.AM && typeof window.AM.whenImagesReady === "function") {{
       readyWaiters.push(window.AM.whenImagesReady().catch(function () {{}}));
     }}

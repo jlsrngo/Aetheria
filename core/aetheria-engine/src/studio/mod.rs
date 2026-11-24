@@ -14,6 +14,7 @@
 //! - `film_static_server`, `ffmpeg_pipeline`, `cdp_ws` & `html_renderer`: Pure-Rust headless browser CDP + FFmpeg renderer.
 //! - `native_renderer` & `native_canvas`: FFmpeg pipe renderer and RGBA software rasterizer.
 
+pub mod asset_registry;
 pub mod assets;
 pub mod builtin_runtime;
 pub(crate) mod cdp_pool;
@@ -89,6 +90,10 @@ pub fn router() -> Router {
         .route(
             "/api/studio/assets",
             post(assets::handle_get_static_files).get(assets::handle_get_static_files),
+        )
+        .route(
+            "/api/studio/asset-registry",
+            get(asset_registry::handle_asset_registry).post(asset_registry::handle_asset_registry),
         )
         .route(
             "/api/update-default-props",

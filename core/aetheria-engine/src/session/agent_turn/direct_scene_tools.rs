@@ -350,11 +350,13 @@ fn encode_file_jpeg_data_url(path: &Path) -> Option<String> {
 }
 
 fn build_unused_downloaded_asset_hint(film_root: &Path, code: &str) -> Option<String> {
-    let has_load = code.contains("AM.loadImage(");
-    let actually_draws_image = code.contains("AM.drawImageFit(")
+    let uses_asset_registry = code.contains("AM.drawAsset(");
+    let has_load = code.contains("AM.loadImage(") || code.contains("AM.getAsset(");
+    let actually_draws_image = uses_asset_registry
+        || code.contains("AM.drawImageFit(")
         || code.contains(".drawImage(")
         || (has_load && code.contains("AM.drawTurntableObject("));
-    if has_load && actually_draws_image {
+    if (has_load || uses_asset_registry) && actually_draws_image {
         return None;
     }
     let img_dir = film_root.join("img");

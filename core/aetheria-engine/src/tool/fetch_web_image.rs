@@ -715,10 +715,67 @@ pub async fn execute_fetch_web_image(workspace_dir: &str, arguments: &Value) -> 
                         target_sat,
                     )
                     .await;
+                    let is_valid_raster = meta.width.is_some_and(|w| w > 0) && meta.height.is_some_and(|h| h > 0);
+                    if !is_valid_raster {
+                        let _ = tokio::fs::remove_file(&target_out).await;
+                        continue;
+                    }
                     let final_bytes = tokio::fs::metadata(&target_out)
                         .await
                         .map(|m| m.len())
                         .unwrap_or(bytes.len() as u64);
+
+                    // Persist normalized asset metadata into project `assets.json` registry.
+                    let film_root_for_reg = target_out
+                        .parent()
+                        .and_then(|p| {
+                            if p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.eq_ignore_ascii_case("img")) {
+                                p.parent().map(std::path::Path::to_path_buf)
+                            } else {
+                                Some(p.to_path_buf())
+                            }
+                        })
+                        .unwrap_or_else(|| PathBuf::from(workspace_dir));
+                    let reg_rel = asset_rel.clone();
+                    let reg_hints = crate::studio::asset_registry::AssetRegistrationHints {
+                        width: meta.width,
+                        height: meta.height,
+                        has_alpha: Some(meta.has_alpha),
+                        background_removed: meta.background_removed,
+                        alpha_bbox: meta.alpha_bbox.clone(),
+                        pivot: None,
+                        source: Some(img_url.clone()),
+                        query: if query.is_empty() { None } else { Some(query.to_string()) },
+                        mean_hex: meta.mean_hex.clone(),
+                        mean_luma: meta.mean_luma,
+                        mean_sat: meta.mean_sat,
+                    };
+                    let registered = tokio::task::spawn_blocking(move || {
+                        crate::studio::asset_registry::register_project_asset(
+                            &film_root_for_reg,
+                            &reg_rel,
+                            &reg_hints,
+                        )
+                    })
+                    .await
+                    .ok()
+                    .and_then(|r| r.ok());
+
+                    let asset_id = registered
+                        .as_ref()
+                        .map(|r| r.id.clone())
+                        .unwrap_or_else(|| crate::studio::asset_registry::derive_asset_id(&asset_rel));
+                    let asset_kind = registered
+                        .as_ref()
+                        .map(|r| r.kind.clone())
+                        .unwrap_or_else(|| {
+                            if meta.background_removed || meta.has_alpha {
+                                "raster_cutout".to_string()
+                            } else {
+                                "raster".to_string()
+                            }
+                        });
+
                     let resp_val = json!({
                         "success": true,
                         "query": query,
@@ -726,12 +783,16 @@ pub async fn execute_fetch_web_image(workspace_dir: &str, arguments: &Value) -> 
                         "selectedTitle": title,
                         "sourceUrl": img_url,
                         "outputPath": target_out.to_string_lossy().to_string(),
+                        "assetId": asset_id,
+                        "assetKind": asset_kind,
                         "assetPath": asset_rel,
                         "assetUrl": format!("/{}", asset_rel),
+                        "manifestPath": crate::studio::asset_registry::ASSET_MANIFEST_FILENAME,
                         "bytes": final_bytes,
                         "width": meta.width,
                         "height": meta.height,
                         "hasAlpha": meta.has_alpha,
+                        "alphaBbox": meta.alpha_bbox,
                         "backgroundRemoved": meta.background_removed,
                         "satP90": meta.sat_p90,
                         "meanLuma": meta.mean_luma,
@@ -739,7 +800,7 @@ pub async fn execute_fetch_web_image(workspace_dir: &str, arguments: &Value) -> 
                         "meanHex": meta.mean_hex,
                         "toneAdjusted": meta.tone_adjusted,
                         "candidates": candidate_summary,
-                        "message": format!("Downloaded internet image to {} (preload via `AM.loadImage('/{}')` and animate via `AM.drawTurntableObject(...)` or `AM.drawImageFit(...)`)", asset_rel, asset_rel)
+                        "message": format!("Downloaded internet image to {} (registered as '{}' in assets.json; draw via `AM.drawAsset(ctx, '{}', x, y, w, h)` or `AM.loadImage('/{}')`)", asset_rel, asset_id, asset_id, asset_rel)
                     });
                     // Auto-skip achromatic B&W line-art sketches on candidate 0 when realistic color photo/3D is wanted
                     let is_bw_sketch = wants_realistic_img
@@ -775,6 +836,7 @@ struct DownloadedImageMeta {
     width: Option<u32>,
     height: Option<u32>,
     has_alpha: bool,
+    alpha_bbox: Option<crate::studio::asset_registry::AlphaBbox>,
     background_removed: bool,
     sat_p90: Option<f64>,
     mean_luma: Option<f64>,
@@ -945,10 +1007,19 @@ if final_img.ndim == 3 and final_img.shape[2] >= 3:
         mb, mg, mr = [int(round(float(x))) for x in np.mean(bgr_vals, axis=0)]
         mean_hex = "#{:02X}{:02X}{:02X}".format(mr, mg, mb)
 
+alpha_bbox = None
+if final_img.ndim == 3 and final_img.shape[2] == 4:
+    ys_a, xs_a = np.where(final_img[:, :, 3] > 16)
+    if ys_a.size > 0 and xs_a.size > 0:
+        ax0, ay0 = int(xs_a.min()), int(ys_a.min())
+        ax1, ay1 = int(xs_a.max()) + 1, int(ys_a.max()) + 1
+        alpha_bbox = {"x": ax0, "y": ay0, "w": max(1, ax1 - ax0), "h": max(1, ay1 - ay0)}
+
 print(json.dumps({
     "w": int(w),
     "h": int(h),
     "alpha": bool(has_alpha),
+    "alphaBbox": alpha_bbox,
     "rm": bool(removed),
     "satP90": sat_p90,
     "meanLuma": mean_luma,
@@ -969,10 +1040,22 @@ print(json.dumps({
     if let Ok(o) = out {
         if o.status.success() {
             if let Ok(v) = serde_json::from_slice::<Value>(&o.stdout) {
+                let parsed_bbox = v.get("alphaBbox").and_then(|b| {
+                    let x = b.get("x").and_then(Value::as_u64)? as u32;
+                    let y = b.get("y").and_then(Value::as_u64)? as u32;
+                    let w = b.get("w").and_then(Value::as_u64)? as u32;
+                    let h = b.get("h").and_then(Value::as_u64)? as u32;
+                    if w > 0 && h > 0 {
+                        Some(crate::studio::asset_registry::AlphaBbox { x, y, w, h })
+                    } else {
+                        None
+                    }
+                });
                 return DownloadedImageMeta {
                     width: v.get("w").and_then(Value::as_u64).map(|x| x as u32),
                     height: v.get("h").and_then(Value::as_u64).map(|x| x as u32),
                     has_alpha: v.get("alpha").and_then(Value::as_bool).unwrap_or(false),
+                    alpha_bbox: parsed_bbox,
                     background_removed: v.get("rm").and_then(Value::as_bool).unwrap_or(false),
                     sat_p90: v.get("satP90").and_then(Value::as_f64),
                     mean_luma: v.get("meanLuma").and_then(Value::as_f64),

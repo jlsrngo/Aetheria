@@ -1961,6 +1961,138 @@
     return true;
   }
 
+  // Unified cross-scene asset registry (`assets.json`) with metadata, alphaBbox & pivot support.
+  const ASSET_BY_ID = Object.create(null);
+  const ASSET_BY_KEY = Object.create(null);
+
+  function _normalizeAssetKey(key) {
+    return String(key || "")
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "")
+      .toLowerCase();
+  }
+
+  function registerAsset(record) {
+    if (!record || typeof record !== "object") return null;
+    const rawUrl = String(record.url || (record.path ? "/" + String(record.path).replace(/^\/+/, "") : "")).trim();
+    if (!rawUrl) return null;
+    const cleanPath = String(record.path || rawUrl.replace(/^\/+/, "")).replace(/^\/+/, "");
+    const id = String(record.id || cleanPath.replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9]+/g, "_").toLowerCase());
+    const pivot = Array.isArray(record.pivot) && record.pivot.length >= 2
+      ? [clamp(Number(record.pivot[0]) || 0.5, 0, 1), clamp(Number(record.pivot[1]) || 0.5, 0, 1)]
+      : [0.5, 0.5];
+    const bbox = record.alphaBbox && Number(record.alphaBbox.w) > 0 && Number(record.alphaBbox.h) > 0
+      ? {
+          x: Math.max(0, Number(record.alphaBbox.x) || 0),
+          y: Math.max(0, Number(record.alphaBbox.y) || 0),
+          w: Number(record.alphaBbox.w),
+          h: Number(record.alphaBbox.h),
+        }
+      : null;
+    const kind = String(record.kind || (cleanPath.toLowerCase().endsWith(".svg") ? "svg" : record.hasAlpha ? "raster_cutout" : "raster"));
+    const valid = record.valid !== false;
+    const meta = {
+      id,
+      path: cleanPath,
+      url: rawUrl.startsWith("/") || /^https?:\/\//i.test(rawUrl) || /^data:/i.test(rawUrl) ? rawUrl : "/" + rawUrl,
+      kind,
+      width: Number(record.width) || 0,
+      height: Number(record.height) || 0,
+      hasAlpha: Boolean(record.hasAlpha || kind === "svg" || kind === "raster_cutout"),
+      alphaBbox: bbox,
+      pivot,
+      valid,
+      warnings: Array.isArray(record.warnings) ? record.warnings.slice() : [],
+    };
+
+    const image = valid && kind !== "model3d" ? loadImage(meta.url) : null;
+    const entry = { meta, image };
+    ASSET_BY_ID[id.toLowerCase()] = entry;
+    ASSET_BY_KEY[_normalizeAssetKey(cleanPath)] = entry;
+    ASSET_BY_KEY[_normalizeAssetKey(meta.url)] = entry;
+    return entry;
+  }
+
+  function loadAssetManifest(url = "/assets.json") {
+    if (typeof fetch !== "function") {
+      return Promise.resolve({ version: 1, assets: [] });
+    }
+    return fetch(url)
+      .then((res) => (res && res.ok ? res.json() : { version: 1, assets: [] }))
+      .then((data) => {
+        const list = data && Array.isArray(data.assets) ? data.assets : [];
+        for (let i = 0; i < list.length; i++) {
+          registerAsset(list[i]);
+        }
+        return whenImagesReady().then(() => ({ version: Number(data && data.version) || 1, assets: list }));
+      })
+      .catch(() => ({ version: 1, assets: [] }));
+  }
+
+  function getAsset(idOrPath) {
+    if (!idOrPath) return null;
+    const key = _normalizeAssetKey(idOrPath);
+    const entry = ASSET_BY_ID[key] || ASSET_BY_KEY[key] || null;
+    if (!entry) return null;
+    const img = entry.image;
+    const ready = Boolean(entry.meta.valid && img && img.complete && img.naturalWidth > 0 && img.naturalHeight > 0);
+    return { meta: entry.meta, image: img, ready };
+  }
+
+  /**
+   * Draws a registered asset (PNG cutout, raster photo, or SVG) using its validated metadata,
+   * optional `alphaBbox` tight crop, and normalized `pivot` anchor.
+   */
+  function drawAsset(ctx, idOrPath, x, y, w, h, opts = {}) {
+    if (!ctx || !(w > 0) || !(h > 0)) return false;
+    const asset = getAsset(idOrPath);
+    if (!asset || !asset.ready || !asset.image) return false;
+    const img = asset.image;
+    const meta = asset.meta;
+
+    const useBbox = opts.useAlphaBbox !== false && meta.alphaBbox;
+    const sx = useBbox ? meta.alphaBbox.x : 0;
+    const sy = useBbox ? meta.alphaBbox.y : 0;
+    const sw = useBbox ? Math.min(meta.alphaBbox.w, img.naturalWidth - sx) : img.naturalWidth;
+    const sh = useBbox ? Math.min(meta.alphaBbox.h, img.naturalHeight - sy) : img.naturalHeight;
+    if (!(sw > 0) || !(sh > 0)) return false;
+
+    const mode = opts.mode || "contain";
+    const fitScale = mode === "cover" ? Math.max(w / sw, h / sh) : Math.min(w / sw, h / sh);
+    const dw = sw * fitScale;
+    const dh = sh * fitScale;
+    const pivot = Array.isArray(opts.pivot) && opts.pivot.length >= 2 ? opts.pivot : meta.pivot;
+    const px = clamp(Number(pivot[0]) ?? 0.5, 0, 1);
+    const py = clamp(Number(pivot[1]) ?? 0.5, 0, 1);
+    const ax = x + w * px;
+    const ay = y + h * py;
+    const scaleX = (Number.isFinite(Number(opts.scaleX)) ? Number(opts.scaleX) : (Number.isFinite(Number(opts.scale)) ? Number(opts.scale) : 1)) * (opts.flipX ? -1 : 1);
+    const scaleY = (Number.isFinite(Number(opts.scaleY)) ? Number(opts.scaleY) : (Number.isFinite(Number(opts.scale)) ? Number(opts.scale) : 1)) * (opts.flipY ? -1 : 1);
+    const rot = Number(opts.rot) || 0;
+    const alpha = opts.alpha !== undefined ? clamp(Number(opts.alpha), 0, 1) : 1;
+
+    ctx.save();
+    if (mode === "cover") {
+      ctx.beginPath();
+      ctx.rect(x, y, w, h);
+      ctx.clip();
+    }
+    ctx.globalAlpha *= alpha;
+    if (opts.shadow && typeof opts.shadow === "object") {
+      ctx.shadowColor = opts.shadow.color || "rgba(0,0,0,0.35)";
+      ctx.shadowBlur = Number(opts.shadow.blur) || 18;
+      ctx.shadowOffsetX = Number(opts.shadow.offsetX) || 0;
+      ctx.shadowOffsetY = Number(opts.shadow.offsetY) || 8;
+    }
+    ctx.translate(ax, ay);
+    if (rot) ctx.rotate(rot);
+    if (scaleX !== 1 || scaleY !== 1) ctx.scale(scaleX, scaleY);
+    ctx.drawImage(img, sx, sy, sw, sh, -dw * px, -dh * py, dw, dh);
+    ctx.restore();
+    return true;
+  }
+
   /**
    * Renders a physically inspired 3-layer additive optical glow/bloom orb
    * (wide atmospheric halo + saturated mid bloom + over-exposed white hot core).
@@ -2970,6 +3102,10 @@
     loadImage,
     whenImagesReady,
     drawImageFit,
+    registerAsset,
+    loadAssetManifest,
+    getAsset,
+    drawAsset,
     drawOpticalGlow,
     drawBloomStroke,
     drawSphericalLens,
