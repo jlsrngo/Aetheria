@@ -131,6 +131,10 @@
       const x = clamp(t, 0, 1);
       return 1 - Math.pow(1 - x, 4);
     },
+    inOutQuart: (t) => {
+      const x = clamp(t, 0, 1);
+      return x < 0.5 ? 8 * x * x * x * x : 1 - Math.pow(-2 * x + 2, 4) / 2;
+    },
     outExpo: (t) => {
       const x = clamp(t, 0, 1);
       return x >= 1 ? 1 : 1 - Math.pow(2, -10 * x);
@@ -2478,8 +2482,8 @@
     }
     const isExiting = exitAt !== null && Number(t) >= exitAt;
 
-    // Fast path once all characters have completely zoomed in and settled solid (before any exit window)
-    if (!isExiting && elapsed >= totalDur + 0.08) {
+    // Fast path only after the last character's damped spring has fully settled (prevents 1-frame snap)
+    if (!isExiting && elapsed >= totalDur + 0.52) {
       ctx.globalAlpha = baseAlpha;
       ctx.filter = "none";
       ctx.fillStyle = baseColor;
@@ -2544,11 +2548,14 @@
       } else {
         ctx.fillStyle = baseColor;
       }
+      const chW = ctx.measureText ? ctx.measureText(ch).width : 20;
       const gx = startX + offsetX;
       const gy = baseY + dy;
-      ctx.translate(gx, gy);
+      const gcx = gx + chW * 0.5;
+      const gcy = gy - 16;
+      ctx.translate(gcx, gcy);
       ctx.scale(charScale, charScale);
-      ctx.fillText(ch, 0, 0);
+      ctx.fillText(ch, -chW * 0.5, 16);
       ctx.restore();
     }
     ctx.restore();

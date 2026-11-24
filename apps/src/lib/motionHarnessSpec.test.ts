@@ -476,11 +476,16 @@ describe("Harness F1 spec guards (skill-lint & AM API parity)", () => {
       expect(lines[1]).toBe("aren't Luck");
 
       const amExt = AM as unknown as {
+        ease: { inOutQuart: (u: number) => number };
+        E: { ioQt: (u: number) => number };
         drawBlurRevealText: (c: unknown, txt: string, x: number, y: number, t: number, t0: number, dur: number, opts?: unknown) => void;
         drawBlurRiseWords: (c: unknown, txt: string, x: number, y: number, t: number, t0: number, opts?: unknown) => void;
         drawTurntableObject: (c: unknown, cx: number, cy: number, t: number, fn: () => void, opts?: unknown) => void;
         drawMorphPolygon: (c: unknown, a: number[][], b: number[][], p: number, opts?: unknown) => Array<{ x: number; y: number }>;
       };
+      expect(typeof amExt.ease.inOutQuart).toBe("function");
+      expect(amExt.ease.inOutQuart(0.5)).toBeCloseTo(0.5, 4);
+      expect(amExt.E.ioQt(0.5)).toBeCloseTo(0.5, 4);
       let ttCalled = 0;
       const alphaTrack: number[] = [];
       const origFillText = measureCtx.fillText;

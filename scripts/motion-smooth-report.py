@@ -27,6 +27,16 @@ SIZE = (360, 640)
 FAST_PX = 3.0
 
 
+def _extract_cut_sec(item):
+    if isinstance(item, (int, float)):
+        return float(item)
+    if isinstance(item, dict):
+        for k in ("cutSec", "timestamp", "t", "sec", "start"):
+            if k in item and item[k] is not None:
+                return float(item[k])
+    return 0.0
+
+
 def parse_scene_cuts_arg(raw: str):
     """Accepts either comma-separated cut seconds OR a path to style.json (`cuts[]` or `scenes[].start`)."""
     cand = Path(raw.strip())
@@ -34,7 +44,8 @@ def parse_scene_cuts_arg(raw: str):
         data = json.loads(cand.read_text(encoding="utf-8"))
         cuts = data.get("cuts")
         if isinstance(cuts, list) and cuts:
-            return [float(c) for c in cuts if float(c) > 0.05]
+            vals = [_extract_cut_sec(c) for c in cuts]
+            return [v for v in vals if v > 0.05]
         scenes = data.get("scenes")
         if isinstance(scenes, list) and len(scenes) > 1:
             return [float(s["start"]) for s in scenes[1:] if float(s.get("start", 0.0)) > 0.05]

@@ -86,10 +86,16 @@ class MotionSmoothReportTests(unittest.TestCase):
             rep_dup = mod.compute_smooth_report(ref_mov, res_dup, [])
             self.assertIn(21, rep_dup["midMotionDup"]["res"])
 
-            # Style JSON cuts parser
+            # Style JSON cuts parser (both numeric and dict cut entries from real style.json)
             style_json = td_path / "style.json"
             style_json.write_text(json.dumps({"cuts": [2.502, 6.206, 9.543]}), encoding="utf-8")
             self.assertEqual(mod.parse_scene_cuts_arg(str(style_json)), [2.502, 6.206, 9.543])
+            style_dict_json = td_path / "style_dict.json"
+            style_dict_json.write_text(
+                json.dumps({"cuts": [{"cutSec": 0.0}, {"cutSec": 2.502}, {"cutSec": 6.206}]}),
+                encoding="utf-8",
+            )
+            self.assertEqual(mod.parse_scene_cuts_arg(str(style_dict_json)), [2.502, 6.206])
 
 
 if __name__ == "__main__":

@@ -135,6 +135,16 @@ def repo_compare(ref_path, res_path, fps, repo, step_sec=0.5):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _extract_cut_sec(item):
+    if isinstance(item, (int, float)):
+        return float(item)
+    if isinstance(item, dict):
+        for k in ("cutSec", "timestamp", "t", "sec", "start"):
+            if k in item and item[k] is not None:
+                return float(item[k])
+    return 0.0
+
+
 def parse_scene_cuts(raw, fps):
     if not raw:
         return None
@@ -144,7 +154,8 @@ def parse_scene_cuts(raw, fps):
             data = json.load(fh)
         cuts = data.get("cuts")
         if isinstance(cuts, list) and cuts:
-            return [int(round(float(x) * fps)) for x in cuts if float(x) > 0.05]
+            vals = [_extract_cut_sec(x) for x in cuts]
+            return [int(round(v * fps)) for v in vals if v > 0.05]
         scenes = data.get("scenes")
         if isinstance(scenes, list) and len(scenes) > 1:
             return [int(round(float(sc["start"]) * fps)) for sc in scenes[1:] if float(sc.get("start", 0.0)) > 0.05]
