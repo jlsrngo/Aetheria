@@ -29,6 +29,7 @@ Arsip benchmark offline untuk evaluasi regresi kualitas rekonstruksi gerak (*mot
 | **Run 12** | **Prompt 12 M0–M4 (`secondaryMotion` 30fps, ranking `elementTracks`, kalibrasi `hasLivingHold`, gerbang optical-flow 30fps) + fix `AM.ease.inOutQuart` & blur-reveal snap** | **`0.7220`** | `0.782` | `0.882` | `0.571` | `2/36` | `1/26` | `3/5` (maks `4.3×`) | Rekor 36-frame (`0.7220`); S1 kartu melayang 23px (`frozenShare 0.26→0.04`), S3 (`p97Ratio 0.34→0.66`), S5 (`0.821`, `p97Ratio 0.17→0.38`). |
 | **Run 13** | **Compositor `push_*` side-by-side kontinu + 180° clamped shutter blur default + kurva AE (`aeGlide`/`outQuint`) + gerbang 30fps tiap render + rollback simetris + `SceneMotionSpec` (`16a899a`)** | `0.7152` | `0.789` | `0.878` | **`0.585`** | `2/36` | **`0/26`** | **`0/5` (maks `2.2×`)** | **Rekor baru Edge (`0.5846`), `0/5` Seam POP pertama kali, `0/26` Dead Holds, `fastSeconds` melonjak 2× (`2.07s→4.40s`), S3 `fastShare 0.35` (`p97Ratio 1.01`), S5 `fastShare 1.00/1.00` (`p97Ratio 0.86`) diselamatkan rollback simetris.** |
 | **Run 14** | **Fase 1–5 (`assets.json` cutout registry + `aetheria-post.js` WebGL2 + `aetheria-stage.js` + Independent Auditor `.audit.json` + concurrency 4, `f3244f6`)** | `0.6971` | `0.778` | **`0.903`** | `0.507` | `3/36` | **`0/26`** | `1/5` (`4.0×` S1→S2) | **Rekor tertinggi Color (`0.9025`) & `midMotionDup` identik referensi (`[49]`); Independent Auditor mengangkat S2 (`0.689→0.767`, `Edge 0.383→0.630`) via `assets.json` (`brain.png`) & S6 `energyRatio=0.91`; S1 variansi LLM lebih rendah (`0.552`).** |
+| **Run 15 (`v15`)** | **Tahap 1–5 EffectCraft Porting (`aetheria-tracks.js` AE cubic-bezier + `aetheria-behaviors.js` + `aetheria-shapes-text.js` + Track Mattes/Echo/WebGL2 blurs + `motion_spec.rs` v2, `cb4f4aa`)** | `0.6909` | `0.772` | `0.896` | `0.536` | **`0/36`** | **`0/26`** | `1/5` (`4.0×` S2→S3) | **Rekor `0/36` Low-Edge (setara Run 8), rekor tertinggi `fastSeconds` (`5.27s` vs Ref `6.61s`), `0/26` Dead Holds, `midMotionDup` identik referensi (`[49]`), S1 naik tajam (`0.552→0.726`), S3–S6 `energyRatio 1.02..1.16`, waktu render turun `-81.1s` (`898.4s`); namun di freeform `scene*.js` LLM belum mengadopsi `AM.createStage` (`0/6`) dan cutout Wikimedia S2 menyisakan kotak putih tipis (`energyRatio 0.38`).** |
 
 ## Skor Per-Scene Run 9 (`summary_run9.json`)
 
@@ -49,15 +50,15 @@ Arsip benchmark offline untuk evaluasi regresi kualitas rekonstruksi gerak (*mot
 
 > **Catatan batasan alat ukur:** `motion-smooth-report.py` adalah proksi optical flow Farneback pada 360×640 (bukan ukuran rasa subjektif, tidak menghapus derau kompresi, tidak mengukur bentuk kurva kecepatan satu elemen atau kualitas blur).
 
-| Scene | `fastShare` Ref | Run 11 | Run 12 | Run 13 | **Run 14** | `p97Ratio` R12 → R13 → **R14** | `active` Ref / R13 / **R14** |
-|---|---:|---:|---:|---:|---:|---|---|
-| S1 | `0.52` | `0.30` | `0.27` | `0.24` | `0.24` | `0.52 → 0.48 → `**`0.70`** | `0.158 / 0.104 / 0.102` |
-| S2 | `0.29` | `0.20` | `0.16` | `0.15` | `0.11` | `0.63 → 0.92 → 0.55` | `0.174 / 0.108 / 0.070` |
-| S3 | `0.61` | `0.05` | `0.07` | `0.35` | `0.14` | `0.66 → 1.01 → 0.84` | `0.105 / 0.073 / 0.061` |
-| S4 | `0.07` | `0.05` | `0.03` | `0.06` | **`0.07`** | `0.80 → 0.95 → `**`0.94`** | `0.025 / 0.018 / 0.018` |
-| S5 | `1.00` | `0.08` | `0.15` | **`1.00`** | **`1.00`** | `0.38 → 0.86 → `**`0.84`** | `0.113 / 0.129 / 0.128` |
-| S6 | `0.32` | `0.19` | `0.15` | `0.13` | **`0.19`** | `0.79 → 0.55 → `**`0.82`** | `0.081 / 0.050 / `**`0.079`** |
-| **Total `fastSeconds`** | **`6.61s`** | `2.20s` | `2.07s` | `4.40s` | **`3.74s`** | `midMotionDup`: Ref `[49]`, R13 `[3,47]`, **R14 `[49]`** | **Dead Holds: `0/26`, Seam POP: `1/5`** |
+| Scene | `fastShare` Ref | Run 11 | Run 12 | Run 13 | Run 14 | **Run 15 (`v15`)** | `p97Ratio` R13 → R14 → **R15** | `active` Ref / R14 / **R15** |
+|---|---:|---:|---:|---:|---:|---:|---|---|
+| S1 | `0.52` | `0.30` | `0.27` | `0.24` | `0.24` | **`0.29`** | `0.48 → 0.70 → `**`0.71`** | `0.158 / 0.102 / `**`0.105`** |
+| S2 | `0.29` | `0.20` | `0.16` | `0.15` | `0.11` | `0.11` | `0.92 → 0.55 → `**`0.59`** | `0.174 / 0.070 / `**`0.078`** |
+| S3 | `0.61` | `0.05` | `0.07` | `0.35` | `0.14` | **`0.99`** | `1.01 → 0.84 → 1.39` | `0.105 / 0.061 / `**`0.080`** |
+| S4 | `0.07` | `0.05` | `0.03` | `0.06` | `0.07` | **`0.06`** | `0.95 → 0.94 → `**`0.97`** | `0.025 / 0.018 / `**`0.023`** |
+| S5 | `1.00` | `0.08` | `0.15` | `1.00` | `1.00` | `0.45` | `0.86 → 0.84 → 0.72` | `0.113 / 0.128 / 0.104` |
+| S6 | `0.32` | `0.19` | `0.15` | `0.13` | `0.19` | `0.17` | `0.55 → 0.82 → `**`1.03`** | `0.081 / 0.079 / `**`0.078`** |
+| **Total `fastSeconds`** | **`6.61s`** | `2.20s` | `2.07s` | `4.40s` | `3.74s` | **`5.27s`** | `midMotionDup`: Ref `[49]`, R14 `[49]`, **R15 `[49]`** | **Dead Holds: `0/26`, Seam POP: `1/5` (`S2→S3`)** |
 
 ## Cara Reproduksi Evaluasi Offline
 

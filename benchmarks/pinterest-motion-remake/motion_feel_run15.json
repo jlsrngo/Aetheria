@@ -1,0 +1,364 @@
+{
+ "fps": 29.97,
+ "frames": 536,
+ "perScene": [
+  {
+   "scene": 1,
+   "windows": 3,
+   "deadWindows": 0,
+   "meanRef_lag15": 0.2198,
+   "meanRes_lag15": 0.2043
+  },
+  {
+   "scene": 2,
+   "windows": 6,
+   "deadWindows": 0,
+   "meanRef_lag15": 0.1148,
+   "meanRes_lag15": 0.0655
+  },
+  {
+   "scene": 3,
+   "windows": 5,
+   "deadWindows": 0,
+   "meanRef_lag15": 0.1066,
+   "meanRes_lag15": 0.0746
+  },
+  {
+   "scene": 4,
+   "windows": 7,
+   "deadWindows": 0,
+   "meanRef_lag15": 0.032,
+   "meanRes_lag15": 0.0201
+  },
+  {
+   "scene": 5,
+   "windows": 2,
+   "deadWindows": 0,
+   "meanRef_lag15": 0.0914,
+   "meanRes_lag15": 0.121
+  },
+  {
+   "scene": 6,
+   "windows": 3,
+   "deadWindows": 0,
+   "meanRef_lag15": 0.0858,
+   "meanRes_lag15": 0.0542
+  }
+ ],
+ "seams": [
+  {
+   "cutSec": 2.502,
+   "refPeak": 38.95,
+   "resPeak": 37.64,
+   "refPreMed": 0.685,
+   "resPreMed": 0.362,
+   "refRatio": 56.9,
+   "resRatio": 103.9,
+   "resPopVsRef": 1.8
+  },
+  {
+   "cutSec": 6.206,
+   "refPeak": 7.86,
+   "resPeak": 4.76,
+   "refPreMed": 0.364,
+   "resPreMed": 0.055,
+   "refRatio": 21.6,
+   "resRatio": 86.5,
+   "resPopVsRef": 4.0
+  },
+  {
+   "cutSec": 9.543,
+   "refPeak": 26.08,
+   "resPeak": 24.13,
+   "refPreMed": 0.181,
+   "resPreMed": 0.455,
+   "refRatio": 144.2,
+   "resRatio": 53.0,
+   "resPopVsRef": 0.4
+  },
+  {
+   "cutSec": 13.514,
+   "refPeak": 14.29,
+   "resPeak": 13.96,
+   "refPreMed": 0.057,
+   "resPreMed": 0.556,
+   "refRatio": 249.2,
+   "resRatio": 25.1,
+   "resPopVsRef": 0.1
+  },
+  {
+   "cutSec": 15.682,
+   "refPeak": 7.67,
+   "resPeak": 7.09,
+   "refPreMed": 1.571,
+   "resPreMed": 1.043,
+   "refRatio": 4.9,
+   "resRatio": 6.8,
+   "resPopVsRef": 1.4
+  }
+ ],
+ "energy": [
+  {
+   "scene": 1,
+   "ratioRes/Ref": 0.75
+  },
+  {
+   "scene": 2,
+   "ratioRes/Ref": 0.38
+  },
+  {
+   "scene": 3,
+   "ratioRes/Ref": 1.05
+  },
+  {
+   "scene": 4,
+   "ratioRes/Ref": 1.04
+  },
+  {
+   "scene": 5,
+   "ratioRes/Ref": 1.16
+  },
+  {
+   "scene": 6,
+   "ratioRes/Ref": 1.02
+  }
+ ],
+ "totalDeadWindows": 0,
+ "totalWindows": 26,
+ "driftWindows": [
+  {
+   "scene": 1,
+   "t": 0.3,
+   "ref_lag1": 0.042,
+   "ref_lag15": 0.0914,
+   "res_lag1": 0.0292,
+   "res_lag15": 0.0647,
+   "dead": false
+  },
+  {
+   "scene": 1,
+   "t": 0.7,
+   "ref_lag1": 0.0094,
+   "ref_lag15": 0.2069,
+   "res_lag1": 0.0,
+   "res_lag15": 0.1349,
+   "dead": false
+  },
+  {
+   "scene": 1,
+   "t": 1.1,
+   "ref_lag1": 0.0927,
+   "ref_lag15": 0.3612,
+   "res_lag1": 0.0349,
+   "res_lag15": 0.4133,
+   "dead": false
+  },
+  {
+   "scene": 2,
+   "t": 2.8,
+   "ref_lag1": 0.0536,
+   "ref_lag15": 0.1036,
+   "res_lag1": 0.0131,
+   "res_lag15": 0.0429,
+   "dead": false
+  },
+  {
+   "scene": 2,
+   "t": 3.2,
+   "ref_lag1": 0.0168,
+   "ref_lag15": 0.1463,
+   "res_lag1": 0.0012,
+   "res_lag15": 0.0807,
+   "dead": false
+  },
+  {
+   "scene": 2,
+   "t": 3.6,
+   "ref_lag1": 0.0723,
+   "ref_lag15": 0.1782,
+   "res_lag1": 0.0234,
+   "res_lag15": 0.1702,
+   "dead": false
+  },
+  {
+   "scene": 2,
+   "t": 4.0,
+   "ref_lag1": 0.0775,
+   "ref_lag15": 0.1222,
+   "res_lag1": 0.0217,
+   "res_lag15": 0.0353,
+   "dead": false
+  },
+  {
+   "scene": 2,
+   "t": 4.4,
+   "ref_lag1": 0.0148,
+   "ref_lag15": 0.0662,
+   "res_lag1": 0.0031,
+   "res_lag15": 0.0306,
+   "dead": false
+  },
+  {
+   "scene": 2,
+   "t": 4.8,
+   "ref_lag1": 0.0116,
+   "ref_lag15": 0.0721,
+   "res_lag1": 0.0027,
+   "res_lag15": 0.0333,
+   "dead": false
+  },
+  {
+   "scene": 3,
+   "t": 6.51,
+   "ref_lag1": 0.0176,
+   "ref_lag15": 0.0527,
+   "res_lag1": 0.0192,
+   "res_lag15": 0.0516,
+   "dead": false
+  },
+  {
+   "scene": 3,
+   "t": 6.91,
+   "ref_lag1": 0.0181,
+   "ref_lag15": 0.0627,
+   "res_lag1": 0.0128,
+   "res_lag15": 0.0468,
+   "dead": false
+  },
+  {
+   "scene": 3,
+   "t": 7.31,
+   "ref_lag1": 0.0222,
+   "ref_lag15": 0.1057,
+   "res_lag1": 0.0137,
+   "res_lag15": 0.0446,
+   "dead": false
+  },
+  {
+   "scene": 3,
+   "t": 7.71,
+   "ref_lag1": 0.0261,
+   "ref_lag15": 0.1516,
+   "res_lag1": 0.0084,
+   "res_lag15": 0.1124,
+   "dead": false
+  },
+  {
+   "scene": 3,
+   "t": 8.11,
+   "ref_lag1": 0.0641,
+   "ref_lag15": 0.1604,
+   "res_lag1": 0.0579,
+   "res_lag15": 0.1174,
+   "dead": false
+  },
+  {
+   "scene": 4,
+   "t": 9.84,
+   "ref_lag1": 0.015,
+   "ref_lag15": 0.0935,
+   "res_lag1": 0.0085,
+   "res_lag15": 0.0829,
+   "dead": false
+  },
+  {
+   "scene": 4,
+   "t": 10.24,
+   "ref_lag1": 0.0076,
+   "ref_lag15": 0.0375,
+   "res_lag1": 0.0014,
+   "res_lag15": 0.0121,
+   "dead": false
+  },
+  {
+   "scene": 4,
+   "t": 10.64,
+   "ref_lag1": 0.0013,
+   "ref_lag15": 0.0136,
+   "res_lag1": 0.003,
+   "res_lag15": 0.0045,
+   "dead": false
+  },
+  {
+   "scene": 4,
+   "t": 11.04,
+   "ref_lag1": 0.0007,
+   "ref_lag15": 0.0208,
+   "res_lag1": 0.0,
+   "res_lag15": 0.0109,
+   "dead": false
+  },
+  {
+   "scene": 4,
+   "t": 11.44,
+   "ref_lag1": 0.0015,
+   "ref_lag15": 0.0151,
+   "res_lag1": 0.0041,
+   "res_lag15": 0.0102,
+   "dead": false
+  },
+  {
+   "scene": 4,
+   "t": 11.84,
+   "ref_lag1": 0.0014,
+   "ref_lag15": 0.0271,
+   "res_lag1": 0.0,
+   "res_lag15": 0.0117,
+   "dead": false
+  },
+  {
+   "scene": 4,
+   "t": 12.24,
+   "ref_lag1": 0.0016,
+   "ref_lag15": 0.0161,
+   "res_lag1": 0.0045,
+   "res_lag15": 0.0081,
+   "dead": false
+  },
+  {
+   "scene": 5,
+   "t": 13.81,
+   "ref_lag1": 0.0404,
+   "ref_lag15": 0.1036,
+   "res_lag1": 0.0888,
+   "res_lag15": 0.183,
+   "dead": false
+  },
+  {
+   "scene": 5,
+   "t": 14.21,
+   "ref_lag1": 0.0385,
+   "ref_lag15": 0.0791,
+   "res_lag1": 0.0289,
+   "res_lag15": 0.0589,
+   "dead": false
+  },
+  {
+   "scene": 6,
+   "t": 15.98,
+   "ref_lag1": 0.033,
+   "ref_lag15": 0.1234,
+   "res_lag1": 0.0187,
+   "res_lag15": 0.0729,
+   "dead": false
+  },
+  {
+   "scene": 6,
+   "t": 16.38,
+   "ref_lag1": 0.0673,
+   "ref_lag15": 0.0972,
+   "res_lag1": 0.0328,
+   "res_lag15": 0.0641,
+   "dead": false
+  },
+  {
+   "scene": 6,
+   "t": 16.78,
+   "ref_lag1": 0.0218,
+   "ref_lag15": 0.0368,
+   "res_lag1": 0.0202,
+   "res_lag15": 0.0257,
+   "dead": false
+  }
+ ]
+}

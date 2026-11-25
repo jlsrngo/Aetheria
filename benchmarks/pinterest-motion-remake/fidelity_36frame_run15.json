@@ -1,0 +1,2134 @@
+{
+  "ok": true,
+  "comparedCount": 36,
+  "ssimMean": 0.7721,
+  "ssimMin": 0.6269,
+  "colorMatchMean": 0.8961,
+  "edgeMatchMean": 0.5361,
+  "overallFidelity": 0.6909,
+  "overallMin": 0.4254,
+  "meanAdjacentFrameDelta": 8.54,
+  "refMeanAdjacentFrameDelta": 9.93,
+  "motionDiagnostics": {
+    "refStepDeltas": [
+      19.62,
+      23.79,
+      48.66,
+      9.89,
+      41.7,
+      7.95,
+      8.3,
+      11.66,
+      4.22,
+      4.45,
+      4.42,
+      9.24,
+      14.51,
+      4.04,
+      4.27,
+      11.99,
+      13.06,
+      4.15,
+      26.16,
+      5.92,
+      3.77,
+      0.74,
+      1.43,
+      2.11,
+      1.11,
+      0.75,
+      17.03,
+      6.86,
+      5.19,
+      4.55,
+      4.01,
+      12.9,
+      5.39,
+      3.06,
+      0.48
+    ],
+    "prevStepDeltas": [
+      16.56,
+      7.0,
+      41.89,
+      3.44,
+      38.57,
+      4.1,
+      2.62,
+      6.98,
+      1.6,
+      1.68,
+      1.94,
+      6.66,
+      11.86,
+      4.31,
+      4.2,
+      13.76,
+      9.04,
+      13.09,
+      36.45,
+      6.74,
+      1.03,
+      0.53,
+      0.81,
+      0.82,
+      0.74,
+      0.55,
+      15.19,
+      11.62,
+      4.19,
+      2.87,
+      2.46,
+      12.31,
+      8.04,
+      3.98,
+      1.27
+    ],
+    "motionEnergyRatio": 0.86,
+    "frozenIntervals": [],
+    "jumpIntervals": [],
+    "motionWindowWarnings": [],
+    "motionWarning": null
+  },
+  "passThreshold": 0.85,
+  "ssimFloor": 0.765,
+  "aspectRatioMismatch": false,
+  "passed": false,
+  "sceneScores": {
+    "full": {
+      "count": 36,
+      "ssimMean": 0.7721,
+      "ssimMin": 0.6269,
+      "overallMean": 0.6909,
+      "overallMin": 0.4254
+    }
+  },
+  "comparisonStripPath": "C:\\Users\\AMD\\.gemini\\antigravity\\brain\\c45f00c3-99e0-4e1a-9a15-95af61428086\\scratch\\live-verify-run15-out\\fidelity_36frame_strip_run15.jpg",
+  "sceneBeatStripPaths": {
+    "full": "C:\\Users\\AMD\\.gemini\\antigravity\\brain\\c45f00c3-99e0-4e1a-9a15-95af61428086\\scratch\\live-verify-run15-out\\scene_01_compare_6beats.jpg"
+  },
+  "primarySceneBeatStripPath": "C:\\Users\\AMD\\.gemini\\antigravity\\brain\\c45f00c3-99e0-4e1a-9a15-95af61428086\\scratch\\live-verify-run15-out\\scene_01_compare_6beats.jpg",
+  "perFrame": [
+    {
+      "timestamp": 0.248,
+      "refPath": "ref_00.png",
+      "refRelPath": "ref_00.png",
+      "previewPath": "res_00.png",
+      "previewRelPath": "res_00.png",
+      "ssim": 0.8083,
+      "colorSimilarity": 0.9713,
+      "edgeSimilarity": 0.3116,
+      "fgEdge": 0.3116,
+      "fgMaskIou": 0.62,
+      "geometryGateApplied": false,
+      "luminanceDelta": -0.022,
+      "lumaCorrelation": 0.903,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 1.184,
+      "fgBboxIou": 0.778,
+      "fgScaleRatio": 1.129,
+      "refFgBox": [
+        96,
+        229,
+        507,
+        432
+      ],
+      "prevFgBox": [
+        109,
+        139,
+        480,
+        515
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "",
+      "worstZones": [
+        "top-right (shape/alignment/color mismatch, diff=23)",
+        "center (shape/alignment/color mismatch, diff=22)"
+      ],
+      "combinedScore": 0.7579,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "sebagian",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 0.745,
+      "refPath": "ref_01.png",
+      "refRelPath": "ref_01.png",
+      "previewPath": "res_01.png",
+      "previewRelPath": "res_01.png",
+      "ssim": 0.7692,
+      "colorSimilarity": 0.9776,
+      "edgeSimilarity": 0.66,
+      "fgEdge": 0.66,
+      "fgMaskIou": 0.7573,
+      "geometryGateApplied": false,
+      "luminanceDelta": -0.005,
+      "lumaCorrelation": 0.975,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.994,
+      "fgBboxIou": 0.923,
+      "fgScaleRatio": 0.989,
+      "refFgBox": [
+        99,
+        293,
+        501,
+        365
+      ],
+      "prevFgBox": [
+        107,
+        280,
+        485,
+        373
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "",
+      "worstZones": [
+        "center (shape/alignment/color mismatch, diff=29)",
+        "mid-left (shape/alignment/color mismatch, diff=16)"
+      ],
+      "combinedScore": 0.8099,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "sebagian",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 1.242,
+      "refPath": "ref_02.png",
+      "refRelPath": "ref_02.png",
+      "previewPath": "res_02.png",
+      "previewRelPath": "res_02.png",
+      "ssim": 0.7003,
+      "colorSimilarity": 0.959,
+      "edgeSimilarity": 0.4941,
+      "fgEdge": 0.4941,
+      "fgMaskIou": 0.5917,
+      "geometryGateApplied": false,
+      "luminanceDelta": 0.028,
+      "lumaCorrelation": 0.818,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.815,
+      "fgBboxIou": 0.8362,
+      "fgScaleRatio": 0.836,
+      "refFgBox": [
+        67,
+        267,
+        573,
+        392
+      ],
+      "prevFgBox": [
+        101,
+        272,
+        493,
+        381
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "EMPTY BENTO CELLS at (darkTile@x=68,y=134), (darkTile@x=136,y=190), (darkTile@x=136,y=134) \u2014 draw crisp contrast-inverted vector icons inside dark tiles too (never leave darkTile cells blank)",
+      "worstZones": [
+        "top-left (undersized or faint element, diff=28)",
+        "mid-right (shape/alignment/color mismatch, diff=32)"
+      ],
+      "combinedScore": 0.5967,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "beda",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 1.739,
+      "refPath": "ref_03.png",
+      "refRelPath": "ref_03.png",
+      "previewPath": "res_03.png",
+      "previewRelPath": "res_03.png",
+      "ssim": 0.814,
+      "colorSimilarity": 0.781,
+      "edgeSimilarity": 0.6169,
+      "fgEdge": 0.6169,
+      "fgMaskIou": 0.3975,
+      "geometryGateApplied": false,
+      "luminanceDelta": -0.008,
+      "lumaCorrelation": 0.944,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 1.362,
+      "fgBboxIou": 0.96,
+      "fgScaleRatio": 0.972,
+      "refFgBox": [
+        8,
+        11,
+        704,
+        1261
+      ],
+      "prevFgBox": [
+        19,
+        5,
+        680,
+        1269
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "",
+      "worstZones": [
+        "center (shape/alignment/color mismatch, diff=24)",
+        "mid-left (shape/alignment/color mismatch, diff=24)"
+      ],
+      "combinedScore": 0.7647,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "sebagian",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 2.236,
+      "refPath": "ref_04.png",
+      "refRelPath": "ref_04.png",
+      "previewPath": "res_04.png",
+      "previewRelPath": "res_04.png",
+      "ssim": 0.7748,
+      "colorSimilarity": 0.7997,
+      "edgeSimilarity": 0.7278,
+      "fgEdge": 0.7278,
+      "fgMaskIou": 0.3293,
+      "geometryGateApplied": false,
+      "luminanceDelta": 0.001,
+      "lumaCorrelation": 0.871,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 1.361,
+      "fgBboxIou": 0.9132,
+      "fgScaleRatio": 0.913,
+      "refFgBox": [
+        13,
+        13,
+        696,
+        1256
+      ],
+      "prevFgBox": [
+        56,
+        13,
+        648,
+        1232
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "COLOR DRIFT: ref fg \u2248 #8D8AA8 (hue 126, luma 0.95), preview \u2248 #AEB9A8 (hue 41, luma 0.95) \u2014 match the fill hex",
+      "worstZones": [
+        "mid-left (oversized or wrong silhouette, diff=26)",
+        "center (shape/alignment/color mismatch, diff=28)"
+      ],
+      "combinedScore": 0.7729,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "sebagian",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 2.732,
+      "refPath": "ref_05.png",
+      "refRelPath": "ref_05.png",
+      "previewPath": "res_05.png",
+      "previewRelPath": "res_05.png",
+      "ssim": 0.8114,
+      "colorSimilarity": 0.8459,
+      "edgeSimilarity": 0.4776,
+      "fgEdge": 0.4776,
+      "fgMaskIou": 0.1608,
+      "geometryGateApplied": true,
+      "luminanceDelta": 0.005,
+      "lumaCorrelation": 0.4,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 1.298,
+      "fgBboxIou": 0.8147,
+      "fgScaleRatio": 0.893,
+      "refFgBox": [
+        232,
+        245,
+        277,
+        568
+      ],
+      "prevFgBox": [
+        235,
+        240,
+        285,
+        493
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "GEOMETRY GATE: edge=0.48, fgMaskIoU=0.16, missedRefFg=0.48, missedRefEdge=0.41, fgBboxIoU=0.8147 \u2014 background SSIM masked severe shape/text/position mismatch",
+      "worstZones": [
+        "center (shape/alignment/color mismatch, diff=33)"
+      ],
+      "combinedScore": 0.4762,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "beda",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 3.229,
+      "refPath": "ref_06.png",
+      "refRelPath": "ref_06.png",
+      "previewPath": "res_06.png",
+      "previewRelPath": "res_06.png",
+      "ssim": 0.7618,
+      "colorSimilarity": 0.8879,
+      "edgeSimilarity": 0.6328,
+      "fgEdge": 0.6328,
+      "fgMaskIou": 0.4615,
+      "geometryGateApplied": false,
+      "luminanceDelta": 0.014,
+      "lumaCorrelation": 0.824,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.932,
+      "fgBboxIou": 0.8883,
+      "fgScaleRatio": 1.078,
+      "refFgBox": [
+        232,
+        227,
+        275,
+        523
+      ],
+      "prevFgBox": [
+        235,
+        211,
+        291,
+        533
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "",
+      "worstZones": [
+        "center (shape/alignment/color mismatch, diff=35)",
+        "top-center (shape/alignment/color mismatch, diff=24)"
+      ],
+      "combinedScore": 0.7739,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "sebagian",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 3.726,
+      "refPath": "ref_07.png",
+      "refRelPath": "ref_07.png",
+      "previewPath": "res_07.png",
+      "previewRelPath": "res_07.png",
+      "ssim": 0.7517,
+      "colorSimilarity": 0.9492,
+      "edgeSimilarity": 0.6986,
+      "fgEdge": 0.6986,
+      "fgMaskIou": 0.497,
+      "geometryGateApplied": false,
+      "luminanceDelta": 0.021,
+      "lumaCorrelation": 0.798,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.708,
+      "fgBboxIou": 0.947,
+      "fgScaleRatio": 0.947,
+      "refFgBox": [
+        235,
+        213,
+        285,
+        755
+      ],
+      "prevFgBox": [
+        240,
+        213,
+        275,
+        741
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "",
+      "worstZones": [
+        "center (shape/alignment/color mismatch, diff=35)",
+        "bottom-center (undersized or faint element, diff=12)"
+      ],
+      "combinedScore": 0.8003,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "sebagian",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 4.223,
+      "refPath": "ref_08.png",
+      "refRelPath": "ref_08.png",
+      "previewPath": "res_08.png",
+      "previewRelPath": "res_08.png",
+      "ssim": 0.779,
+      "colorSimilarity": 0.9344,
+      "edgeSimilarity": 0.6719,
+      "fgEdge": 0.6719,
+      "fgMaskIou": 0.5044,
+      "geometryGateApplied": false,
+      "luminanceDelta": 0.017,
+      "lumaCorrelation": 0.715,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.704,
+      "fgBboxIou": 0.7474,
+      "fgScaleRatio": 0.97,
+      "refFgBox": [
+        227,
+        437,
+        317,
+        389
+      ],
+      "prevFgBox": [
+        237,
+        381,
+        280,
+        427
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "",
+      "worstZones": [
+        "center (shape/alignment/color mismatch, diff=37)",
+        "mid-right (undersized or faint element, diff=12)"
+      ],
+      "combinedScore": 0.8042,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "sebagian",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 4.72,
+      "refPath": "ref_09.png",
+      "refRelPath": "ref_09.png",
+      "previewPath": "res_09.png",
+      "previewRelPath": "res_09.png",
+      "ssim": 0.7493,
+      "colorSimilarity": 0.9332,
+      "edgeSimilarity": 0.5517,
+      "fgEdge": 0.5517,
+      "fgMaskIou": 0.4748,
+      "geometryGateApplied": false,
+      "luminanceDelta": 0.018,
+      "lumaCorrelation": 0.547,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.676,
+      "fgBboxIou": 0.6621,
+      "fgScaleRatio": 0.778,
+      "refFgBox": [
+        203,
+        429,
+        347,
+        525
+      ],
+      "prevFgBox": [
+        235,
+        384,
+        283,
+        501
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "",
+      "worstZones": [
+        "center (shape/alignment/color mismatch, diff=37)",
+        "mid-right (undersized or faint element, diff=13)"
+      ],
+      "combinedScore": 0.7649,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "sebagian",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 5.216,
+      "refPath": "ref_10.png",
+      "refRelPath": "ref_10.png",
+      "previewPath": "res_10.png",
+      "previewRelPath": "res_10.png",
+      "ssim": 0.7283,
+      "colorSimilarity": 0.9288,
+      "edgeSimilarity": 0.5162,
+      "fgEdge": 0.5162,
+      "fgMaskIou": 0.4316,
+      "geometryGateApplied": true,
+      "luminanceDelta": 0.022,
+      "lumaCorrelation": 0.585,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.617,
+      "fgBboxIou": 0.588,
+      "fgScaleRatio": 0.691,
+      "refFgBox": [
+        192,
+        432,
+        355,
+        595
+      ],
+      "prevFgBox": [
+        229,
+        384,
+        285,
+        512
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "GEOMETRY GATE: edge=0.52, fgMaskIoU=0.43, missedRefFg=0.30, missedRefEdge=0.44, fgBboxIoU=0.588 \u2014 background SSIM masked severe shape/text/position mismatch",
+      "worstZones": [
+        "center (shape/alignment/color mismatch, diff=37)",
+        "bottom-center (undersized or faint element, diff=22)"
+      ],
+      "combinedScore": 0.5383,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "beda",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 5.713,
+      "refPath": "ref_11.png",
+      "refRelPath": "ref_11.png",
+      "previewPath": "res_11.png",
+      "previewRelPath": "res_11.png",
+      "ssim": 0.7202,
+      "colorSimilarity": 0.9208,
+      "edgeSimilarity": 0.5283,
+      "fgEdge": 0.5283,
+      "fgMaskIou": 0.4205,
+      "geometryGateApplied": false,
+      "luminanceDelta": 0.023,
+      "lumaCorrelation": 0.659,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.652,
+      "fgBboxIou": 0.6513,
+      "fgScaleRatio": 0.744,
+      "refFgBox": [
+        192,
+        435,
+        373,
+        579
+      ],
+      "prevFgBox": [
+        229,
+        392,
+        283,
+        568
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "",
+      "worstZones": [
+        "center (shape/alignment/color mismatch, diff=37)",
+        "bottom-center (undersized or faint element, diff=28)"
+      ],
+      "combinedScore": 0.742,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "sebagian",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 6.21,
+      "refPath": "ref_12.png",
+      "refRelPath": "ref_12.png",
+      "previewPath": "res_12.png",
+      "previewRelPath": "res_12.png",
+      "ssim": 0.7293,
+      "colorSimilarity": 0.9203,
+      "edgeSimilarity": 0.4618,
+      "fgEdge": 0.4618,
+      "fgMaskIou": 0.4412,
+      "geometryGateApplied": false,
+      "luminanceDelta": 0.023,
+      "lumaCorrelation": 0.655,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.711,
+      "fgBboxIou": 0.6817,
+      "fgScaleRatio": 0.787,
+      "refFgBox": [
+        136,
+        435,
+        384,
+        573
+      ],
+      "prevFgBox": [
+        155,
+        389,
+        299,
+        579
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": true,
+      "structuralDiagnosis": "TEXT SUB-BEAT/WORD MISMATCH (expected ['35000', 'decisions', 'every single day'] at this timestamp, got ['35000', 'decisions', 'erery single day'])",
+      "worstZones": [
+        "center (shape/alignment/color mismatch, diff=35)",
+        "bottom-center (shape/alignment/color mismatch, diff=24)"
+      ],
+      "combinedScore": 0.5931,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "beda",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 6.707,
+      "refPath": "ref_13.png",
+      "refRelPath": "ref_13.png",
+      "previewPath": "res_13.png",
+      "previewRelPath": "res_13.png",
+      "ssim": 0.8666,
+      "colorSimilarity": 0.8397,
+      "edgeSimilarity": 0.1977,
+      "fgEdge": 0.1977,
+      "fgMaskIou": 0.493,
+      "geometryGateApplied": false,
+      "luminanceDelta": -0.003,
+      "lumaCorrelation": 0.789,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.868,
+      "fgBboxIou": 0.9007,
+      "fgScaleRatio": 1.057,
+      "refFgBox": [
+        160,
+        80,
+        533,
+        952
+      ],
+      "prevFgBox": [
+        157,
+        45,
+        557,
+        963
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": true,
+      "structuralDiagnosis": "TEXT SUB-BEAT/WORD MISMATCH (expected ['When'] at this timestamp, got ['Whe']); COLOR DRIFT: ref fg \u2248 #8423B4 (hue 139, luma 0.83), preview \u2248 #8314A0 (hue 147, luma 0.83) \u2014 match the fill hex",
+      "worstZones": [
+        "top-right (shape/alignment/color mismatch, diff=21)",
+        "bottom-center (undersized or faint element, diff=13)"
+      ],
+      "combinedScore": 0.5847,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "beda",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 7.203,
+      "refPath": "ref_14.png",
+      "refRelPath": "ref_14.png",
+      "previewPath": "res_14.png",
+      "previewRelPath": "res_14.png",
+      "ssim": 0.8422,
+      "colorSimilarity": 0.879,
+      "edgeSimilarity": 0.3742,
+      "fgEdge": 0.3742,
+      "fgMaskIou": 0.4932,
+      "geometryGateApplied": false,
+      "luminanceDelta": -0.006,
+      "lumaCorrelation": 0.818,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.96,
+      "fgBboxIou": 0.9005,
+      "fgScaleRatio": 1.035,
+      "refFgBox": [
+        160,
+        77,
+        533,
+        973
+      ],
+      "prevFgBox": [
+        165,
+        32,
+        541,
+        992
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "COLOR DRIFT: ref fg \u2248 #8422B4 (hue 139, luma 0.83), preview \u2248 #8213A4 (hue 147, luma 0.82) \u2014 match the fill hex",
+      "worstZones": [
+        "top-right (shape/alignment/color mismatch, diff=21)"
+      ],
+      "combinedScore": 0.7597,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "sebagian",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 7.7,
+      "refPath": "ref_15.png",
+      "refRelPath": "ref_15.png",
+      "previewPath": "res_15.png",
+      "previewRelPath": "res_15.png",
+      "ssim": 0.8314,
+      "colorSimilarity": 0.8934,
+      "edgeSimilarity": 0.6054,
+      "fgEdge": 0.6054,
+      "fgMaskIou": 0.4828,
+      "geometryGateApplied": false,
+      "luminanceDelta": -0.008,
+      "lumaCorrelation": 0.868,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.916,
+      "fgBboxIou": 0.8977,
+      "fgScaleRatio": 1.005,
+      "refFgBox": [
+        128,
+        80,
+        568,
+        968
+      ],
+      "prevFgBox": [
+        147,
+        43,
+        560,
+        987
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "COLOR DRIFT: ref fg \u2248 #8625B4 (hue 139, luma 0.82), preview \u2248 #8112A7 (hue 146, luma 0.81) \u2014 match the fill hex",
+      "worstZones": [
+        "top-right (shape/alignment/color mismatch, diff=20)",
+        "top-center (shape/alignment/color mismatch, diff=15)"
+      ],
+      "combinedScore": 0.8048,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "sebagian",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 8.197,
+      "refPath": "ref_16.png",
+      "refRelPath": "ref_16.png",
+      "previewPath": "res_16.png",
+      "previewRelPath": "res_16.png",
+      "ssim": 0.7263,
+      "colorSimilarity": 0.9213,
+      "edgeSimilarity": 0.5346,
+      "fgEdge": 0.5346,
+      "fgMaskIou": 0.4603,
+      "geometryGateApplied": false,
+      "luminanceDelta": -0.012,
+      "lumaCorrelation": 0.833,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.899,
+      "fgBboxIou": 0.9245,
+      "fgScaleRatio": 1.051,
+      "refFgBox": [
+        107,
+        91,
+        573,
+        944
+      ],
+      "prevFgBox": [
+        107,
+        56,
+        589,
+        965
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "COLOR DRIFT: ref fg \u2248 #8622B6 (hue 139, luma 0.78), preview \u2248 #8112A7 (hue 146, luma 0.77) \u2014 match the fill hex",
+      "worstZones": [
+        "center (undersized or faint element, diff=26)",
+        "top-right (oversized or wrong silhouette, diff=26)"
+      ],
+      "combinedScore": 0.7465,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "sebagian",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 8.694,
+      "refPath": "ref_17.png",
+      "refRelPath": "ref_17.png",
+      "previewPath": "res_17.png",
+      "previewRelPath": "res_17.png",
+      "ssim": 0.6633,
+      "colorSimilarity": 0.9204,
+      "edgeSimilarity": 0.4992,
+      "fgEdge": 0.4992,
+      "fgMaskIou": 0.4253,
+      "geometryGateApplied": false,
+      "luminanceDelta": -0.011,
+      "lumaCorrelation": 0.777,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.997,
+      "fgBboxIou": 0.9233,
+      "fgScaleRatio": 1.054,
+      "refFgBox": [
+        101,
+        101,
+        576,
+        925
+      ],
+      "prevFgBox": [
+        104,
+        61,
+        587,
+        957
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "COLOR DRIFT: ref fg \u2248 #8623B5 (hue 140, luma 0.76), preview \u2248 #8212A8 (hue 146, luma 0.75) \u2014 match the fill hex",
+      "worstZones": [
+        "center (undersized or faint element, diff=44)",
+        "top-right (oversized or wrong silhouette, diff=37)"
+      ],
+      "combinedScore": 0.7076,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "sebagian",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 9.191,
+      "refPath": "ref_18.png",
+      "refRelPath": "ref_18.png",
+      "previewPath": "res_18.png",
+      "previewRelPath": "res_18.png",
+      "ssim": 0.6269,
+      "colorSimilarity": 0.9123,
+      "edgeSimilarity": 0.5048,
+      "fgEdge": 0.5048,
+      "fgMaskIou": 0.4191,
+      "geometryGateApplied": false,
+      "luminanceDelta": -0.045,
+      "lumaCorrelation": 0.805,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 1.19,
+      "fgBboxIou": 0.8975,
+      "fgScaleRatio": 1.055,
+      "refFgBox": [
+        101,
+        109,
+        573,
+        915
+      ],
+      "prevFgBox": [
+        104,
+        64,
+        589,
+        939
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "COLOR DRIFT: ref fg \u2248 #8622B5 (hue 140, luma 0.75), preview \u2248 #8212A8 (hue 146, luma 0.71) \u2014 match the fill hex",
+      "worstZones": [
+        "center (shape/alignment/color mismatch, diff=65)",
+        "mid-right (oversized or wrong silhouette, diff=44)"
+      ],
+      "combinedScore": 0.6881,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "sebagian",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 9.687,
+      "refPath": "ref_19.png",
+      "refRelPath": "ref_19.png",
+      "previewPath": "res_19.png",
+      "previewRelPath": "res_19.png",
+      "ssim": 0.9029,
+      "colorSimilarity": 0.9198,
+      "edgeSimilarity": 0.3024,
+      "fgEdge": null,
+      "fgMaskIou": 0.0244,
+      "geometryGateApplied": false,
+      "luminanceDelta": -0.004,
+      "lumaCorrelation": 0.555,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.569,
+      "fgBboxIou": 0.1899,
+      "fgScaleRatio": 0.416,
+      "refFgBox": [
+        93,
+        237,
+        99,
+        45
+      ],
+      "prevFgBox": [
+        107,
+        221,
+        53,
+        35
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "UNDERSIZED ELEMENTS: preview box [107,221,53x35] is 0.42x smaller than ref [93,237,99x45] (IoU=0.19 \u2014 enlarge hero typography/shape to fill 99x45px)",
+      "worstZones": [],
+      "combinedScore": 0.6727,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "sebagian",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 10.184,
+      "refPath": "ref_20.png",
+      "refRelPath": "ref_20.png",
+      "previewPath": "res_20.png",
+      "previewRelPath": "res_20.png",
+      "ssim": 0.8239,
+      "colorSimilarity": 0.8811,
+      "edgeSimilarity": 0.4925,
+      "fgEdge": 0.4925,
+      "fgMaskIou": 0.3823,
+      "geometryGateApplied": false,
+      "luminanceDelta": -0.009,
+      "lumaCorrelation": 0.801,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 1.326,
+      "fgBboxIou": 0.4268,
+      "fgScaleRatio": 0.427,
+      "refFgBox": [
+        115,
+        232,
+        419,
+        525
+      ],
+      "prevFgBox": [
+        171,
+        488,
+        349,
+        269
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "UNDERSIZED ELEMENTS: preview box [171,488,349x269] is 0.43x smaller than ref [115,232,419x525] (IoU=0.43 \u2014 enlarge hero typography/shape to fill 419x525px); COLOR DRIFT: ref fg \u2248 #8E6790 (hue 126, luma 0.83), preview \u2248 #996A7D (hue 94, luma 0.83) \u2014 match the fill hex",
+      "worstZones": [
+        "center (oversized or wrong silhouette, diff=25)"
+      ],
+      "combinedScore": 0.7354,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "sebagian",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 10.681,
+      "refPath": "ref_21.png",
+      "refRelPath": "ref_21.png",
+      "previewPath": "res_21.png",
+      "previewRelPath": "res_21.png",
+      "ssim": 0.7875,
+      "colorSimilarity": 0.8853,
+      "edgeSimilarity": 0.461,
+      "fgEdge": 0.461,
+      "fgMaskIou": 0.511,
+      "geometryGateApplied": false,
+      "luminanceDelta": -0.002,
+      "lumaCorrelation": 0.871,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.897,
+      "fgBboxIou": 0.4661,
+      "fgScaleRatio": 0.466,
+      "refFgBox": [
+        152,
+        269,
+        384,
+        568
+      ],
+      "prevFgBox": [
+        173,
+        464,
+        347,
+        293
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "UNDERSIZED ELEMENTS: preview box [173,464,347x293] is 0.47x smaller than ref [152,269,384x568] (IoU=0.47 \u2014 enlarge hero typography/shape to fill 384x568px)",
+      "worstZones": [
+        "center (shape/alignment/color mismatch, diff=26)"
+      ],
+      "combinedScore": 0.7247,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "sebagian",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 11.178,
+      "refPath": "ref_22.png",
+      "refRelPath": "ref_22.png",
+      "previewPath": "res_22.png",
+      "previewRelPath": "res_22.png",
+      "ssim": 0.7832,
+      "colorSimilarity": 0.8847,
+      "edgeSimilarity": 0.4418,
+      "fgEdge": 0.4418,
+      "fgMaskIou": 0.5079,
+      "geometryGateApplied": false,
+      "luminanceDelta": -0.002,
+      "lumaCorrelation": 0.871,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.919,
+      "fgBboxIou": 0.4601,
+      "fgScaleRatio": 0.46,
+      "refFgBox": [
+        149,
+        269,
+        387,
+        571
+      ],
+      "prevFgBox": [
+        173,
+        464,
+        347,
+        293
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "UNDERSIZED ELEMENTS: preview box [173,464,347x293] is 0.46x smaller than ref [149,269,387x571] (IoU=0.46 \u2014 enlarge hero typography/shape to fill 387x571px)",
+      "worstZones": [
+        "center (shape/alignment/color mismatch, diff=26)"
+      ],
+      "combinedScore": 0.7166,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "sebagian",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 11.675,
+      "refPath": "ref_23.png",
+      "refRelPath": "ref_23.png",
+      "previewPath": "res_23.png",
+      "previewRelPath": "res_23.png",
+      "ssim": 0.7482,
+      "colorSimilarity": 0.9053,
+      "edgeSimilarity": 0.511,
+      "fgEdge": 0.511,
+      "fgMaskIou": 0.4767,
+      "geometryGateApplied": false,
+      "luminanceDelta": -0.002,
+      "lumaCorrelation": 0.865,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.925,
+      "fgBboxIou": 0.4053,
+      "fgScaleRatio": 0.405,
+      "refFgBox": [
+        165,
+        269,
+        371,
+        683
+      ],
+      "prevFgBox": [
+        173,
+        464,
+        347,
+        296
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "UNDERSIZED ELEMENTS: preview box [173,464,347x296] is 0.41x smaller than ref [165,269,371x683] (IoU=0.41 \u2014 enlarge hero typography/shape to fill 371x683px)",
+      "worstZones": [
+        "center (shape/alignment/color mismatch, diff=27)"
+      ],
+      "combinedScore": 0.7016,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "sebagian",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 12.171,
+      "refPath": "ref_24.png",
+      "refRelPath": "ref_24.png",
+      "previewPath": "res_24.png",
+      "previewRelPath": "res_24.png",
+      "ssim": 0.7141,
+      "colorSimilarity": 0.8606,
+      "edgeSimilarity": 0.4436,
+      "fgEdge": 0.4436,
+      "fgMaskIou": 0.4422,
+      "geometryGateApplied": false,
+      "luminanceDelta": 0.002,
+      "lumaCorrelation": 0.836,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.85,
+      "fgBboxIou": 0.333,
+      "fgScaleRatio": 0.333,
+      "refFgBox": [
+        152,
+        269,
+        384,
+        795
+      ],
+      "prevFgBox": [
+        173,
+        464,
+        347,
+        293
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "UNDERSIZED ELEMENTS: preview box [173,464,347x293] is 0.33x smaller than ref [152,269,384x795] (IoU=0.33 \u2014 enlarge hero typography/shape to fill 384x795px)",
+      "worstZones": [
+        "center (shape/alignment/color mismatch, diff=27)",
+        "bottom-center (undersized or faint element, diff=18)"
+      ],
+      "combinedScore": 0.6346,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "beda",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 12.668,
+      "refPath": "ref_25.png",
+      "refRelPath": "ref_25.png",
+      "previewPath": "res_25.png",
+      "previewRelPath": "res_25.png",
+      "ssim": 0.7127,
+      "colorSimilarity": 0.89,
+      "edgeSimilarity": 0.5343,
+      "fgEdge": 0.5343,
+      "fgMaskIou": 0.4475,
+      "geometryGateApplied": false,
+      "luminanceDelta": 0.0,
+      "lumaCorrelation": 0.862,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.899,
+      "fgBboxIou": 0.3442,
+      "fgScaleRatio": 0.344,
+      "refFgBox": [
+        163,
+        272,
+        373,
+        792
+      ],
+      "prevFgBox": [
+        173,
+        464,
+        347,
+        293
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "UNDERSIZED ELEMENTS: preview box [173,464,347x293] is 0.34x smaller than ref [163,272,373x792] (IoU=0.34 \u2014 enlarge hero typography/shape to fill 373x792px)",
+      "worstZones": [
+        "center (shape/alignment/color mismatch, diff=27)",
+        "bottom-center (shape/alignment/color mismatch, diff=19)"
+      ],
+      "combinedScore": 0.6643,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "sebagian",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 13.165,
+      "refPath": "ref_26.png",
+      "refRelPath": "ref_26.png",
+      "previewPath": "res_26.png",
+      "previewRelPath": "res_26.png",
+      "ssim": 0.7092,
+      "colorSimilarity": 0.8903,
+      "edgeSimilarity": 0.5121,
+      "fgEdge": 0.5121,
+      "fgMaskIou": 0.4459,
+      "geometryGateApplied": false,
+      "luminanceDelta": 0.0,
+      "lumaCorrelation": 0.863,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.89,
+      "fgBboxIou": 0.3499,
+      "fgScaleRatio": 0.35,
+      "refFgBox": [
+        163,
+        272,
+        373,
+        795
+      ],
+      "prevFgBox": [
+        173,
+        461,
+        347,
+        299
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "UNDERSIZED ELEMENTS: preview box [173,461,347x299] is 0.35x smaller than ref [163,272,373x795] (IoU=0.35 \u2014 enlarge hero typography/shape to fill 373x795px)",
+      "worstZones": [
+        "center (shape/alignment/color mismatch, diff=27)",
+        "bottom-center (shape/alignment/color mismatch, diff=19)"
+      ],
+      "combinedScore": 0.6601,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "sebagian",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 13.662,
+      "refPath": "ref_27.png",
+      "refRelPath": "ref_27.png",
+      "previewPath": "res_27.png",
+      "previewRelPath": "res_27.png",
+      "ssim": 0.8028,
+      "colorSimilarity": 0.9428,
+      "edgeSimilarity": 0.5752,
+      "fgEdge": 0.5752,
+      "fgMaskIou": 0.1247,
+      "geometryGateApplied": true,
+      "luminanceDelta": 0.001,
+      "lumaCorrelation": 0.164,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.969,
+      "fgBboxIou": 0.936,
+      "fgScaleRatio": 1.031,
+      "refFgBox": [
+        75,
+        21,
+        643,
+        1179
+      ],
+      "prevFgBox": [
+        77,
+        37,
+        640,
+        1221
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "GEOMETRY GATE: edge=0.58, fgMaskIoU=0.12, missedRefFg=0.62, missedRefEdge=0.29, fgBboxIoU=0.936 \u2014 background SSIM masked severe shape/text/position mismatch",
+      "worstZones": [
+        "top-left (missing reference element, diff=25)",
+        "mid-left (extra unreferenced element in your render \u2014 remove it, diff=19)"
+      ],
+      "combinedScore": 0.4254,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "beda",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 14.159,
+      "refPath": "ref_28.png",
+      "refRelPath": "ref_28.png",
+      "previewPath": "res_28.png",
+      "previewRelPath": "res_28.png",
+      "ssim": 0.8379,
+      "colorSimilarity": 0.8959,
+      "edgeSimilarity": 0.6128,
+      "fgEdge": 0.6128,
+      "fgMaskIou": 0.1687,
+      "geometryGateApplied": true,
+      "luminanceDelta": 0.003,
+      "lumaCorrelation": 0.373,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.938,
+      "fgBboxIou": 0.6897,
+      "fgScaleRatio": 0.69,
+      "refFgBox": [
+        72,
+        133,
+        645,
+        1011
+      ],
+      "prevFgBox": [
+        85,
+        152,
+        629,
+        715
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "GEOMETRY GATE: edge=0.61, fgMaskIoU=0.17, missedRefFg=0.58, missedRefEdge=0.22, fgBboxIoU=0.6897 \u2014 background SSIM masked severe shape/text/position mismatch",
+      "worstZones": [
+        "bottom-right (missing reference element, diff=29)",
+        "mid-right (extra unreferenced element in your render \u2014 remove it, diff=22)"
+      ],
+      "combinedScore": 0.4404,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "beda",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 14.655,
+      "refPath": "ref_29.png",
+      "refRelPath": "ref_29.png",
+      "previewPath": "res_29.png",
+      "previewRelPath": "res_29.png",
+      "ssim": 0.8143,
+      "colorSimilarity": 0.8306,
+      "edgeSimilarity": 0.6639,
+      "fgEdge": 0.6639,
+      "fgMaskIou": 0.1853,
+      "geometryGateApplied": true,
+      "luminanceDelta": 0.002,
+      "lumaCorrelation": 0.413,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 1.01,
+      "fgBboxIou": 0.6895,
+      "fgScaleRatio": 0.69,
+      "refFgBox": [
+        72,
+        125,
+        648,
+        1037
+      ],
+      "prevFgBox": [
+        85,
+        141,
+        627,
+        739
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "GEOMETRY GATE: edge=0.66, fgMaskIoU=0.19, missedRefFg=0.50, missedRefEdge=0.20, fgBboxIoU=0.6895 \u2014 background SSIM masked severe shape/text/position mismatch",
+      "worstZones": [
+        "mid-right (extra unreferenced element in your render \u2014 remove it, diff=22)",
+        "bottom-right (undersized or faint element, diff=26)"
+      ],
+      "combinedScore": 0.4703,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "beda",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 15.152,
+      "refPath": "ref_30.png",
+      "refRelPath": "ref_30.png",
+      "previewPath": "res_30.png",
+      "previewRelPath": "res_30.png",
+      "ssim": 0.8153,
+      "colorSimilarity": 0.8364,
+      "edgeSimilarity": 0.7721,
+      "fgEdge": 0.7721,
+      "fgMaskIou": 0.1981,
+      "geometryGateApplied": false,
+      "luminanceDelta": 0.005,
+      "lumaCorrelation": 0.407,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.885,
+      "fgBboxIou": 0.708,
+      "fgScaleRatio": 0.708,
+      "refFgBox": [
+        75,
+        131,
+        643,
+        1037
+      ],
+      "prevFgBox": [
+        85,
+        144,
+        632,
+        747
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "",
+      "worstZones": [
+        "bottom-right (undersized or faint element, diff=33)",
+        "mid-right (extra unreferenced element in your render \u2014 remove it, diff=19)"
+      ],
+      "combinedScore": 0.813,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "sebagian",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 15.649,
+      "refPath": "ref_31.png",
+      "refRelPath": "ref_31.png",
+      "previewPath": "res_31.png",
+      "previewRelPath": "res_31.png",
+      "ssim": 0.817,
+      "colorSimilarity": 0.842,
+      "edgeSimilarity": 0.7382,
+      "fgEdge": 0.7382,
+      "fgMaskIou": 0.2009,
+      "geometryGateApplied": false,
+      "luminanceDelta": 0.004,
+      "lumaCorrelation": 0.427,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.921,
+      "fgBboxIou": 0.721,
+      "fgScaleRatio": 0.721,
+      "refFgBox": [
+        75,
+        120,
+        645,
+        1013
+      ],
+      "prevFgBox": [
+        85,
+        147,
+        629,
+        749
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "",
+      "worstZones": [
+        "mid-right (extra unreferenced element in your render \u2014 remove it, diff=20)",
+        "bottom-right (undersized or faint element, diff=28)"
+      ],
+      "combinedScore": 0.8087,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "sebagian",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 16.146,
+      "refPath": "ref_32.png",
+      "refRelPath": "ref_32.png",
+      "previewPath": "res_32.png",
+      "previewRelPath": "res_32.png",
+      "ssim": 0.7766,
+      "colorSimilarity": 0.8681,
+      "edgeSimilarity": 0.3289,
+      "fgEdge": 0.3289,
+      "fgMaskIou": 0.4506,
+      "geometryGateApplied": false,
+      "luminanceDelta": 0.014,
+      "lumaCorrelation": 0.37,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 1.357,
+      "fgBboxIou": 0.6983,
+      "fgScaleRatio": 1.125,
+      "refFgBox": [
+        253,
+        371,
+        205,
+        531
+      ],
+      "prevFgBox": [
+        253,
+        331,
+        243,
+        504
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": true,
+      "structuralDiagnosis": "TEXT SUB-BEAT/WORD MISMATCH (expected ['theyre', 'Trained', 'SKILLS', 'O'] at this timestamp, got ['theyre', 'Trained'])",
+      "worstZones": [
+        "center (shape/alignment/color mismatch, diff=41)",
+        "bottom-center (oversized or wrong silhouette, diff=14)"
+      ],
+      "combinedScore": 0.5745,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "beda",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 16.643,
+      "refPath": "ref_33.png",
+      "refRelPath": "ref_33.png",
+      "previewPath": "res_33.png",
+      "previewRelPath": "res_33.png",
+      "ssim": 0.7642,
+      "colorSimilarity": 0.9128,
+      "edgeSimilarity": 0.5999,
+      "fgEdge": 0.5999,
+      "fgMaskIou": 0.5346,
+      "geometryGateApplied": false,
+      "luminanceDelta": -0.004,
+      "lumaCorrelation": 0.717,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.971,
+      "fgBboxIou": 0.8927,
+      "fgScaleRatio": 1.014,
+      "refFgBox": [
+        253,
+        368,
+        216,
+        571
+      ],
+      "prevFgBox": [
+        256,
+        347,
+        219,
+        571
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "",
+      "worstZones": [
+        "center (shape/alignment/color mismatch, diff=53)",
+        "bottom-center (shape/alignment/color mismatch, diff=19)"
+      ],
+      "combinedScore": 0.7759,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "sebagian",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 17.139,
+      "refPath": "ref_34.png",
+      "refRelPath": "ref_34.png",
+      "previewPath": "res_34.png",
+      "previewRelPath": "res_34.png",
+      "ssim": 0.7668,
+      "colorSimilarity": 0.9204,
+      "edgeSimilarity": 0.6271,
+      "fgEdge": 0.6271,
+      "fgMaskIou": 0.5378,
+      "geometryGateApplied": false,
+      "luminanceDelta": -0.001,
+      "lumaCorrelation": 0.765,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.803,
+      "fgBboxIou": 0.8588,
+      "fgScaleRatio": 0.969,
+      "refFgBox": [
+        251,
+        371,
+        221,
+        576
+      ],
+      "prevFgBox": [
+        256,
+        344,
+        219,
+        563
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "",
+      "worstZones": [
+        "center (shape/alignment/color mismatch, diff=56)",
+        "bottom-center (shape/alignment/color mismatch, diff=18)"
+      ],
+      "combinedScore": 0.7849,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "sebagian",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 17.636,
+      "refPath": "ref_35.png",
+      "refRelPath": "ref_35.png",
+      "previewPath": "res_35.png",
+      "previewRelPath": "res_35.png",
+      "ssim": 0.7663,
+      "colorSimilarity": 0.9195,
+      "edgeSimilarity": 0.619,
+      "fgEdge": 0.619,
+      "fgMaskIou": 0.5538,
+      "geometryGateApplied": false,
+      "luminanceDelta": -0.002,
+      "lumaCorrelation": 0.774,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.85,
+      "fgBboxIou": 0.8677,
+      "fgScaleRatio": 0.969,
+      "refFgBox": [
+        251,
+        371,
+        221,
+        576
+      ],
+      "prevFgBox": [
+        256,
+        347,
+        219,
+        563
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "",
+      "worstZones": [
+        "center (shape/alignment/color mismatch, diff=56)",
+        "bottom-center (shape/alignment/color mismatch, diff=19)"
+      ],
+      "combinedScore": 0.7828,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "sebagian",
+      "sceneId": "full"
+    }
+  ],
+  "worstFrames": [
+    {
+      "timestamp": 13.662,
+      "refPath": "ref_27.png",
+      "refRelPath": "ref_27.png",
+      "previewPath": "res_27.png",
+      "previewRelPath": "res_27.png",
+      "ssim": 0.8028,
+      "colorSimilarity": 0.9428,
+      "edgeSimilarity": 0.5752,
+      "fgEdge": 0.5752,
+      "fgMaskIou": 0.1247,
+      "geometryGateApplied": true,
+      "luminanceDelta": 0.001,
+      "lumaCorrelation": 0.164,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.969,
+      "fgBboxIou": 0.936,
+      "fgScaleRatio": 1.031,
+      "refFgBox": [
+        75,
+        21,
+        643,
+        1179
+      ],
+      "prevFgBox": [
+        77,
+        37,
+        640,
+        1221
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "GEOMETRY GATE: edge=0.58, fgMaskIoU=0.12, missedRefFg=0.62, missedRefEdge=0.29, fgBboxIoU=0.936 \u2014 background SSIM masked severe shape/text/position mismatch",
+      "worstZones": [
+        "top-left (missing reference element, diff=25)",
+        "mid-left (extra unreferenced element in your render \u2014 remove it, diff=19)"
+      ],
+      "combinedScore": 0.4254,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "beda",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 14.159,
+      "refPath": "ref_28.png",
+      "refRelPath": "ref_28.png",
+      "previewPath": "res_28.png",
+      "previewRelPath": "res_28.png",
+      "ssim": 0.8379,
+      "colorSimilarity": 0.8959,
+      "edgeSimilarity": 0.6128,
+      "fgEdge": 0.6128,
+      "fgMaskIou": 0.1687,
+      "geometryGateApplied": true,
+      "luminanceDelta": 0.003,
+      "lumaCorrelation": 0.373,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 0.938,
+      "fgBboxIou": 0.6897,
+      "fgScaleRatio": 0.69,
+      "refFgBox": [
+        72,
+        133,
+        645,
+        1011
+      ],
+      "prevFgBox": [
+        85,
+        152,
+        629,
+        715
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "GEOMETRY GATE: edge=0.61, fgMaskIoU=0.17, missedRefFg=0.58, missedRefEdge=0.22, fgBboxIoU=0.6897 \u2014 background SSIM masked severe shape/text/position mismatch",
+      "worstZones": [
+        "bottom-right (missing reference element, diff=29)",
+        "mid-right (extra unreferenced element in your render \u2014 remove it, diff=22)"
+      ],
+      "combinedScore": 0.4404,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "beda",
+      "sceneId": "full"
+    },
+    {
+      "timestamp": 14.655,
+      "refPath": "ref_29.png",
+      "refRelPath": "ref_29.png",
+      "previewPath": "res_29.png",
+      "previewRelPath": "res_29.png",
+      "ssim": 0.8143,
+      "colorSimilarity": 0.8306,
+      "edgeSimilarity": 0.6639,
+      "fgEdge": 0.6639,
+      "fgMaskIou": 0.1853,
+      "geometryGateApplied": true,
+      "luminanceDelta": 0.002,
+      "lumaCorrelation": 0.413,
+      "blankFrameDetected": false,
+      "fgCoverageRatio": 1.01,
+      "fgBboxIou": 0.6895,
+      "fgScaleRatio": 0.69,
+      "refFgBox": [
+        72,
+        125,
+        648,
+        1037
+      ],
+      "prevFgBox": [
+        85,
+        141,
+        627,
+        739
+      ],
+      "containerSpillDetected": false,
+      "stackedRowMismatch": false,
+      "clippedTextDetected": false,
+      "textDriftDetected": false,
+      "structuralDiagnosis": "GEOMETRY GATE: edge=0.66, fgMaskIoU=0.19, missedRefFg=0.50, missedRefEdge=0.20, fgBboxIoU=0.6895 \u2014 background SSIM masked severe shape/text/position mismatch",
+      "worstZones": [
+        "mid-right (extra unreferenced element in your render \u2014 remove it, diff=22)",
+        "bottom-right (undersized or faint element, diff=26)"
+      ],
+      "combinedScore": 0.4703,
+      "aspectRatioMismatch": false,
+      "refDimensions": [
+        720,
+        1280
+      ],
+      "previewDimensions": [
+        720,
+        1280
+      ],
+      "verdict": "beda",
+      "sceneId": "full"
+    }
+  ]
+}

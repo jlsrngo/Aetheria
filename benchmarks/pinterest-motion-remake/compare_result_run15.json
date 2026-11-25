@@ -1,0 +1,422 @@
+{
+  "fps": 29.97002997002997,
+  "frames": {
+    "ref": 536,
+    "res": 537
+  },
+  "cutOffsets": [
+    {
+      "refFrame": 49,
+      "resFrame": 51,
+      "offsetFrames": 2
+    },
+    {
+      "refFrame": 75,
+      "resFrame": 75,
+      "offsetFrames": 0
+    },
+    {
+      "refFrame": 286,
+      "resFrame": 286,
+      "offsetFrames": 0
+    }
+  ],
+  "motionByScene": [
+    {
+      "scene": 1,
+      "t0": 0,
+      "t1": 75,
+      "meanDiffRef": 7.432,
+      "meanDiffRes": 5.541,
+      "ratioRes/Ref": 0.75,
+      "frozenShareRes": 0.26,
+      "frozenShareRef": 0.0
+    },
+    {
+      "scene": 2,
+      "t0": 75,
+      "t1": 186,
+      "meanDiffRef": 1.804,
+      "meanDiffRes": 0.697,
+      "ratioRes/Ref": 0.39,
+      "frozenShareRes": 0.0,
+      "frozenShareRef": 0.0
+    },
+    {
+      "scene": 3,
+      "t0": 186,
+      "t1": 286,
+      "meanDiffRef": 1.192,
+      "meanDiffRes": 1.183,
+      "ratioRes/Ref": 0.99,
+      "frozenShareRes": 0.0,
+      "frozenShareRef": 0.0
+    },
+    {
+      "scene": 4,
+      "t0": 286,
+      "t1": 405,
+      "meanDiffRef": 0.469,
+      "meanDiffRes": 0.454,
+      "ratioRes/Ref": 0.97,
+      "frozenShareRes": 0.21,
+      "frozenShareRef": 0.0
+    },
+    {
+      "scene": 5,
+      "t0": 405,
+      "t1": 470,
+      "meanDiffRef": 1.776,
+      "meanDiffRes": 1.984,
+      "ratioRes/Ref": 1.12,
+      "frozenShareRes": 0.0,
+      "frozenShareRef": 0.0
+    },
+    {
+      "scene": 6,
+      "t0": 470,
+      "t1": 536,
+      "meanDiffRef": 1.126,
+      "meanDiffRes": 1.101,
+      "ratioRes/Ref": 0.98,
+      "frozenShareRes": 0.03,
+      "frozenShareRef": 0.11
+    }
+  ],
+  "paletteDrift": [
+    {
+      "t": 0.0,
+      "dE76": 1.0,
+      "meanRGBRef": [
+        254,
+        254,
+        254
+      ],
+      "meanRGBRes": [
+        254,
+        254,
+        254
+      ]
+    },
+    {
+      "t": 1.0,
+      "dE76": 12.6,
+      "meanRGBRef": [
+        222,
+        217,
+        237
+      ],
+      "meanRGBRes": [
+        220,
+        215,
+        237
+      ]
+    },
+    {
+      "t": 2.0,
+      "dE76": 11.9,
+      "meanRGBRef": [
+        244,
+        244,
+        246
+      ],
+      "meanRGBRes": [
+        244,
+        244,
+        244
+      ]
+    },
+    {
+      "t": 3.0,
+      "dE76": 8.2,
+      "meanRGBRef": [
+        213,
+        212,
+        212
+      ],
+      "meanRGBRes": [
+        216,
+        215,
+        214
+      ]
+    },
+    {
+      "t": 4.0,
+      "dE76": 11.1,
+      "meanRGBRef": [
+        214,
+        209,
+        203
+      ],
+      "meanRGBRes": [
+        217,
+        215,
+        212
+      ]
+    },
+    {
+      "t": 5.0,
+      "dE76": 10.7,
+      "meanRGBRef": [
+        214,
+        209,
+        203
+      ],
+      "meanRGBRes": [
+        216,
+        214,
+        212
+      ]
+    },
+    {
+      "t": 6.01,
+      "dE76": 12.5,
+      "meanRGBRef": [
+        212,
+        207,
+        202
+      ],
+      "meanRGBRes": [
+        216,
+        214,
+        211
+      ]
+    },
+    {
+      "t": 7.01,
+      "dE76": 7.9,
+      "meanRGBRef": [
+        213,
+        208,
+        215
+      ],
+      "meanRGBRes": [
+        212,
+        207,
+        214
+      ]
+    },
+    {
+      "t": 8.01,
+      "dE76": 13.6,
+      "meanRGBRef": [
+        206,
+        201,
+        208
+      ],
+      "meanRGBRes": [
+        209,
+        203,
+        211
+      ]
+    },
+    {
+      "t": 9.01,
+      "dE76": 31.3,
+      "meanRGBRef": [
+        195,
+        190,
+        197
+      ],
+      "meanRGBRes": [
+        184,
+        178,
+        186
+      ]
+    },
+    {
+      "t": 10.01,
+      "dE76": 4.0,
+      "meanRGBRef": [
+        215,
+        215,
+        216
+      ],
+      "meanRGBRes": [
+        214,
+        215,
+        215
+      ]
+    },
+    {
+      "t": 11.01,
+      "dE76": 8.1,
+      "meanRGBRef": [
+        212,
+        209,
+        210
+      ],
+      "meanRGBRes": [
+        211,
+        208,
+        209
+      ]
+    },
+    {
+      "t": 12.01,
+      "dE76": 10.2,
+      "meanRGBRef": [
+        211,
+        208,
+        209
+      ],
+      "meanRGBRes": [
+        211,
+        207,
+        209
+      ]
+    },
+    {
+      "t": 13.01,
+      "dE76": 10.3,
+      "meanRGBRef": [
+        210,
+        207,
+        208
+      ],
+      "meanRGBRes": [
+        210,
+        207,
+        208
+      ]
+    },
+    {
+      "t": 14.01,
+      "dE76": 12.8,
+      "meanRGBRef": [
+        212,
+        211,
+        212
+      ],
+      "meanRGBRes": [
+        212,
+        211,
+        212
+      ]
+    },
+    {
+      "t": 15.02,
+      "dE76": 10.6,
+      "meanRGBRef": [
+        211,
+        210,
+        211
+      ],
+      "meanRGBRes": [
+        212,
+        211,
+        212
+      ]
+    },
+    {
+      "t": 16.02,
+      "dE76": 6.4,
+      "meanRGBRef": [
+        216,
+        215,
+        215
+      ],
+      "meanRGBRes": [
+        216,
+        215,
+        215
+      ]
+    },
+    {
+      "t": 17.02,
+      "dE76": 11.3,
+      "meanRGBRef": [
+        214,
+        210,
+        211
+      ],
+      "meanRGBRes": [
+        214,
+        210,
+        211
+      ]
+    }
+  ],
+  "repoComparator": {
+    "frames": 36,
+    "overallFidelity": 0.6736,
+    "lowEdgeShare(edge<=0.15)": 0.111,
+    "lowEdgeButVerdictSebagianOrBetter(>=0.65)": 1,
+    "lowEdgeCombinedMax": 0.738,
+    "framesWithStructuralDiagnosis": 21,
+    "diagnosesSample": [
+      {
+        "t": 1.535,
+        "combined": 0.4089,
+        "edge": 0.2235,
+        "diag": "OVERSIZED ELEMENTS: preview box [16,8,693x1227] is 1.80x larger than ref [13,21,691x683] (IoU=0.55 — scale/fold shape down to [13,21,691x683]); EXTRA/STACKED TEXT ['idYou', 'now'] alongside ['resear'] (render morphing glyphs inline on the single hero baseline, remove hallucinated subtitle/header); EMPTY BENTO CELLS at (darkTile@x=61,y=91), (darkTile@x=131,y=89), (darkTile@x=174,y=83), (darkTile@x=42,y=85), (darkTile@x=91,y=85) — draw crisp contrast-inverted vector icons inside dark tiles too (never leave darkTile cells blank)"
+      },
+      {
+        "t": 3.036,
+        "combined": 0.6342,
+        "edge": 0.6168,
+        "diag": "TEXT SUB-BEAT/WORD MISMATCH (expected ['Your Brain', 'Makes'] at this timestamp, got ['YourBrain', 'Ma'])"
+      },
+      {
+        "t": 4.037,
+        "combined": 0.4916,
+        "edge": 0.5208,
+        "diag": "UNDERSIZED ELEMENTS: preview box [237,384,280x421] is 0.51x smaller than ref [224,112,312x739] (IoU=0.51 — enlarge hero typography/shape to fill 312x739px); TEXT SUB-BEAT/WORD MISMATCH (expected ['Your Brain', 'Makesover', '29557'] at this timestamp, got ['29063']); GEOMETRY GATE: edge=0.52, fgMaskIoU=0.37, missedRefFg=0.44, missedRefEdge=0.46, fgBboxIoU=0.5113 — background SSIM masked severe shape/text/position mismatch"
+      },
+      {
+        "t": 4.538,
+        "combined": 0.6351,
+        "edge": 0.5964,
+        "diag": "POSITION/SCALE SHIFT: preview box [235,381,283x429] vs ref [205,432,344x547] (IoU=0.53 — align center/pose to (377,705) sized 344x547px); TEXT SUB-BEAT/WORD MISMATCH (expected ['35000', 'decisions'] at this timestamp, got ['34998', 'de'])"
+      },
+      {
+        "t": 6.54,
+        "combined": 0.7544,
+        "edge": 0.2792,
+        "diag": "COLOR DRIFT: ref fg ≈ #8624B5 (hue 139, luma 0.83), preview ≈ #8517A4 (hue 147, luma 0.83) — match the fill hex"
+      },
+      {
+        "t": 7.04,
+        "combined": 0.74,
+        "edge": 0.2752,
+        "diag": "COLOR DRIFT: ref fg ≈ #801EB4 (hue 139, luma 0.82), preview ≈ #8113A4 (hue 147, luma 0.82) — match the fill hex"
+      },
+      {
+        "t": 7.541,
+        "combined": 0.7956,
+        "edge": 0.562,
+        "diag": "COLOR DRIFT: ref fg ≈ #8623B5 (hue 140, luma 0.82), preview ≈ #8112A7 (hue 147, luma 0.81) — match the fill hex"
+      },
+      {
+        "t": 8.041,
+        "combined": 0.6104,
+        "edge": 0.5467,
+        "diag": "TEXT SUB-BEAT/WORD MISMATCH (expected ['Whenyoulearn', 'Structured', 'Prob'] at this timestamp, got ['Whenyoulearn', 'Structured', 'Pro']); COLOR DRIFT: ref fg ≈ #8623B6 (hue 140, luma 0.80), preview ≈ #8112A7 (hue 146, luma 0.80) — match the fill hex"
+      },
+      {
+        "t": 8.542,
+        "combined": 0.5017,
+        "edge": 0.4957,
+        "diag": "COLOR DRIFT: ref fg ≈ #8623B5 (hue 140, luma 0.76), preview ≈ #8212A8 (hue 146, luma 0.76) — match the fill hex; GEOMETRY GATE: edge=0.50, fgMaskIoU=0.34, missedRefFg=0.41, missedRefEdge=0.30, fgBboxIoU=0.923 — background SSIM masked severe shape/text/position mismatch"
+      },
+      {
+        "t": 9.042,
+        "combined": 0.5522,
+        "edge": 0.5125,
+        "diag": "TEXT SUB-BEAT/WORD MISMATCH (expected ['Whenyoulearn', 'Structured', 'Problem', 'Solving', 'Mets'] at this timestamp, got ['Whenyoulearn', 'Structured', 'Problem', 'Solving', 'Methods']); COLOR DRIFT: ref fg ≈ #8622B5 (hue 140, luma 0.76), preview ≈ #8212A8 (hue 146, luma 0.71) — match the fill hex"
+      },
+      {
+        "t": 9.543,
+        "combined": 0.4945,
+        "edge": 0.0,
+        "diag": "OVERSIZED ELEMENTS: preview box [104,67,587x936] is 166.65x larger than ref [0,64,3x1099] (IoU=0.00 — scale/fold shape down to [0,64,3x1099])"
+      },
+      {
+        "t": 10.043,
+        "combined": 0.5064,
+        "edge": 0.5329,
+        "diag": "UNDERSIZED ELEMENTS: preview box [165,613,259x147] is 0.17x smaller than ref [99,216,421x544] (IoU=0.17 — enlarge hero typography/shape to fill 421x544px); TEXT SUB-BEAT/WORD MISMATCH (expected ['Your', 'decisions', 'become'] at this timestamp, got ['decisionsbecom']); GEOMETRY GATE: edge=0.53, fgMaskIoU=0.32, missedRefFg=0.21, missedRefEdge=0.30, fgBboxIoU=0.1662 — background SSIM masked severe shape/text/position mismatch"
+      }
+    ]
+  }
+}
