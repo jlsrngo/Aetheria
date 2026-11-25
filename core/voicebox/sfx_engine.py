@@ -358,16 +358,186 @@ def render_audio_events_track(
 
 
 MOOD_PRESETS: Dict[str, Dict[str, Any]] = {
-    "cheerful": {"bpm": 122.0, "chords": [[261.63, 329.63, 392.00, 493.88], [293.66, 369.99, 440.00, 523.25], [329.63, 415.30, 493.88, 659.25], [261.63, 329.63, 392.00, 523.25]], "kick": 0.24},
-    "chill": {"bpm": 88.0, "chords": [[174.61, 220.00, 261.63, 329.63], [164.81, 196.00, 246.94, 293.66], [146.83, 174.61, 220.00, 261.63], [130.81, 164.81, 196.00, 246.94]], "kick": 0.14},
-    "tense": {"bpm": 105.0, "chords": [[110.00, 130.81, 164.81, 233.08], [103.83, 123.47, 155.56, 220.00], [98.00, 116.54, 146.83, 207.65], [110.00, 130.81, 155.56, 233.08]], "kick": 0.28},
-    "comic": {"bpm": 132.0, "chords": [[261.63, 311.13, 392.00, 523.25], [293.66, 349.23, 440.00, 587.33], [246.94, 293.66, 392.00, 493.88], [261.63, 329.63, 392.00, 523.25]], "kick": 0.26},
-    "sad": {"bpm": 76.0, "chords": [[130.81, 155.56, 196.00, 233.08], [116.54, 138.59, 174.61, 207.65], [103.83, 130.81, 155.56, 196.00], [98.00, 123.47, 146.83, 196.00]], "kick": 0.10},
-    "epic": {"bpm": 116.0, "chords": [[110.00, 164.81, 220.00, 329.63], [130.81, 196.00, 261.63, 392.00], [146.83, 220.00, 293.66, 440.00], [123.47, 185.00, 246.94, 369.99]], "kick": 0.34},
-    "study": {"bpm": 92.0, "chords": [[146.83, 174.61, 220.00, 261.63], [130.81, 164.81, 196.00, 246.94], [116.54, 146.83, 174.61, 220.00], [130.81, 164.81, 196.00, 261.63]], "kick": 0.16},
-    "mystery": {"bpm": 96.0, "chords": [[123.47, 146.83, 185.00, 277.18], [116.54, 138.59, 174.61, 261.63], [110.00, 130.81, 164.81, 246.94], [123.47, 155.56, 185.00, 277.18]], "kick": 0.18},
-    "warm": {"bpm": 100.0, "chords": [[174.61, 220.00, 261.63, 349.23], [196.00, 246.94, 293.66, 392.00], [164.81, 196.00, 246.94, 329.63], [146.83, 174.61, 220.00, 329.63]], "kick": 0.16},
+    "cheerful": {"bpm": 114.0, "midi": [[60, 64, 67], [55, 59, 62], [57, 60, 64], [53, 57, 60]], "lead": "marimba", "pat": "arp8", "bass": True, "perc": "shaker", "kick": 0.22},
+    "chill":    {"bpm": 84.0,  "midi": [[60, 64, 67, 71], [57, 60, 64, 67], [53, 57, 60, 64], [55, 59, 62, 65]], "lead": "epiano", "pat": "arp4", "bass": True, "perc": "brush", "kick": 0.14},
+    "warm":     {"bpm": 76.0,  "midi": [[60, 64, 67], [57, 60, 64], [53, 57, 60], [55, 59, 62]], "lead": "musicbox", "pat": "slow", "pad": True, "kick": 0.14},
+    "sad":      {"bpm": 64.0,  "midi": [[57, 60, 64], [53, 57, 60], [48, 52, 55], [52, 56, 59]], "lead": "piano", "pat": "sparse", "pad": True, "kick": 0.10},
+    "tense":    {"bpm": 104.0, "midi": [[45, 48, 52], [44, 47, 51], [45, 48, 52], [41, 44, 48]], "lead": "pluck", "pat": "tick", "drone": True, "kick": 0.26},
+    "epic":     {"bpm": 126.0, "midi": [[62, 66, 69], [57, 61, 64], [59, 62, 66], [55, 59, 62]], "lead": "marimba", "pat": "arp8", "bass": True, "perc": "kick", "kick": 0.34},
+    "comic":    {"bpm": 120.0, "midi": [[60, 64, 67], [65, 69, 72], [67, 71, 74], [60, 64, 67]], "lead": "pizz", "pat": "bounce", "bass": True, "kick": 0.24},
+    "mystery":  {"bpm": 72.0,  "midi": [[57, 60, 63], [56, 59, 62], [57, 60, 63], [53, 56, 59]], "lead": "musicbox", "pat": "sparse", "drone": True, "kick": 0.16},
+    "study":    {"bpm": 70.0,  "midi": [[60, 64, 67], [57, 60, 64], [53, 57, 60], [55, 59, 62]], "lead": "epiano", "pat": "slow", "pad": True, "kick": 0.14},
 }
+
+MOOD_ALIASES: Dict[str, str] = {
+    "ceria": "cheerful",
+    "santai": "chill",
+    "hangat": "warm",
+    "sedih": "sad",
+    "tegang": "tense",
+    "semangat": "epic",
+    "lucu": "comic",
+    "misteri": "mystery",
+    "malam": "study",
+}
+
+
+def _resolve_mood_preset(mood: Optional[str]) -> Optional[Dict[str, Any]]:
+    if not mood:
+        return None
+    key = str(mood).strip().lower()
+    key = MOOD_ALIASES.get(key, key)
+    return MOOD_PRESETS.get(key)
+
+
+def _midi_hz(m: float) -> float:
+    return 440.0 * (2.0 ** ((m - 69.0) / 12.0))
+
+
+def _render_musical_mood_bgm(
+    preset: Dict[str, Any],
+    duration_sec: float,
+    bpm_override: float,
+    scene_index: int,
+) -> List[float]:
+    """Synthesizes a 6-instrument musical mood arrangement (marimba/epiano/musicbox/piano/pizz/pluck)."""
+    eff_bpm = float(bpm_override) if bpm_override and bpm_override > 0 else float(preset["bpm"])
+    safe_bpm = min(175.0, max(58.0, eff_bpm))
+    beat = 60.0 / safe_bpm
+    safe_dur = max(0.35, float(duration_sec))
+    num_samples = max(1, int(safe_dur * SAMPLE_RATE))
+
+    try:
+        import numpy as np  # Fast vectorized synthesis when available
+        out = np.zeros(num_samples, dtype=np.float32)
+        rng = np.random.default_rng(scene_index + 3)
+
+        def np_env(n: int, a: float = 0.004, d: float = 0.3):
+            t = np.arange(n, dtype=np.float32) / SAMPLE_RATE
+            return np.minimum(1.0, t / a) * np.exp(-t / d)
+
+        def np_tone(freq: float, dur: float, kind: str, vel: float):
+            n = max(1, int(dur * SAMPLE_RATE))
+            t = np.arange(n, dtype=np.float32) / SAMPLE_RATE
+            if kind == "marimba":
+                s = np.sin(2.0 * np.pi * freq * t) + 0.25 * np.sin(2.0 * np.pi * 4.0 * freq * t) * np.exp(-t / 0.05)
+                e = np_env(n, 0.003, 0.26)
+            elif kind == "epiano":
+                s = np.sin(2.0 * np.pi * freq * t) + 0.30 * np.sin(2.0 * np.pi * 2.0 * freq * t) * np.exp(-t / 0.40)
+                e = np_env(n, 0.010, 0.70)
+            elif kind == "musicbox":
+                s = (
+                    np.sin(2.0 * np.pi * freq * t)
+                    + 0.35 * np.sin(2.0 * np.pi * 2.76 * freq * t) * np.exp(-t / 0.15)
+                    + 0.15 * np.sin(2.0 * np.pi * 5.40 * freq * t) * np.exp(-t / 0.07)
+                )
+                e = np_env(n, 0.002, 0.85)
+            elif kind == "piano":
+                s = (
+                    np.sin(2.0 * np.pi * freq * t)
+                    + 0.40 * np.sin(2.0 * np.pi * 2.0 * freq * t) * np.exp(-t / 0.50)
+                    + 0.20 * np.sin(2.0 * np.pi * 3.0 * freq * t) * np.exp(-t / 0.30)
+                )
+                e = np_env(n, 0.004, 0.95)
+            elif kind == "pizz":
+                s = np.sin(2.0 * np.pi * freq * t) + 0.30 * np.sin(2.0 * np.pi * 3.0 * freq * t) * np.exp(-t / 0.03)
+                e = np_env(n, 0.002, 0.09)
+            else:  # pluck
+                s = np.sin(2.0 * np.pi * freq * t) + 0.50 * np.sin(2.0 * np.pi * 2.0 * freq * t) * np.exp(-t / 0.10)
+                e = np_env(n, 0.002, 0.16)
+            return (s * e * vel).astype(np.float32)
+
+        def np_pad(chord_midi: List[int], dur: float, vel: float = 0.14):
+            n = max(1, int(dur * SAMPLE_RATE))
+            t = np.arange(n, dtype=np.float32) / SAMPLE_RATE
+            acc = np.zeros(n, dtype=np.float32)
+            for m in chord_midi:
+                f = _midi_hz(m)
+                acc += np.sin(2.0 * np.pi * f * t) + 0.30 * np.sin(2.0 * np.pi * f * 2.003 * t)
+            fade = min(0.55, dur * 0.35)
+            e = np.minimum(1.0, t / max(0.01, fade)) * np.minimum(1.0, np.maximum(0.0, (dur - t) / max(0.01, fade)))
+            return (acc * e * (vel / max(1, len(chord_midi)))).astype(np.float32)
+
+        def put_np(seg, t_pos: float):
+            a = int(t_pos * SAMPLE_RATE)
+            if a < 0 or a >= num_samples:
+                return
+            take = min(len(seg), num_samples - a)
+            if take > 0:
+                out[a : a + take] += seg[:take]
+
+        chords = preset["midi"]
+        lead = preset["lead"]
+        pat = preset["pat"]
+        perc = preset.get("perc")
+        bar = scene_index
+        t_cur = 0.0
+        while t_cur < safe_dur + 0.05:
+            ch = chords[bar % len(chords)]
+            if pat == "arp8":
+                order = [0, 1, 2, 1, 0, 2, 1, 2]
+                steps = [(k * beat / 2.0, ch[order[k] % len(ch)] + 12, 0.45 if k % 2 else 0.65) for k in range(8)]
+            elif pat == "arp4":
+                steps = [(k * beat, ch[k % len(ch)] + 12, 0.58) for k in range(4)]
+            elif pat == "slow":
+                steps = [(0.0, ch[2 % len(ch)] + 12, 0.65), (beat * 1.5, ch[1 % len(ch)] + 12, 0.48), (beat * 2.5, ch[0] + 24, 0.55)]
+            elif pat == "sparse":
+                steps = [(0.0, ch[2 % len(ch)] + 12, 0.72), (beat * 2.5, ch[1 % len(ch)] + 12, 0.45)]
+            elif pat == "tick":
+                steps = [(k * beat / 2.0, ch[0] + 24 if k % 4 == 0 else ch[2 % len(ch)] + 12, 0.34) for k in range(8)]
+            else:  # bounce
+                order = [0, 2, 1, 2]
+                steps = [(k * beat / 2.0, ch[order[k % 4] % len(ch)] + 12, 0.58) for k in (0, 1, 2, 3, 5, 7)]
+
+            for off, midi_note, vel in steps:
+                put_np(np_tone(_midi_hz(midi_note), 0.65, lead, vel * 0.42), t_cur + off)
+
+            if preset.get("bass"):
+                for k in (0, 2):
+                    n_b = max(1, int(beat * 1.5 * SAMPLE_RATE))
+                    tb = np.arange(n_b, dtype=np.float32) / SAMPLE_RATE
+                    b_seg = (np.sin(2.0 * np.pi * _midi_hz(ch[0] - 24) * tb) * np_env(n_b, 0.01, 0.42) * 0.38).astype(np.float32)
+                    put_np(b_seg, t_cur + k * beat)
+            if preset.get("pad"):
+                put_np(np_pad([c - 12 for c in ch], beat * 4.0, 0.14), t_cur)
+            if preset.get("drone"):
+                put_np(np_pad([ch[0] - 24, ch[0] - 17], beat * 4.0, 0.18), t_cur)
+            if perc:
+                for k in range(8):
+                    tt = t_cur + k * beat / 2.0
+                    if perc == "shaker" and k % 2 == 1:
+                        n_p = int(0.05 * SAMPLE_RATE)
+                        put_np((rng.standard_normal(n_p) * np_env(n_p, 0.002, 0.015) * 0.05).astype(np.float32), tt)
+                    elif perc == "brush" and k % 2 == 0:
+                        n_p = int(0.11 * SAMPLE_RATE)
+                        put_np((rng.standard_normal(n_p) * np_env(n_p, 0.01, 0.045) * 0.032).astype(np.float32), tt)
+                    elif perc == "kick" and k % 2 == 0:
+                        n_p = int(0.18 * SAMPLE_RATE)
+                        tb = np.arange(n_p, dtype=np.float32) / SAMPLE_RATE
+                        put_np((np.sin(2.0 * np.pi * (110.0 - 65.0 * tb / 0.18) * tb) * np_env(n_p, 0.002, 0.09) * 0.42).astype(np.float32), tt)
+            t_cur += beat * 4.0
+            bar += 1
+
+        # Smooth edge fades so per-scene mood transitions cross-glue cleanly without clicks
+        fade_in_n = min(num_samples // 3, int(0.35 * SAMPLE_RATE))
+        fade_out_n = min(num_samples // 3, int(0.40 * SAMPLE_RATE))
+        if fade_in_n > 1:
+            out[:fade_in_n] *= np.linspace(0.0, 1.0, fade_in_n, dtype=np.float32)
+        if fade_out_n > 1:
+            out[-fade_out_n:] *= np.linspace(1.0, 0.0, fade_out_n, dtype=np.float32)
+        peak = float(np.max(np.abs(out))) + 1e-6
+        out = out * (0.72 / max(peak, 0.72))
+        return out.tolist()
+    except Exception:
+        # Pure-Python fallback if NumPy is unavailable
+        buf = [0.0] * num_samples
+        chord = [_midi_hz(m) for m in preset["midi"][scene_index % len(preset["midi"])]]
+        scale = 0.16 / max(1, len(chord))
+        for f in chord:
+            omega = 2.0 * math.pi * f / SAMPLE_RATE
+            for i in range(num_samples):
+                buf[i] += math.sin(omega * i) * scale
+        return buf
 
 
 def generate_showreel_bgm_track(
@@ -378,25 +548,25 @@ def generate_showreel_bgm_track(
     scene_start_sec: float = 0.0,
     mood: Optional[str] = None,
 ) -> float:
-    """Synthesizes a deterministic beat-locked studio chord pad + kick/tick groove without TTS."""
-    preset = MOOD_PRESETS.get((mood or "").strip().lower())
-    eff_bpm = float(bpm) if bpm else (preset["bpm"] if preset else 120.0)
-    safe_bpm = min(175.0, max(70.0, eff_bpm))
+    """Synthesizes a deterministic musical mood BGM track (or beat-locked studio groove when mood is omitted)."""
+    preset = _resolve_mood_preset(mood)
+    if preset is not None:
+        buf = _render_musical_mood_bgm(preset, duration_sec, bpm, scene_index)
+        write_wav(file_path, buf)
+        return round(len(buf) / float(SAMPLE_RATE), 3)
+
+    safe_bpm = min(175.0, max(70.0, float(bpm or 120.0)))
     beat = 60.0 / safe_bpm
     safe_dur = max(0.35, float(duration_sec))
     num_samples = max(1, int(safe_dur * SAMPLE_RATE))
     buf = [0.0] * num_samples
 
-    chords = (
-        preset["chords"]
-        if preset
-        else [
-            [130.81, 196.00, 246.94, 311.13],
-            [116.54, 174.61, 220.00, 277.18],
-            [155.56, 233.08, 293.66, 392.00],
-            [174.61, 261.63, 311.13, 415.30],
-        ]
-    )
+    chords = [
+        [130.81, 196.00, 246.94, 311.13],
+        [116.54, 174.61, 220.00, 277.18],
+        [155.56, 233.08, 293.66, 392.00],
+        [174.61, 261.63, 311.13, 415.30],
+    ]
     chord = chords[scene_index % len(chords)]
 
     # Warm ambient pad with gentle fade in/out so cuts glue cleanly without clipping.
@@ -414,7 +584,7 @@ def generate_showreel_bgm_track(
     # Beat-locked low-end kick & subtle hi-hat tick aligned across global timeline.
     first_beat = math.ceil(max(0.0, scene_start_sec) / beat) * beat
     t_b = first_beat
-    base_kick = float(preset["kick"]) if preset else 0.30
+    base_kick = 0.30
     while t_b < scene_start_sec + safe_dur - 0.05:
         lt = t_b - scene_start_sec
         if lt >= 0.0:

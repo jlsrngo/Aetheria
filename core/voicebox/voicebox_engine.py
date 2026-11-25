@@ -13,6 +13,7 @@ Supported Voice Modes:
 """
 
 import os
+import re
 import sys
 import json
 import time
@@ -567,10 +568,11 @@ def apply_voicebox_dsp(
 
     if gentle_cloning:
         # Transparent zero-phase mastering for cloned voice: preserves pure natural timbre,
-        # open room dynamics (RMS ~0.12-0.14), and prevents comb-filtering / double-voice artifacts.
+        # tames harsh high-end raspiness, and leaves clean -1.8 dBFS headroom (zero clipping).
         board = Pedalboard([
             HighpassFilter(cutoff_frequency_hz=65.0),
-            Limiter(threshold_db=-1.0, release_ms=80.0),
+            HighShelfFilter(cutoff_frequency_hz=7200.0, gain_db=-1.5),
+            Limiter(threshold_db=-1.8, release_ms=90.0),
         ])
     else:
         board = Pedalboard([
@@ -1088,6 +1090,283 @@ def crossfade_audio_chunks(
     return out.astype(np.float32)
 
 
+INLINE_AUDIO_TAGS: Dict[str, Dict[str, Any]] = {
+    # Emotions (kept in smooth VoxCPM2 CFG range 1.38-1.46 and gain <= 1.0 to avoid raspiness/clipping)
+    "excited": {
+        "control": "Very excited, upbeat, energetic, bright rising intonation, smooth clean voice without raspiness.",
+        "cfg": 1.42,
+        "gain": 1.00,
+        "edge_rate": "+8%",
+        "edge_pitch": "+6Hz",
+    },
+    "sad": {
+        "control": "Sad, soft, slow empathetic tone, gentle downward cadence, smooth warm voice.",
+        "cfg": 1.44,
+        "gain": 0.90,
+        "edge_rate": "-10%",
+        "edge_pitch": "-6Hz",
+    },
+    "angry": {
+        "control": "Angry, firm, emphatic emotional tone with strong urgency, clear resonant voice without distortion.",
+        "cfg": 1.44,
+        "gain": 1.00,
+        "edge_rate": "+6%",
+        "edge_pitch": "+4Hz",
+    },
+    "sarcastic": {
+        "control": "Sarcastic, dry, playful ironic delivery with subtle emphasis, clean smooth tone.",
+        "cfg": 1.44,
+        "gain": 0.96,
+        "edge_rate": "-4%",
+        "edge_pitch": "-2Hz",
+    },
+    "nervous": {
+        "control": "Nervous, anxious, slightly hurried and hesitant delivery with short breath, clear voice.",
+        "cfg": 1.44,
+        "gain": 0.95,
+        "edge_rate": "+5%",
+        "edge_pitch": "+3Hz",
+    },
+    "confident": {
+        "control": "Confident, assured, steady authoritative chest voice with crisp clean articulation.",
+        "cfg": 1.42,
+        "gain": 1.00,
+        "edge_rate": "+0%",
+        "edge_pitch": "-2Hz",
+    },
+    # Delivery styles
+    "whispers": {
+        "control": "Soft intimate whisper close to the microphone, quiet gentle secretive tone.",
+        "cfg": 1.46,
+        "gain": 0.78,
+        "edge_rate": "-12%",
+        "edge_pitch": "-8Hz",
+    },
+    "shouting": {
+        "control": "Calling out loudly with high vocal energy and urgency, clean resonant voice without clipping.",
+        "cfg": 1.42,
+        "gain": 1.00,
+        "edge_rate": "+10%",
+        "edge_pitch": "+10Hz",
+    },
+    # Non-verbal cues (best-effort VoxCPM steering + natural beat padding)
+    "laughs": {
+        "control": "Laughing warmly and cheerfully while speaking, bright joyful smooth tone.",
+        "cfg": 1.40,
+        "gain": 1.00,
+        "pause_before_ms": 120,
+        "edge_rate": "+8%",
+        "edge_pitch": "+6Hz",
+    },
+    "chuckles": {
+        "control": "Lightly chuckling, amused and friendly smiling delivery, smooth warm voice.",
+        "cfg": 1.42,
+        "gain": 0.96,
+        "pause_before_ms": 100,
+        "edge_rate": "+4%",
+        "edge_pitch": "+3Hz",
+    },
+    "sighs": {
+        "control": "Opening with a tired sigh, speaking softly, candidly, and gently without harshness.",
+        "cfg": 1.44,
+        "gain": 0.90,
+        "pause_before_ms": 260,
+        "edge_rate": "-8%",
+        "edge_pitch": "-5Hz",
+    },
+    "gasps": {
+        "control": "Sudden surprised gasp, startled exclamation with crisp upward inflection, clean voice.",
+        "cfg": 1.42,
+        "gain": 0.98,
+        "pause_before_ms": 140,
+        "edge_rate": "+6%",
+        "edge_pitch": "+8Hz",
+    },
+    "clears throat": {
+        "control": "Clears throat gently then speaks clearly, smoothly, and composed.",
+        "cfg": 1.42,
+        "gain": 0.98,
+        "pause_before_ms": 220,
+        "edge_rate": "+0%",
+        "edge_pitch": "+0Hz",
+    },
+}
+
+INLINE_AUDIO_TAG_ALIASES: Dict[str, str] = {
+    "whisper": "whispers",
+    "shout": "shouting",
+    "laugh": "laughs",
+    "chuckle": "chuckles",
+    "sigh": "sighs",
+    "gasp": "gasps",
+    "clears_throat": "clears throat",
+}
+
+_INLINE_TAG_RE = re.compile(r"\[([^\[\]]{1,40})\]")
+
+
+def _canonical_inline_tag(raw_inner: str) -> Optional[tuple[str, Optional[int]]]:
+    """Returns (canonical_tag, pause_ms_if_pause) or None if not a known audio tag."""
+    key = re.sub(r"\s+", " ", str(raw_inner or "").strip().lower())
+    if not key:
+        return None
+    if key == "pause":
+        return ("pause", 450)
+    m_pause = re.match(r"^pause\s*[:=]\s*([\d.]+)\s*(ms|s)?$", key)
+    if m_pause:
+        val = float(m_pause.group(1))
+        unit = m_pause.group(2) or ("s" if val <= 5.0 else "ms")
+        ms = int(round(val * 1000.0 if unit == "s" else val))
+        return ("pause", max(100, min(2000, ms)))
+    key = INLINE_AUDIO_TAG_ALIASES.get(key, key)
+    if key in INLINE_AUDIO_TAGS:
+        return (key, None)
+    return None
+
+
+def strip_inline_audio_tags(text: str) -> str:
+    """Removes recognized inline `[tag]` directives so subtitles and words.json stay clean."""
+    def _repl(m: re.Match) -> str:
+        return " " if _canonical_inline_tag(m.group(1)) is not None else m.group(0)
+    cleaned = _INLINE_TAG_RE.sub(_repl, str(text or ""))
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def parse_inline_audio_segments(text: str) -> List[Dict[str, Any]]:
+    """Splits text into ordered speech/pause segments carrying active inline expression tags."""
+    raw = str(text or "")
+    segments: List[Dict[str, Any]] = []
+    active_tag: Optional[str] = None
+    pos = 0
+
+    for m in _INLINE_TAG_RE.finditer(raw):
+        parsed = _canonical_inline_tag(m.group(1))
+        if parsed is None:
+            continue
+        before = raw[pos : m.start()].strip()
+        if before:
+            segments.append({
+                "kind": "speech",
+                "text": before,
+                "tag": active_tag,
+                "spec": INLINE_AUDIO_TAGS.get(active_tag) if active_tag else None,
+            })
+        tag_name, pause_ms = parsed
+        if tag_name == "pause":
+            segments.append({"kind": "pause", "pause_ms": pause_ms or 450})
+        else:
+            active_tag = tag_name
+        pos = m.end()
+
+    tail = raw[pos:].strip()
+    if tail:
+        segments.append({
+            "kind": "speech",
+            "text": tail,
+            "tag": active_tag,
+            "spec": INLINE_AUDIO_TAGS.get(active_tag) if active_tag else None,
+        })
+
+    if not segments and raw.strip():
+        segments.append({"kind": "speech", "text": raw.strip(), "tag": None, "spec": None})
+    return segments
+
+
+def _synthesize_tagged_voxcpm_segments(
+    segments: List[Dict[str, Any]],
+    voice_design: str,
+    clone_ref: Optional[str],
+    prompt_text: Optional[str],
+    base_control_instruction: Optional[str],
+    base_cfg_value: float,
+    base_cloning_mode: str,
+    is_indonesian: bool,
+    custom_lex: Optional[Dict[str, str]],
+    workspace_dir: Optional[str],
+) -> tuple[np.ndarray, int, List[Dict[str, Any]]]:
+    """Synthesizes multi-tag segments sequentially with per-segment VoxCPM2 emotion steering."""
+    out_sr = 48000
+    pieces: List[np.ndarray] = []
+    all_words: List[Dict[str, Any]] = []
+    cursor_sec = 0.0
+    speech_idx = 0
+
+    for seg in segments:
+        if seg["kind"] == "pause":
+            pause_sec = max(0.1, float(seg.get("pause_ms", 450)) / 1000.0)
+            pieces.append(np.zeros(int(round(pause_sec * out_sr)), dtype=np.float32))
+            cursor_sec += pause_sec
+            continue
+
+        raw_seg_text = seg["text"]
+        if not raw_seg_text.strip():
+            continue
+
+        tag = seg.get("tag")
+        spec = seg.get("spec") or {}
+        if speech_idx > 0:
+            time.sleep(1.5)
+        speech_idx += 1
+
+        if is_indonesian:
+            spoken_seg = normalize_indonesian_speech_text(
+                raw_seg_text, custom_lexicon=custom_lex, workspace_dir=workspace_dir
+            )
+        else:
+            spoken_seg = raw_seg_text
+
+        tag_ctrl = spec.get("control") or ""
+        if tag_ctrl and base_control_instruction:
+            seg_ctrl = f"{tag_ctrl} ({base_control_instruction})"
+        else:
+            seg_ctrl = tag_ctrl or base_control_instruction or voice_design
+        seg_cfg = float(spec.get("cfg", base_cfg_value))
+        # Use controllable mode on tagged segments so VoxCPM2 acts out the emotion while keeping clone_ref timbre
+        seg_mode = "controllable" if tag else base_cloning_mode
+        print(f"[voicebox] Expressive segment #{speech_idx} tag=[{tag or 'neutral'}] cfg={seg_cfg}: '{raw_seg_text[:80]}'")
+
+        chunk, sr = generate_voxcpm_speech(
+            spoken_seg,
+            voice_design,
+            clone_ref=clone_ref,
+            prompt_text=prompt_text if seg_mode != "controllable" else None,
+            control_instruction=seg_ctrl,
+            cfg_value=seg_cfg,
+            cloning_mode=seg_mode,
+        )
+        out_sr = sr
+        chunk = trim_tts_output(chunk, sr)
+        gain = float(spec.get("gain", 1.0))
+        if abs(gain - 1.0) > 0.01:
+            chunk = np.clip(chunk * gain, -0.98, 0.98).astype(np.float32)
+
+        pre_ms = int(spec.get("pause_before_ms", 0))
+        if pre_ms > 0 and pieces:
+            pre_sec = pre_ms / 1000.0
+            pieces.append(np.zeros(int(round(pre_sec * out_sr)), dtype=np.float32))
+            cursor_sec += pre_sec
+        elif pieces:
+            gap_sec = 0.09
+            pieces.append(np.zeros(int(round(gap_sec * out_sr)), dtype=np.float32))
+            cursor_sec += gap_sec
+
+        seg_dur = len(chunk) / float(out_sr)
+        seg_words = estimate_word_timings(raw_seg_text, seg_dur)
+        for w in seg_words:
+            all_words.append({
+                "word": w["word"],
+                "start": round(cursor_sec + w["start"], 3),
+                "duration": w["duration"],
+                "end": round(cursor_sec + w["end"], 3),
+            })
+        pieces.append(chunk)
+        cursor_sec += seg_dur
+
+    if not pieces:
+        return np.zeros(int(0.25 * out_sr), dtype=np.float32), out_sr, []
+    return np.concatenate(pieces).astype(np.float32), out_sr, all_words
+
+
 def generate_voxcpm_speech(
     text: str,
     voice_design: str,
@@ -1485,11 +1764,15 @@ def generate_speech(
             if lang.lower() == "id":
                 lang = "en"
 
-    # Dual-track text handling: visual_text for subtitles, spoken_candidate for TTS voice synthesis
-    visual_text = text
-    spoken_candidate = spoken_text if spoken_text and spoken_text.strip() else text
+    # Dual-track text handling: visual_text for subtitles (tags stripped), spoken_candidate for TTS synthesis
+    raw_spoken_source = spoken_text if spoken_text and spoken_text.strip() else text
+    parsed_segments = parse_inline_audio_segments(raw_spoken_source)
+    has_inline_tags = any(seg["kind"] == "pause" or seg.get("tag") for seg in parsed_segments)
+    visual_text = strip_inline_audio_tags(text)
+    spoken_candidate = strip_inline_audio_tags(raw_spoken_source)
 
     # Normalize Indonesian numbers & abbreviations so '21' is spoken as 'dua puluh satu', never 'twenty one'
+    custom_lex: Optional[Dict[str, str]] = None
     if lang.lower() == "id" or (voice and "id-id" in voice.lower()) or preset_key == "aetheria":
         custom_lex = load_pronunciation_lexicon(lexicon_path, workspace_dir=workspace_dir)
         text = normalize_indonesian_speech_text(spoken_candidate, custom_lexicon=custom_lex, workspace_dir=workspace_dir)
@@ -1598,16 +1881,30 @@ def generate_speech(
             f"{'clone' if clone_ref else 'voice design'}: {design if not clone_ref else clone_ref})..."
         )
         try:
-            audio_data, sample_rate = generate_voxcpm_speech(
-                text,
-                design,
-                clone_ref=clone_ref,
-                prompt_text=prompt_txt,
-                control_instruction=ctrl_inst,
-                cfg_value=cfg_val,
-                cloning_mode=cloning_mode,
-            )
-            words = estimate_word_timings(text, len(audio_data) / sample_rate)
+            if has_inline_tags:
+                audio_data, sample_rate, words = _synthesize_tagged_voxcpm_segments(
+                    parsed_segments,
+                    design,
+                    clone_ref=clone_ref,
+                    prompt_text=prompt_txt,
+                    base_control_instruction=ctrl_inst,
+                    base_cfg_value=cfg_val,
+                    base_cloning_mode=cloning_mode,
+                    is_indonesian=is_indonesian,
+                    custom_lex=custom_lex,
+                    workspace_dir=workspace_dir,
+                )
+            else:
+                audio_data, sample_rate = generate_voxcpm_speech(
+                    text,
+                    design,
+                    clone_ref=clone_ref,
+                    prompt_text=prompt_txt,
+                    control_instruction=ctrl_inst,
+                    cfg_value=cfg_val,
+                    cloning_mode=cloning_mode,
+                )
+                words = estimate_word_timings(text, len(audio_data) / sample_rate)
             used_engine = "voxcpm2"
         except Exception as e:
             fallback_reason = f"VoxCPM2 unavailable ({type(e).__name__}: {e})"
@@ -1637,9 +1934,53 @@ def generate_speech(
                     v = "en-US-AriaNeural" if is_female else "en-US-GuyNeural"
             effective_voice = v
             print(f"[voicebox] Generating audio (lang={lang}, voice={v}, rate={rate}, pitch={pitch})...")
-            audio_data, sample_rate, words = asyncio.run(
-                generate_indonesian_speech(text, voice=v, rate=rate, pitch=pitch)
-            )
+            if has_inline_tags:
+                pieces_e: List[np.ndarray] = []
+                words = []
+                sample_rate = 24000
+                cursor_e = 0.0
+                for seg in parsed_segments:
+                    if seg["kind"] == "pause":
+                        p_sec = max(0.1, float(seg.get("pause_ms", 450)) / 1000.0)
+                        pieces_e.append(np.zeros(int(round(p_sec * sample_rate)), dtype=np.float32))
+                        cursor_e += p_sec
+                        continue
+                    s_txt = seg["text"]
+                    if not s_txt.strip():
+                        continue
+                    spec = seg.get("spec") or {}
+                    seg_spoken = (
+                        normalize_indonesian_speech_text(s_txt, custom_lexicon=custom_lex, workspace_dir=workspace_dir)
+                        if is_indonesian else s_txt
+                    )
+                    seg_rate = spec.get("edge_rate", rate)
+                    seg_pitch = spec.get("edge_pitch", pitch)
+                    ch, sr_e, w_e = asyncio.run(
+                        generate_indonesian_speech(seg_spoken, voice=v, rate=seg_rate, pitch=seg_pitch)
+                    )
+                    sample_rate = sr_e
+                    gain_e = float(spec.get("gain", 1.0))
+                    if abs(gain_e - 1.0) > 0.01:
+                        ch = np.clip(ch * gain_e, -0.98, 0.98).astype(np.float32)
+                    pre_ms = int(spec.get("pause_before_ms", 0))
+                    if pre_ms > 0 and pieces_e:
+                        pre_s = pre_ms / 1000.0
+                        pieces_e.append(np.zeros(int(round(pre_s * sample_rate)), dtype=np.float32))
+                        cursor_e += pre_s
+                    for w_item in w_e:
+                        words.append({
+                            "word": w_item["word"],
+                            "start": round(cursor_e + w_item["start"], 3),
+                            "duration": w_item["duration"],
+                            "end": round(cursor_e + w_item["end"], 3),
+                        })
+                    pieces_e.append(ch)
+                    cursor_e += len(ch) / float(sample_rate)
+                audio_data = np.concatenate(pieces_e).astype(np.float32) if pieces_e else np.zeros(int(0.25 * sample_rate), dtype=np.float32)
+            else:
+                audio_data, sample_rate, words = asyncio.run(
+                    generate_indonesian_speech(text, voice=v, rate=rate, pitch=pitch)
+                )
             used_engine = "edge-neural"
 
     # Sanitize voiceover audio (trim pre-speech transient spikes, compact dead-air pauses, cosine fade-in/out)

@@ -40,7 +40,7 @@ pub fn film_audio_tool_definition() -> Value {
                             "type": "object",
                             "properties": {
                                 "id": { "type": "string", "description": "Scene ID matching `film.json` / `AM.registerScene`." },
-                                "narration": { "type": "string", "description": "Clean subtitle/display narration text (optional/empty when mode='showreel')." },
+                                "narration": { "type": "string", "description": "Narration text (optional/empty when mode='showreel'). Supports inline expression tags `[excited]`, `[sad]`, `[angry]`, `[sarcastic]`, `[nervous]`, `[confident]`, `[whispers]`, `[shouting]`, `[laughs]`, `[chuckles]`, `[sighs]`, `[gasps]`, `[clears throat]`, and `[pause]` (steers TTS emotion and is stripped from subtitles automatically)." },
                                 "spokenText": { "type": "string", "description": "Optional phonetic override for foreign names or unmapped acronyms." },
                                 "voPath": { "type": "string", "description": "Optional user-supplied WAV path (relative inside workspace/project) to skip TTS and derive exact duration, words.json, and RMS lipsync levels.json." },
                                 "duration": { "type": "number", "description": "Target duration seconds for non-narrated showreel scenes (optional alias for minScene)." },
@@ -59,6 +59,11 @@ pub fn film_audio_tool_definition() -> Value {
                                 "disableSfx": {
                                     "type": "boolean",
                                     "description": "Set true only if this scene must have no SFX track."
+                                },
+                                "musicMood": {
+                                    "type": "string",
+                                    "enum": ["cheerful", "chill", "tense", "comic", "sad", "epic", "study", "mystery", "warm"],
+                                    "description": "Optional per-scene BGM mood override (falls back to top-level musicMood when omitted)."
                                 }
                             },
                             "required": ["id"]
@@ -1020,14 +1025,22 @@ pub async fn execute_film_audio(
             (a_rel, Some(w_rel), levels_opt, f_dur, c_dur)
         };
 
+        let scene_mood = item
+            .get("musicMood")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_ascii_lowercase())
+            .or_else(|| music_mood.clone());
         let bgm_rel_opt = if !showreel_mode || vo_path_opt.is_some() {
-            if let Some(ref mood) = music_mood {
+            if let Some(ref mood) = scene_mood {
+                let scene_bpm = if arguments.get("bpm").is_some() { bpm } else { 0.0 };
                 let bgm_rel = format!("audio/bgm_{}.wav", clean_id);
                 let bgm_wav_path = film_dir.join(&bgm_rel);
                 if let Err(e) = synthesize_showreel_bgm(
                     &bgm_wav_path,
                     computed_duration,
-                    bpm,
+                    scene_bpm,
                     idx,
                     showreel_cursor_sec,
                     Some(mood.as_str()),
@@ -1143,7 +1156,11 @@ pub async fn execute_film_audio(
         .unwrap_or("#0f1115")
         .to_string();
 
+    let any_scene_bgm = generated_summaries
+        .iter()
+        .any(|s| s.get("bgm").and_then(Value::as_str).is_some());
     let computed_audio_mix = if music_mood.is_some()
+        || any_scene_bgm
         || arguments.get("duck").is_some()
         || arguments.get("loudnorm").is_some()
         || arguments.get("musicVolume").is_some()

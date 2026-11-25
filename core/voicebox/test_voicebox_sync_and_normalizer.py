@@ -118,6 +118,27 @@ class TestVoiceboxSyncAndNormalizer(unittest.TestCase):
             self.assertNotIn("Arunaki Brend", without_ws)
             self.assertIn("Arunaki Brend", with_ws)
 
+    def test_inline_audio_expression_tags_and_subtitle_stripping(self):
+        script = (
+            "[excited] Halo semuanya! "
+            "[sighs] Awalnya aku pikir gagal... [pause] Semuanya berantakan. "
+            "[whispers] Tapi tunggu dulu... [chuckles] Solusinya simpel! "
+            "[angry] Kita selesaikan SEKARANG! "
+            "[sad] Maaf ya... [gasps] Eh, tunggu! [laughs] Berhasil!"
+        )
+        segs = vb.parse_inline_audio_segments(script)
+        tags = [s.get("tag") for s in segs if s["kind"] == "speech"]
+        pauses = [s for s in segs if s["kind"] == "pause"]
+        self.assertEqual(tags, ["excited", "sighs", "sighs", "whispers", "chuckles", "angry", "sad", "gasps", "laughs"])
+        self.assertEqual(len(pauses), 1)
+        self.assertEqual(pauses[0]["pause_ms"], 450)
+
+        clean = vb.strip_inline_audio_tags(script)
+        self.assertNotIn("[", clean)
+        self.assertNotIn("]", clean)
+        self.assertIn("Halo semuanya!", clean)
+        self.assertIn("Berhasil!", clean)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

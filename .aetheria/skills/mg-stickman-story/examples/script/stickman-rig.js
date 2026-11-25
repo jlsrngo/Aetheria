@@ -208,10 +208,11 @@
       scale: 1.0
     },
     nadia: {
-      skin: '#FDE0C6', hair: 'hijab', hairColor: '#23262E',
-      glasses: 'round', chibiEyes: true, lashes: true,
-      shirt: '#D7B38C', whiteCollar: true, shortSleeves: false,
-      bottom: 'skirt', bottomColor: '#23262E', shoes: 'flat', shoeColor: '#3B2820',
+      skin: '#FFE0C4', hair: 'hijab', hijabStyle: 'modern', hairColor: '#202028', hijabShade: '#4C4E5C',
+      glasses: 'round', chibiEyes: true, lashes: false,
+      shirt: '#E0C29A', innerShirt: '#FFFFFF', blazer: true, whiteCollar: false, shortSleeves: false,
+      bodyWidth: 1.05,
+      bottom: 'skirt', bottomColor: '#2C2C34', shoes: 'flat', shoeColor: '#44342E',
       scale: 0.96
     },
     leo: {
@@ -448,12 +449,24 @@
         c.ell(lq[0], lq[1], lobes[pb][2] * s, lobes[pb][2] * s, hc, 0);
       }
     } else if (r === 'hijab') {
-      var veil = [
-        [0, -HEAD_R - 18], [HEAD_R + 18, -HEAD_R * 0.45],
-        [HEAD_R + 24, 24], [HEAD_R * 0.85, 86], [0, 108],
-        [-HEAD_R * 0.85, 86], [-HEAD_R - 24, 24], [-HEAD_R - 18, -HEAD_R * 0.45]
-      ];
-      c.blob(HH(veil), hc, ow, OUT, 8);
+      if (p.hijabStyle === 'modern') {
+        var modDome = [
+          [-108, -10], [-96, -78], [-56, -118], [0, -130],
+          [56, -118], [96, -78], [108, -10],
+          [112, 46], [82, 86], [0, 96], [-82, 86], [-112, 46]
+        ];
+        c.blob(HH(modDome), hc, ow, OUT, 7);
+        var hShade = p.hijabShade || '#4C4E5C';
+        c.curve(HH([[-86, -58], [-52, -100], [0, -112]]), hShade, 3.0 * s, false);
+        c.curve(HH([[86, -58], [52, -100], [0, -112]]), hShade, 3.0 * s, false);
+      } else {
+        var veil = [
+          [0, -HEAD_R - 18], [HEAD_R + 18, -HEAD_R * 0.45],
+          [HEAD_R + 24, 24], [HEAD_R * 0.85, 86], [0, 108],
+          [-HEAD_R * 0.85, 86], [-HEAD_R - 24, 24], [-HEAD_R - 18, -HEAD_R * 0.45]
+        ];
+        c.blob(HH(veil), hc, ow, OUT, 8);
+      }
     } else if (r === 'bob') {
       c.blob(HH([[-HEAD_R - 12, -32], [HEAD_R + 12, -32], [HEAD_R + 18, 56], [-HEAD_R - 18, 56]]), hc, ow, OUT, 6);
     } else if (r === 'ponytail') {
@@ -475,10 +488,23 @@
       }
       c.poly(HH(topArc.concat(innerFringe)), hc, 0);
     } else if (r === 'hijab') {
-      var outerHood = arcPts(0, -2, HEAD_R + 16, HEAD_R + 18, 150, 390, 24);
-      var innerFace = arcPts(0, 6, HEAD_R * 0.90, HEAD_R * 0.92, 385, 155, 22);
-      c.poly(HH(outerHood.concat(innerFace)), hc, ow * 0.85, OUT);
-      c.curve(HH([[-HEAD_R * 0.72, 68], [0, 92], [HEAD_R * 0.72, 68]]), OUT, 4.2 * s, false);
+      if (p.hijabStyle === 'modern') {
+        var hShadeF = p.hijabShade || '#4C4E5C';
+        c.curve(HH([[-74, -14], [-44, -56], [0, -76], [44, -56], [74, -14]]), hShadeF, 3.0 * s, false);
+        // Soft chest scarf wrap under chin so blazer shoulders & lapels stay visible
+        var scarf = [
+          [-92, 22], [-102, 74], [-78, 108], [-42, 122], [0, 134],
+          [42, 122], [78, 108], [102, 74], [92, 22], [68, 66], [0, 88], [-68, 66]
+        ];
+        c.blob(HH(scarf), hc, ow * 0.85, OUT, 6);
+        c.curve(HH([[-76, 94], [-34, 110], [0, 118], [34, 110], [76, 94]]), hShadeF, 3.6 * s, false);
+        c.curve(HH([[-52, 112], [-16, 124], [24, 120]]), hShadeF, 3.0 * s, false);
+      } else {
+        var outerHood = arcPts(0, -2, HEAD_R + 16, HEAD_R + 18, 150, 390, 24);
+        var innerFace = arcPts(0, 6, HEAD_R * 0.90, HEAD_R * 0.92, 385, 155, 22);
+        c.poly(HH(outerHood.concat(innerFace)), hc, ow * 0.85, OUT);
+        c.curve(HH([[-HEAD_R * 0.72, 68], [0, 92], [HEAD_R * 0.72, 68]]), OUT, 4.2 * s, false);
+      }
     } else if (r === 'spiky') {
       var spikes = [
         [-84, -22], [-96, -68], [-64, -64], [-58, -112], [-24, -84],
@@ -905,7 +931,20 @@
     c.poly(BB([[-13, NECK_Y - 6], [13, NECK_Y - 6], [14, SHOULDER_Y + 8], [-14, SHOULDER_Y + 8]]), p.skin, ow * 0.8, OUT);
     c.blob(BB([[-40 * wMul, SHOULDER_Y], [40 * wMul, SHOULDER_Y], [37 * wMul, HIP_Y - 4], [-37 * wMul, HIP_Y - 4]]), p.shirt, ow * 0.9, OUT, 5);
 
-    if (p.whiteCollar) {
+    if (p.blazer) {
+      var innerCol = p.innerShirt || WHITE;
+      c.poly(BB([[-18 * wMul, SHOULDER_Y + 3], [18 * wMul, SHOULDER_Y + 3], [12 * wMul, HIP_Y - 8], [-12 * wMul, HIP_Y - 8]]), innerCol, ow * 0.65, OUT);
+      for (var sg = -1; sg <= 1; sg += 2) {
+        c.poly(BB([
+          [sg * 15 * wMul, SHOULDER_Y + 3],
+          [sg * 32 * wMul, SHOULDER_Y + 13],
+          [sg * 27 * wMul, SHOULDER_Y + 32],
+          [sg * 33 * wMul, SHOULDER_Y + 40],
+          [sg * 12 * wMul, HIP_Y - 12],
+          [sg * 13 * wMul, SHOULDER_Y + 24]
+        ]), '#EAD0AC', ow * 0.72, OUT);
+      }
+    } else if (p.whiteCollar) {
       c.poly(BB([[-16, SHOULDER_Y + 2], [16, SHOULDER_Y + 2], [10, SHOULDER_Y + 42], [-10, SHOULDER_Y + 42]]), WHITE, ow * 0.7, OUT);
     }
     if (p.tie === 'bowtie') {

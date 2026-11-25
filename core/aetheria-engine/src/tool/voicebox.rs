@@ -45,7 +45,7 @@ pub fn voicebox_tool_definition() -> Value {
                 "properties": {
                     "text": {
                         "type": "string",
-                        "description": "The exact script or narration text to synthesize. Write it the way people actually talk (casual particles like 'jadi', 'nah', 'gue', commas for breathing)."
+                        "description": "The exact script or narration text to synthesize. Write it the way people actually talk (casual particles, commas for breathing). Supports inline expression tags `[excited]`, `[sad]`, `[angry]`, `[sarcastic]`, `[nervous]`, `[confident]`, `[whispers]`, `[shouting]`, `[laughs]`, `[chuckles]`, `[sighs]`, `[gasps]`, `[clears throat]`, and `[pause]` (automatically stripped from subtitles)."
                     },
                     "spokenText": {
                         "type": "string",
