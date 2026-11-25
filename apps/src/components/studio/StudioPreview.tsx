@@ -13,9 +13,7 @@ import { HtmlMotionPlayer, type MotionPlayerHandle } from "./HtmlMotionPlayer";
 import { ProxyVideoStage } from "./ProxyVideoStage";
 import {
   CanvasGridOverlay,
-  HorizontalRuler,
   SafeZoneGuideOverlay,
-  VerticalRuler,
 } from "./preview/CanvasRulersAndGrid";
 import {
   buildCustomLayerRemovalPatch,
@@ -106,7 +104,6 @@ export const StudioPreview: React.FC = () => {
   const {
     viewportRef,
     viewportDim,
-    cursorPos,
     setCursorPos,
     isPanning,
     isZoomed,
@@ -161,44 +158,23 @@ export const StudioPreview: React.FC = () => {
         };
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-[var(--bg-app)]">
-      <StudioPreviewHeader
-        activeComposition={activeComposition}
-        canvas={canvas}
-        numericZoom={numericZoom}
-        gridCols={gridCols}
-        gridRows={gridRows}
-        onUpdateCanvas={actions.updateCanvas}
-        onRequestFullscreen={() => playerRef.current?.requestFullscreen()}
-        onProjectChanged={() => {
-          setProxyStreamUrl(null);
-          void actions.syncFromBackend();
-          reloadFilm();
-        }}
-        onProxyStreamChange={setProxyStreamUrl}
-      />
-
-      {canvas.showRulers && (
-        <HorizontalRuler
-          position="top"
-          width={viewportDim.w}
-          originX={canvasOriginX}
-          effectiveScale={effectiveScale}
-          cursorX={cursorPos?.x ?? null}
+    <div className="flex-1 flex flex-col min-h-0 p-2 gap-2 bg-[var(--bg-app)]">
+      <div className="flex-1 flex flex-col min-h-0 rounded-[var(--radius-panel)] border border-[var(--border-color)] bg-[var(--bg-panel)] overflow-hidden">
+        <StudioPreviewHeader
+          activeComposition={activeComposition}
+          canvas={canvas}
+          numericZoom={numericZoom}
+          onUpdateCanvas={actions.updateCanvas}
+          onRequestFullscreen={() => playerRef.current?.requestFullscreen()}
+          onProjectChanged={() => {
+            setProxyStreamUrl(null);
+            void actions.syncFromBackend();
+            reloadFilm();
+          }}
+          onProxyStreamChange={setProxyStreamUrl}
         />
-      )}
 
       <div className="flex-1 min-h-0 flex flex-row overflow-hidden relative">
-        {canvas.showRulers && (
-          <VerticalRuler
-            position="left"
-            height={viewportDim.h}
-            originY={canvasOriginY}
-            effectiveScale={effectiveScale}
-            cursorY={cursorPos?.y ?? null}
-          />
-        )}
-
         <div
           ref={viewportRef}
           onWheel={handleCanvasWheel}
@@ -210,7 +186,7 @@ export const StudioPreview: React.FC = () => {
           }}
           onMouseLeave={() => setCursorPos(null)}
           className={cn(
-            "flex-1 min-h-0 flex items-center justify-center p-3 relative overflow-hidden bg-[#0A0A0C]",
+            "flex-1 min-h-0 flex items-center justify-center p-3 relative overflow-hidden bg-[var(--bg-editor)]",
             isPanning ? "cursor-grabbing" : isZoomed ? "cursor-grab" : "cursor-default"
           )}
         >
@@ -306,7 +282,7 @@ export const StudioPreview: React.FC = () => {
             onDeselect={() => setSelectedLayerId(null)}
           />
 
-          {canvas.showMinimap !== false && (
+          {isZoomed && canvas.showMinimap !== false && (
             <CanvasMinimap
               compositionWidth={stageWidth}
               compositionHeight={stageHeight}
@@ -323,27 +299,8 @@ export const StudioPreview: React.FC = () => {
             />
           )}
         </div>
-
-        {canvas.showRulers && (
-          <VerticalRuler
-            position="right"
-            height={viewportDim.h}
-            originY={canvasOriginY}
-            effectiveScale={effectiveScale}
-            cursorY={cursorPos?.y ?? null}
-          />
-        )}
       </div>
-
-      {canvas.showRulers && (
-        <HorizontalRuler
-          position="bottom"
-          width={viewportDim.w}
-          originX={canvasOriginX}
-          effectiveScale={effectiveScale}
-          cursorX={cursorPos?.x ?? null}
-        />
-      )}
+      </div>
 
       {canvas.showTimeline && (
         <Timeline

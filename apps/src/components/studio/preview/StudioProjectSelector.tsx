@@ -97,13 +97,13 @@ export const StudioProjectSelector: React.FC<StudioProjectSelectorProps> = ({
           aria-label="New video project title"
           autoFocus
           disabled={busy}
-          className="h-6 w-36 px-2 rounded-[var(--radius-control)] bg-[var(--bg-card)] border border-[var(--border-color)] text-[11px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-amber-400"
+          className="h-7 w-36 px-3 rounded-[var(--radius-pill)] bg-[var(--bg-card)] border border-[var(--border-color)] text-[11px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--btn-primary-bg)]"
         />
         <button
           type="submit"
           disabled={busy || !newTitle.trim()}
           aria-label="Create video project"
-          className="h-6 px-1.5 rounded-[var(--radius-control)] bg-[var(--bg-card)] border border-[var(--border-color)] text-[var(--text-primary)] hover:border-amber-400 disabled:opacity-40 cursor-pointer"
+          className="h-7 w-7 flex items-center justify-center rounded-[var(--radius-pill)] bg-[var(--bg-card)] border border-[var(--border-color)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-40 cursor-pointer transition-colors"
         >
           <Check className="w-3 h-3" />
         </button>
@@ -114,7 +114,7 @@ export const StudioProjectSelector: React.FC<StudioProjectSelectorProps> = ({
             setNewTitle("");
           }}
           aria-label="Cancel new video project"
-          className="h-6 px-1.5 rounded-[var(--radius-control)] bg-[var(--bg-card)] border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
+          className="h-7 w-7 flex items-center justify-center rounded-[var(--radius-pill)] bg-[var(--bg-card)] border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
         >
           <X className="w-3 h-3" />
         </button>
@@ -130,7 +130,7 @@ export const StudioProjectSelector: React.FC<StudioProjectSelectorProps> = ({
           value={activeProject ?? "__root__"}
           disabled={busy}
           onChange={(e) => void handleSelect(e.target.value)}
-          className="h-6 max-w-[160px] px-1.5 rounded-[var(--radius-control)] bg-[var(--bg-card)] border border-[var(--border-color)] text-[10px] text-[var(--text-primary)] focus:outline-none focus:border-amber-400 cursor-pointer truncate"
+          className="h-7 max-w-[160px] px-2.5 rounded-[var(--radius-pill)] bg-[var(--bg-card)] border border-[var(--border-color)] text-[10px] text-[var(--text-primary)] focus:outline-none focus:border-[var(--btn-primary-bg)] cursor-pointer truncate"
         >
           {projects.map((proj) => (
             <option key={proj.id} value={proj.id}>
@@ -150,7 +150,7 @@ export const StudioProjectSelector: React.FC<StudioProjectSelectorProps> = ({
         }}
         aria-label="New video project"
         title="New video project subfolder"
-        className="h-6 w-6 flex items-center justify-center rounded-[var(--radius-control)] bg-[var(--bg-card)] border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-amber-400 cursor-pointer"
+        className="h-7 w-7 flex items-center justify-center rounded-[var(--radius-pill)] bg-[var(--bg-card)] border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
       >
         <FolderPlus className="w-3 h-3" />
       </button>
@@ -163,7 +163,7 @@ export const StudioProjectSelector: React.FC<StudioProjectSelectorProps> = ({
               disabled={busy}
               onClick={() => void handleDelete()}
               aria-label="Confirm delete active video project"
-              className="h-6 px-1.5 rounded-[var(--radius-control)] bg-rose-500/20 border border-rose-500/60 text-rose-300 text-[10px] font-medium hover:bg-rose-500/30 cursor-pointer"
+              className="h-7 px-2.5 rounded-[var(--radius-pill)] bg-[var(--status-error-bg)] border border-[var(--status-error-border)] text-white text-[10px] font-medium cursor-pointer"
             >
               Delete
             </button>
@@ -172,7 +172,7 @@ export const StudioProjectSelector: React.FC<StudioProjectSelectorProps> = ({
               disabled={busy}
               onClick={() => setConfirmDelete(false)}
               aria-label="Cancel delete video project"
-              className="h-6 w-6 flex items-center justify-center rounded-[var(--radius-control)] bg-[var(--bg-card)] border border-[var(--border-color)] text-[var(--text-secondary)] cursor-pointer"
+              className="h-7 w-7 flex items-center justify-center rounded-[var(--radius-pill)] bg-[var(--bg-card)] border border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] cursor-pointer"
             >
               <X className="w-3 h-3" />
             </button>
@@ -184,14 +184,14 @@ export const StudioProjectSelector: React.FC<StudioProjectSelectorProps> = ({
             onClick={() => setConfirmDelete(true)}
             aria-label="Delete active video project"
             title={`Delete projects/${activeProject}`}
-            className="h-6 w-6 flex items-center justify-center rounded-[var(--radius-control)] bg-[var(--bg-card)] border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-rose-400 hover:border-rose-500/50 cursor-pointer"
+            className="h-7 w-7 flex items-center justify-center rounded-[var(--radius-pill)] bg-[var(--bg-card)] border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--status-error-bar)] hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
           >
             <Trash2 className="w-3 h-3" />
           </button>
         ))}
 
       {errorMsg && (
-        <span className="text-[10px] text-rose-400 max-w-[120px] truncate">{errorMsg}</span>
+        <span className="text-[10px] text-[var(--status-error-bar)] max-w-[120px] truncate">{errorMsg}</span>
       )}
     </div>
   );

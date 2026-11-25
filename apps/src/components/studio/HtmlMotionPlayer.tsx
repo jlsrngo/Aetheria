@@ -192,7 +192,8 @@ export const HtmlMotionPlayer = forwardRef<
       style={{
         position: "relative",
         overflow: "hidden",
-        backgroundColor: "#0A0A0C",
+        backgroundColor: "var(--bg-editor)",
+        borderRadius: "var(--radius-card)",
         ...style,
       }}
     >

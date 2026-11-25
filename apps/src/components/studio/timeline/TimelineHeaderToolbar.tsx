@@ -4,21 +4,11 @@ import {
   ChevronRight,
   ChevronUp,
   ChevronDown,
-  RotateCcw,
-  RotateCw,
   LayoutTemplate,
-  Crop,
-  FoldHorizontal,
-  Scissors,
   Gauge,
-  Copy,
   Volume1,
   Volume2,
   VolumeX,
-  Trash2,
-  Magnet,
-  Plus,
-  Share2,
   Download,
   Loader2,
   Check,
@@ -28,10 +18,8 @@ import {
   Smartphone,
   Square,
   Monitor,
-  Smartphone as PhonePortrait,
 } from "lucide-react";
 import { cn } from "../../../lib/utils";
-import type { VideoLayerSpec } from "../../../types/video";
 
 export interface TimelineHeaderToolbarProps {
   currentFrame: number;
@@ -42,31 +30,16 @@ export interface TimelineHeaderToolbarProps {
   volume?: number;
   isMuted?: boolean;
   timelineZoom: number;
-  isSnapping: boolean;
-  canUndo: boolean;
-  canRedo: boolean;
   activeRatio: string;
-  selectedLayer?: VideoLayerSpec | null;
   isExporting: boolean;
   onTogglePlay: () => void;
   onStep: (delta: number) => void;
-  onUndo: () => void;
-  onRedo: () => void;
   onRatioChange: (ratio: string) => void;
   onFpsChange?: (fps: number) => void;
-  onFit: () => void;
-  onTrimIn?: () => void;
-  onTrimOut?: () => void;
-  onSplit: () => void;
   onSpeedChange: (speed: 0.5 | 1 | 1.5 | 2) => void;
   onVolumeChange?: (volume: number) => void;
   onToggleMute?: () => void;
-  onDuplicate: () => void;
-  onDelete: () => void;
-  onToggleSnap: () => void;
-  onAddLayer: () => void;
   onExport: () => void;
-  onShare?: () => void;
   onZoomChange: (zoom: number) => void;
   onMotionClick?: () => void;
   isMicrostockActive?: boolean;
@@ -83,29 +56,16 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
   volume = 1,
   isMuted = false,
   timelineZoom,
-  isSnapping,
-  canUndo,
-  canRedo,
   activeRatio,
   isExporting,
   onTogglePlay,
   onStep,
-  onUndo,
-  onRedo,
   onRatioChange,
   onFpsChange,
-  onFit,
-  onTrimIn,
-  onSplit,
   onSpeedChange,
   onVolumeChange,
   onToggleMute,
-  onDuplicate,
-  onDelete,
-  onToggleSnap,
-  onAddLayer,
   onExport,
-  onShare,
   onZoomChange,
   onMotionClick,
   isMicrostockActive = false,
@@ -113,10 +73,8 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
   onToggleCollapse,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const toolsScrollRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState<number>(1000);
 
-  // Dropdown states
   const [isRatioOpen, setIsRatioOpen] = useState(false);
   const [isSpeedOpen, setIsSpeedOpen] = useState(false);
   const [isFpsOpen, setIsFpsOpen] = useState(false);
@@ -128,7 +86,6 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
   const speedRef = useRef<HTMLDivElement>(null);
   const fpsRef = useRef<HTMLDivElement>(null);
 
-  // ResizeObserver for fluid responsive scaling
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -142,12 +99,11 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
     return () => ro.disconnect();
   }, []);
 
-  // Adaptive breakpoints
-  const showToolLabels = containerWidth >= 1320;
-  const isCompact = containerWidth < 820;
-  const isWide = containerWidth >= 1150;
+  const isCompact = containerWidth < 680;
+  const showVolumeSlider = containerWidth >= 880;
+  const showZoomControl = containerWidth >= 980;
+  const isWide = containerWidth >= 1120;
 
-  // Close dropdowns on outside click or Escape
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (ratioRef.current && !ratioRef.current.contains(e.target as Node)) {
@@ -179,10 +135,30 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
   const totalDurationFormatted = (durationInFrames / fps).toFixed(2);
 
   const allRatioOptions = [
-    { value: "9:16", label: "9:16 Vertical", sub: isMicrostockActive ? "1080×1920 / 2160×3840 (Adobe Stock)" : "1080×1920 (TikTok, Shorts)", icon: Smartphone },
-    { value: "1:1", label: "1:1 Square", sub: isMicrostockActive ? "2160×2160 / 1080×1080 (Adobe Stock)" : "1080×1080 (Feed, Carousel)", icon: Square },
-    { value: "16:9", label: "16:9 Landscape", sub: isMicrostockActive ? "1920×1080 / 3840×2160 (Adobe Stock)" : "1920×1080 (YouTube, Web)", icon: Monitor },
-    { value: "4:5", label: "4:5 Portrait", sub: "1080×1350 (IG Portrait)", icon: PhonePortrait },
+    {
+      value: "9:16",
+      label: "9:16 Vertical",
+      sub: isMicrostockActive ? "1080×1920 / 2160×3840 (Adobe Stock)" : "1080×1920 (TikTok, Shorts)",
+      icon: Smartphone,
+    },
+    {
+      value: "1:1",
+      label: "1:1 Square",
+      sub: isMicrostockActive ? "2160×2160 / 1080×1080 (Adobe Stock)" : "1080×1080 (Feed, Carousel)",
+      icon: Square,
+    },
+    {
+      value: "16:9",
+      label: "16:9 Landscape",
+      sub: isMicrostockActive ? "1920×1080 / 3840×2160 (Adobe Stock)" : "1920×1080 (YouTube, Web)",
+      icon: Monitor,
+    },
+    {
+      value: "4:5",
+      label: "4:5 Portrait",
+      sub: "1080×1350 (IG Portrait)",
+      icon: Smartphone,
+    },
   ];
   const ratioOptions = isMicrostockActive
     ? allRatioOptions.filter((r) => r.value !== "4:5")
@@ -191,37 +167,32 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
   const speedOptions: (0.5 | 1 | 1.5 | 2)[] = [0.5, 1, 1.5, 2];
   const fpsOptions: number[] = [24, 25, 30, 50, 60];
 
-  // Mouse wheel scroll handler: converts vertical scroll into horizontal scroll
-  const handleToolsWheel = (e: React.WheelEvent<HTMLDivElement>) => {
-    if (e.deltaY !== 0) {
-      e.currentTarget.scrollLeft += e.deltaY;
-    }
-  };
-
-  // Dynamic responsive tool button classes
-  const toolBtnClass = cn(
-    "flex items-center justify-center rounded-lg transition-all cursor-pointer group text-center select-none shrink-0",
-    showToolLabels
-      ? "flex-1 min-w-[36px] max-w-[52px] h-9 flex-col px-1 py-0.5"
-      : "w-8 h-8 p-0"
-  );
-  const toolIconClass = "w-3.5 h-3.5";
-  const toolLabelClass = "tracking-tight leading-none mt-0.5 truncate max-w-full text-[8px]";
+  const circleBtnBase =
+    "w-full h-full flex flex-col items-center justify-center rounded-[var(--radius-pill)] border transition-colors cursor-pointer select-none p-0.5";
+  const circleBtnIdle =
+    "bg-[var(--bg-card)] border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]";
+  const circleBtnActive =
+    "bg-[var(--bg-hover)] border-[var(--btn-primary-bg)] text-[var(--text-primary)]";
 
   return (
     <div
       ref={containerRef}
-      className="h-14 px-1.5 sm:px-2 border-b border-[var(--border-color)] bg-[var(--bg-panel)] flex items-center justify-between gap-1 select-none shrink-0 relative z-40 w-full"
+      data-testid="timeline-header-toolbar"
+      className={cn(
+        "h-12 px-2.5 bg-[var(--bg-panel)] flex items-center justify-between gap-2 select-none shrink-0 relative z-40 w-full",
+        !isCollapsed && "border-b border-[var(--border-color)]"
+      )}
     >
-      {/* 1. LEFT PINNED SECTION: Transport, Timecode, and Ratio/Speed/FPS Dropdowns */}
-      <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 relative z-50">
-        {/* Transport: Step Back, Circular Play/Pause, Step Forward */}
-        <div className="flex items-center gap-1 px-1 py-0.5 rounded-full bg-[var(--bg-card)] border border-[var(--border-color)] shadow-sm shrink-0">
+      {/* LEFT: Playback Transport, Timecode, and Essential Format Selectors */}
+      <div className="flex items-center gap-1.5 shrink-0 relative z-50">
+        {/* Transport Pill */}
+        <div className="h-9 px-1 rounded-[var(--radius-pill)] bg-[var(--bg-card)] border border-[var(--border-color)] flex items-center gap-0.5 shrink-0">
           <button
             type="button"
             onClick={() => onStep(-1)}
+            aria-label="Step Backward 1 Frame"
             title="Step Backward 1 Frame (Left Arrow)"
-            className="w-6 h-6 rounded-full hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+            className="w-7 h-7 rounded-[var(--radius-pill)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex items-center justify-center transition-colors cursor-pointer"
           >
             <ChevronLeft className="w-3.5 h-3.5" />
           </button>
@@ -231,8 +202,9 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
             onClick={onTogglePlay}
             data-testid="timeline-play-toggle"
             data-state={isPlaying ? "playing" : "paused"}
+            aria-label={isPlaying ? "Pause" : "Play Video"}
             title={isPlaying ? "Pause (Space)" : "Play Video (Space)"}
-            className="w-7 h-7 rounded-full bg-[#cf6613] hover:bg-[#b8580f] text-white flex items-center justify-center transition-transform hover:scale-105 active:scale-95 shadow-md shadow-orange-950/40 cursor-pointer shrink-0"
+            className="w-7 h-7 rounded-[var(--radius-pill)] bg-[#cf6613] hover:bg-[#b8580f] text-white flex items-center justify-center transition-colors active:scale-95 cursor-pointer shrink-0"
           >
             <span
               data-testid="timeline-play-shape"
@@ -247,40 +219,40 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
           <button
             type="button"
             onClick={() => onStep(1)}
+            aria-label="Step Forward 1 Frame"
             title="Step Forward 1 Frame (Right Arrow)"
-            className="w-6 h-6 rounded-full hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+            className="w-7 h-7 rounded-[var(--radius-pill)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex items-center justify-center transition-colors cursor-pointer"
           >
             <ChevronRight className="w-3.5 h-3.5" />
           </button>
         </div>
 
-        {/* Timecode Badge */}
+        {/* Timecode Pill */}
         <div
           data-testid="timeline-timecode-badge"
           className={cn(
-            "h-7 rounded-full bg-[var(--bg-card)] border border-[var(--border-color)] flex items-center gap-1 font-mono shrink-0",
-            isCompact ? "px-2 text-[9.5px]" : "px-2.5 text-[10px]"
+            "h-9 rounded-[var(--radius-pill)] bg-[var(--bg-card)] border border-[var(--border-color)] flex items-center gap-1 font-mono shrink-0 tabular-nums",
+            isCompact ? "px-2.5 text-[10px]" : "px-3 text-[11px]"
           )}
         >
-          {isWide && <span className="text-[var(--text-muted)] text-[9px]">FRAME</span>}
-          <span className="text-amber-400 font-bold">
+          <span className="text-[var(--text-primary)] font-semibold">
             {String(currentFrame).padStart(3, "0")}
           </span>
           <span className="text-[var(--text-muted)]">/</span>
           <span className="text-[var(--text-secondary)]">{durationInFrames}</span>
           {isWide && (
-            <span className="text-[var(--text-muted)] text-[9px] ml-0.5">
+            <span className="text-[var(--text-muted)] text-[10px] ml-0.5">
               ({timeFormatted}s / {totalDurationFormatted}s)
             </span>
           )}
           {!isWide && !isCompact && (
-            <span className="text-[var(--text-muted)] text-[9px] ml-0.5">
+            <span className="text-[var(--text-muted)] text-[10px] ml-0.5">
               ({timeFormatted}s)
             </span>
           )}
         </div>
 
-        {/* Ratio Dropdown (NO chevron arrow, fully clickable) */}
+        {/* Aspect Ratio Circle */}
         <div ref={ratioRef} className="relative shrink-0 w-9 h-9">
           <button
             type="button"
@@ -291,23 +263,18 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
               setIsFpsOpen(false);
             }}
             title="Video Aspect Ratio"
-            className={cn(
-              "w-full h-full flex flex-col items-center justify-center rounded-full border transition-all cursor-pointer group text-center select-none p-0.5",
-              isRatioOpen
-                ? "bg-[var(--bg-hover)] border-amber-400/80 text-amber-400 shadow-sm shadow-amber-500/10"
-                : "bg-[var(--bg-card)] border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
-            )}
+            className={cn(circleBtnBase, isRatioOpen ? circleBtnActive : circleBtnIdle)}
           >
-            <LayoutTemplate className="w-3 h-3 text-amber-400 transition-colors" />
+            <LayoutTemplate className="w-3 h-3 text-[var(--text-primary)]" />
             <span className="font-mono font-semibold text-[7.5px] leading-none mt-0.5">
               {activeRatio || "9:16"}
             </span>
           </button>
 
           {isRatioOpen && (
-            <div className="absolute top-full left-0 mt-1.5 w-60 py-1.5 rounded-xl bg-[var(--bg-panel)] border border-[var(--border-strong)] shadow-2xl shadow-black/90 z-50 animate-in fade-in zoom-in-95 duration-100">
-              <div className="px-3 py-1 text-[9px] font-bold uppercase tracking-wider text-[var(--text-muted)] border-b border-[var(--border-color)] mb-1">
-                Select Aspect Ratio
+            <div className="absolute bottom-full left-0 mb-1.5 w-60 py-1.5 rounded-[var(--radius-panel)] bg-[var(--bg-panel)] border border-[var(--border-strong)] z-50">
+              <div className="px-3 py-1 text-[10px] font-semibold text-[var(--text-muted)] border-b border-[var(--border-color)] mb-1">
+                Aspect Ratio
               </div>
               {ratioOptions.map((opt) => {
                 const isSelected = activeRatio === opt.value;
@@ -323,18 +290,23 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
                     className={cn(
                       "w-full px-3 py-1.5 flex items-center justify-between text-left transition-colors cursor-pointer",
                       isSelected
-                        ? "bg-[#cf6613]/20 text-amber-400 font-semibold"
-                        : "text-[var(--text-primary)] hover:bg-[var(--bg-hover)] hover:text-white"
+                        ? "bg-[var(--bg-hover)] text-[var(--text-primary)] font-semibold"
+                        : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                     )}
                   >
                     <div className="flex items-center gap-2 min-w-0">
-                      <Icon className={cn("w-3.5 h-3.5 shrink-0", isSelected ? "text-amber-400" : "text-[var(--text-muted)]")} />
+                      <Icon
+                        className={cn(
+                          "w-3.5 h-3.5 shrink-0",
+                          isSelected ? "text-[var(--btn-primary-bg)]" : "text-[var(--text-muted)]"
+                        )}
+                      />
                       <div>
                         <div className="text-[11px] leading-tight font-medium">{opt.label}</div>
-                        <div className="text-[8.5px] text-[var(--text-muted)] font-mono">{opt.sub}</div>
+                        <div className="text-[9px] text-[var(--text-muted)] font-mono">{opt.sub}</div>
                       </div>
                     </div>
-                    {isSelected && <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
+                    {isSelected && <Check className="w-3.5 h-3.5 text-[var(--btn-primary-bg)] shrink-0" />}
                   </button>
                 );
               })}
@@ -342,7 +314,7 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
           )}
         </div>
 
-        {/* Speed Dropdown (NO chevron arrow, fully clickable) */}
+        {/* Playback Speed Circle */}
         <div ref={speedRef} className="relative shrink-0 w-9 h-9">
           <button
             type="button"
@@ -353,23 +325,18 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
               setIsFpsOpen(false);
             }}
             title="Playback Speed"
-            className={cn(
-              "w-full h-full flex flex-col items-center justify-center rounded-full border transition-all cursor-pointer group text-center select-none p-0.5",
-              isSpeedOpen
-                ? "bg-[var(--bg-hover)] border-amber-400/80 text-amber-400 shadow-sm shadow-amber-500/10"
-                : "bg-[var(--bg-card)] border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
-            )}
+            className={cn(circleBtnBase, isSpeedOpen ? circleBtnActive : circleBtnIdle)}
           >
-            <Gauge className="w-3 h-3 text-amber-400 transition-colors" />
+            <Gauge className="w-3 h-3 text-[var(--text-primary)]" />
             <span className="font-mono font-semibold text-[7.5px] leading-none mt-0.5">
               {playbackRate}x
             </span>
           </button>
 
           {isSpeedOpen && (
-            <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 w-36 py-1.5 rounded-xl bg-[var(--bg-panel)] border border-[var(--border-strong)] shadow-2xl shadow-black/90 z-50 animate-in fade-in zoom-in-95 duration-100">
-              <div className="px-3 py-1 text-[9px] font-bold uppercase tracking-wider text-[var(--text-muted)] border-b border-[var(--border-color)] mb-1">
-                Playback Speed
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 w-36 py-1.5 rounded-[var(--radius-panel)] bg-[var(--bg-panel)] border border-[var(--border-strong)] z-50">
+              <div className="px-3 py-1 text-[10px] font-semibold text-[var(--text-muted)] border-b border-[var(--border-color)] mb-1">
+                Speed
               </div>
               {speedOptions.map((rate) => (
                 <button
@@ -380,21 +347,21 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
                     setIsSpeedOpen(false);
                   }}
                   className={cn(
-                    "w-full px-3 py-1 flex items-center justify-between text-left text-xs transition-colors cursor-pointer",
+                    "w-full px-3 py-1.5 flex items-center justify-between text-left text-xs transition-colors cursor-pointer",
                     playbackRate === rate
-                      ? "bg-[#cf6613]/20 text-amber-400 font-semibold"
-                      : "text-[var(--text-primary)] hover:bg-[var(--bg-hover)] hover:text-white"
+                      ? "bg-[var(--bg-hover)] text-[var(--text-primary)] font-semibold"
+                      : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                   )}
                 >
                   <span className="font-mono">{rate}x Speed</span>
-                  {playbackRate === rate && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                  {playbackRate === rate && <Check className="w-3.5 h-3.5 text-[var(--btn-primary-bg)]" />}
                 </button>
               ))}
             </div>
           )}
         </div>
 
-        {/* Frame Rate (FPS) Dropdown (NO chevron arrow, fully clickable) */}
+        {/* Frame Rate Circle */}
         <div ref={fpsRef} className="relative shrink-0 w-9 h-9">
           <button
             type="button"
@@ -405,23 +372,18 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
               setIsSpeedOpen(false);
             }}
             title="Composition Frame Rate (FPS)"
-            className={cn(
-              "w-full h-full flex flex-col items-center justify-center rounded-full border transition-all cursor-pointer group text-center select-none p-0.5",
-              isFpsOpen
-                ? "bg-[var(--bg-hover)] border-amber-400/80 text-amber-400 shadow-sm shadow-amber-500/10"
-                : "bg-[var(--bg-card)] border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
-            )}
+            className={cn(circleBtnBase, isFpsOpen ? circleBtnActive : circleBtnIdle)}
           >
-            <Film className="w-3 h-3 text-amber-400 transition-colors" />
+            <Film className="w-3 h-3 text-[var(--text-primary)]" />
             <span className="font-mono font-semibold text-[7.5px] leading-none mt-0.5">
               {fps}f
             </span>
           </button>
 
           {isFpsOpen && (
-            <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 w-36 py-1.5 rounded-xl bg-[var(--bg-panel)] border border-[var(--border-strong)] shadow-2xl shadow-black/90 z-50 animate-in fade-in zoom-in-95 duration-100">
-              <div className="px-3 py-1 text-[9px] font-bold uppercase tracking-wider text-[var(--text-muted)] border-b border-[var(--border-color)] mb-1">
-                Frame Rate (FPS)
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 w-36 py-1.5 rounded-[var(--radius-panel)] bg-[var(--bg-panel)] border border-[var(--border-strong)] z-50">
+              <div className="px-3 py-1 text-[10px] font-semibold text-[var(--text-muted)] border-b border-[var(--border-color)] mb-1">
+                Frame Rate
               </div>
               {fpsOptions.map((rate) => (
                 <button
@@ -432,21 +394,21 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
                     setIsFpsOpen(false);
                   }}
                   className={cn(
-                    "w-full px-3 py-1 flex items-center justify-between text-left text-xs transition-colors cursor-pointer",
+                    "w-full px-3 py-1.5 flex items-center justify-between text-left text-xs transition-colors cursor-pointer",
                     fps === rate
-                      ? "bg-[#cf6613]/20 text-amber-400 font-semibold"
-                      : "text-[var(--text-primary)] hover:bg-[var(--bg-hover)] hover:text-white"
+                      ? "bg-[var(--bg-hover)] text-[var(--text-primary)] font-semibold"
+                      : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                   )}
                 >
                   <span className="font-mono">{rate} FPS</span>
-                  {fps === rate && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                  {fps === rate && <Check className="w-3.5 h-3.5 text-[var(--btn-primary-bg)]" />}
                 </button>
               ))}
             </div>
           )}
         </div>
 
-        {/* Circular M Logo Button beside FPS */}
+        {/* Microstock Mode Toggle Circle */}
         <button
           type="button"
           data-testid="timeline-motion-logo-btn"
@@ -460,9 +422,9 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
           }
           aria-label="Motion Logo"
           className={cn(
-            "w-9 h-9 rounded-full border flex items-center justify-center transition-all cursor-pointer shrink-0 select-none",
+            "w-9 h-9 rounded-[var(--radius-pill)] border flex items-center justify-center transition-colors cursor-pointer shrink-0 select-none",
             isMicrostockActive
-              ? "bg-amber-600 hover:bg-amber-500 border-amber-500 text-white shadow-sm"
+              ? "bg-[#cf6613] hover:bg-[#b8580f] border-[#e07b27] text-white"
               : "border-[var(--border-color)] bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
           )}
         >
@@ -470,7 +432,7 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
             viewBox="0 0 24 24"
             className={cn(
               "w-4 h-4",
-              isMicrostockActive ? "text-white" : "text-amber-400"
+              isMicrostockActive ? "text-current" : "text-[var(--text-primary)]"
             )}
             fill="none"
             stroke="currentColor"
@@ -484,110 +446,15 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
         </button>
       </div>
 
-      <div className="w-px h-5 bg-[var(--border-color)] mx-0.5 shrink-0" />
-
-      {/* 2. CENTER SCROLLABLE SECTION: Action Tools, Zoom Slider, & Share */}
-      <div
-        ref={toolsScrollRef}
-        onWheel={handleToolsWheel}
-        className="flex-1 min-w-0 flex items-center gap-1 sm:gap-1.5 px-0.5 overflow-x-auto no-scrollbar scroll-smooth"
-      >
-        {/* --- GROUP 2: History (Undo, Redo) --- */}
-        {/* Undo */}
-        <button
-          type="button"
-          disabled={!canUndo}
-          onClick={onUndo}
-          title="Undo (Ctrl+Z)"
-          className={cn(
-            toolBtnClass,
-            "text-[var(--text-secondary)] hover:text-white hover:bg-[var(--bg-hover)] disabled:opacity-20 disabled:pointer-events-none"
-          )}
-        >
-          <RotateCcw className={cn(toolIconClass, "transition-colors group-hover:text-white")} />
-          {showToolLabels && <span className={cn("font-medium", toolLabelClass)}>Undo</span>}
-        </button>
-
-        {/* Redo */}
-        <button
-          type="button"
-          disabled={!canRedo}
-          onClick={onRedo}
-          title="Redo (Ctrl+Y)"
-          className={cn(
-            toolBtnClass,
-            "text-[var(--text-secondary)] hover:text-white hover:bg-[var(--bg-hover)] disabled:opacity-20 disabled:pointer-events-none"
-          )}
-        >
-          <RotateCw className={cn(toolIconClass, "transition-colors group-hover:text-white")} />
-          {showToolLabels && <span className={cn("font-medium", toolLabelClass)}>Redo</span>}
-        </button>
-
-        <div className="w-px h-5 bg-[var(--border-color)] mx-0.5 shrink-0" />
-
-        {/* --- GROUP 3: Editing Tools (Crop, Trim, Cut, Mirror, Volume, Delete) --- */}
-        {/* Crop / Fit */}
-        <button
-          type="button"
-          onClick={onFit}
-          title="Fit Timeline Zoom to Screen"
-          className={cn(
-            toolBtnClass,
-            "text-[var(--text-secondary)] hover:text-white hover:bg-[var(--bg-hover)]"
-          )}
-        >
-          <Crop className={cn(toolIconClass, "transition-colors group-hover:text-white")} />
-          {showToolLabels && <span className={cn("font-medium", toolLabelClass)}>Crop</span>}
-        </button>
-
-        {/* Trim */}
-        <button
-          type="button"
-          onClick={onTrimIn}
-          title="Trim In-Point at Playhead"
-          className={cn(
-            toolBtnClass,
-            "text-[var(--text-secondary)] hover:text-white hover:bg-[var(--bg-hover)]"
-          )}
-        >
-          <FoldHorizontal className={cn(toolIconClass, "transition-colors group-hover:text-white")} />
-          {showToolLabels && <span className={cn("font-medium", toolLabelClass)}>Trim</span>}
-        </button>
-
-        {/* Cut / Split */}
-        <button
-          type="button"
-          onClick={onSplit}
-          title="Split Clip at Playhead (S or C)"
-          className={cn(
-            toolBtnClass,
-            "text-[var(--text-secondary)] hover:text-white hover:bg-[var(--bg-hover)]"
-          )}
-        >
-          <Scissors className={cn(toolIconClass, "transition-colors group-hover:text-white")} />
-          {showToolLabels && <span className={cn("font-medium", toolLabelClass)}>Cut</span>}
-        </button>
-
-        {/* Mirror / Duplicate */}
-        <button
-          type="button"
-          onClick={onDuplicate}
-          title="Duplicate Clip (Ctrl+D)"
-          className={cn(
-            toolBtnClass,
-            "text-[var(--text-secondary)] hover:text-white hover:bg-[var(--bg-hover)]"
-          )}
-        >
-          <Copy className={cn(toolIconClass, "transition-colors group-hover:text-white")} />
-          {showToolLabels && <span className={cn("font-medium", toolLabelClass)}>Mirror</span>}
-        </button>
-
-        {/* Volume (Mute Toggle + Gain Slider) */}
+      {/* RIGHT: Volume, Timeline Zoom, Export MP4, Collapse */}
+      <div className="flex items-center gap-1.5 shrink-0">
+        {/* Volume Pill */}
         <div
           className={cn(
-            "h-8 px-1.5 flex items-center gap-1.5 border bg-[var(--bg-card)] rounded-[var(--radius-control)] shrink-0",
+            "h-9 flex items-center gap-1.5 border bg-[var(--bg-card)] rounded-[var(--radius-pill)] shrink-0",
+            showVolumeSlider ? "px-2.5" : "w-9 justify-center p-0",
             isMuted || effectiveVolumePct === 0
-              ? "border-rose-500/30 bg-rose-950/15"
+              ? "border-[var(--status-error-border)]"
               : "border-[var(--border-color)]"
           )}
         >
@@ -597,175 +464,117 @@ export const TimelineHeaderToolbar: React.FC<TimelineHeaderToolbarProps> = ({
             aria-label={isMuted || effectiveVolumePct === 0 ? "Unmute Audio" : "Mute Audio"}
             title={isMuted || effectiveVolumePct === 0 ? "Unmute Audio" : "Mute Audio"}
             className={cn(
-              "p-1 rounded-[var(--radius-control)] transition-colors cursor-pointer",
+              "w-7 h-7 rounded-[var(--radius-pill)] flex items-center justify-center transition-colors cursor-pointer",
               isMuted || effectiveVolumePct === 0
-                ? "text-rose-400 hover:text-rose-300"
+                ? "text-[var(--status-error-bar)]"
                 : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
             )}
           >
             {isMuted || effectiveVolumePct === 0 ? (
-              <VolumeX className={cn(toolIconClass, "text-rose-400")} />
+              <VolumeX className="w-3.5 h-3.5" />
             ) : effectiveVolumePct < 50 ? (
-              <Volume1 className={cn(toolIconClass, "transition-colors")} />
+              <Volume1 className="w-3.5 h-3.5" />
             ) : (
-              <Volume2 className={cn(toolIconClass, "transition-colors")} />
+              <Volume2 className="w-3.5 h-3.5" />
             )}
           </button>
-          <input
-            type="range"
-            min={0}
-            max={100}
-            step={1}
-            value={effectiveVolumePct}
-            aria-label="Audio volume percentage"
-            onChange={(e) => {
-              const nextPct = Number(e.target.value);
-              onVolumeChange?.(Math.max(0, Math.min(1, nextPct / 100)));
-            }}
-            className="w-14 sm:w-16 h-1 accent-amber-500 bg-[var(--bg-input)] rounded-lg cursor-ew-resize outline-none"
-            title={`Volume: ${effectiveVolumePct}%`}
-          />
-          <span className="font-mono text-[10px] w-7 text-right text-[var(--text-secondary)] tabular-nums">
-            {effectiveVolumePct}%
-          </span>
+          {showVolumeSlider && (
+            <>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={effectiveVolumePct}
+                aria-label="Audio volume percentage"
+                onChange={(e) => {
+                  const nextPct = Number(e.target.value);
+                  onVolumeChange?.(Math.max(0, Math.min(1, nextPct / 100)));
+                }}
+                className="w-14 h-1 accent-[#cf6613] bg-[var(--bg-input)] rounded-[var(--radius-pill)] cursor-ew-resize outline-none"
+                title={`Volume: ${effectiveVolumePct}%`}
+              />
+              <span className="font-mono text-[10px] w-7 text-right text-[var(--text-secondary)] tabular-nums">
+                {effectiveVolumePct}%
+              </span>
+            </>
+          )}
         </div>
 
-        {/* Delete */}
-        <button
-          type="button"
-          onClick={onDelete}
-          title="Delete Selected Clip (Del)"
-          className={cn(
-            toolBtnClass,
-            "text-[var(--text-secondary)] hover:text-rose-400 hover:bg-rose-950/40"
-          )}
-        >
-          <Trash2 className={cn(toolIconClass, "transition-colors group-hover:text-rose-400")} />
-          {showToolLabels && <span className={cn("font-medium", toolLabelClass)}>Delete</span>}
-        </button>
+        {/* Timeline Zoom Pill */}
+        {!isCollapsed && showZoomControl && (
+          <div className="h-9 px-2.5 flex items-center gap-1 border border-[var(--border-color)] bg-[var(--bg-card)] rounded-[var(--radius-pill)] text-[10px] font-mono shrink-0">
+            <button
+              type="button"
+              onClick={() => onZoomChange(Math.max(-100, timelineZoom - 10))}
+              aria-label="Zoom Out Timeline"
+              className="w-6 h-6 rounded-[var(--radius-pill)] flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
+              title="Zoom Out Timeline"
+            >
+              <ZoomOut className="w-3.5 h-3.5" />
+            </button>
+            <input
+              type="range"
+              min={-100}
+              max={100}
+              step={5}
+              value={timelineZoom}
+              aria-label="Timeline zoom"
+              onChange={(e) => onZoomChange(Number(e.target.value))}
+              className="w-14 h-1 accent-[#cf6613] bg-[var(--bg-input)] rounded-[var(--radius-pill)] cursor-ew-resize outline-none"
+              title={`Timeline Zoom: ${timelineZoom > 0 ? `+${timelineZoom}%` : `${timelineZoom}%`}`}
+            />
+            <button
+              type="button"
+              onClick={() => onZoomChange(Math.min(100, timelineZoom + 10))}
+              aria-label="Zoom In Timeline"
+              className="w-6 h-6 rounded-[var(--radius-pill)] flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
+              title="Zoom In Timeline"
+            >
+              <ZoomIn className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => onZoomChange(0)}
+              className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] font-semibold px-1 cursor-pointer tabular-nums"
+              title="Reset Zoom"
+            >
+              {timelineZoom > 0 ? `+${timelineZoom}%` : `${timelineZoom}%`}
+            </button>
+          </div>
+        )}
 
-        <div className="w-px h-5 bg-[var(--border-color)] mx-0.5 shrink-0" />
-
-        {/* --- GROUP 4: Track Controls (Snap, Layer) --- */}
-        {/* Magnet Snapping */}
-        <button
-          type="button"
-          onClick={onToggleSnap}
-          title={isSnapping ? "Magnetic Snapping ON" : "Magnetic Snapping OFF"}
-          className={cn(
-            toolBtnClass,
-            isSnapping
-              ? "bg-[#cf6613]/20 text-amber-400 border border-amber-500/30"
-              : "text-[var(--text-secondary)] hover:text-white hover:bg-[var(--bg-hover)]"
-          )}
-        >
-          <Magnet className={cn(toolIconClass, "transition-colors")} />
-          {showToolLabels && <span className={cn("font-medium", toolLabelClass)}>Snap</span>}
-        </button>
-
-        {/* Add Layer Track */}
-        <button
-          type="button"
-          onClick={onAddLayer}
-          title="Add Dynamic Layer Track"
-          className={cn(
-            toolBtnClass,
-            "text-amber-400 hover:text-amber-300 hover:bg-amber-500/10"
-          )}
-        >
-          <Plus className={cn(toolIconClass, "transition-colors")} />
-          {showToolLabels && <span className={cn("font-semibold", toolLabelClass)}>Layer</span>}
-        </button>
-
-        <div className="w-px h-5 bg-[var(--border-color)] mx-0.5 shrink-0" />
-
-        {/* --- GROUP 5: Zoom Controls (Always accessible, never disappears!) --- */}
-        <div className="h-8 px-2 flex items-center gap-1.5 border border-[var(--border-color)] bg-[var(--bg-card)] rounded-xl text-[10px] font-mono shrink-0">
-          <button
-            type="button"
-            onClick={() => onZoomChange(Math.max(-100, timelineZoom - 10))}
-            className="text-[var(--text-secondary)] hover:text-amber-400 cursor-pointer p-0.5"
-            title="Zoom Out Timeline (-10%)"
-          >
-            <ZoomOut className="w-3.5 h-3.5" />
-          </button>
-          <input
-            type="range"
-            min={-100}
-            max={100}
-            step={5}
-            value={timelineZoom}
-            onChange={(e) => onZoomChange(Number(e.target.value))}
-            className="w-14 sm:w-16 md:w-20 h-1 accent-[#cf6613] bg-[var(--bg-input)] rounded-lg cursor-ew-resize outline-none"
-            title={`Timeline Zoom: ${timelineZoom > 0 ? `+${timelineZoom}%` : `${timelineZoom}%`}`}
-          />
-          <button
-            type="button"
-            onClick={() => onZoomChange(Math.min(100, timelineZoom + 10))}
-            className="text-[var(--text-secondary)] hover:text-amber-400 cursor-pointer p-0.5"
-            title="Zoom In Timeline (+10%)"
-          >
-            <ZoomIn className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => onZoomChange(0)}
-            className="text-amber-400 font-semibold px-0.5 hover:underline cursor-pointer min-w-5 text-center text-[9px]"
-            title="Reset Zoom to 0%"
-          >
-            {timelineZoom > 0 ? `+${timelineZoom}%` : `${timelineZoom}%`}
-          </button>
-        </div>
-
-        {/* --- GROUP 6: Share Button (Always accessible, never disappears!) --- */}
-        <button
-          type="button"
-          onClick={() => {
-            if (onShare) onShare();
-          }}
-          title="Share Video Config (Copy JSON)"
-          className={cn(
-            toolBtnClass,
-            "text-[var(--text-secondary)] hover:text-white hover:bg-[var(--bg-hover)]"
-          )}
-        >
-          <Share2 className={cn(toolIconClass, "transition-colors group-hover:text-white")} />
-          {showToolLabels && <span className={cn("font-medium", toolLabelClass)}>Share</span>}
-        </button>
-      </div>
-
-      <div className="w-px h-5 bg-[var(--border-color)] mx-0.5 shrink-0" />
-
-      {/* 3. RIGHT PINNED SECTION: Always-Visible Orange Export Button */}
-      <div className="flex items-center shrink-0">
+        {/* Export MP4 Pill */}
         <button
           type="button"
           onClick={onExport}
           disabled={isExporting}
-          title="Render & Export Video MP4 (Local GPU)"
+          aria-label="Export Video MP4"
+          title="Render & Export Video MP4"
           className={cn(
-            "rounded-full bg-[#cf6613] hover:bg-[#b8580f] active:scale-[0.98] border border-[#e07b27] text-white flex items-center justify-center font-semibold shadow-md shadow-orange-950/40 hover:scale-[1.02] transition-all cursor-pointer disabled:opacity-50 shrink-0",
-            isCompact ? "w-8 h-8 p-0" : "h-8 px-3.5 text-xs gap-1.5"
+            "h-9 rounded-[var(--radius-pill)] bg-[#cf6613] hover:bg-[#b8580f] active:scale-[0.98] border border-[#e07b27] text-white flex items-center justify-center font-semibold transition-colors cursor-pointer disabled:opacity-50 shrink-0",
+            isCompact ? "w-9 p-0" : "px-4 text-xs gap-1.5"
           )}
         >
           {isExporting ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
           ) : (
-            <Download className="w-3.5 h-3.5 text-white stroke-[2.5]" />
+            <Download className="w-3.5 h-3.5 stroke-[2.25]" />
           )}
           {!isCompact && <span>Export</span>}
         </button>
 
-        {/* 4. PINNED SECTION: Collapse / Expand Timeline Toggle */}
+        {/* Collapse / Expand Timeline Circle */}
         {onToggleCollapse && (
           <button
             type="button"
             onClick={onToggleCollapse}
-            title={isCollapsed ? "Buka Timeline (Tampilkan Tracks)" : "Tutup Timeline (Hanya Header)"}
-            className="ml-1.5 w-8 h-8 rounded-full border border-[var(--border-color)] bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] active:scale-95 text-[var(--text-secondary)] hover:text-white transition-all cursor-pointer shrink-0 flex items-center justify-center shadow-sm"
+            aria-label={isCollapsed ? "Expand Timeline" : "Collapse Timeline"}
+            title={isCollapsed ? "Expand Timeline" : "Collapse Timeline"}
+            className="w-9 h-9 rounded-[var(--radius-pill)] border border-[var(--border-color)] bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer shrink-0 flex items-center justify-center"
           >
             {isCollapsed ? (
-              <ChevronUp className="w-4 h-4 text-amber-400 shrink-0" />
+              <ChevronUp className="w-4 h-4 shrink-0" />
             ) : (
               <ChevronDown className="w-4 h-4 shrink-0" />
             )}

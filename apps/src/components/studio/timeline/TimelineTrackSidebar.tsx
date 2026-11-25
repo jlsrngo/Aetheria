@@ -63,9 +63,9 @@ export const TimelineTrackSidebar: React.FC<TimelineTrackSidebarProps> = ({
 }) => {
   return (
     <div className="w-[245px] shrink-0 border-r border-[var(--border-color)] bg-[var(--bg-panel)] flex flex-col min-h-0">
-      <div className="h-6 px-2.5 border-b border-[var(--border-color)] flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] shrink-0">
-        <span>Track / Component Layer</span>
-        <span>Visibility</span>
+      <div className="h-6 px-2.5 border-b border-[var(--border-color)] flex items-center justify-between text-[10px] font-semibold text-[var(--text-muted)] shrink-0">
+        <span>Scenes &amp; Audio</span>
+        <span>Show</span>
       </div>
 
       <div
@@ -77,6 +77,11 @@ export const TimelineTrackSidebar: React.FC<TimelineTrackSidebarProps> = ({
         }}
         className="flex-1 overflow-y-auto divide-y divide-[var(--border-color)]/50"
       >
+        {layers.length === 0 && subtitles.length === 0 && (
+          <div className="px-3 py-4 text-[11px] text-[var(--text-muted)]">
+            No scenes yet. Generate a video in Chat.
+          </div>
+        )}
         {layers.map((layer, idx) => {
           const isSelected = layer.id === selectedLayerId;
           const palette = getLayerPalette(layer, idx, layerColors);
@@ -95,7 +100,7 @@ export const TimelineTrackSidebar: React.FC<TimelineTrackSidebarProps> = ({
               <div className="flex items-center gap-1.5 min-w-0 flex-1">
                 <span
                   className={cn(
-                    "w-7 text-[9px] font-mono font-bold border rounded px-1 py-0.5 text-center shrink-0",
+                    "w-7 text-[9px] font-mono font-bold border rounded-[var(--radius-pill)] px-1 py-0.5 text-center shrink-0",
                     layer.visible
                       ? palette.badge
                       : "text-[var(--text-muted)] bg-[var(--bg-card)] border-[var(--border-color)] opacity-50"

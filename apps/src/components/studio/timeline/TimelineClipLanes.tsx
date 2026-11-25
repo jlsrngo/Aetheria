@@ -56,7 +56,7 @@ export const TimelineClipLanes: React.FC<TimelineClipLanesProps> = ({
 }) => {
   return (
     <div
-      className="flex-1 relative flex flex-col min-h-0 overflow-x-auto overflow-y-hidden bg-[#0A0A0C]"
+      className="flex-1 relative flex flex-col min-h-0 overflow-x-auto overflow-y-hidden bg-[var(--bg-editor)]"
       onWheel={(e) => {
         if (e.ctrlKey || e.altKey) {
           e.preventDefault();
@@ -155,7 +155,7 @@ export const TimelineClipLanes: React.FC<TimelineClipLanesProps> = ({
                     onEditLayer(layer);
                   }}
                   className={cn(
-                    "group absolute top-1 bottom-1 rounded border flex items-center justify-between overflow-hidden select-none transition-colors cursor-grab active:cursor-grabbing",
+                    "group absolute top-1 bottom-1 rounded-[var(--radius-control)] border flex items-center justify-between overflow-hidden select-none transition-colors cursor-grab active:cursor-grabbing",
                     !layer.visible
                       ? "bg-[var(--bg-card)] border-[var(--border-color)] text-[var(--text-muted)] opacity-50"
                       : cn(palette.clip, isSelected && palette.selected)
@@ -236,10 +236,10 @@ export const TimelineClipLanes: React.FC<TimelineClipLanesProps> = ({
 
         {/* Playhead Vertical Line */}
         <div
-          className="absolute top-0 bottom-0 w-px bg-amber-500 pointer-events-none z-20"
+          className="absolute top-0 bottom-0 w-px bg-[var(--btn-primary-bg)] pointer-events-none z-20"
           style={{ left: `${progress * 100}%` }}
         >
-          <div className="absolute top-0 -left-[4px] w-2.5 h-2.5 rounded-full bg-amber-500 ring-2 ring-black" />
+          <div className="absolute top-0 -left-[4px] w-2.5 h-2.5 rounded-full bg-[var(--btn-primary-bg)] ring-2 ring-[var(--bg-editor)]" />
         </div>
       </div>
     </div>

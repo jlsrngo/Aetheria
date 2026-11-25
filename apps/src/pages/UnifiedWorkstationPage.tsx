@@ -4,10 +4,7 @@ import { toast } from "sonner";
 import { WorkstationLeftExplorer } from "../components/workstation/WorkstationLeftExplorer";
 import { WorkstationActivityBar, type SidebarView } from "../components/workstation/activity/WorkstationActivityBar";
 import { WorkspaceSearchPanel } from "../components/workstation/search/WorkspaceSearchPanel";
-import { CompositionsPanel } from "../components/studio/panels/CompositionsPanel";
 import { ScriptPanel } from "../components/studio/panels/ScriptPanel";
-import { InspectorPanel } from "../components/studio/panels/InspectorPanel";
-import { ElementsCaptionsPanel } from "../components/studio/panels/ElementsCaptionsPanel";
 import { RenderQueuePanel } from "../components/studio/panels/RenderQueuePanel";
 import { MicrostockPanel } from "../components/studio/panels/MicrostockPanel";
 import {
@@ -105,7 +102,7 @@ export function UnifiedWorkstationPage() {
   });
 
   const [showQuickOpenModal, setShowQuickOpenModal] = useState(false);
-  const [activeSidebarView, setActiveSidebarView] = useState<SidebarView>("compositions");
+  const [activeSidebarView, setActiveSidebarView] = useState<SidebarView>("explorer");
   const [floatingPanels, setFloatingPanels] = useState<
     Partial<Record<SidebarView, FloatingPanelGeometry>>
   >({});
@@ -120,7 +117,7 @@ export function UnifiedWorkstationPage() {
   useEffect(() => {
     if (!microstock.manifest.enabled) {
       if (activeSidebarView === "microstock") {
-        setActiveSidebarView("compositions");
+        setActiveSidebarView("explorer");
       }
       setFloatingPanels((prev) => {
         if (!prev.microstock) return prev;
@@ -221,14 +218,6 @@ export function UnifiedWorkstationPage() {
       : handleCloseLeft;
 
     switch (view) {
-      case "compositions":
-        return (
-          <CompositionsPanel
-            width="100%"
-            isFloating={isFloating}
-            onClose={onCloseAction}
-          />
-        );
       case "script":
         return (
           <ScriptPanel
@@ -239,22 +228,6 @@ export function UnifiedWorkstationPage() {
             activeFolder={activeFolder}
             workspaceFiles={workspaceFiles}
             onOpenFileTab={tabs.handleOpenFileTab}
-          />
-        );
-      case "inspector":
-        return (
-          <InspectorPanel
-            width="100%"
-            isFloating={isFloating}
-            onClose={onCloseAction}
-          />
-        );
-      case "elements":
-        return (
-          <ElementsCaptionsPanel
-            width="100%"
-            isFloating={isFloating}
-            onClose={onCloseAction}
           />
         );
       case "renders":

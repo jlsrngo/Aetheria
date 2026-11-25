@@ -94,19 +94,19 @@ export const StudioProxyControl: React.FC<StudioProxyControlProps> = ({
               : "Build Rust proxy MP4 preview"
         }
         className={cn(
-          "h-6 px-2 rounded-[var(--radius-control)] border text-[10px] font-medium flex items-center gap-1 transition-colors cursor-pointer",
+          "h-7 px-2.5 rounded-[var(--radius-pill)] border text-[10px] font-medium flex items-center gap-1 transition-colors cursor-pointer",
           isRendering
-            ? "bg-[var(--bg-card)] border-amber-400/60 text-amber-300 cursor-wait"
+            ? "bg-[var(--bg-card)] border-[var(--btn-primary-bg)] text-[var(--btn-primary-bg)] cursor-wait"
             : isReady && proxyEnabled
               ? "bg-[var(--text-primary)] text-[var(--bg-app)] border-[var(--text-primary)] font-semibold"
               : errText
-                ? "bg-rose-500/15 border-rose-500/50 text-rose-300"
-                : "bg-[var(--bg-card)] border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-amber-400"
+                ? "bg-[var(--status-error-bg)] border-[var(--status-error-border)] text-white"
+                : "bg-[var(--bg-card)] border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
         )}
       >
         {isRendering ? (
           <>
-            <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
+            <Loader2 className="w-3 h-3 animate-spin text-[var(--btn-primary-bg)]" />
             <span className="font-mono">Proxy {status?.progress ?? 0}%</span>
           </>
         ) : (
@@ -133,10 +133,10 @@ export const StudioProxyControl: React.FC<StudioProxyControlProps> = ({
           aria-label="Rebuild Rust proxy MP4 preview"
           title={status?.stale ? "Source changed — rebuild proxy MP4" : "Rebuild proxy MP4"}
           className={cn(
-            "h-6 w-6 flex items-center justify-center rounded-[var(--radius-control)] bg-[var(--bg-card)] border cursor-pointer",
+            "h-7 w-7 flex items-center justify-center rounded-[var(--radius-pill)] bg-[var(--bg-card)] border cursor-pointer transition-colors",
             status?.stale
-              ? "border-amber-400 text-amber-400"
-              : "border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+              ? "border-[var(--btn-primary-bg)] text-[var(--btn-primary-bg)]"
+              : "border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
           )}
         >
           <RefreshCw className="w-3 h-3" />

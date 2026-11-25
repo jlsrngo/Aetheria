@@ -1,23 +1,16 @@
 import { memo } from "react";
 import {
-  Clapperboard,
   FileCode2,
   Files,
-  SlidersHorizontal,
-  Layers,
   Download,
-  Search,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "../../../lib/utils";
 import { useTheme } from "../../../lib/theme";
 
 export type SidebarView =
-  | "compositions"
-  | "script"
   | "explorer"
-  | "inspector"
-  | "elements"
+  | "script"
   | "renders"
   | "search"
   | "microstock";
@@ -38,53 +31,25 @@ const ITEMS: {
   neoOff: string;
 }[] = [
   {
-    view: "compositions",
-    label: "Compositions (Scene)",
-    icon: Clapperboard,
+    view: "explorer",
+    label: "Files & Assets",
+    icon: Files,
     neoOn: "bg-[#CCFF00]",
     neoOff: "bg-[#FFFDFB] hover:bg-[#CCFF00]",
   },
   {
     view: "script",
-    label: "Scripts (LLM React Code)",
+    label: "Scripts & Story",
     icon: FileCode2,
     neoOn: "bg-sky-300",
-    neoOff: "bg-[var(--bg-card)] hover:bg-sky-300",
-  },
-  {
-    view: "explorer",
-    label: "Assets & Explorer",
-    icon: Files,
-    neoOn: "bg-amber-200",
-    neoOff: "bg-[var(--bg-card)] hover:bg-amber-200",
-  },
-  {
-    view: "inspector",
-    label: "Inspector & Properties",
-    icon: SlidersHorizontal,
-    neoOn: "bg-[#B388FF]",
-    neoOff: "bg-[#FFFDFB] hover:bg-[#B388FF]",
-  },
-  {
-    view: "elements",
-    label: "Elements & Captions",
-    icon: Layers,
-    neoOn: "bg-[#FFD166]",
-    neoOff: "bg-[#FFFDFB] hover:bg-[#FFD166]",
+    neoOff: "bg-[#FFFDFB] hover:bg-sky-300",
   },
   {
     view: "renders",
-    label: "Render Queue (Jobs)",
+    label: "Render Queue",
     icon: Download,
     neoOn: "bg-[#FF9F43]",
     neoOff: "bg-[#FFFDFB] hover:bg-[#FF9F43]",
-  },
-  {
-    view: "search",
-    label: "Search",
-    icon: Search,
-    neoOn: "bg-[#67E8F9]",
-    neoOff: "bg-[#FFFDFB] hover:bg-[#67E8F9]",
   },
 ];
 
@@ -103,40 +68,38 @@ export const WorkstationActivityBar = memo(function WorkstationActivityBar({
       className="w-12 h-full bg-[var(--bg-app)] border-r border-[var(--border-color)] flex flex-col justify-between shrink-0 select-none z-10"
       aria-label="Activity Bar"
     >
-      <div className="flex flex-col items-center py-2 gap-1.5 w-full">
+      <div className="flex flex-col items-center py-2.5 gap-2 w-full">
         {ITEMS.map(({ view, label, icon: Icon, neoOn, neoOff }) => {
           const active = !isCollapsed && activeView === view;
           return (
             <button
               key={view}
               type="button"
+              data-testid={`activity-bar-${view}-btn`}
               onClick={() => onSelectView(view)}
               className={cn(
-                "w-9 h-9 rounded-lg flex items-center justify-center transition-all cursor-pointer relative group",
+                "w-9 h-9 rounded-[var(--radius-pill)] flex items-center justify-center transition-colors cursor-pointer relative",
                 isNeobrutalism
                   ? cn(
                       "neo-icon-badge text-[#141413] border border-[#141413]",
                       active ? neoOn : neoOff
                     )
                   : active
-                  ? "text-[var(--text-primary)] bg-[var(--bg-hover)]"
-                  : "text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]/60"
+                  ? "text-[var(--text-primary)] bg-[var(--bg-hover)] border border-[var(--border-strong)]"
+                  : "text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]/60 border border-transparent"
               )}
               title={label}
               aria-label={label}
             >
-              {!isNeobrutalism && active && (
-                <span className="absolute left-0 top-2 bottom-2 w-0.5 bg-[var(--text-primary)] rounded-r" />
-              )}
               <Icon className="w-4 h-4 stroke-[1.8]" />
 
               {view === "renders" && renderJobCount > 0 && (
                 <span
                   className={cn(
-                    "absolute -top-1 -right-1 min-w-[17px] h-[17px] px-0.5 rounded-full text-[10px] font-bold leading-none flex items-center justify-center text-center pointer-events-none select-none",
+                    "absolute -top-1 -right-1 min-w-[17px] h-[17px] px-0.5 rounded-[var(--radius-pill)] text-[10px] font-bold leading-none flex items-center justify-center text-center pointer-events-none select-none",
                     isNeobrutalism
                       ? "bg-[#FF9F43] text-[#141413] border border-[#141413]"
-                      : "bg-[#0078d4] text-white"
+                      : "bg-[#cf6613] text-white"
                   )}
                 >
                   <span className="inline-block transform -translate-y-[0.5px]">
@@ -154,22 +117,19 @@ export const WorkstationActivityBar = memo(function WorkstationActivityBar({
             data-testid="activity-bar-microstock-btn"
             onClick={() => onSelectView("microstock")}
             className={cn(
-              "w-9 h-9 rounded-lg flex items-center justify-center transition-all cursor-pointer relative group",
+              "w-9 h-9 rounded-[var(--radius-pill)] flex items-center justify-center transition-colors cursor-pointer relative",
               isNeobrutalism
                 ? cn(
                     "neo-icon-badge text-[#141413] border border-[#141413]",
-                    microstockSelected ? "bg-amber-300" : "bg-[var(--bg-card)] hover:bg-amber-300"
+                    microstockSelected ? "bg-[#CCFF00]" : "bg-[#FFFDFB] hover:bg-[#CCFF00]"
                   )
                 : microstockSelected
-                ? "text-amber-400 bg-[var(--bg-hover)]"
-                : "text-amber-400 hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]/60"
+                ? "text-[var(--text-primary)] bg-[var(--bg-hover)] border border-[var(--border-strong)]"
+                : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]/60 border border-transparent"
             )}
             title="Adobe Stock Microstock (M)"
             aria-label="Adobe Stock Microstock (M)"
           >
-            {!isNeobrutalism && microstockSelected && (
-              <span className="absolute left-0 top-2 bottom-2 w-0.5 bg-amber-400 rounded-r" />
-            )}
             <svg
               viewBox="0 0 24 24"
               className="w-4 h-4"

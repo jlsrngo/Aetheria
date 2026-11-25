@@ -5,7 +5,7 @@ import { useMicrostockStore } from "../../hooks/useMicrostockStore";
 import { useTimelineFilmMeta } from "../../hooks/useTimelineFilmMeta";
 import { useTimelineActions } from "../../hooks/useTimelineActions";
 import { useTimelineInteractions } from "../../hooks/useTimelineInteractions";
-import { buildCompositionLayers, type VideoLayerSpec } from "../../types/video";
+import { type VideoLayerSpec } from "../../types/video";
 import { ClipEditModal } from "./ClipEditModal";
 import { TimelineHeaderToolbar } from "./timeline/TimelineHeaderToolbar";
 import { TimelineTrackSidebar } from "./timeline/TimelineTrackSidebar";
@@ -37,8 +37,6 @@ export const Timeline: React.FC<TimelineProps> = ({
     canvas,
     subtitleCues,
     renderJobs,
-    undoStack,
-    redoStack,
     actions,
   } = useStudioStore();
   const microstock = useMicrostockStore();
@@ -47,7 +45,6 @@ export const Timeline: React.FC<TimelineProps> = ({
   const [timelineZoom, setTimelineZoom] = useState<number>(0);
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
   const [modalLayer, setModalLayer] = useState<VideoLayerSpec | null>(null);
-  const [isSnapping, setIsSnapping] = useState<boolean>(true);
   const isMountedRef = useRef(true);
 
   useEffect(() => {
@@ -63,11 +60,8 @@ export const Timeline: React.FC<TimelineProps> = ({
 
   const baseLayers = useMemo(() => {
     const dynamicLayers = buildDynamicHtmlSceneLayers(activeFilmMeta, durationInFrames);
-    if (dynamicLayers && dynamicLayers.length > 0) {
-      return dynamicLayers;
-    }
-    return buildCompositionLayers(activeComposition.props, durationInFrames);
-  }, [activeFilmMeta, activeComposition.props, durationInFrames]);
+    return dynamicLayers ?? [];
+  }, [activeFilmMeta, durationInFrames]);
 
   const timelineActions = useTimelineActions({
     activeComposition,
@@ -87,7 +81,7 @@ export const Timeline: React.FC<TimelineProps> = ({
     lastFrame,
     currentFrame,
     timelineZoom,
-    isSnapping,
+    isSnapping: true,
     canvas,
     layers: baseLayers,
     layerStartFrame: activeComposition.props.layerStartFrame,
@@ -113,11 +107,6 @@ export const Timeline: React.FC<TimelineProps> = ({
     );
   }, [baseLayers, interactions.dragOverride]);
 
-  const selectedLayer = useMemo(
-    () => layers.find((l) => l.id === selectedLayerId) ?? null,
-    [layers, selectedLayerId]
-  );
-
   const step = (delta: number) =>
     onSeek(Math.min(lastFrame, Math.max(0, currentFrame + delta)));
 
@@ -132,13 +121,13 @@ export const Timeline: React.FC<TimelineProps> = ({
 
   return (
     <section
-      className="shrink-0 border-t border-[var(--border-color)] bg-[var(--bg-app)] flex flex-col select-none relative transition-all duration-150"
+      className="shrink-0 rounded-[var(--radius-panel)] border border-[var(--border-color)] bg-[var(--bg-panel)] flex flex-col select-none relative overflow-visible transition-all duration-150"
       style={{ height: isTimelineCollapsed ? "auto" : interactions.timelineHeight }}
     >
       {!isTimelineCollapsed && (
         <div
           onMouseDown={interactions.startResizeHeight}
-          className="h-1 w-full cursor-row-resize hover:bg-[#cf6613] transition-colors shrink-0"
+          className="h-1 w-full cursor-row-resize hover:bg-[var(--btn-primary-bg)] transition-colors shrink-0 rounded-t-[var(--radius-panel)]"
           title="Drag to resize Timeline height"
         />
       )}
@@ -152,43 +141,17 @@ export const Timeline: React.FC<TimelineProps> = ({
         volume={canvas.volume ?? 1}
         isMuted={Boolean(canvas.isMuted || activeComposition.props.isMuted)}
         timelineZoom={timelineZoom}
-        isSnapping={isSnapping}
-        canUndo={undoStack.length > 0}
-        canRedo={redoStack.length > 0}
         activeRatio={activeComposition.ratio}
-        selectedLayer={selectedLayer}
         isExporting={timelineActions.isExporting}
         isCollapsed={isTimelineCollapsed}
         onToggleCollapse={() => setIsTimelineCollapsed((c) => !c)}
         onTogglePlay={onTogglePlay}
         onStep={step}
-        onUndo={() => {
-          actions.undoProps();
-          toast.info("Undo: Reverted change", { duration: 1200 });
-        }}
-        onRedo={() => {
-          actions.redoProps();
-          toast.info("Redo: Reapplied change", { duration: 1200 });
-        }}
         onRatioChange={timelineActions.handleRatioChange}
         onFpsChange={(newFps) => {
           actions.updateActiveMetadata({ fps: newFps });
           toast.success(`Frame rate: ${newFps} FPS`);
         }}
-        onFit={() => setTimelineZoom(0)}
-        onTrimIn={() => {
-          actions.updateCanvas({
-            inFrame: canvas.inFrame === currentFrame ? null : currentFrame,
-          });
-          toast.info(`In-point: ${currentFrame}f`);
-        }}
-        onTrimOut={() => {
-          actions.updateCanvas({
-            outFrame: canvas.outFrame === currentFrame ? null : currentFrame,
-          });
-          toast.info(`Out-point: ${currentFrame}f`);
-        }}
-        onSplit={timelineActions.handleSplitClip}
         onSpeedChange={(speed) => {
           actions.updateCanvas({ playbackRate: speed });
           toast.info(`Playback speed: ${speed}x`);
@@ -209,10 +172,6 @@ export const Timeline: React.FC<TimelineProps> = ({
             actions.updateActiveProps({ isMuted: false }, { recordHistory: false });
           }
         }}
-        onDuplicate={timelineActions.handleDuplicateLayer}
-        onDelete={timelineActions.handleDeleteSelectedLayer}
-        onToggleSnap={() => setIsSnapping((s) => !s)}
-        onAddLayer={timelineActions.handleAddCustomLayer}
         isMicrostockActive={microstock.manifest.enabled}
         onMotionClick={() => {
           const next = !microstock.manifest.enabled;
@@ -246,17 +205,11 @@ export const Timeline: React.FC<TimelineProps> = ({
             void timelineActions.handleQuickExport();
           }
         }}
-        onShare={() => {
-          navigator.clipboard?.writeText(
-            JSON.stringify(activeComposition.props, null, 2)
-          );
-          toast.success("JSON konfigurasi komposisi disalin ke clipboard!");
-        }}
         onZoomChange={setTimelineZoom}
       />
 
       {!isTimelineCollapsed && (
-        <div className="flex-1 flex min-h-0 overflow-hidden">
+        <div className="flex-1 flex min-h-0 overflow-hidden rounded-b-[var(--radius-panel)]">
           <TimelineTrackSidebar
             layers={layers}
             subtitles={subtitleCues}
