@@ -88,6 +88,10 @@ pub struct PreviewCaptureOptions {
     /// When `true` (or `AETHERIA_PREVIEW_MOTION_BLUR=1`), evaluates frames using the exact same
     /// `motion_blur::MotionBlurMode` temporal shutter expression as `html_renderer.rs` for 1:1 parity.
     pub apply_motion_blur: Option<bool>,
+    /// Number of QC samples per shot for `story.json` projects (`3` default: start/mid/end, or `9` for motion strip).
+    pub frames_per_shot: Option<usize>,
+    /// Optional target `shot.id` when `frames_per_shot == Some(9)`.
+    pub strip_shot_id: Option<String>,
 }
 
 /// Returns `true` when the active film uses `stageMode: "hybrid"` or is a self-contained HTML
@@ -348,6 +352,7 @@ pub async fn capture_film_preview_with_options(
             forced_scene_id: None,
             write_scene_beat_strips: None,
             apply_motion_blur: None,
+            ..Default::default()
         },
     )
     .await
@@ -733,10 +738,24 @@ async fn run_cdp_preview_capture(
             if let Some(ref url) = sheet_data_url {
                 if let Some(b64_part) = url.strip_prefix("data:image/jpeg;base64,") {
                     if let Ok(bytes) = B64.decode(b64_part) {
-                        let sheet_path = args.preview_dir.join("contact_sheet.jpg");
+                        let sheet_filename = if args.options.frames_per_shot == Some(9) {
+                            let target_id = args
+                                .story_midpoints
+                                .first()
+                                .map(|(id, _)| id.as_str())
+                                .unwrap_or("shot1");
+                            let clean: String = target_id
+                                .chars()
+                                .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+                                .collect();
+                            format!("strip_{}.jpg", if clean.is_empty() { "shot1" } else { &clean })
+                        } else {
+                            "contact_sheet.jpg".to_string()
+                        };
+                        let sheet_path = args.preview_dir.join(&sheet_filename);
                         if tokio::fs::write(&sheet_path, &bytes).await.is_ok() {
                             contact_sheet_rel =
-                                Some(".aetheria/preview/contact_sheet.jpg".to_string());
+                                Some(format!(".aetheria/preview/{}", sheet_filename));
                         }
                     }
                 }
@@ -804,8 +823,13 @@ pub async fn capture_film_preview_with_full_options(
         .unwrap_or_else(|_| film_root.join(".aetheria").join("preview"));
     let story_json_path = film_root.join("story.json");
     let has_story_json = story_json_path.is_file();
+    let qc_frames_per_shot = if options.frames_per_shot == Some(9) { 9 } else { 3 };
     let story_triplets = if has_story_json {
-        super::story_lint::story_shot_qc_triplets(&story_json_path)
+        super::story_lint::story_shot_qc_samples(
+            &story_json_path,
+            qc_frames_per_shot,
+            options.strip_shot_id.as_deref(),
+        )
     } else {
         Vec::new()
     };
@@ -990,7 +1014,7 @@ pub async fn capture_film_preview_with_full_options(
         );
         let qa_json = json!({
             "mode": "story",
-            "framesPerShot": 3,
+            "framesPerShot": qc_frames_per_shot,
             "lintValid": story_lint.valid,
             "lintIssues": story_lint.issues,
             "totalShots": story_lint.total_shots,

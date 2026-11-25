@@ -132,6 +132,7 @@ pub(crate) async fn run_scene_motion_flow_gate(
             forced_scene_id: Some(scene_id.to_string()),
             write_scene_beat_strips: Some(false),
             apply_motion_blur: Some(false),
+            ..Default::default()
         },
     )
     .await

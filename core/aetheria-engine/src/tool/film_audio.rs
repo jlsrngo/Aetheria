@@ -42,6 +42,7 @@ pub fn film_audio_tool_definition() -> Value {
                                 "id": { "type": "string", "description": "Scene ID matching `film.json` / `AM.registerScene`." },
                                 "narration": { "type": "string", "description": "Clean subtitle/display narration text (optional/empty when mode='showreel')." },
                                 "spokenText": { "type": "string", "description": "Optional phonetic override for foreign names or unmapped acronyms." },
+                                "voPath": { "type": "string", "description": "Optional user-supplied WAV path (relative inside workspace/project) to skip TTS and derive exact duration, words.json, and RMS lipsync levels.json." },
                                 "duration": { "type": "number", "description": "Target duration seconds for non-narrated showreel scenes (optional alias for minScene)." },
                                 "voice": { "type": "string", "description": "Optional voice override (e.g. 'aetheria', 'id-ID-ArdiNeural', 'af_heart')." },
                                 "style": { "type": "string", "description": "Optional delivery style ('default', 'energetic', 'mystery', 'casual', 'serious', 'horror', 'crime_conspiracy')." },
@@ -70,7 +71,24 @@ pub fn film_audio_tool_definition() -> Value {
                     },
                     "bpm": {
                         "type": "number",
-                        "description": "BPM tempo for beat-synced 'showreel' BGM/SFX grooves (defaults to reference style.json BPM or 120)."
+                        "description": "BPM tempo for beat-synced 'showreel' or 'musicMood' BGM grooves (defaults to mood preset or 120)."
+                    },
+                    "musicMood": {
+                        "type": "string",
+                        "enum": ["cheerful", "chill", "tense", "comic", "sad", "epic", "study", "mystery", "warm"],
+                        "description": "Optional procedural BGM mood preset synthesized alongside scenes (paired with FFmpeg ducking and loudnorm)."
+                    },
+                    "musicVolume": {
+                        "type": "number",
+                        "description": "Optional background music gain 0.0..1.0 (default 0.18)."
+                    },
+                    "duck": {
+                        "type": "boolean",
+                        "description": "Sidechain-duck BGM underneath voiceover via FFmpeg sidechaincompress (default true when musicMood is set)."
+                    },
+                    "loudnorm": {
+                        "type": "boolean",
+                        "description": "Apply EBU R128 loudness normalization (I=-16) in FFmpeg mix (default true when musicMood is set)."
                     },
                     "buffer": {
                         "type": "number",
@@ -491,12 +509,13 @@ async fn synthesize_showreel_bgm(
     bpm: f64,
     scene_index: usize,
     scene_start_sec: f64,
+    mood: Option<&str>,
 ) -> Result<(), String> {
     let voicebox_dir = project_root().join("core").join("voicebox");
     let py_code = r#"
 import sys
 from pathlib import Path
-vb_dir, out_wav_s, dur_s, bpm_s, idx_s, start_s = sys.argv[1:7]
+vb_dir, out_wav_s, dur_s, bpm_s, idx_s, start_s, mood_s = sys.argv[1:8]
 if vb_dir not in sys.path:
     sys.path.insert(0, vb_dir)
 import sfx_engine
@@ -506,6 +525,7 @@ sfx_engine.generate_showreel_bgm_track(
     float(bpm_s),
     int(idx_s),
     float(start_s),
+    mood=mood_s or None,
 )
 "#;
     let mut cmd = Command::new("python");
@@ -517,7 +537,8 @@ sfx_engine.generate_showreel_bgm_track(
         .arg(format!("{:.4}", duration_sec.max(0.35)))
         .arg(format!("{:.2}", bpm))
         .arg(scene_index.to_string())
-        .arg(format!("{:.4}", scene_start_sec.max(0.0)));
+        .arg(format!("{:.4}", scene_start_sec.max(0.0)))
+        .arg(mood.unwrap_or(""));
 
     let out = cmd
         .output()
@@ -526,6 +547,59 @@ sfx_engine.generate_showreel_bgm_track(
     if !out.status.success() {
         return Err(format!(
             "Showreel BGM synthesis failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    Ok(())
+}
+
+/// Computes per-frame normalized RMS levels (`levels.json`) and optional energy-aligned `words.json`
+/// from a WAV file using `sfx_engine.py`.
+async fn analyze_wav_rms_and_words(
+    wav_path: &Path,
+    levels_json_path: &Path,
+    words_target: Option<(&Path, &str)>,
+    fps: u32,
+) -> Result<(), String> {
+    let voicebox_dir = project_root().join("core").join("voicebox");
+    let py_code = r#"
+import json, sys
+from pathlib import Path
+vb_dir, wav_s, levels_s, words_s, text_s, fps_s = sys.argv[1:7]
+if vb_dir not in sys.path:
+    sys.path.insert(0, vb_dir)
+import sfx_engine
+wav_p = Path(wav_s)
+lvl = sfx_engine.compute_wav_rms_levels(wav_p, int(fps_s))
+Path(levels_s).parent.mkdir(parents=True, exist_ok=True)
+Path(levels_s).write_text(json.dumps(lvl), encoding="utf-8")
+if words_s:
+    aligned = sfx_engine.align_words_from_wav(wav_p, text_s)
+    Path(words_s).parent.mkdir(parents=True, exist_ok=True)
+    Path(words_s).write_text(json.dumps(aligned, indent=2), encoding="utf-8")
+"#;
+    let (words_path_str, words_text) = match words_target {
+        Some((wp, txt)) => (wp.to_string_lossy().to_string(), txt.to_string()),
+        None => (String::new(), String::new()),
+    };
+    let mut cmd = Command::new("python");
+    crate::paths::configure_hidden_tokio_command(&mut cmd);
+    cmd.arg("-c")
+        .arg(py_code)
+        .arg(&voicebox_dir)
+        .arg(wav_path)
+        .arg(levels_json_path)
+        .arg(&words_path_str)
+        .arg(&words_text)
+        .arg(fps.max(1).to_string());
+
+    let out = cmd
+        .output()
+        .await
+        .map_err(|e| format!("Failed running WAV RMS analyzer: {}", e))?;
+    if !out.status.success() {
+        return Err(format!(
+            "WAV RMS analysis failed: {}",
             String::from_utf8_lossy(&out.stderr).trim()
         ));
     }
@@ -652,10 +726,31 @@ pub async fn execute_film_audio(
         || music_only_flag
         || (explicit_mode.is_none() && all_empty_narration);
 
-    let bpm = arguments
+    let bpm_arg = arguments
         .get("bpm")
         .and_then(|v| v.as_f64())
-        .filter(|b| b.is_finite() && *b >= 60.0 && *b <= 200.0)
+        .filter(|b| b.is_finite() && *b >= 60.0 && *b <= 200.0);
+    let music_mood = arguments
+        .get("musicMood")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_ascii_lowercase());
+    let music_volume = arguments
+        .get("musicVolume")
+        .and_then(|v| v.as_f64())
+        .filter(|v| v.is_finite())
+        .map(|v| v.clamp(0.02, 1.0))
+        .unwrap_or(0.18);
+    let duck_bgm = arguments
+        .get("duck")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let loudnorm_enabled = arguments
+        .get("loudnorm")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let bpm = bpm_arg
         .or_else(|| {
             ref_style_val
                 .as_ref()
@@ -663,7 +758,7 @@ pub async fn execute_film_audio(
                 .and_then(|v| v.as_f64())
                 .filter(|b| b.is_finite() && *b >= 60.0 && *b <= 200.0)
         })
-        .unwrap_or(120.0);
+        .unwrap_or(if music_mood.is_some() { 0.0 } else { 120.0 });
 
     let lock = active_microstock_lock(workspace_dir);
     let mut seen_ids = HashSet::new();
@@ -699,10 +794,14 @@ pub async fn execute_film_audio(
             .and_then(|v| v.as_str())
             .map(str::trim)
             .unwrap_or("");
-        if !showreel_mode && narration.is_empty() {
+        let has_vo_path = item
+            .get("voPath")
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| !s.trim().is_empty());
+        if !showreel_mode && !has_vo_path && narration.is_empty() {
             return json!({
                 "ok": false,
-                "error": format!("Scene '{}' requires non-empty 'narration' text (or set mode='showreel' for BGM/SFX-only).", clean_id)
+                "error": format!("Scene '{}' requires non-empty 'narration' text (or set mode='showreel' or 'voPath').", clean_id)
             });
         }
     }
@@ -797,21 +896,75 @@ pub async fn execute_film_audio(
         let title_opt = item.get("title").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty());
         let accent = item.get("accent").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).unwrap_or("#f59e0b");
 
-        let (audio_rel, words_rel_opt, final_wav_dur, computed_duration) = if showreel_mode {
+        let vo_path_opt = item
+            .get("voPath")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+
+        let (audio_rel, words_rel_opt, levels_rel_opt, final_wav_dur, computed_duration) = if showreel_mode && vo_path_opt.is_none() {
             let target_dur = round3(scene_min_sec.max(1.0));
             let bgm_rel = format!("audio/bgm_{}.wav", clean_id);
             let bgm_wav_path = film_dir.join(&bgm_rel);
             let safe_wav_dur = (target_dur - 0.04).max(0.35);
-            if let Err(e) = synthesize_showreel_bgm(&bgm_wav_path, safe_wav_dur, bpm, idx, showreel_cursor_sec).await {
+            if let Err(e) = synthesize_showreel_bgm(&bgm_wav_path, safe_wav_dur, bpm, idx, showreel_cursor_sec, music_mood.as_deref()).await {
                 return json!({ "ok": false, "sceneId": clean_id, "error": e });
             }
             showreel_cursor_sec += target_dur;
-            (bgm_rel, None, safe_wav_dur, target_dur)
+            (bgm_rel, None, None, safe_wav_dur, target_dur)
+        } else if let Some(vo_rel) = vo_path_opt {
+            let film_dir_str = film_dir.to_string_lossy().to_string();
+            let vo_src = match resolve_isolated_path(&film_dir_str, vo_rel) {
+                Ok(p) if p.is_file() => p,
+                Ok(_) => match resolve_isolated_path(workspace_dir, vo_rel) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return json!({ "ok": false, "code": "INVALID_VO_PATH", "sceneId": clean_id, "error": e });
+                    }
+                },
+                Err(e) => {
+                    return json!({ "ok": false, "code": "INVALID_VO_PATH", "sceneId": clean_id, "error": e });
+                }
+            };
+            if !vo_src.is_file() {
+                return json!({
+                    "ok": false,
+                    "code": "MISSING_VO_FILE",
+                    "sceneId": clean_id,
+                    "error": format!("User-supplied voPath '{}' does not exist.", vo_rel)
+                });
+            }
+            let a_rel = format!("audio/{}.wav", clean_id);
+            let w_rel = format!("audio/{}.words.json", clean_id);
+            let l_rel = format!("audio/{}.levels.json", clean_id);
+            let wav_path = film_dir.join(&a_rel);
+            let words_path = film_dir.join(&w_rel);
+            let levels_path = film_dir.join(&l_rel);
+            if vo_src != wav_path {
+                if let Err(e) = std::fs::copy(&vo_src, &wav_path) {
+                    return json!({
+                        "ok": false,
+                        "sceneId": clean_id,
+                        "error": format!("Failed copying voPath '{}': {}", vo_rel, e)
+                    });
+                }
+            }
+            let wav_dur = match read_wav_duration_secs(&wav_path) {
+                Ok(d) => d,
+                Err(e) => return json!({ "ok": false, "sceneId": clean_id, "error": e }),
+            };
+            if let Err(e) = analyze_wav_rms_and_words(&wav_path, &levels_path, Some((&words_path, narration)), fps).await {
+                return json!({ "ok": false, "sceneId": clean_id, "error": e });
+            }
+            let c_dur = round3(scene_min_sec.max(wav_dur + buffer_sec));
+            (a_rel, Some(w_rel), Some(l_rel), wav_dur, c_dur)
         } else {
             let a_rel = format!("audio/{}.wav", clean_id);
             let w_rel = format!("audio/{}.words.json", clean_id);
+            let l_rel = format!("audio/{}.levels.json", clean_id);
             let wav_path = film_dir.join(&a_rel);
             let words_path = film_dir.join(&w_rel);
+            let levels_path = film_dir.join(&l_rel);
 
             let mut cmd = Command::new("python");
             crate::paths::configure_hidden_tokio_command(&mut cmd);
@@ -874,7 +1027,38 @@ pub async fn execute_film_audio(
             let words_dur = read_words_duration_secs(&words_path);
             let f_dur = words_dur.map(|wd| wd.max(wav_dur)).unwrap_or(wav_dur);
             let c_dur = round3(scene_min_sec.max(f_dur + buffer_sec));
-            (a_rel, Some(w_rel), f_dur, c_dur)
+            // Best-effort RMS mouth openness levels for voicebox TTS audio.
+            let levels_opt = if analyze_wav_rms_and_words(&wav_path, &levels_path, None, fps).await.is_ok() {
+                Some(l_rel)
+            } else {
+                None
+            };
+            (a_rel, Some(w_rel), levels_opt, f_dur, c_dur)
+        };
+
+        let bgm_rel_opt = if !showreel_mode || vo_path_opt.is_some() {
+            if let Some(ref mood) = music_mood {
+                let bgm_rel = format!("audio/bgm_{}.wav", clean_id);
+                let bgm_wav_path = film_dir.join(&bgm_rel);
+                if let Err(e) = synthesize_showreel_bgm(
+                    &bgm_wav_path,
+                    computed_duration,
+                    bpm,
+                    idx,
+                    showreel_cursor_sec,
+                    Some(mood.as_str()),
+                )
+                .await
+                {
+                    return json!({ "ok": false, "sceneId": clean_id, "error": e });
+                }
+                showreel_cursor_sec += computed_duration;
+                Some(bgm_rel)
+            } else {
+                None
+            }
+        } else {
+            None
         };
 
         let global_disable_sfx = arguments
@@ -919,6 +1103,7 @@ pub async fn execute_film_audio(
                 start: 0.0,
                 duration: computed_duration,
                 audio: Some(audio_rel.clone()),
+                bgm: bgm_rel_opt.clone(),
                 sfx: sfx_rel.clone(),
                 words: words_rel_opt.clone(),
                 accent: accent.to_string(),
@@ -930,12 +1115,14 @@ pub async fn execute_film_audio(
 
         generated_summaries.push(json!({
             "id": clean_id,
-            "mode": if showreel_mode { "showreel" } else { "narrated" },
+            "mode": if showreel_mode && vo_path_opt.is_none() { "showreel" } else if vo_path_opt.is_some() { "user_vo" } else { "narrated" },
             "duration": computed_duration,
             "wavDuration": round3(final_wav_dur),
             "bufferApplied": round3(computed_duration - final_wav_dur),
             "audio": audio_rel,
+            "bgm": bgm_rel_opt,
             "words": words_rel_opt,
+            "levels": levels_rel_opt,
             "sfx": sfx_rel
         }));
     }
@@ -972,6 +1159,21 @@ pub async fn execute_film_audio(
         .unwrap_or("#0f1115")
         .to_string();
 
+    let computed_audio_mix = if music_mood.is_some()
+        || arguments.get("duck").is_some()
+        || arguments.get("loudnorm").is_some()
+        || arguments.get("musicVolume").is_some()
+    {
+        Some(json!({
+            "musicMood": music_mood,
+            "musicVolume": round3(music_volume),
+            "duck": duck_bgm,
+            "loudnorm": loudnorm_enabled
+        }))
+    } else {
+        None
+    };
+
     let mut manifest = if film_json_path.is_file() {
         let raw = std::fs::read_to_string(&film_json_path).unwrap_or_default();
         serde_json::from_str::<FilmManifestJson>(&raw).unwrap_or_else(|_| FilmManifestJson {
@@ -984,6 +1186,7 @@ pub async fn execute_film_audio(
             fps: default_fps,
             background: default_bg.clone(),
             use_three: false,
+            audio_mix: None,
             scenes: Vec::new(),
         })
     } else {
@@ -1009,9 +1212,13 @@ pub async fn execute_film_audio(
             fps: default_fps,
             background: default_bg,
             use_three: false,
+            audio_mix: None,
             scenes: Vec::new(),
         }
     };
+    if computed_audio_mix.is_some() {
+        manifest.audio_mix = computed_audio_mix;
+    }
 
     if manifest.scenes.is_empty() {
         for id in &ordered_ids {
@@ -1025,6 +1232,9 @@ pub async fn execute_film_audio(
                 existing.duration = upd.duration;
                 existing.audio = upd.audio;
                 existing.words = upd.words;
+                if upd.bgm.is_some() {
+                    existing.bgm = upd.bgm;
+                }
                 if upd.sfx.is_some() {
                     existing.sfx = upd.sfx;
                 }
@@ -1150,6 +1360,7 @@ mod tests {
             start: 0.0,
             duration: 1.5,
             audio: Some("audio/s1.wav".to_string()),
+            bgm: None,
             sfx: None,
             words: None,
             accent: "#f59e0b".to_string(),
@@ -1169,6 +1380,7 @@ mod tests {
             start: 0.0,
             duration: 8.0,
             audio: Some("audio/s1.wav".to_string()),
+            bgm: None,
             sfx: None,
             words: None,
             accent: "#f59e0b".to_string(),
@@ -1281,6 +1493,59 @@ mod tests {
         assert_eq!(manifest.scenes.len(), 2);
         assert!(manifest.scenes[0].words.is_none());
         assert_eq!(manifest.scenes[0].audio.as_deref(), Some("audio/bgm_scene1_hook.wav"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn film_audio_supports_user_vo_path_with_mood_bgm_levels_and_path_guard() {
+        let dir = std::env::temp_dir().join(format!("aetheria_user_vo_{}", crate::paths::now_ms()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ws = dir.to_string_lossy().to_string();
+
+        // Failure path: outside-workspace traversal in voPath must be rejected cleanly.
+        let bad = execute_film_audio(
+            "ses_vo_bad",
+            &ws,
+            &json!({
+                "musicMood": "cheerful",
+                "scenes": [{ "id": "s1", "narration": "Hello world", "voPath": "../../outside.wav" }]
+            }),
+        )
+        .await;
+        assert_eq!(bad["ok"], false);
+        assert_eq!(bad["code"], "INVALID_VO_PATH");
+
+        // Success path: fixture WAV in workspace produces levels.json, words.json, bgm, and audioMix.
+        let film_dir = resolve_target_film_dir(&dir, "Motion Film").unwrap();
+        write_test_pcm_wav(&film_dir.join("input").join("vo1.wav"), 2.2, 24000);
+        let ok = execute_film_audio(
+            "ses_vo_ok",
+            &ws,
+            &json!({
+                "musicMood": "cheerful",
+                "musicVolume": 0.16,
+                "duck": true,
+                "loudnorm": true,
+                "scenes": [{ "id": "s1", "narration": "Hello bright morning", "voPath": "input/vo1.wav" }]
+            }),
+        )
+        .await;
+        assert_eq!(ok["ok"], true, "unexpected user VO error: {:?}", ok);
+        assert!(film_dir.join("audio/s1.wav").is_file());
+        assert!(film_dir.join("audio/s1.words.json").is_file());
+        assert!(film_dir.join("audio/s1.levels.json").is_file());
+        assert!(film_dir.join("audio/bgm_s1.wav").is_file());
+        let manifest: FilmManifestJson = serde_json::from_str(
+            &std::fs::read_to_string(film_dir.join("film.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(manifest.scenes[0].bgm.as_deref(), Some("audio/bgm_s1.wav"));
+        assert_eq!(
+            manifest.audio_mix.as_ref().and_then(|m| m["musicMood"].as_str()),
+            Some("cheerful")
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

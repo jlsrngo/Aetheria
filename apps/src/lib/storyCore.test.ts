@@ -46,6 +46,7 @@ interface StoryCoreApi {
     shotLabel?: string,
   ) => number;
   collectAudioEvents?: (story: unknown, map?: Record<string, Array<{ word: string; start: number; end: number }>>) => Array<unknown>;
+  sampleTalkLevel?: (levelsEntry: { fps?: number; levels?: number[] } | null, localTime: number) => number | null;
   computeOverlapCount?: (
     heroBox: { minX: number; maxX: number; minY: number; maxY: number },
     extraBoxes: Array<{ minX: number; maxX: number; minY: number; maxY: number }>,
@@ -201,5 +202,11 @@ describe("apps/public/script/story-core.js (Core API v1)", () => {
 
     const audioEvs = core.collectAudioEvents?.(story, { shot1: words }) ?? [];
     expect(Array.isArray(audioEvs)).toBe(true);
+
+    const lvlSample0 = core.sampleTalkLevel?.({ fps: 30, levels: [0.0, 0.45, 0.9] }, 0.04);
+    const lvlSampleHi = core.sampleTalkLevel?.({ fps: 30, levels: [0.0, 0.45, 0.9] }, 0.08);
+    expect(lvlSample0).toBeCloseTo(0.45, 3);
+    expect(lvlSampleHi).toBeCloseTo(0.9, 3);
+    expect(core.sampleTalkLevel?.(null, 0.5)).toBeNull();
   });
 });

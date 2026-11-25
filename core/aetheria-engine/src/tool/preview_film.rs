@@ -43,6 +43,15 @@ pub fn capture_film_preview_tool_definition() -> Value {
                             "endSec": { "type": "number", "description": "Optional end timestamp in seconds." },
                             "frames": { "type": "integer", "description": "Optional sample frame count (`4..10`, default `10`)." }
                         }
+                    },
+                    "framesPerShot": {
+                        "type": "integer",
+                        "enum": [3, 9],
+                        "description": "Self-QC frames per shot for story.json (`3` default: start/mid/end, or `9` for a 9-frame motion strip on fast follow/fly-to/whip shots)."
+                    },
+                    "stripShotId": {
+                        "type": "string",
+                        "description": "Optional target shot.id when requesting framesPerShot: 9."
                     }
                 }
             }
@@ -218,6 +227,16 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
     let apply_motion_blur = arguments
         .get("applyMotionBlur")
         .and_then(|v| v.as_bool());
+    let frames_per_shot = arguments
+        .get("framesPerShot")
+        .and_then(|v| v.as_u64())
+        .map(|n| n as usize);
+    let strip_shot_id = arguments
+        .get("stripShotId")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
 
     match crate::studio::preview_capture::capture_film_preview_with_full_options(
         workspace_dir,
@@ -231,6 +250,8 @@ pub async fn execute_capture_film_preview(workspace_dir: &str, arguments: &Value
             forced_scene_id: None,
             write_scene_beat_strips: None,
             apply_motion_blur,
+            frames_per_shot,
+            strip_shot_id,
         },
     )
     .await

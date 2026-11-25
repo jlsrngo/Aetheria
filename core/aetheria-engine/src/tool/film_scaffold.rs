@@ -55,6 +55,8 @@ pub struct FilmManifestJson {
     pub background: String,
     #[serde(default)]
     pub use_three: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_mix: Option<Value>,
     pub scenes: Vec<FilmManifestScene>,
 }
 
@@ -68,6 +70,8 @@ pub struct FilmManifestScene {
     pub duration: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audio: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bgm: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sfx: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -926,16 +930,17 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
     let index_path = film_dir.join("index.html");
     let script_dir = film_dir.join("script");
 
-    let existing_by_id: std::collections::HashMap<String, FilmManifestScene> =
-        if film_json_path.is_file() {
-            std::fs::read_to_string(&film_json_path)
-                .ok()
-                .and_then(|s| serde_json::from_str::<FilmManifestJson>(&s).ok())
-                .map(|m| m.scenes.into_iter().map(|s| (s.id.clone(), s)).collect())
-                .unwrap_or_default()
-        } else {
-            std::collections::HashMap::new()
-        };
+    let existing_manifest: Option<FilmManifestJson> = if film_json_path.is_file() {
+        std::fs::read_to_string(&film_json_path)
+            .ok()
+            .and_then(|s| serde_json::from_str::<FilmManifestJson>(&s).ok())
+    } else {
+        None
+    };
+    let preserved_audio_mix = existing_manifest.as_ref().and_then(|m| m.audio_mix.clone());
+    let existing_by_id: std::collections::HashMap<String, FilmManifestScene> = existing_manifest
+        .map(|m| m.scenes.into_iter().map(|s| (s.id.clone(), s)).collect())
+        .unwrap_or_default();
 
     let mut seen_ids = HashSet::new();
     let mut manifest_scenes = Vec::with_capacity(raw_scenes.len());
@@ -1085,6 +1090,7 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
             start: (acc_start * 1000.0).round() / 1000.0,
             duration: (resolved_duration * 1000.0).round() / 1000.0,
             audio,
+            bgm: prev.and_then(|p| p.bgm.clone()),
             sfx,
             words,
             accent,
@@ -1141,6 +1147,7 @@ pub fn execute_film_scaffold(session_id: &str, workspace_dir: &str, arguments: &
         fps,
         background: background.clone(),
         use_three,
+        audio_mix: preserved_audio_mix,
         scenes: manifest_scenes.clone(),
     };
 
@@ -1554,6 +1561,7 @@ mod tests {
             fps: 30,
             background: "#93C5FD".to_string(),
             use_three: false,
+            audio_mix: None,
             scenes: vec![FilmManifestScene {
                 id: "s1".to_string(),
                 title: "S1".to_string(),
@@ -1561,6 +1569,7 @@ mod tests {
                 start: 0.0,
                 duration: 3.0,
                 audio: None,
+                bgm: None,
                 sfx: None,
                 words: None,
                 accent: "#FFDE59".to_string(),

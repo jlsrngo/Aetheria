@@ -96,6 +96,58 @@ fn find_scene_audio_file(film_root: &Path, ws_root: &Path, raw_audio: &str) -> O
     None
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AudioBus {
+    Vo,
+    Bgm,
+    Sfx,
+}
+
+#[derive(Clone, Debug)]
+struct AudioMixConfig {
+    music_volume: f64,
+    duck: bool,
+    loudnorm: bool,
+    bgm_by_scene: HashMap<String, String>,
+}
+
+fn load_audio_mix_config(film_root: &Path) -> AudioMixConfig {
+    let mut cfg = AudioMixConfig {
+        music_volume: 0.18,
+        duck: true,
+        loudnorm: false,
+        bgm_by_scene: HashMap::new(),
+    };
+    let Ok(raw) = std::fs::read_to_string(film_root.join("film.json")) else {
+        return cfg;
+    };
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return cfg;
+    };
+    if let Some(mix) = val.get("audioMix").and_then(|v| v.as_object()) {
+        if let Some(vol) = mix.get("musicVolume").and_then(|v| v.as_f64()).filter(|v| v.is_finite()) {
+            cfg.music_volume = vol.clamp(0.02, 1.0);
+        }
+        if let Some(d) = mix.get("duck").and_then(|v| v.as_bool()) {
+            cfg.duck = d;
+        }
+        cfg.loudnorm = mix.get("loudnorm").and_then(|v| v.as_bool()).unwrap_or(true);
+    }
+    if let Some(scenes) = val.get("scenes").and_then(|v| v.as_array()) {
+        for sc in scenes {
+            if let (Some(id), Some(bgm)) = (
+                sc.get("id").and_then(|v| v.as_str()),
+                sc.get("bgm").and_then(|v| v.as_str()),
+            ) {
+                if !bgm.trim().is_empty() {
+                    cfg.bgm_by_scene.insert(id.to_string(), bgm.trim().to_string());
+                }
+            }
+        }
+    }
+    cfg
+}
+
 /// Constructs an FFmpeg `image2pipe` MP4 encoding command with synchronized scene audio mixing.
 pub fn build_ffmpeg_command(
     ffmpeg_bin: &Path,
@@ -119,7 +171,8 @@ pub fn build_ffmpeg_command(
             .map(|e| e.eq_ignore_ascii_case("gif"))
             .unwrap_or(false);
 
-    let mut active_audios: Vec<(PathBuf, u64, f64, f64, f64)> = Vec::new();
+    let mix_cfg = load_audio_mix_config(film_root);
+    let mut active_audios: Vec<(PathBuf, u64, f64, f64, f64, AudioBus)> = Vec::new();
     if !is_gif {
         for scene in &meta.scenes {
             let sc_start = scene.start.max(0.0);
@@ -134,26 +187,42 @@ pub fn build_ffmpeg_command(
 
             if let Some(ref audio_rel) = scene.audio {
                 if let Some(audio_path) = find_scene_audio_file(film_root, ws_root, audio_rel) {
-                    active_audios.push((audio_path, delay_ms, trim_start, max_dur, 1.0));
+                    active_audios.push((audio_path, delay_ms, trim_start, max_dur, 1.0, AudioBus::Vo));
+                }
+            }
+            if let Some(bgm_rel) = mix_cfg.bgm_by_scene.get(&scene.id) {
+                if let Some(bgm_path) = find_scene_audio_file(film_root, ws_root, bgm_rel) {
+                    active_audios.push((
+                        bgm_path,
+                        delay_ms,
+                        trim_start,
+                        max_dur,
+                        mix_cfg.music_volume,
+                        AudioBus::Bgm,
+                    ));
                 }
             }
             if let Some(ref sfx_rel) = scene.sfx {
                 if let Some(sfx_path) = find_scene_audio_file(film_root, ws_root, sfx_rel) {
-                    active_audios.push((sfx_path, delay_ms, trim_start, max_dur, 0.45));
+                    active_audios.push((sfx_path, delay_ms, trim_start, max_dur, 0.45, AudioBus::Sfx));
                 }
             }
         }
     }
 
-    for (audio_path, _, _, _, _) in &active_audios {
+    for (audio_path, _, _, _, _, _) in &active_audios {
         cmd.arg("-i").arg(audio_path);
     }
 
     if !active_audios.is_empty() {
         let total_dur = (end_sec - start_sec).max(0.05);
-        let mut filter_parts = Vec::with_capacity(active_audios.len() + 1);
-        let mut mix_labels = Vec::with_capacity(active_audios.len());
-        for (idx, (_, delay_ms, trim_start, max_dur, vol)) in active_audios.iter().enumerate() {
+        let mut filter_parts = Vec::with_capacity(active_audios.len() + 4);
+        let mut vo_labels = Vec::new();
+        let mut bgm_labels = Vec::new();
+        let mut sfx_labels = Vec::new();
+        let mut all_labels = Vec::with_capacity(active_audios.len());
+
+        for (idx, (_, delay_ms, trim_start, max_dur, vol, bus)) in active_audios.iter().enumerate() {
             let input_idx = idx + 1;
             let label = format!("[a{}]", idx);
             let vol_filter = if (*vol - 1.0).abs() > 0.01 {
@@ -165,17 +234,68 @@ pub fn build_ffmpeg_command(
                 "[{}:a]atrim=start={:.4}:duration={:.4},asetpts=PTS-STARTPTS{},adelay={}|{}{}",
                 input_idx, trim_start, max_dur, vol_filter, delay_ms, delay_ms, label
             ));
-            mix_labels.push(label);
+            match bus {
+                AudioBus::Vo => vo_labels.push(label.clone()),
+                AudioBus::Bgm => bgm_labels.push(label.clone()),
+                AudioBus::Sfx => sfx_labels.push(label.clone()),
+            }
+            all_labels.push(label);
         }
-        // Clamp `[aout]` to the exact target video duration via `apad` + `atrim` so audio neither
-        // truncates nor outlives the video without relying on `-shortest` (which can close `pipe:0` early).
-        filter_parts.push(format!(
-            "{}amix=inputs={}:duration=longest:normalize=0,apad=whole_dur={:.4},atrim=duration={:.4}[aout]",
-            mix_labels.join(""),
-            active_audios.len(),
-            total_dur,
-            total_dur
-        ));
+
+        let loud_suffix = if mix_cfg.loudnorm {
+            ",loudnorm=I=-16:TP=-1.5:LRA=11"
+        } else {
+            ""
+        };
+        let use_duck = mix_cfg.duck && !vo_labels.is_empty() && !bgm_labels.is_empty();
+        if use_duck {
+            let vo_bus = if vo_labels.len() == 1 {
+                vo_labels[0].clone()
+            } else {
+                filter_parts.push(format!(
+                    "{}amix=inputs={}:duration=longest:normalize=0[vo_sum]",
+                    vo_labels.join(""),
+                    vo_labels.len()
+                ));
+                "[vo_sum]".to_string()
+            };
+            let bgm_bus = if bgm_labels.len() == 1 {
+                bgm_labels[0].clone()
+            } else {
+                filter_parts.push(format!(
+                    "{}amix=inputs={}:duration=longest:normalize=0[bgm_sum]",
+                    bgm_labels.join(""),
+                    bgm_labels.len()
+                ));
+                "[bgm_sum]".to_string()
+            };
+            filter_parts.push(format!("{}asplit=2[vo_sc][vo_mix]", vo_bus));
+            filter_parts.push(format!(
+                "{}[vo_sc]sidechaincompress=threshold=0.03:ratio=4:attack=20:release=250[bgm_duck]",
+                bgm_bus
+            ));
+            let mut final_inputs = vec!["[vo_mix]".to_string(), "[bgm_duck]".to_string()];
+            final_inputs.extend(sfx_labels);
+            filter_parts.push(format!(
+                "{}amix=inputs={}:duration=longest:normalize=0{},apad=whole_dur={:.4},atrim=duration={:.4}[aout]",
+                final_inputs.join(""),
+                final_inputs.len(),
+                loud_suffix,
+                total_dur,
+                total_dur
+            ));
+        } else {
+            // Clamp `[aout]` to the exact target video duration via `apad` + `atrim` so audio neither
+            // truncates nor outlives the video without relying on `-shortest` (which can close `pipe:0` early).
+            filter_parts.push(format!(
+                "{}amix=inputs={}:duration=longest:normalize=0{},apad=whole_dur={:.4},atrim=duration={:.4}[aout]",
+                all_labels.join(""),
+                all_labels.len(),
+                loud_suffix,
+                total_dur,
+                total_dur
+            ));
+        }
         cmd.args(["-filter_complex", &filter_parts.join(";")])
             .args([
                 "-map",
@@ -505,6 +625,41 @@ mod tests {
         assert!(args
             .iter()
             .any(|a| a.contains("[1:a]atrim=start=0.0000:duration=3.0000")));
+
+        // Verify sidechaincompress ducking + loudnorm filtergraph when film.json carries audioMix + scene bgm
+        let tmp2 = std::env::temp_dir().join(format!("aetheria_ffmpeg_duck_{}", crate::paths::now_ms()));
+        let _ = std::fs::remove_dir_all(&tmp2);
+        std::fs::create_dir_all(tmp2.join("audio")).unwrap();
+        std::fs::write(tmp2.join("audio/s1.wav"), b"RIFF").unwrap();
+        std::fs::write(tmp2.join("audio/bgm_s1.wav"), b"RIFF").unwrap();
+        std::fs::write(
+            tmp2.join("film.json"),
+            serde_json::json!({
+                "audioMix": { "musicMood": "cheerful", "musicVolume": 0.16, "duck": true, "loudnorm": true },
+                "scenes": [{ "id": "s1", "bgm": "audio/bgm_s1.wav" }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let cmd2 = build_ffmpeg_command(
+            Path::new("ffmpeg"),
+            &meta,
+            &tmp2,
+            &tmp2,
+            0.0,
+            10.0,
+            "h264",
+            &tmp2.join("out.mp4"),
+        );
+        let args2: Vec<String> = cmd2
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        let fc2 = args2.join(" ");
+        let _ = std::fs::remove_dir_all(&tmp2);
+        assert!(fc2.contains("sidechaincompress="), "expected ducking filter: {}", fc2);
+        assert!(fc2.contains("loudnorm=I=-16"), "expected loudnorm filter: {}", fc2);
     }
 
     #[tokio::test]

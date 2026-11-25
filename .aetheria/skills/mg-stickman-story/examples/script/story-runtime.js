@@ -140,15 +140,21 @@
     c.setDepth(1);
   }
 
-  function talkLevel(id, bubbles, env) {
+  function talkLevel(id, bubbles, env, actorCount) {
+    var hasBubbleOwner = false;
     for (var i = 0; i < bubbles.length; i++) {
       var b = bubbles[i] || {};
       if (b.by !== id) continue;
+      hasBubbleOwner = true;
       var t0 = env.when(b);
       var t1 = env.whenEnd(b, t0 + 2.0);
       if (env.localTime >= t0 && env.localTime <= Math.min(t1, t0 + 1.6)) {
+        if (typeof env.talkLevel === 'number') return env.talkLevel;
         return 0.5 + 0.5 * Math.abs(Math.sin((env.localTime - t0) * 15));
       }
+    }
+    if (!hasBubbleOwner && bubbles.length === 0 && typeof env.talkLevel === 'number' && actorCount <= 1) {
+      return env.talkLevel;
     }
     return null;
   }
@@ -189,7 +195,7 @@
       var st = states[idx];
       var preset = spec.preset || presetFor(story, spec.id);
       var emoteKind = st.emote ? st.emote.kind : null;
-      var talk = spec.talk ? 0.5 + 0.5 * Math.abs(Math.sin(env.localTime * 14)) : talkLevel(spec.id, bubbles, env);
+      var talk = spec.talk ? (typeof env.talkLevel === 'number' ? env.talkLevel : 0.5 + 0.5 * Math.abs(Math.sin(env.localTime * 14))) : talkLevel(spec.id, bubbles, env, actors.length);
       var info = Rig.drawCharacter(c, preset, {
         t: env.localTime,
         x: st.x,

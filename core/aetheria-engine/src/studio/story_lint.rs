@@ -739,9 +739,28 @@ pub fn story_shot_midpoints(story_path: &Path) -> Vec<(String, f64)> {
         .collect()
 }
 
-/// Returns 3 Self-QC timestamps per shot (`start`: `start + 0.25s`, `mid`: `55%`, `end`: `end - 0.35s`,
-/// up to 24 frames / 8 shots) matching the director 3-beat `contact_sheet.jpg` QC standard.
-pub fn story_shot_qc_triplets(story_path: &Path) -> Vec<(String, &'static str, f64)> {
+const STRIP_9_LABELS: [&str; 9] = ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9"];
+
+fn shot_has_fast_motion_move(sh: &Value) -> bool {
+    sh.pointer("/camera/moves")
+        .and_then(Value::as_array)
+        .is_some_and(|arr| {
+            arr.iter().any(|mv| {
+                mv.get("kind")
+                    .or_else(|| mv.get("move"))
+                    .and_then(Value::as_str)
+                    .is_some_and(|k| matches!(k, "follow" | "fly-to" | "whip"))
+            })
+        })
+}
+
+/// Returns Self-QC timestamps per shot (`frames_per_shot == 3`: `start`/`mid`/`end` up to 8 shots;
+/// `frames_per_shot == 9`: 9 evenly spaced frames across `target_shot_id` or first fast-motion shot).
+pub fn story_shot_qc_samples(
+    story_path: &Path,
+    frames_per_shot: usize,
+    target_shot_id: Option<&str>,
+) -> Vec<(String, &'static str, f64)> {
     let Ok(raw) = std::fs::read_to_string(story_path) else {
         return Vec::new();
     };
@@ -752,6 +771,39 @@ pub fn story_shot_qc_triplets(story_path: &Path) -> Vec<(String, &'static str, f
     let Some(shots) = val.get("shots").and_then(Value::as_array) else {
         return Vec::new();
     };
+
+    if frames_per_shot == 9 && !shots.is_empty() {
+        let chosen_idx = target_shot_id
+            .and_then(|tid| {
+                shots.iter().position(|s| s.get("id").and_then(Value::as_str) == Some(tid))
+            })
+            .or_else(|| shots.iter().position(shot_has_fast_motion_move))
+            .unwrap_or(0);
+        let sh = &shots[chosen_idx];
+        let id = sh
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("shot{}", chosen_idx + 1));
+        if let (Some(st), Some(du)) = (
+            sh.get("start").and_then(Value::as_f64),
+            sh.get("duration").and_then(Value::as_f64),
+        ) {
+            if st.is_finite() && du.is_finite() && du > 0.0 {
+                let t0 = st + du * 0.08;
+                let t1 = st + du * 0.92;
+                let mut out = Vec::with_capacity(9);
+                for (k, lbl) in STRIP_9_LABELS.iter().enumerate() {
+                    let frac = k as f64 / 8.0;
+                    let ts = ((t0 + (t1 - t0) * frac) * 1000.0).round() / 1000.0;
+                    out.push((id.clone(), *lbl, ts));
+                }
+                return out;
+            }
+        }
+        return Vec::new();
+    }
+
     let mut out = Vec::with_capacity(shots.len().min(8) * 3);
     for (i, sh) in shots.iter().take(8).enumerate() {
         let id = sh
@@ -771,12 +823,20 @@ pub fn story_shot_qc_triplets(story_path: &Path) -> Vec<(String, &'static str, f
         let end = st + du;
         let t_start = st + 0.25_f64.min(du * 0.22);
         let t_mid = st + du * 0.55;
-        let t_end = (end - 0.35_f64.min(du * 0.22)).max(t_mid + 0.06).min((end - 0.04).max(st));
+        let t_end = (end - 0.35_f64.min(du * 0.22))
+            .max(t_mid + 0.06)
+            .min((end - 0.04).max(st));
         out.push((id.clone(), "start", (t_start * 1000.0).round() / 1000.0));
         out.push((id.clone(), "mid", (t_mid * 1000.0).round() / 1000.0));
         out.push((id, "end", (t_end * 1000.0).round() / 1000.0));
     }
     out
+}
+
+/// Returns 3 Self-QC timestamps per shot (`start`: `start + 0.25s`, `mid`: `55%`, `end`: `end - 0.35s`,
+/// up to 24 frames / 8 shots) matching the director 3-beat `contact_sheet.jpg` QC standard.
+pub fn story_shot_qc_triplets(story_path: &Path) -> Vec<(String, &'static str, f64)> {
+    story_shot_qc_samples(story_path, 3, None)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

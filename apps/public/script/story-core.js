@@ -580,6 +580,7 @@
     var microOverride = false;
     var customState = null;
     var shotWordsMap = {};
+    var shotLevelsMap = {};
 
     global.__storyRuntimeErrors = global.__storyRuntimeErrors || [];
     global.__storyWarnings = global.__storyWarnings || [];
@@ -626,6 +627,7 @@
             micro: micro,
             caption: caption,
             words: activeWords,
+            talkLevel: sampleTalkLevel(shotLevelsMap[sid], resolved.localTime),
             when: function (item) {
               return resolveWhen(item, activeWords, 0, shotWarnings, sid);
             },
@@ -762,6 +764,25 @@
       return map;
     }
 
+    async function loadShotLevels(st) {
+      var map = {};
+      if (typeof fetch !== 'function') return map;
+      var shots = (st && Array.isArray(st.shots)) ? st.shots : [];
+      await Promise.all(
+        shots.map(async function (s) {
+          var sid = s && s.id;
+          if (!sid) return;
+          var lvlUrl = (s.audio && s.audio.levels) || ('audio/' + sid + '.levels.json');
+          var clean = lvlUrl.charAt(0) === '/' ? lvlUrl : '/' + lvlUrl;
+          var fetched = await fetchJson(clean);
+          if (fetched && Array.isArray(fetched.levels) && fetched.levels.length > 0) {
+            map[sid] = fetched;
+          }
+        })
+      );
+      return map;
+    }
+
     async function start() {
       var raw = await fetchJson('story.json');
       if (!raw) raw = await fetchJson('story.example.json');
@@ -771,6 +792,7 @@
       fps = story.canvas.fps;
       totalDuration = computeTotalDuration(story);
       shotWordsMap = await loadShotWords(story);
+      shotLevelsMap = await loadShotLevels(story);
       global.__audioEvents = collectAudioEvents(story, shotWordsMap);
 
       if (cfg.contextType !== 'none' && typeof document !== 'undefined') {
@@ -825,12 +847,22 @@
     start();
   }
 
+  function sampleTalkLevel(levelsEntry, localTime) {
+    var lvls = levelsEntry && Array.isArray(levelsEntry.levels) ? levelsEntry.levels : null;
+    if (!lvls || !lvls.length) return null;
+    var lf = Math.max(1, Number(levelsEntry.fps) || 30);
+    var idx = clamp(Math.floor(Math.max(0, Number(localTime) || 0) * lf), 0, lvls.length - 1);
+    var v = Number(lvls[idx]);
+    return Number.isFinite(v) ? clamp(v, 0, 1) : 0;
+  }
+
   global.StoryCore = {
     version: 1,
     directorVersion: 2,
     clamp: clamp,
     easeOutCubic: easeOutCubic,
     easeOutExpo: easeOutExpo,
+    sampleTalkLevel: sampleTalkLevel,
     isMicrostock: isMicrostock,
     computeSafeZone: computeSafeZone,
     computePortraitRailSafeZone: computePortraitRailSafeZone,
