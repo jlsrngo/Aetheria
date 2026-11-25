@@ -379,6 +379,13 @@
         if (fk === 'flash') ev.push([round3(s0 + when(fxList[fi])), 'flash', 0.8]);
       }
       if (s.alarm || (s.options && s.options.alarm)) ev.push([round3(s0 + 0.2), 'alarm', 1.0]);
+      if (s.type === 'comic' && Array.isArray(s.panels)) {
+        for (var pi = 0; pi < s.panels.length; pi++) {
+          var pn = s.panels[pi] || {};
+          var pAt = pn.appear !== undefined ? Number(pn.appear) : pi * 0.6;
+          if (Number.isFinite(pAt)) ev.push([round3(s0 + Math.max(0, pAt)), 'pop', 0.8]);
+        }
+      }
       var extraSfx = Array.isArray(s.sfx) ? s.sfx : [];
       for (var xi = 0; xi < extraSfx.length; xi++) {
         var sx = extraSfx[xi] || {};
@@ -748,7 +755,7 @@
       await Promise.all(
         shots.map(async function (s) {
           var sid = s.id;
-          var wordsUrl = (s.audio && s.audio.words) || (st.audio && st.audio.words) || '';
+          var wordsUrl = (typeof s.words === 'string' && s.words) || (s.audio && s.audio.words) || (st.audio && st.audio.words) || '';
           if (wordsUrl && typeof fetch === 'function') {
             var clean = wordsUrl.charAt(0) === '/' ? wordsUrl : '/' + wordsUrl;
             var fetched = await fetchJson(clean);
@@ -772,7 +779,7 @@
         shots.map(async function (s) {
           var sid = s && s.id;
           if (!sid) return;
-          var lvlUrl = (s.audio && s.audio.levels) || ('audio/' + sid + '.levels.json');
+          var lvlUrl = (typeof s.levels === 'string' && s.levels) || (s.audio && s.audio.levels) || ('audio/' + sid + '.levels.json');
           var clean = lvlUrl.charAt(0) === '/' ? lvlUrl : '/' + lvlUrl;
           var fetched = await fetchJson(clean);
           if (fetched && Array.isArray(fetched.levels) && fetched.levels.length > 0) {

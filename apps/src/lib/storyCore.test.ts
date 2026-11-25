@@ -202,6 +202,10 @@ describe("apps/public/script/story-core.js (Core API v1)", () => {
 
     const audioEvs = core.collectAudioEvents?.(story, { shot1: words }) ?? [];
     expect(Array.isArray(audioEvs)).toBe(true);
+    const comicEvs = core.collectAudioEvents?.({
+      shots: [{ id: "comic1", start: 5.0, duration: 4.0, type: "comic", panels: [{ appear: 0.0 }, { appear: 0.25 }] }],
+    }, {}) ?? [];
+    expect(comicEvs).toEqual([[5, "pop", 0.8], [5.25, "pop", 0.8]]);
 
     const lvlSample0 = core.sampleTalkLevel?.({ fps: 30, levels: [0.0, 0.45, 0.9] }, 0.04);
     const lvlSampleHi = core.sampleTalkLevel?.({ fps: 30, levels: [0.0, 0.45, 0.9] }, 0.08);

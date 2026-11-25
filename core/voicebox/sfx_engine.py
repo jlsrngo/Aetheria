@@ -84,6 +84,279 @@ def write_wav(file_path: Path, samples: List[float]):
         w.writeframes(raw)
 
 
+# Shared Engine SFX Catalog (usable by all skills via window.__audioEvents or film_audio sfxCues)
+SFX_CATALOG_ALIASES: Dict[str, str] = {
+    "pop": "pop",
+    "tick": "tick",
+    "tik": "tick",
+    "typewriter": "tick",
+    "click": "tick",
+    "ding": "ding",
+    "chime": "ding",
+    "bell": "ding",
+    "question": "question",
+    "tanya": "question",
+    "sparkle": "sparkle",
+    "kilau": "sparkle",
+    "star": "sparkle",
+    "heart": "sparkle",
+    "idea": "sparkle",
+    "zzz": "zzz",
+    "sleep": "zzz",
+    "boing": "boing",
+    "hop": "boing",
+    "jump": "boing",
+    "footstep": "footstep",
+    "langkah": "footstep",
+    "step": "footstep",
+    "step_a": "footstep",
+    "whoosh": "whoosh",
+    "swipe": "whoosh",
+    "whip": "whoosh",
+    "soft-whoosh": "soft-whoosh",
+    "soft_whoosh": "soft-whoosh",
+    "whoosh_lembut": "soft-whoosh",
+    "thud": "thud",
+    "impact": "thud",
+    "hit": "thud",
+    "punch": "thud",
+    "burst": "burst",
+    "seru": "burst",
+    "exclaim": "burst",
+    "alarm": "alarm",
+    "flash": "flash",
+    "kilat": "flash",
+    "iris": "iris",
+    "riser": "riser",
+}
+
+SFX_CATALOG_NAMES: List[str] = sorted(set(SFX_CATALOG_ALIASES.values()))
+
+
+def normalize_sfx_kind(raw_kind: str) -> str:
+    key = str(raw_kind or "pop").strip().lower()
+    if key in SFX_CATALOG_ALIASES:
+        return SFX_CATALOG_ALIASES[key]
+    for alias, canon in SFX_CATALOG_ALIASES.items():
+        if alias in key:
+            return canon
+    return "pop"
+
+
+def _sfx_env(i: int, sr: int, attack: float = 0.004, decay: float = 0.3) -> float:
+    t = i / float(sr)
+    return min(1.0, t / max(1e-5, attack)) * math.exp(-t / max(1e-5, decay))
+
+
+def _sfx_sweep(f0: float, f1: float, dur: float, attack: float = 0.004, decay: Optional[float] = None) -> List[float]:
+    n = max(1, int(dur * SAMPLE_RATE))
+    dec = decay if decay is not None else max(0.01, dur / 3.0)
+    out = [0.0] * n
+    phase = 0.0
+    denom = float(max(1, n - 1))
+    for i in range(n):
+        f = f0 + (f1 - f0) * (i / denom)
+        phase += 2.0 * math.pi * f / SAMPLE_RATE
+        out[i] = math.sin(phase) * _sfx_env(i, SAMPLE_RATE, attack, dec)
+    return out
+
+
+def _sfx_noise(n: int, seed: int, smooth_k: int) -> List[float]:
+    import random
+    rng = random.Random(seed)
+    raw = [rng.uniform(-1.0, 1.0) for _ in range(n)]
+    if smooth_k <= 1:
+        return raw
+    # Fast moving-average lowpass for crisp organic air/whoosh texture
+    out = [0.0] * n
+    acc = 0.0
+    for i in range(n):
+        acc += raw[i]
+        if i >= smooth_k:
+            acc -= raw[i - smooth_k]
+        out[i] = acc / float(min(i + 1, smooth_k))
+    return out
+
+
+def synthesize_sfx(raw_kind: str, volume: float = 1.0) -> List[float]:
+    """Synthesizes a named SFX clip from the shared engine catalog at SAMPLE_RATE (48kHz)."""
+    kind = normalize_sfx_kind(raw_kind)
+    vol = max(0.05, min(1.5, float(volume)))
+
+    if kind == "pop":
+        base = [s * 0.70 for s in _sfx_sweep(500.0, 1800.0, 0.09, 0.002, 0.03)]
+    elif kind == "tick":
+        base = [s * 0.42 for s in _sfx_sweep(1850.0, 1650.0, 0.035, 0.001, 0.012)]
+    elif kind == "ding":
+        n = int(0.55 * SAMPLE_RATE)
+        base = [
+            (math.sin(2.0 * math.pi * 1318.5 * i / SAMPLE_RATE) + 0.5 * math.sin(2.0 * math.pi * 1975.5 * i / SAMPLE_RATE))
+            * _sfx_env(i, SAMPLE_RATE, 0.002, 0.18) * 0.45
+            for i in range(n)
+        ]
+    elif kind == "question":
+        s1 = _sfx_sweep(400.0, 520.0, 0.12, 0.004, 0.06)
+        s2 = _sfx_sweep(520.0, 720.0, 0.20, 0.004, 0.09)
+        base = [s * 0.52 for s in (s1 + s2)]
+    elif kind == "sparkle":
+        n = int(0.68 * SAMPLE_RATE)
+        base = [0.0] * n
+        notes = (1318.5, 1568.0, 2093.0, 2637.0)  # E6, G6, C7, E7 musicbox shimmer
+        note_n = int(0.32 * SAMPLE_RATE)
+        for ni, freq in enumerate(notes):
+            off = int(ni * 0.07 * SAMPLE_RATE)
+            for i in range(note_n):
+                idx = off + i
+                if idx >= n:
+                    break
+                t = i / float(SAMPLE_RATE)
+                sig = (
+                    math.sin(2.0 * math.pi * freq * t)
+                    + 0.35 * math.sin(2.0 * math.pi * 2.76 * freq * t) * math.exp(-t / 0.12)
+                ) * _sfx_env(i, SAMPLE_RATE, 0.002, 0.16) * 0.34
+                base[idx] += sig
+    elif kind == "zzz":
+        base = [s * 0.26 for s in _sfx_sweep(420.0, 240.0, 0.65, 0.05, 0.38)]
+    elif kind == "boing":
+        n = int(0.48 * SAMPLE_RATE)
+        base = [0.0] * n
+        phase = 0.0
+        for i in range(n):
+            t = i / float(SAMPLE_RATE)
+            f = 180.0 + 260.0 * abs(math.sin(2.0 * math.pi * 3.2 * t)) * math.exp(-t / 0.25)
+            phase += 2.0 * math.pi * f / SAMPLE_RATE
+            base[i] = math.sin(phase) * _sfx_env(i, SAMPLE_RATE, 0.003, 0.22) * 0.52
+    elif kind == "footstep":
+        n = int(0.065 * SAMPLE_RATE)
+        nz = _sfx_noise(n, 11, 8)
+        base = [
+            (
+                math.sin(2.0 * math.pi * 135.0 * i / SAMPLE_RATE) * _sfx_env(i, SAMPLE_RATE, 0.001, 0.02)
+                + nz[i] * _sfx_env(i, SAMPLE_RATE, 0.001, 0.012) * 0.65
+            ) * 0.38
+            for i in range(n)
+        ]
+    elif kind in ("whoosh", "soft-whoosh"):
+        dur = 0.38 if kind == "whoosh" else 0.58
+        smooth_k = 20 if kind == "whoosh" else 38
+        gain = 1.45 if kind == "whoosh" else 1.05
+        n = int(dur * SAMPLE_RATE)
+        nz = _sfx_noise(n, 5 if kind == "whoosh" else 17, smooth_k)
+        base = [nz[i] * (math.sin(math.pi * i / float(max(1, n - 1))) ** 2) * gain for i in range(n)]
+    elif kind == "thud":
+        n = int(0.30 * SAMPLE_RATE)
+        nz = _sfx_noise(n, 7, 10)
+        base = [0.0] * n
+        phase = 0.0
+        for i in range(n):
+            t = i / float(SAMPLE_RATE)
+            f = 95.0 - 52.0 * (t / 0.30)
+            phase += 2.0 * math.pi * f / SAMPLE_RATE
+            base[i] = (
+                math.sin(phase) * _sfx_env(i, SAMPLE_RATE, 0.002, 0.11) * 0.80
+                + nz[i] * _sfx_env(i, SAMPLE_RATE, 0.001, 0.022) * 0.35
+            )
+    elif kind == "burst":
+        s1 = _sfx_sweep(420.0, 160.0, 0.22, 0.003, 0.09)
+        s2 = _sfx_sweep(900.0, 1450.0, 0.10, 0.002, 0.04)
+        base = [s * 0.62 for s in s1]
+        for i, v in enumerate(s2):
+            base[i] += v * 0.22
+    elif kind == "alarm":
+        n = int(1.35 * SAMPLE_RATE)
+        base = [0.0] * n
+        beep_n = int(0.08 * SAMPLE_RATE)
+        for k in range(8):
+            off = int((k % 4) * 0.09 * SAMPLE_RATE) + int((k // 4) * 0.58 * SAMPLE_RATE)
+            for i in range(beep_n):
+                idx = off + i
+                if idx >= n:
+                    break
+                sq = 1.0 if math.sin(2.0 * math.pi * 2300.0 * i / SAMPLE_RATE) >= 0.0 else -1.0
+                base[idx] += sq * 0.20 * _sfx_env(i, SAMPLE_RATE, 0.002, 0.08)
+    elif kind == "flash":
+        s1 = _sfx_sweep(320.0, 2400.0, 0.20, 0.002, 0.11)
+        nz = _sfx_noise(len(s1), 9, 3)
+        base = [s1[i] * 0.38 + nz[i] * _sfx_env(i, SAMPLE_RATE, 0.001, 0.055) * 0.28 for i in range(len(s1))]
+    elif kind == "iris":
+        s1 = _sfx_sweep(620.0, 220.0, 0.18, 0.004, 0.10)
+        s2 = _sfx_sweep(220.0, 540.0, 0.18, 0.004, 0.10)
+        base = [s * 0.45 for s in (s1 + s2)]
+    elif kind == "riser":
+        base = generate_noise_sweep(0.75, 250.0, 6000.0, 0.42)
+    else:
+        base = [s * 0.70 for s in _sfx_sweep(500.0, 1800.0, 0.09, 0.002, 0.03)]
+
+    return [max(-0.98, min(0.98, s * vol)) for s in base]
+
+
+def render_audio_events_track(
+    events: List[Any],
+    total_duration_sec: float,
+    out_wav_path: Path,
+) -> Dict[str, Any]:
+    """Renders `[timeSec, kind, gain]` timeline events into a single synchronized 48kHz WAV."""
+    dur = max(0.25, float(total_duration_sec))
+    total_samples = max(1, int(math.ceil(dur * SAMPLE_RATE)))
+    mix = [0.0] * total_samples
+
+    parsed = []
+    for item in events or []:
+        if isinstance(item, (list, tuple)) and len(item) >= 2:
+            t_sec = max(0.0, float(item[0]))
+            kind = normalize_sfx_kind(str(item[1]))
+            gain = max(0.05, min(1.5, float(item[2]) if len(item) >= 3 else 0.8))
+            parsed.append((t_sec, kind, gain))
+        elif isinstance(item, dict):
+            t_sec = max(0.0, float(item.get("time", item.get("t", 0.0))))
+            kind = normalize_sfx_kind(str(item.get("kind") or item.get("type") or "pop"))
+            gain = max(0.05, min(1.5, float(item.get("gain", item.get("volume", 0.8)))))
+            parsed.append((t_sec, kind, gain))
+
+    parsed.sort(key=lambda x: x[0])
+
+    # Cache synthesized unit-gain clips per kind so repeated cues are instant
+    clip_cache: Dict[str, List[float]] = {}
+    last_by_kind: Dict[str, float] = {}
+    placed_types: set = set()
+    placed_count = 0
+
+    for t_sec, kind, gain in parsed:
+        if t_sec >= dur:
+            continue
+        min_gap = 0.14 if kind == "footstep" else 0.045
+        if kind in last_by_kind and (t_sec - last_by_kind[kind]) < min_gap:
+            continue
+        last_by_kind[kind] = t_sec
+
+        clip = clip_cache.get(kind)
+        if clip is None:
+            clip = synthesize_sfx(kind, 1.0)
+            clip_cache[kind] = clip
+
+        off = min(total_samples - 1, int(round(t_sec * SAMPLE_RATE)))
+        for i, smp in enumerate(clip):
+            idx = off + i
+            if idx >= total_samples:
+                break
+            mix[idx] += smp * gain
+        placed_types.add(kind)
+        placed_count += 1
+
+    # Soft-clip limiter so overlapping SFX never distort
+    for i in range(total_samples):
+        v = mix[i]
+        if v > 0.85 or v < -0.85:
+            mix[i] = math.tanh(v)
+
+    write_wav(Path(out_wav_path), mix)
+    return {
+        "placed": placed_count,
+        "types": sorted(placed_types),
+        "duration": round(dur, 3),
+    }
+
+
 MOOD_PRESETS: Dict[str, Dict[str, Any]] = {
     "cheerful": {"bpm": 122.0, "chords": [[261.63, 329.63, 392.00, 493.88], [293.66, 369.99, 440.00, 523.25], [329.63, 415.30, 493.88, 659.25], [261.63, 329.63, 392.00, 523.25]], "kick": 0.24},
     "chill": {"bpm": 88.0, "chords": [[174.61, 220.00, 261.63, 329.63], [164.81, 196.00, 246.94, 293.66], [146.83, 174.61, 220.00, 261.63], [130.81, 164.81, 196.00, 246.94]], "kick": 0.14},

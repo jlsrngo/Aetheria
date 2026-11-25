@@ -159,6 +159,32 @@ pub fn build_ffmpeg_command(
     codec: &str,
     output_path: &Path,
 ) -> tokio::process::Command {
+    build_ffmpeg_command_with_events(
+        ffmpeg_bin,
+        meta,
+        film_root,
+        ws_root,
+        start_sec,
+        end_sec,
+        codec,
+        output_path,
+        None,
+    )
+}
+
+/// Constructs an FFmpeg command optionally replacing generic per-scene SFX tracks with a single
+/// timeline-synchronized event SFX track synthesized from `window.__audioEvents`.
+pub fn build_ffmpeg_command_with_events(
+    ffmpeg_bin: &Path,
+    meta: &FilmMeta,
+    film_root: &Path,
+    ws_root: &Path,
+    start_sec: f64,
+    end_sec: f64,
+    codec: &str,
+    output_path: &Path,
+    events_sfx_wav: Option<&Path>,
+) -> tokio::process::Command {
     let mut cmd = tokio::process::Command::new(ffmpeg_bin);
     cmd.args(["-y", "-f", "image2pipe", "-vcodec", "mjpeg", "-framerate"])
         .arg(meta.fps.max(1).to_string())
@@ -172,6 +198,7 @@ pub fn build_ffmpeg_command(
             .unwrap_or(false);
 
     let mix_cfg = load_audio_mix_config(film_root);
+    let has_events_sfx = !is_gif && events_sfx_wav.is_some_and(|p| p.is_file());
     let mut active_audios: Vec<(PathBuf, u64, f64, f64, f64, AudioBus)> = Vec::new();
     if !is_gif {
         for scene in &meta.scenes {
@@ -202,10 +229,25 @@ pub fn build_ffmpeg_command(
                     ));
                 }
             }
-            if let Some(ref sfx_rel) = scene.sfx {
-                if let Some(sfx_path) = find_scene_audio_file(film_root, ws_root, sfx_rel) {
-                    active_audios.push((sfx_path, delay_ms, trim_start, max_dur, 0.45, AudioBus::Sfx));
+            if !has_events_sfx {
+                if let Some(ref sfx_rel) = scene.sfx {
+                    if let Some(sfx_path) = find_scene_audio_file(film_root, ws_root, sfx_rel) {
+                        active_audios.push((sfx_path, delay_ms, trim_start, max_dur, 0.45, AudioBus::Sfx));
+                    }
                 }
+            }
+        }
+        if has_events_sfx {
+            if let Some(ev_wav) = events_sfx_wav {
+                let slice_dur = (end_sec - start_sec).max(0.05);
+                active_audios.push((
+                    ev_wav.to_path_buf(),
+                    0,
+                    start_sec.max(0.0),
+                    slice_dur,
+                    0.65,
+                    AudioBus::Sfx,
+                ));
             }
         }
     }
@@ -231,7 +273,7 @@ pub fn build_ffmpeg_command(
                 String::new()
             };
             filter_parts.push(format!(
-                "[{}:a]atrim=start={:.4}:duration={:.4},asetpts=PTS-STARTPTS{},adelay={}|{}{}",
+                "[{}:a]atrim=start={:.4}:duration={:.4},asetpts=PTS-STARTPTS,aresample=48000{},adelay={}|{}{}",
                 input_idx, trim_start, max_dur, vol_filter, delay_ms, delay_ms, label
             ));
             match bus {
@@ -660,6 +702,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp2);
         assert!(fc2.contains("sidechaincompress="), "expected ducking filter: {}", fc2);
         assert!(fc2.contains("loudnorm=I=-16"), "expected loudnorm filter: {}", fc2);
+        assert!(fc2.contains("aresample=48000"), "expected uniform 48kHz resample: {}", fc2);
+    }
+
+    #[test]
+    fn runtime_events_sfx_replaces_generic_scene_sfx_track() {
+        let tmp = std::env::temp_dir().join(format!("aetheria_events_sfx_{}", crate::paths::now_ms()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("audio")).unwrap();
+        std::fs::write(tmp.join("audio/s1.wav"), b"RIFF").unwrap();
+        std::fs::write(tmp.join("audio/sfx_s1.wav"), b"RIFF").unwrap();
+        let ev_wav = tmp.join("events_sfx.wav");
+        std::fs::write(&ev_wav, b"RIFF").unwrap();
+
+        let mut meta = sample_meta();
+        meta.scenes[0].audio = Some("audio/s1.wav".to_string());
+        meta.scenes[0].sfx = Some("audio/sfx_s1.wav".to_string());
+
+        let cmd = build_ffmpeg_command_with_events(
+            Path::new("ffmpeg"),
+            &meta,
+            &tmp,
+            &tmp,
+            0.0,
+            5.0,
+            "h264",
+            &tmp.join("out.mp4"),
+            Some(&ev_wav),
+        );
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        let joined = args.join(" ");
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        assert!(joined.contains("events_sfx.wav"), "expected runtime events SFX wav input: {}", joined);
+        assert!(!joined.contains("sfx_s1.wav"), "generic per-scene SFX should be skipped when runtime events SFX exists: {}", joined);
     }
 
     #[tokio::test]

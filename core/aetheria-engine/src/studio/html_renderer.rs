@@ -5,7 +5,7 @@ use super::cdp_pool::{
 };
 use super::cdp_ws::CdpWebSocket;
 use super::ffmpeg_pipeline::{
-    build_ffmpeg_command, format_ffmpeg_failure_from_task, spawn_stderr_drain,
+    build_ffmpeg_command_with_events, format_ffmpeg_failure_from_task, spawn_stderr_drain,
 };
 use super::film_inspector::{inspect_workspace_film, FilmMeta};
 use super::film_static_server::{pick_ephemeral_port, start_ephemeral_film_server};
@@ -375,6 +375,81 @@ async fn capture_single_frame_jpeg(
     })
 }
 
+/// Extracts `window.__audioEvents` from the loaded film page and synthesizes a timeline-synced
+/// 48kHz SFX WAV via the shared engine catalog in `core/voicebox/sfx_engine.py`.
+async fn synthesize_runtime_audio_events_sfx(
+    tab: &mut CdpWebSocket,
+    total_duration: f64,
+    out_wav: &Path,
+) -> Option<PathBuf> {
+    let eval = tab
+        .call(
+            "Runtime.evaluate",
+            json!({
+                "expression": "JSON.stringify(Array.isArray(window.__audioEvents) ? window.__audioEvents : [])",
+                "returnByValue": true
+            }),
+        )
+        .await
+        .ok()?;
+    let raw_events = eval
+        .get("result")
+        .and_then(|r| r.get("value"))
+        .and_then(Value::as_str)?;
+    let parsed: Vec<Value> = serde_json::from_str(raw_events).ok()?;
+    if parsed.is_empty() {
+        return None;
+    }
+
+    let voicebox_dir = crate::paths::project_root().join("core").join("voicebox");
+    let py_code = r#"
+import json, sys
+from pathlib import Path
+vb_dir, events_s, dur_s, out_wav_s = sys.argv[1:5]
+if vb_dir not in sys.path:
+    sys.path.insert(0, vb_dir)
+import sfx_engine
+events = json.loads(events_s)
+res = sfx_engine.render_audio_events_track(events, float(dur_s), Path(out_wav_s))
+print(json.dumps(res))
+"#;
+    let mut cmd = tokio::process::Command::new("python");
+    crate::paths::configure_hidden_tokio_command(&mut cmd);
+    cmd.arg("-c")
+        .arg(py_code)
+        .arg(&voicebox_dir)
+        .arg(raw_events)
+        .arg(format!("{:.4}", total_duration.max(0.25)))
+        .arg(out_wav);
+
+    match cmd.output().await {
+        Ok(out) if out.status.success() && out_wav.is_file() => {
+            crate::paths::log_engine(
+                "render",
+                &format!(
+                    "Synthesized runtime SFX track from window.__audioEvents: {}",
+                    String::from_utf8_lossy(&out.stdout).trim()
+                ),
+            );
+            Some(out_wav.to_path_buf())
+        }
+        Ok(out) => {
+            eprintln!(
+                "[render] Runtime SFX event synthesis failed (falling back to scene sfx): {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+            None
+        }
+        Err(err) => {
+            eprintln!(
+                "[render] Could not invoke Python for runtime SFX event synthesis: {}",
+                err
+            );
+            None
+        }
+    }
+}
+
 /// Renders the active HTML5+JS film using local headless Chrome/Edge multi-tab CDP + FFmpeg.
 pub async fn render_active_html_film<FStatus, FProgress>(
     params: HtmlRenderParams,
@@ -443,6 +518,23 @@ where
     let frames_to_render = end_frame - start_frame + 1;
     let fps_f = meta.fps.max(1) as f64;
 
+    let is_gif = params.codec.eq_ignore_ascii_case("gif")
+        || params
+            .output_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("gif"))
+            .unwrap_or(false);
+    let tmp_events_sfx = params.output_path.with_file_name(format!(
+        ".tmp-events-sfx-{}.wav",
+        now_ms()
+    ));
+    let events_sfx_wav = if !is_gif && !is_proxy {
+        synthesize_runtime_audio_events_sfx(&mut tab0, meta.duration, &tmp_events_sfx).await
+    } else {
+        None
+    };
+
     let desired_workers = compute_render_worker_count(frames_to_render);
     let mut workers = vec![tab0];
     if desired_workers > 1 {
@@ -501,7 +593,7 @@ where
         out_ext
     ));
 
-    let mut ff_cmd = build_ffmpeg_command(
+    let mut ff_cmd = build_ffmpeg_command_with_events(
         &ffmpeg_bin,
         &meta,
         &film_root,
@@ -510,6 +602,7 @@ where
         (end_frame + 1) as f64 / fps_f,
         &params.codec,
         &tmp_output,
+        events_sfx_wav.as_deref(),
     );
     let mut ff_child = ff_cmd
         .spawn()
@@ -640,6 +733,9 @@ where
     if let Err(err) = pipe_res {
         let _ = ff_child.kill().await;
         let _ = tokio::fs::remove_file(&tmp_output).await;
+        if let Some(ref ev_wav) = events_sfx_wav {
+            let _ = tokio::fs::remove_file(ev_wav).await;
+        }
         if let Ok(Ok(ff_err)) =
             tokio::time::timeout(std::time::Duration::from_secs(2), ff_stderr_task).await
         {
@@ -662,6 +758,10 @@ where
         .wait()
         .await
         .map_err(|e| format!("FFmpeg wait error: {}", e))?;
+
+    if let Some(ref ev_wav) = events_sfx_wav {
+        let _ = tokio::fs::remove_file(ev_wav).await;
+    }
 
     if !status.success() {
         let _ = tokio::fs::remove_file(&tmp_output).await;

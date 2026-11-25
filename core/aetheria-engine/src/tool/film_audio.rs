@@ -53,7 +53,7 @@ pub fn film_audio_tool_definition() -> Value {
                                 "minScene": { "type": "number", "description": "Optional minimum duration floor (seconds) for this scene." },
                                 "sfxCues": {
                                     "type": "array",
-                                    "description": "SFX cues for this scene (`{ type: 'whoosh'|'pop'|'impact'|'chime'|'riser'|'typewriter', time?: sec, frame?: n, volume?: 0..1 }` or shorthand cue name). When omitted, deterministic transition & beat SFX cues are generated automatically into `audio/sfx_<id>.wav`.",
+                                    "description": "SFX cues from the shared engine catalog (`{ type: 'pop'|'tick'|'ding'|'question'|'sparkle'|'zzz'|'boing'|'footstep'|'whoosh'|'soft-whoosh'|'thud'|'burst'|'alarm'|'flash'|'iris'|'riser', time?: sec, frame?: n, volume?: 0..1 }` or shorthand cue name). When omitted, deterministic transition & beat SFX cues are generated into `audio/sfx_<id>.wav` (declarative StoryCore skills auto-override with timeline-synced `window.__audioEvents` at render time).",
                                     "items": {}
                                 },
                                 "disableSfx": {
@@ -447,24 +447,8 @@ for raw in cues:
     else:
         continue
 
-    if "whoosh" in ctype or "swipe" in ctype:
-        samples = se.generate_noise_sweep(0.38, 400, 4500, vol)
-        norm_type = "whoosh"
-    elif "riser" in ctype:
-        samples = se.generate_noise_sweep(0.75, 250, 6000, vol)
-        norm_type = "riser"
-    elif "impact" in ctype or "hit" in ctype or "thud" in ctype:
-        samples = se.generate_sub_impact(0.45, vol)
-        norm_type = "impact"
-    elif "chime" in ctype or "bell" in ctype:
-        samples = se.generate_chime([1046.5, 1318.5, 1567.98], 0.35, vol)
-        norm_type = "chime"
-    elif "type" in ctype or "click" in ctype:
-        samples = se.generate_sine_blip(2200, 1600, 0.035, 120.0, vol)
-        norm_type = "typewriter"
-    else:
-        samples = se.generate_sine_blip(950, 480, 0.075, 45.0, vol)
-        norm_type = "pop"
+    norm_type = se.normalize_sfx_kind(ctype)
+    samples = se.synthesize_sfx(norm_type, vol)
 
     offset = min(total_samples - 1, int(t_sec * sr))
     for i, smp in enumerate(samples):
