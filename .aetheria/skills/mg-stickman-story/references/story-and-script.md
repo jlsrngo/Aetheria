@@ -11,3 +11,8 @@ After calling `capture_film_preview`, inspect `.aetheria/preview/contact_sheet.j
 - **`mid` frame (`55%`):** Are heads, glasses, eyes, and speech bubbles 100% unclipped inside the blue dashed TikTok safe zone? Do speech bubbles stay well above the bottom karaoke subtitle bar (`y < 0.78*H`)?
 - **`end` frame (`-0.35s`):** Did the ending camera move land balanced without drifting partially off-screen?
 - **`storyQa.directorWarnings`:** Resolve any `[CHECK]` warnings (phrase mismatch, monotonous shot sizes, or element collision) with at most 1 surgical pass on `story.json`.
+
+## 3. User-Supplied VO + Script Mode
+When the user provides their own voiceover WAV (`source.voPath`) and full script (`source.script`):
+1. Slice the full script cleanly across `shots[]` so the concatenated per-shot `caption` text equals the user's supplied script verbatim (no dropped or invented sentences).
+2. Pass `scenes[].voPath` (relative workspace path inside the project, e.g. `"input/shot1_vo.wav"`) to `film_audio`. The engine skips TTS synthesis, reads exact WAV duration via `read_wav_duration_secs`, detects speech segments via RMS energy (`±0.2s` estimated word timing when no external word-alignment JSON is supplied), and writes `audio/<id>.words.json` + `audio/<id>.levels.json` for tight subtitles and mouth lipsync.

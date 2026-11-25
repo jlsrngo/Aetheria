@@ -272,10 +272,6 @@ pub(crate) fn normalize_preview_timestamps_with_cap(
     out
 }
 
-pub(crate) fn normalize_preview_timestamps(raw: &[f64], duration: f64) -> Vec<f64> {
-    normalize_preview_timestamps_with_cap(raw, duration, MAX_PREVIEW_FRAMES)
-}
-
 pub(crate) fn resolve_default_preview_timestamps(
     requested_timestamps: &[f64],
     should_compare: bool,
@@ -1043,18 +1039,22 @@ mod tests {
 
     #[test]
     fn normalizes_default_and_clamped_timestamps() {
-        let defaults = normalize_preview_timestamps(&[], 10.0);
+        let defaults = normalize_preview_timestamps_with_cap(&[], 10.0, MAX_PREVIEW_FRAMES);
         assert_eq!(defaults, vec![1.0, 3.5, 6.0, 8.5]);
         assert_eq!(compute_relative_ratio(3.5, 10.0), 0.35);
 
-        let custom = normalize_preview_timestamps(&[-1.0, 0.25, 0.255, 99.0, 2.0, 3.0, 4.0], 6.0);
+        let custom = normalize_preview_timestamps_with_cap(
+            &[-1.0, 0.25, 0.255, 99.0, 2.0, 3.0, 4.0],
+            6.0,
+            MAX_PREVIEW_FRAMES,
+        );
         assert_eq!(custom, vec![0.25, 5.95, 2.0, 3.0, 4.0]);
 
         let many: Vec<f64> = (1..=20).map(|i| i as f64 * 0.5).collect();
-        let capped = normalize_preview_timestamps(&many, 20.0);
+        let capped = normalize_preview_timestamps_with_cap(&many, 20.0, MAX_PREVIEW_FRAMES);
         assert_eq!(capped.len(), MAX_PREVIEW_FRAMES);
 
-        let exact_cuts = normalize_preview_timestamps(&[1.667, 4.967], 10.0);
+        let exact_cuts = normalize_preview_timestamps_with_cap(&[1.667, 4.967], 10.0, MAX_PREVIEW_FRAMES);
         assert_eq!(exact_cuts, vec![1.667, 4.967]);
     }
 

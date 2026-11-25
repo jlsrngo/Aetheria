@@ -116,6 +116,170 @@
           { "at": 1.4, "kind": "push", "to": { "focus": ["afro", "nadia"], "z": 1.0, "dy": -40 }, "dur": 1.2 }
         ]
       }
+    },
+    {
+      "id": "shot4_yard_banter",
+      "start": 10.0,
+      "duration": 3.5,
+      "stage": "school-yard",
+      "timeOfDay": "day",
+      "signText": "SCIENCE FAIR",
+      "transition": { "kind": "slide-push", "dur": 0.42 },
+      "caption": "Nadia reminds Afro that their robotics demo starts in five minutes.",
+      "actors": [
+        {
+          "id": "afro",
+          "x": -145,
+          "pose": "stand",
+          "expr": "happy",
+          "facing": "right",
+          "backpack": true,
+          "actions": [
+            { "word": "five", "pose": "point", "expr": "surprised", "emote": "question", "emoteDur": 1.3 }
+          ]
+        },
+        {
+          "id": "nadia",
+          "x": 95,
+          "pose": "explain",
+          "expr": "happy",
+          "facing": "left",
+          "backpack": true,
+          "actions": [
+            { "at": 0.2, "pose": "point-up", "expr": "determined", "emote": "chat", "emoteDur": 1.6 }
+          ]
+        }
+      ],
+      "bubbles": [
+        { "by": "nadia", "text": "Five minutes left!", "at": 0.3, "until": 2.9, "side": "right" }
+      ],
+      "camera": {
+        "initial": { "size": "wide", "focus": ["afro", "nadia"] },
+        "moves": [
+          { "at": 0.1, "kind": "orbit-sway", "strength": 35, "period": 5.0 },
+          { "at": 1.5, "kind": "push", "to": { "focus": ["afro", "nadia"], "z": 0.96, "dy": -35 }, "dur": 1.1 }
+        ]
+      }
+    },
+    {
+      "id": "shot5_comic_panic",
+      "start": 13.5,
+      "duration": 3.2,
+      "stage": "classroom",
+      "timeOfDay": "day",
+      "boardText": "LAB DEMO 08:00",
+      "transition": { "kind": "whip", "dir": "right", "dur": 0.36 },
+      "caption": "Afro checks his pocket and gasps because the main sensor stayed home!",
+      "actors": [
+        {
+          "id": "afro",
+          "x": -40,
+          "pose": "panic",
+          "expr": "panic",
+          "facing": "right",
+          "actions": [
+            { "at": 0.15, "emote": "sweat", "emoteDur": 2.0 },
+            { "word": "sensor", "pose": "shock", "expr": "shocked", "emote": "bolt", "emoteDur": 1.2 }
+          ]
+        }
+      ],
+      "overlays": [
+        { "word": "sensor", "offset": -0.1, "style": "burst", "text": "WHAT?!", "pos": [0.3, 0.24], "until": 2.9 }
+      ],
+      "camera": {
+        "initial": { "size": "full", "focus": "afro" },
+        "moves": [
+          { "at": 0.1, "kind": "dutch", "r": -4.2, "dur": 0.6 },
+          { "word": "sensor", "offset": -0.1, "kind": "shake", "strength": 9, "dur": 0.65 }
+        ]
+      }
+    },
+    {
+      "id": "shot6_calm_focus",
+      "start": 16.7,
+      "duration": 3.5,
+      "stage": "study",
+      "timeOfDay": "day",
+      "transition": { "kind": "iris", "dur": 0.45 },
+      "caption": "They stay calm, wire a backup chip together, and smile with relief.",
+      "actors": [
+        {
+          "id": "afro",
+          "x": -125,
+          "pose": "think",
+          "expr": "focused",
+          "facing": "right",
+          "actions": [
+            { "word": "smile", "pose": "thumbsup", "expr": "laugh", "emote": "heart", "emoteDur": 1.5 }
+          ]
+        },
+        {
+          "id": "nadia",
+          "x": 95,
+          "pose": "point",
+          "expr": "determined",
+          "facing": "left",
+          "actions": [
+            { "word": "smile", "pose": "cheer", "expr": "excited", "emote": "sparkle", "emoteDur": 1.5 }
+          ]
+        }
+      ],
+      "camera": {
+        "initial": { "size": "wide", "focus": ["afro", "nadia"] },
+        "moves": [
+          { "at": 0.1, "kind": "rack-focus", "blur": 5, "dur": 0.9 },
+          { "at": 1.0, "kind": "push", "to": { "focus": ["afro", "nadia"], "z": 1.04, "dy": -30 }, "dur": 1.4 }
+        ]
+      }
+    },
+    {
+      "id": "shot7_comic_recap",
+      "start": 20.2,
+      "duration": 3.8,
+      "type": "comic",
+      "grid": [2, 2],
+      "transition": { "kind": "zoom-cross", "dur": 0.45 },
+      "caption": "Every hurdle turns into teamwork when friends back each other up!",
+      "panels": [
+        {
+          "stage": "bedroom",
+          "timeOfDay": "morning",
+          "appear": 0.0,
+          "zoom": 0.92,
+          "actors": [{ "id": "afro", "x": -120, "pose": "idea", "expr": "excited" }]
+        },
+        {
+          "stage": "park",
+          "timeOfDay": "day",
+          "appear": 0.35,
+          "zoom": 0.92,
+          "actors": [
+            { "id": "afro", "x": -120, "pose": "run", "expr": "happy" },
+            { "id": "nadia", "x": 130, "pose": "wave", "expr": "happy", "facing": "left" }
+          ]
+        },
+        {
+          "stage": "study",
+          "timeOfDay": "day",
+          "appear": 0.7,
+          "zoom": 0.92,
+          "actors": [
+            { "id": "afro", "x": -110, "pose": "think", "expr": "focused" },
+            { "id": "nadia", "x": 120, "pose": "explain", "expr": "determined", "facing": "left" }
+          ]
+        },
+        {
+          "stage": "school-yard",
+          "timeOfDay": "sunset",
+          "appear": 1.05,
+          "zoom": 0.96,
+          "actors": [
+            { "id": "afro", "x": -115, "pose": "cheer", "expr": "laugh" },
+            { "id": "nadia", "x": 125, "pose": "cheer", "expr": "laugh", "facing": "left" }
+          ]
+        }
+      ],
+      "zoom": { "at": 2.2, "panel": 4, "dur": 1.1 }
     }
   ]
 }

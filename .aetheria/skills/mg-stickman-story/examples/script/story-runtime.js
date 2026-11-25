@@ -224,8 +224,14 @@
     var rows = Math.max(1, num(grid[1], 2));
     var panels = listOf(shot, 'panels');
     var u = Math.min(W, H) / 1080;
-    var margin = 40 * u;
-    var gap = 26 * u;
+    var safe = env.safe || { x: 56, y: 80, w: W - 184, h: H - 580 };
+    var padX = 12 * u;
+    var padY = 12 * u;
+    var left = safe.x + padX;
+    var top = safe.y + padY;
+    var gridW = Math.max(120, safe.w - padX * 2);
+    var gridH = Math.max(120, safe.h - padY * 2);
+    var gap = 22 * u;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = shot.pageColor === 'white' ? '#FFFFFF' : '#FFF6E5';
     ctx.fillRect(0, 0, W, H);
@@ -233,21 +239,23 @@
     var zoom = shot.zoom || null;
     var zp = 0;
     var zr = null;
-    var pw = (W - margin * 2 - gap * (cols - 1)) / cols;
-    var ph = (H - margin * 2 - gap * (rows - 1)) / rows;
+    var pw = (gridW - gap * (cols - 1)) / cols;
+    var ph = (gridH - gap * (rows - 1)) / rows;
     if (zoom) {
       var zt0 = env.when(zoom);
       zp = clamp((env.localTime - zt0) / Math.max(0.1, num(zoom.dur, 1.2)), 0, 1);
       zp = zp * zp * (3 - 2 * zp);
       var zi = Math.max(0, num(zoom.panel, 1) - 1);
-      zr = { x: margin + (zi % cols) * (pw + gap), y: margin + Math.floor(zi / cols) * (ph + gap) };
+      zr = { x: left + (zi % cols) * (pw + gap), y: top + Math.floor(zi / cols) * (ph + gap) };
     }
     ctx.save();
     if (zr && zp > 0) {
-      var sc = 1 + (Math.min(W / pw, H / ph) - 1) * zp;
-      var fcx = W / 2 + (zr.x + pw / 2 - W / 2) * zp;
-      var fcy = H / 2 + (zr.y + ph / 2 - H / 2) * zp;
-      ctx.translate(W / 2, H / 2);
+      var zCenterX = left + gridW * 0.5;
+      var zCenterY = top + gridH * 0.5;
+      var sc = 1 + (Math.min(gridW / pw, gridH / ph) - 1) * zp;
+      var fcx = zCenterX + (zr.x + pw / 2 - zCenterX) * zp;
+      var fcy = zCenterY + (zr.y + ph / 2 - zCenterY) * zp;
+      ctx.translate(zCenterX, zCenterY);
       ctx.scale(sc, sc);
       ctx.translate(-fcx, -fcy);
     }
@@ -267,8 +275,8 @@
       if (age < 0) continue;
       var pop = clamp(age / 0.3, 0, 1);
       var bounce = 1 + Math.sin(pop * Math.PI) * 0.06;
-      var px = margin + (i % cols) * (pw + gap);
-      var py = margin + Math.floor(i / cols) * (ph + gap);
+      var px = left + (i % cols) * (pw + gap);
+      var py = top + Math.floor(i / cols) * (ph + gap);
       var panelEnv = Object.assign({}, env, { localTime: age });
       octx.setTransform(1, 0, 0, 1, 0, 0);
       drawScene(octx, ow, oh, story, pn, panelEnv, { x: 0, y: -300, z: num(pn.zoom, 0.86), r: 0, blur: 0 }, { skipQa: true });
@@ -282,7 +290,7 @@
     }
     ctx.restore();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    return { minX: margin, minY: margin, maxX: W - margin, maxY: H - margin };
+    return { minX: left, minY: top, maxX: left + gridW, maxY: top + gridH };
   }
 
   function renderOverlays(ctx, env, shot, sceneInfo, cam) {

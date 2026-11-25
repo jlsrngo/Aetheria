@@ -68,10 +68,11 @@ describe("mg-stickman-story kit & runtime modules", () => {
 
     const story = JSON.parse(fs.readFileSync(path.join(SKILL_DIR, "examples/story.example.json"), "utf8"));
     expect(story.canvas).toEqual({ w: 1080, h: 1920, fps: 30 });
-    expect(story.shots).toHaveLength(3);
+    expect(story.shots).toHaveLength(7);
     expect(story.shots[0].start).toBe(0);
-    expect(story.shots[1].start).toBeCloseTo(story.shots[0].duration, 3);
-    expect(story.shots[2].start).toBeCloseTo(story.shots[0].duration + story.shots[1].duration, 3);
+    for (let i = 1; i < story.shots.length; i++) {
+      expect(story.shots[i].start).toBeCloseTo(story.shots[i - 1].start + story.shots[i - 1].duration, 3);
+    }
 
     const mods = loadStickmanModules();
     expect(Object.keys(mods.StickmanRig.PRESETS).length).toBeGreaterThanOrEqual(13);
