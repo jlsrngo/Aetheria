@@ -684,8 +684,8 @@ pub fn resolve_voice_preset_command(prompt_text: &str) -> Option<String> {
     let styles_obj = json_val.get("presets")?.get("aetheria")?.get("styles")?;
 
     let effective_key = match style_key.as_str() {
-        "pocketmyth" | "pm" => "default",
-        "kriminal" | "conspiracy" => "crime_conspiracy",
+        "default" | "pocketmyth" | "pm" => "default1",
+        "clean" => "default2",
         other => other,
     };
 

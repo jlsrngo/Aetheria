@@ -45,7 +45,7 @@ pub fn film_audio_tool_definition() -> Value {
                                 "voPath": { "type": "string", "description": "Optional user-supplied WAV path (relative inside workspace/project) to skip TTS and derive exact duration, words.json, and RMS lipsync levels.json." },
                                 "duration": { "type": "number", "description": "Target duration seconds for non-narrated showreel scenes (optional alias for minScene)." },
                                 "voice": { "type": "string", "description": "Optional voice override (e.g. 'aetheria', 'id-ID-ArdiNeural', 'af_heart')." },
-                                "style": { "type": "string", "description": "Optional delivery style ('default', 'energetic', 'mystery', 'casual', 'serious', 'horror', 'crime_conspiracy')." },
+                                "style": { "type": "string", "description": "Optional voice variant ('default1' for expressive default, 'default2' for clean -1.5 dBFS headroom)." },
                                 "lang": { "type": "string", "enum": ["id", "en"] },
                                 "engine": { "type": "string", "enum": ["auto", "voxcpm", "edge", "kokoro"] },
                                 "accent": { "type": "string", "description": "Optional hex accent color when initializing new scenes." },

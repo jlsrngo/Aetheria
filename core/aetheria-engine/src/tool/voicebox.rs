@@ -70,8 +70,8 @@ pub fn voicebox_tool_definition() -> Value {
                     },
                     "style": {
                         "type": "string",
-                        "enum": ["default", "energetic", "mystery", "casual", "serious", "horror", "crime_conspiracy"],
-                        "description": "Delivery style for preset voices like 'aetheria' or 'aetheria_en': 'default' (Aetheria storytelling cadence), 'horror' (chilling supernatural suspense), 'crime_conspiracy' (investigative true crime / mystery), 'energetic' (open, loud hook for tech/news), 'mystery' (dramatic suspense), 'casual' (relaxed friend chat), 'serious' (firm warning/facts)."
+                        "enum": ["default1", "default2", "default"],
+                        "description": "Voice variant for preset voices: 'default1' (expressive default) or 'default2' (clean -1.5 dBFS headroom). Use inline `[excited]`/`[whispers]`/`[angry]`/`[sad]`/`[pause]` tags in `text` for emotions."
                     },
                     "voiceDesign": {
                         "type": "string",

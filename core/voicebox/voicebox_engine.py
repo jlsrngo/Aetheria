@@ -549,17 +549,18 @@ def apply_voicebox_dsp(
     audio_data: np.ndarray,
     sample_rate: int,
     gentle_cloning: bool = False,
+    clean_headroom: bool = False,
 ) -> np.ndarray:
     """
     Applies Voicebox's studio DSP mastering pipeline using Spotify's Pedalboard.
     When `gentle_cloning=True` (used for VoxCPM2 cloned voices whose reference audio is
-    already broadcast-compressed), uses a transparent 1.6:1 compressor with slower
-    28ms attack so emphatic pitch peaks are never squashed or held back ("ketahan").
+    already broadcast-compressed), uses transparent v1 mastering by default, or `-1.5 dBFS`
+    peak-clamped mastering when `clean_headroom=True` (v3 `clean` variant).
     """
     if not HAS_PEDALBOARD:
         peak = np.max(np.abs(audio_data))
         if peak > 0:
-            return (audio_data / peak) * 0.92
+            return (audio_data / peak) * (0.89 if clean_headroom else 0.92)
         return audio_data
 
     audio_f32 = audio_data.astype(np.float32)
@@ -567,12 +568,11 @@ def apply_voicebox_dsp(
         audio_f32 = audio_f32.reshape(1, -1)
 
     if gentle_cloning:
-        # Transparent zero-phase mastering for cloned voice: preserves pure natural timbre,
-        # tames harsh high-end raspiness, and leaves clean -1.8 dBFS headroom (zero clipping).
+        # Default (v1): transparent zero-phase mastering preserving punchy v1 timbre.
+        # Clean variant (v3): tighter -1.5 dBFS ceiling + 0.89 peak safety clamp (zero clipping).
         board = Pedalboard([
             HighpassFilter(cutoff_frequency_hz=65.0),
-            HighShelfFilter(cutoff_frequency_hz=7200.0, gain_db=-1.5),
-            Limiter(threshold_db=-1.8, release_ms=90.0),
+            Limiter(threshold_db=-1.5 if clean_headroom else -1.0, release_ms=80.0),
         ])
     else:
         board = Pedalboard([
@@ -585,8 +585,12 @@ def apply_voicebox_dsp(
             Limiter(threshold_db=-1.0, release_ms=80.0),
         ])
 
-    effected = board(audio_f32, sample_rate)
-    return effected.squeeze()
+    effected = board(audio_f32, sample_rate).squeeze()
+    if clean_headroom:
+        peak = float(np.max(np.abs(effected))) if effected.size else 0.0
+        if peak > 0.89:
+            effected = (effected * (0.89 / peak)).astype(np.float32)
+    return effected
 
 
 def preprocess_reference_audio(
@@ -1091,101 +1095,101 @@ def crossfade_audio_chunks(
 
 
 INLINE_AUDIO_TAGS: Dict[str, Dict[str, Any]] = {
-    # Emotions (kept in smooth VoxCPM2 CFG range 1.38-1.46 and gain <= 1.0 to avoid raspiness/clipping)
+    # Emotions (v1 expressive default; `clean` variant caps gain <= 1.0 & applies -1.5 dBFS headroom)
     "excited": {
-        "control": "Very excited, upbeat, energetic, bright rising intonation, smooth clean voice without raspiness.",
-        "cfg": 1.42,
-        "gain": 1.00,
+        "control": "Very excited, upbeat, energetic, bright rising intonation and lively delivery.",
+        "cfg": 1.50,
+        "gain": 1.05,
         "edge_rate": "+8%",
         "edge_pitch": "+6Hz",
     },
     "sad": {
-        "control": "Sad, soft, slow empathetic tone, gentle downward cadence, smooth warm voice.",
-        "cfg": 1.44,
+        "control": "Sad, soft, slow empathetic tone, gentle downward cadence and subdued energy.",
+        "cfg": 1.58,
         "gain": 0.90,
         "edge_rate": "-10%",
         "edge_pitch": "-6Hz",
     },
     "angry": {
-        "control": "Angry, firm, emphatic emotional tone with strong urgency, clear resonant voice without distortion.",
-        "cfg": 1.44,
-        "gain": 1.00,
+        "control": "Angry, firm, loud, sharp emotional emphasis with strong urgency.",
+        "cfg": 1.54,
+        "gain": 1.08,
         "edge_rate": "+6%",
         "edge_pitch": "+4Hz",
     },
     "sarcastic": {
-        "control": "Sarcastic, dry, playful ironic delivery with subtle emphasis, clean smooth tone.",
-        "cfg": 1.44,
-        "gain": 0.96,
+        "control": "Sarcastic, dry, playful ironic delivery with subtle emphasis.",
+        "cfg": 1.56,
+        "gain": 0.98,
         "edge_rate": "-4%",
         "edge_pitch": "-2Hz",
     },
     "nervous": {
-        "control": "Nervous, anxious, slightly hurried and hesitant delivery with short breath, clear voice.",
-        "cfg": 1.44,
-        "gain": 0.95,
+        "control": "Nervous, anxious, slightly hurried and hesitant delivery with short breath.",
+        "cfg": 1.55,
+        "gain": 0.96,
         "edge_rate": "+5%",
         "edge_pitch": "+3Hz",
     },
     "confident": {
-        "control": "Confident, assured, steady authoritative chest voice with crisp clean articulation.",
-        "cfg": 1.42,
-        "gain": 1.00,
+        "control": "Confident, assured, steady authoritative chest voice with crisp articulation.",
+        "cfg": 1.52,
+        "gain": 1.02,
         "edge_rate": "+0%",
         "edge_pitch": "-2Hz",
     },
     # Delivery styles
     "whispers": {
-        "control": "Soft intimate whisper close to the microphone, quiet gentle secretive tone.",
-        "cfg": 1.46,
-        "gain": 0.78,
+        "control": "Soft intimate whisper close to the microphone, quiet breathy secretive tone.",
+        "cfg": 1.62,
+        "gain": 0.72,
         "edge_rate": "-12%",
         "edge_pitch": "-8Hz",
     },
     "shouting": {
-        "control": "Calling out loudly with high vocal energy and urgency, clean resonant voice without clipping.",
-        "cfg": 1.42,
-        "gain": 1.00,
+        "control": "Shouting loudly with high vocal power and intense urgency.",
+        "cfg": 1.50,
+        "gain": 1.14,
         "edge_rate": "+10%",
         "edge_pitch": "+10Hz",
     },
     # Non-verbal cues (best-effort VoxCPM steering + natural beat padding)
     "laughs": {
-        "control": "Laughing warmly and cheerfully while speaking, bright joyful smooth tone.",
-        "cfg": 1.40,
-        "gain": 1.00,
+        "control": "Laughing warmly and cheerfully while speaking, bright joyful amused tone.",
+        "cfg": 1.50,
+        "gain": 1.04,
         "pause_before_ms": 120,
         "edge_rate": "+8%",
         "edge_pitch": "+6Hz",
     },
     "chuckles": {
-        "control": "Lightly chuckling, amused and friendly smiling delivery, smooth warm voice.",
-        "cfg": 1.42,
-        "gain": 0.96,
+        "control": "Lightly chuckling, amused and friendly smiling delivery.",
+        "cfg": 1.52,
+        "gain": 0.98,
         "pause_before_ms": 100,
         "edge_rate": "+4%",
         "edge_pitch": "+3Hz",
     },
     "sighs": {
-        "control": "Opening with a tired sigh, speaking softly, candidly, and gently without harshness.",
-        "cfg": 1.44,
-        "gain": 0.90,
+        "control": "Opening with a tired sigh, speaking softly, candidly, and slightly weary.",
+        "cfg": 1.58,
+        "gain": 0.92,
         "pause_before_ms": 260,
         "edge_rate": "-8%",
         "edge_pitch": "-5Hz",
     },
     "gasps": {
-        "control": "Sudden surprised gasp, startled exclamation with crisp upward inflection, clean voice.",
-        "cfg": 1.42,
-        "gain": 0.98,
+        "control": "Sudden surprised gasp, startled exclamation with sharp upward inflection.",
+        "cfg": 1.53,
+        "gain": 1.04,
         "pause_before_ms": 140,
         "edge_rate": "+6%",
         "edge_pitch": "+8Hz",
     },
     "clears throat": {
-        "control": "Clears throat gently then speaks clearly, smoothly, and composed.",
-        "cfg": 1.42,
-        "gain": 0.98,
+        "control": "Clears throat gently then speaks clearly, cleanly, and composed.",
+        "cfg": 1.54,
+        "gain": 1.00,
         "pause_before_ms": 220,
         "edge_rate": "+0%",
         "edge_pitch": "+0Hz",
@@ -1283,6 +1287,7 @@ def _synthesize_tagged_voxcpm_segments(
     is_indonesian: bool,
     custom_lex: Optional[Dict[str, str]],
     workspace_dir: Optional[str],
+    clean_headroom: bool = False,
 ) -> tuple[np.ndarray, int, List[Dict[str, Any]]]:
     """Synthesizes multi-tag segments sequentially with per-segment VoxCPM2 emotion steering."""
     out_sr = 48000
@@ -1337,6 +1342,8 @@ def _synthesize_tagged_voxcpm_segments(
         out_sr = sr
         chunk = trim_tts_output(chunk, sr)
         gain = float(spec.get("gain", 1.0))
+        if clean_headroom and gain > 1.0:
+            gain = 1.0
         if abs(gain - 1.0) > 0.01:
             chunk = np.clip(chunk * gain, -0.98, 0.98).astype(np.float32)
 
@@ -1880,6 +1887,10 @@ def generate_speech(
             f"[voicebox] Generating with VoxCPM2 (mode={cloning_mode}, cfg={cfg_val}, style={selected_style_key or 'default'}, "
             f"{'clone' if clone_ref else 'voice design'}: {design if not clone_ref else clone_ref})..."
         )
+        use_clean_variant = (
+            selected_style_key in ("default2", "clean")
+            or os.environ.get("AETHERIA_VOICE_VARIANT", "").strip().lower() in ("default2", "clean")
+        )
         try:
             if has_inline_tags:
                 audio_data, sample_rate, words = _synthesize_tagged_voxcpm_segments(
@@ -1893,6 +1904,7 @@ def generate_speech(
                     is_indonesian=is_indonesian,
                     custom_lex=custom_lex,
                     workspace_dir=workspace_dir,
+                    clean_headroom=use_clean_variant,
                 )
             else:
                 audio_data, sample_rate = generate_voxcpm_speech(
@@ -1986,11 +1998,20 @@ def generate_speech(
     # Sanitize voiceover audio (trim pre-speech transient spikes, compact dead-air pauses, cosine fade-in/out)
     audio_data, time_map = sanitize_voice_audio_with_map(audio_data, sample_rate)
 
-    # Apply Voicebox studio DSP mastering (use gentle transparent compressor for cloned voices so pitch peaks aren't squashed)
+    # Apply Voicebox studio DSP mastering (v1 default or v3 `clean` -1.5 dBFS headroom variant)
     if apply_dsp:
         is_cloned = (used_engine == "voxcpm2" and bool(clone_ref))
-        print(f"[voicebox] Applying Spotify Pedalboard broadcast DSP ({'Gentle Cloning 1.6:1' if is_cloned else 'Broadcast 3.5:1'} + Limiter)...")
-        mastered_audio = apply_voicebox_dsp(audio_data, sample_rate, gentle_cloning=is_cloned)
+        clean_variant = (
+            selected_style_key in ("default2", "clean")
+            or os.environ.get("AETHERIA_VOICE_VARIANT", "").strip().lower() in ("default2", "clean")
+        )
+        print(
+            f"[voicebox] Applying Spotify Pedalboard broadcast DSP "
+            f"({'Gentle Cloning Clean -1.5dB' if (is_cloned and clean_variant) else ('Gentle Cloning v1' if is_cloned else 'Broadcast 3.5:1')} + Limiter)..."
+        )
+        mastered_audio = apply_voicebox_dsp(
+            audio_data, sample_rate, gentle_cloning=is_cloned, clean_headroom=clean_variant
+        )
     else:
         mastered_audio = audio_data
 

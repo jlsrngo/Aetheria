@@ -144,7 +144,7 @@ export const ChatInputBox = memo(function ChatInputBox({
         const styles = data.presets.aetheria.styles;
         const mapped: Array<{ id: string; name: string; command: string; description: string }> = [];
         for (const [key, val] of Object.entries<any>(styles)) {
-          const cmdName = key === "default" ? "/audio:pocketmyth" : `/audio:${key}`;
+          const cmdName = `/audio:${key}`;
           mapped.push({
             id: key,
             name: val.label || key,

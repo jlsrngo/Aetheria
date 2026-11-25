@@ -4,6 +4,7 @@
 1. **Hook (`0–3s`):** Start mid-conflict or kinetic insert (ringing alarm, sudden question, dramatic pull-out) paired with immediate camera motion (`shake` -> `fly-to`, or `snap-zoom`). Never open on 3 seconds of a still wide shot.
 2. **Setup & Escalation:** Cut or transition (`flash`, `whip`, `iris`) into reaction beats synced to narration words (`"word": "..."`), combining facial expression + pose + head emote (`idea`, `exclaim`) + comic overlay (`burst`).
 3. **Payoff & Connection:** Resolve in a fresh set (`park`, `school-yard`, `living-room`) with locomotion (`follow` lag tracking) and a clean two-shot speech bubble + karaoke caption wrap-up.
+4. **Expressive VO & Multi-Mood BGM:** When synthesizing narration via `film_audio`, place inline tags (`[excited]`, `[whispers]`, `[angry]`, `[sad]`, `[gasps]`, `[laughs]`, `[sighs]`, `[pause]`) sparingly at emotional beats (max 1–2 tags per shot; stripped from subtitles automatically) and set per-scene `musicMood` (`chill`, `epic`, `cheerful`, `comic`, `tense`, `warm`) to match story shifts.
 
 ## 2. Director Self-QC Checklist (3 Frames per Shot: `start`, `mid`, `end`)
 After calling `capture_film_preview`, inspect `.aetheria/preview/contact_sheet.jpg`:
