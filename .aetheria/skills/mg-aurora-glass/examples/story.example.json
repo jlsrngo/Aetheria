@@ -2,6 +2,8 @@
   "version": 1,
   "title": "Aurora — Think In Light",
   "theme": "indigo-aurora",
+  "cameraStyle": "calm",
+  "seed": 19,
   "canvas": {
     "w": 1080,
     "h": 1920,
@@ -16,7 +18,7 @@
       "theme": "indigo-aurora",
       "badge": "Aurora",
       "headline": "Plan a slow morning",
-      "subtext": "Sarapan tenang jam sepuluh, lalu berjalan di tepi danau saat cahaya hangat",
+      "subtext": "Quiet breakfast at ten, followed by a warm lakeside walk at dawn",
       "actionPill": "Add to calendar",
       "toggleLabel": "Focus",
       "sliderLabel": "Glow",
@@ -30,8 +32,8 @@
       "layout": "voice-listening",
       "theme": "emerald-northern",
       "badge": "Aurora Voice",
-      "headline": "Mendengar tanpa batas",
-      "subtext": "Gelombang suara alami langsung terubah menjadi jadwal rapi",
+      "headline": "Listen without limits",
+      "subtext": "Natural voice waves automatically flow into a structured schedule",
       "actionPill": "Confirm schedule",
       "toggleLabel": "Ambient",
       "sliderLabel": "Clarity",
@@ -45,8 +47,8 @@
       "layout": "lens-refract",
       "theme": "twilight-violet",
       "badge": "Liquid Glass",
-      "headline": "Lensa kaca refraktif",
-      "subtext": "Dispersi kromatik halus memfokuskan konteks terpenting",
+      "headline": "Refractive glass lens",
+      "subtext": "Subtle chromatic dispersion highlights the highest-priority context",
       "actionPill": "Inspect detail",
       "toggleLabel": "Refract",
       "sliderLabel": "Prism",
@@ -60,7 +62,7 @@
       "layout": "metric-ring",
       "theme": "obsidian-cyan",
       "metric": "42ms",
-      "headline": "Respon jernih seketika",
+      "headline": "Instant crystal response",
       "transition": "light-sweep"
     },
     {
@@ -70,8 +72,8 @@
       "layout": "focus-controls",
       "theme": "rose-nebula",
       "badge": "Spatial UI",
-      "headline": "Kendali tenang & halus",
-      "subtext": "Lapisan kaca buram berparallax dengan kilau tepi Fresnel",
+      "headline": "Calm spatial controls",
+      "subtext": "Frosted parallax glass cards with luminous Fresnel edge highlights",
       "actionPill": "Enable Focus",
       "toggleLabel": "Deep Focus",
       "sliderLabel": "Warmth",
@@ -92,36 +94,12 @@
   "captions": {
     "enabled": true,
     "items": [
-      {
-        "start": 0.5,
-        "duration": 4,
-        "text": "Plan a slow morning"
-      },
-      {
-        "start": 5.5,
-        "duration": 4,
-        "text": "Mendengar tanpa batas"
-      },
-      {
-        "start": 10.5,
-        "duration": 4,
-        "text": "Lensa kaca refraktif"
-      },
-      {
-        "start": 15.5,
-        "duration": 4,
-        "text": "42 milidetik"
-      },
-      {
-        "start": 20.5,
-        "duration": 4,
-        "text": "Kendali tenang & halus"
-      },
-      {
-        "start": 25.5,
-        "duration": 4,
-        "text": "Think in light"
-      }
+      { "start": 0.5, "duration": 4, "text": "Plan a slow morning" },
+      { "start": 5.5, "duration": 4, "text": "Listen without limits" },
+      { "start": 10.5, "duration": 4, "text": "Refractive glass lens" },
+      { "start": 15.5, "duration": 4, "text": "42 milliseconds" },
+      { "start": 20.5, "duration": 4, "text": "Calm spatial controls" },
+      { "start": 25.5, "duration": 4, "text": "Think in light" }
     ]
   }
 }

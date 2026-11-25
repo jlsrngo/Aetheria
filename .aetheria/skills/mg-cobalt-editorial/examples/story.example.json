@@ -1,9 +1,11 @@
 {
   "title": "Cobalt Editorial & Dark Macro-UI — 10-Layout Showreel",
   "theme": "cobalt-beam",
+  "cameraStyle": "editorial",
+  "seed": 17,
   "canvas": {
-    "w": 1280,
-    "h": 720,
+    "w": 1080,
+    "h": 1920,
     "fps": 30
   },
   "captions": {
@@ -16,7 +18,7 @@
       "duration": 3.0,
       "layout": "kinetic-word-reveal",
       "cameraPreset": "rack-focus-in",
-      "headline": "Kreativitas itu seperti ruang bermain."
+      "headline": "Creativity is like a boundless playground."
     },
     {
       "id": "s2-icons",
@@ -35,12 +37,12 @@
       "layout": "radial-wheel-list",
       "anchor": "Aetheria",
       "items": [
-        "18 Skill Deklaratif",
-        "Kamera Virtual 2.5D",
-        "Render CDP + FFmpeg",
-        "Kaca Cair & Obsidian",
-        "Audio & SFX Sinkron",
-        "Ekspor MP4 Lokal"
+        "19 Declarative Skills",
+        "2.5D Virtual Camera",
+        "CDP + FFmpeg Render",
+        "Liquid Glass & Obsidian",
+        "Synced Voice & SFX",
+        "Local 60fps MP4 Export"
       ]
     },
     {
@@ -92,7 +94,7 @@
       "headline": "What do you want to create?",
       "promptText": "Build a 30fps local motion launch film with SFX",
       "modelTag": "Aetheria Engine v2",
-      "chips": ["18 Skills", "2.5D Camera", "Zero Cloud", "SFX Sync"]
+      "chips": ["19 Skills", "2.5D Camera", "Zero Cloud", "SFX Sync"]
     },
     {
       "id": "s8-carousel",

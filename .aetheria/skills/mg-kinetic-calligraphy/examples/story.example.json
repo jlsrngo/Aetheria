@@ -1,52 +1,53 @@
 {
-  "title": "18-Hanazi — Kinetic Calligraphy & Spring Typography",
-  "canvas": {
-    "w": 1080,
-    "h": 1920,
-    "fps": 30
-  },
-  "aspect": "9:16",
-  "seed": 1818,
-  "microstockMode": false,
-  "shots": [
-    {
-      "id": "shot_1_brush",
-      "start": 0,
-      "duration": 7.5,
-      "layout": "brush-reveal",
-      "headline": "SUMI",
-      "tagline": "01 · VARIABLE PRESSURE BRUSH",
-      "sealText": "墨"
-    },
-    {
-      "id": "shot_2_burst",
-      "start": 7.5,
-      "duration": 7.5,
-      "layout": "focus-burst",
-      "headline": "KINETIC",
-      "tagline": "02 · SPRING EXTRUDED TYPE",
-      "sealText": "動"
-    },
-    {
-      "id": "shot_3_cascade",
-      "start": 15,
-      "duration": 7.5,
-      "layout": "ink-cascade",
-      "headline": "FLOW",
-      "tagline": "03 · INK SPLATTER & RAYS",
-      "sealText": "流"
-    },
-    {
-      "id": "shot_4_seal",
-      "start": 22.5,
-      "duration": 7.5,
-      "layout": "hanko-seal",
-      "headline": "SHODO",
-      "tagline": "04 · HANKO SEAL · XUAN PAPER",
-      "sealText": "印"
-    }
-  ],
-  "captions": {
-    "enabled": false
-  }
+    "title":  "18-Hanazi — Kinetic Calligraphy \u0026 Spring Typography",
+    "canvas":  {
+                   "w":  1080,
+                   "h":  1920,
+                   "fps":  30
+               },
+    "aspect":  "9:16",
+    "seed":  1818,
+    "microstockMode":  false,
+    "shots":  [
+                  {
+                      "id":  "shot_1_brush",
+                      "start":  0,
+                      "duration":  7.5,
+                      "layout":  "brush-reveal",
+                      "headline":  "SUMI",
+                      "tagline":  "01 · VARIABLE PRESSURE BRUSH",
+                      "sealText":  "å¢¨"
+                  },
+                  {
+                      "id":  "shot_2_burst",
+                      "start":  7.5,
+                      "duration":  7.5,
+                      "layout":  "focus-burst",
+                      "headline":  "KINETIC",
+                      "tagline":  "02 · SPRING EXTRUDED TYPE",
+                      "sealText":  "å‹•"
+                  },
+                  {
+                      "id":  "shot_3_cascade",
+                      "start":  15,
+                      "duration":  7.5,
+                      "layout":  "ink-cascade",
+                      "headline":  "FLOW",
+                      "tagline":  "03 · INK SPLATTER \u0026 RAYS",
+                      "sealText":  "æµ"
+                  },
+                  {
+                      "id":  "shot_4_seal",
+                      "start":  22.5,
+                      "duration":  7.5,
+                      "layout":  "hanko-seal",
+                      "headline":  "SHODO",
+                      "tagline":  "04 · HANKO SEAL · XUAN PAPER",
+                      "sealText":  "å°"
+                  }
+              ],
+    "captions":  {
+                     "enabled":  false
+                 },
+    "cameraStyle":  "calm"
 }

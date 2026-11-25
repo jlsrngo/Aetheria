@@ -31,6 +31,35 @@ interface CameraReportEntry {
 
 interface StoryCameraApi {
   version: number;
+  directorVersion?: number;
+  SHOT_SIZES?: Record<string, [number, number]>;
+  smootherstep?: (p: number) => number;
+  createDirectorCamera?: (
+    camSpec: Record<string, unknown>,
+    options?: Record<string, unknown>,
+  ) => {
+    initial: { x: number; y: number; z: number; r: number };
+    segments: Array<unknown>;
+    audioEvents: Array<unknown>;
+    evalAt: (t: number) => {
+      x: number;
+      y: number;
+      z: number;
+      r: number;
+      blur: number;
+      shkX: number;
+      shkY: number;
+      whipAmount: number;
+    };
+  };
+  projectWorld2D?: (
+    wx: number,
+    wy: number,
+    cam: { x: number; y: number; z: number; r?: number; shkX?: number; shkY?: number },
+    depth: number,
+    W: number,
+    H: number,
+  ) => { x: number; y: number; scale: number };
   MOVES: Record<string, unknown>;
   CAMERA_STYLES: Record<string, unknown>;
   LEGACY_PRESETS: Record<string, Record<string, number | string>>;
@@ -288,5 +317,64 @@ describe("apps/public/script/story-camera.js (Camera API v1)", () => {
     const { code } = loadStoryCamera();
     expect(code).not.toMatch(/\bMath\.random\b/);
     expect(code).not.toMatch(/\bDate\.now\b/);
+  });
+
+  it("(g) Director Camera v2 supports English shot sizes, smootherstep, fly-to dip, follow lag, punch, shake, and 2.5D depth parallax", () => {
+    const { api } = loadStoryCamera();
+    expect(api.directorVersion).toBe(2);
+    expect(api.SHOT_SIZES?.wide?.[0]).toBeCloseTo(0.86, 4);
+    expect(api.SHOT_SIZES?.["extreme-close"]?.[0]).toBeCloseTo(5.2, 4);
+    expect(api.smootherstep?.(0)).toBe(0);
+    expect(api.smootherstep?.(0.5)).toBeCloseTo(0.5, 6);
+    expect(api.smootherstep?.(1)).toBe(1);
+
+    const director = api.createDirectorCamera?.(
+      {
+        initial: { x: 185, y: -214, z: 3.4 },
+        moves: [
+          { at: 0.2, kind: "shake", strength: 10, dur: 0.6 },
+          { at: 0.8, kind: "fly-to", to: { size: "wide", x: -140, y: -290 }, dur: 1.4 },
+          { at: 2.2, kind: "punch", strength: 0.2, dur: 0.4 },
+          { at: 2.5, kind: "follow", focus: "afro", until: 4.5, lag: 0.5 },
+        ],
+      },
+      {
+        W: 1080,
+        H: 1920,
+        duration: 5.0,
+        actorIds: ["afro"],
+        getActorState: (id: string, t: number) =>
+          id === "afro" ? { x: -400 + t * 180, y: 0, scale: 1, facing: "right" } : null,
+      },
+    );
+    expect(director).toBeDefined();
+    if (!director) return;
+
+    const c0 = director.evalAt(0);
+    expect(c0.z).toBeCloseTo(3.4, 1);
+
+    // Shake amplitude active during shake window
+    const cShake = director.evalAt(0.35);
+    expect(Math.hypot(cShake.shkX, cShake.shkY)).toBeGreaterThan(0);
+
+    // Fly-to dips zoom below straight log-interpolation at mid-flight (t = 1.5)
+    const cMidFly = director.evalAt(1.5);
+    const straightLogZ = Math.exp(0.5 * (Math.log(3.4) + Math.log(0.86)));
+    expect(cMidFly.z).toBeLessThan(straightLogZ);
+
+    // Follow lags smoothly behind fast-moving actor while giving facing look-room
+    const cFollow = director.evalAt(3.6);
+    expect(cFollow.x).toBeGreaterThan(-100);
+
+    // 2.5D depth parallax: background layer (depth=0.4) shifts less than midground (depth=1.0)
+    const camMoved = { x: 300, y: -300, z: 1.4, r: 0, shkX: 0, shkY: 0 };
+    const camZero = { x: 0, y: -300, z: 1.4, r: 0, shkX: 0, shkY: 0 };
+    const pFar0 = api.projectWorld2D?.(0, -200, camZero, 0.4, 1080, 1920);
+    const pFar1 = api.projectWorld2D?.(0, -200, camMoved, 0.4, 1080, 1920);
+    const pMid0 = api.projectWorld2D?.(0, -200, camZero, 1.0, 1080, 1920);
+    const pMid1 = api.projectWorld2D?.(0, -200, camMoved, 1.0, 1080, 1920);
+    const farShift = Math.abs((pFar1?.x ?? 0) - (pFar0?.x ?? 0));
+    const midShift = Math.abs((pMid1?.x ?? 0) - (pMid0?.x ?? 0));
+    expect(midShift).toBeGreaterThan(farShift * 1.5);
   });
 });

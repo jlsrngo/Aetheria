@@ -18,14 +18,14 @@ command: /mg-soft-clay-story
 
 **Seeded Runtime Package (auto-copied to `script/` — DO NOT overwrite or hand-code Three.js):**
 - `script/clay-kit.js`, `script/clay-assets.js` (`ClayKit.makeAsset`), `script/story-runtime.js` (`StoryRuntime`)
-- Reference spec & example: [story.schema.json](examples/story.schema.json), [story.example.json](examples/story.example.json)
+- Reference spec & galleries: [story.schema.json](examples/story.schema.json), [story.example.json](examples/story.example.json), [camera.md](references/camera.md), [character-gallery.png](assets/character-gallery.png), [qc-sheet-example.jpg](assets/qc-sheet-example.jpg)
 
 ## How to Author a Film (Zero Hand-Written JS)
 
 1. Generate narration/SFX first via `film_audio` (skip audio in Microstock Mode `'M'`).
 2. Write **one** declarative `story.json` inside the active project subfolder (`<= 150` lines for a 6-shot ~30s story). Do **NOT** write `index.html` or `script/scene*.js` unless a shot truly needs an escape hatch (`shots[].custom: "script/sceneK.js"`).
 3. Call `film_scaffold(..., { storyMode: true, useThree: true })` to generate the managed `index.html` and run pre-render `storyLint` validation (`0` errors required).
-4. Call `capture_film_preview` to render one midpoint frame per shot into `.aetheria/preview/contact_sheet.jpg` and inspect `storyQa` (`__shotReport`). If any shot fails framing or errors, apply **at most 1 targeted correction pass** on failed shots only (auto-rollback protects against regressions).
+4. Call `capture_film_preview` to render **3 frames per shot (`start`, `mid`, `end`)** into `.aetheria/preview/contact_sheet.jpg` and inspect `storyQa` (`__shotReport` + `directorWarnings`). If any shot fails framing or errors, apply **at most 1 targeted correction pass** on failed shots only (auto-rollback protects against regressions).
 
 ## `story.json` Specification (Compact Schema)
 
@@ -67,7 +67,7 @@ command: /mg-soft-clay-story
       "actions": [
         { "target": "petani", "anim": "walk", "at": 0.2, "dur": 3.6, "from": [-1.4, 0, -0.8], "to": [0.2, 0, 1.8] }
       ],
-      "caption": "Pagi tenang di sawah Pak Tani.",
+      "caption": "Calm morning over the terraced rice field.",
       "audio": { "wav": "audio/shot1_intro.wav", "words": "audio/shot1_intro.words.json" }
     }
   ],

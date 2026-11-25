@@ -441,7 +441,14 @@
         opacity: initOpacity,
         blendMode: spec.blendMode || "source-over",
         visible: initVisible,
-        parallax: Number.isFinite(Number(spec.parallax)) ? Number(spec.parallax) : 1,
+        screenSpace: Boolean(spec.screenSpace),
+        parallax: Number.isFinite(Number(spec.depth))
+          ? Number(spec.depth)
+          : Number.isFinite(Number(spec.parallax))
+            ? Number(spec.parallax)
+            : spec.screenSpace
+              ? 0
+              : 1,
         mask: spec.mask || null,
         matte,
         matteSource: Boolean(spec.matteSource),
@@ -633,6 +640,24 @@
     }
 
     function resolveActiveCamera(t) {
+      if (typeof cameraRaw === "function") {
+        return normalizeCamera(cameraRaw(t), width, height);
+      }
+      if (cameraRaw && typeof cameraRaw.evalAt === "function") {
+        const wc = cameraRaw.evalAt(t);
+        const u = width >= height ? height / 1080 : (width / 1080) * 1.25;
+        return normalizeCamera(
+          {
+            zoom: wc.z,
+            panX: -(wc.x + (wc.shkX || 0)) * u * wc.z,
+            panY: -(wc.y + 300 + (wc.shkY || 0)) * u * wc.z,
+            roll: wc.r || 0,
+            blur: wc.blur || 0,
+          },
+          width,
+          height
+        );
+      }
       if (cameraTrack && global.AM && typeof global.AM.evalCameraTrack === "function") {
         return normalizeCamera(global.AM.evalCameraTrack(cameraTrack, t, width, height), width, height);
       }

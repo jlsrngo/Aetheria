@@ -57,6 +57,14 @@ pub fn format_tool_result_for_model(tool_name: &str, result: &Value) -> String {
         .and_then(Value::as_str)
         .filter(|s| !s.trim().is_empty());
 
+    if tool_name == "capture_film_preview"
+        && (obj.contains_key("captured")
+            || obj.contains_key("storyQa")
+            || obj.contains_key("referenceComparison"))
+    {
+        return serde_json::to_string_pretty(result).unwrap_or_else(|_| "{}".to_string());
+    }
+
     let is_error = obj.get("ok").and_then(Value::as_bool) == Some(false)
         || obj.get("error").and_then(Value::as_str).is_some();
 
@@ -626,5 +634,57 @@ mod tests {
         let (output, truncated) = bound_tool_output("read", &html);
         assert!(!truncated);
         assert_eq!(output, html);
+    }
+
+    #[test]
+    fn test_capture_film_preview_formats_multiline_without_single_line_chop() {
+        let captured: Vec<_> = (0..24)
+            .map(|i| {
+                let phase = ["start", "mid", "end"][i % 3];
+                serde_json::json!({
+                    "path": format!(".aetheria/preview/preview_{i}.jpg"),
+                    "relativeRatio": (i as f64 + 1.0) / 24.0,
+                    "timestamp": i as f64 * 0.75,
+                    "phase": phase
+                })
+            })
+            .collect();
+        for ok_flag in [true, false] {
+            let mut shot_report = serde_json::Map::new();
+            for s in 1..=8 {
+                let sid = format!("shot{s}");
+                shot_report.insert(
+                    sid,
+                    json!({
+                        "focusBboxInSafeZone": if s == 2 { ok_flag } else { true },
+                        "overlapCount": 0,
+                        "bbox": { "minX": 120.5, "minY": 240.25, "maxX": 820.75, "maxY": 1340.5, "width": 700.25, "height": 1100.25 },
+                        "errors": []
+                    }),
+                );
+            }
+            let payload = serde_json::json!({
+                "ok": ok_flag,
+                "error": if ok_flag { serde_json::Value::Null } else { json!("Story shot framing/error failed on [\"shot2\"]") },
+                "captured": captured,
+                "storyQa": {
+                    "lintValid": ok_flag,
+                    "framesPerShot": 3,
+                    "totalShots": 8,
+                    "failedShots": if ok_flag { json!([]) } else { json!(["shot2"]) },
+                    "shotReport": shot_report
+                },
+                "output": "Captured 24 visual preview frame(s)."
+            });
+            let compact_len = serde_json::to_string(&payload).unwrap().len();
+            assert!(compact_len > MAX_LINE_LENGTH);
+
+            let formatted = format_tool_result_for_model("capture_film_preview", &payload);
+            let (bounded, truncated) = bound_tool_output("capture_film_preview", &formatted);
+            assert!(!truncated, "capture_film_preview (ok={ok_flag}) must not truncate");
+            let parsed: serde_json::Value = serde_json::from_str(&bounded).unwrap();
+            assert_eq!(parsed["storyQa"]["framesPerShot"], 3);
+            assert_eq!(parsed["ok"], ok_flag);
+        }
     }
 }

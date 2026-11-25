@@ -1,5 +1,7 @@
 {
-  "title": "Petani Melawan Hama Sawah",
+  "title": "Farmer Protects the Rice Field",
+  "cameraStyle": "editorial",
+  "seed": 11,
   "canvas": { "w": 1080, "h": 1920, "fps": 30 },
   "cast": [
     {
@@ -61,7 +63,7 @@
       "actions": [
         { "target": "petani", "anim": "walk", "at": 0.2, "dur": 3.6, "from": [-1.4, 0, -0.8], "to": [0.2, 0, 1.8] }
       ],
-      "caption": "Pagi tenang, Pak Tani berjalan menyusuri pematang sawah."
+      "caption": "Quiet morning: the farmer walks along the sunlit rice paddy path."
     },
     {
       "id": "shot2_hama_muncul",
@@ -77,7 +79,7 @@
         { "target": "petani", "anim": "shock", "at": 0.4, "dur": 1.2, "expression": "surprised", "emote": "exclaim" },
         { "target": "petani", "anim": "walk", "at": 1.7, "dur": 2.4, "from": [-2.6, 0, -0.4], "to": [-1.5, 0, 0.6], "expression": "worried" }
       ],
-      "caption": "Tiba-tiba hama wereng melompat menyerang petak padi!"
+      "caption": "Suddenly a hopping pest leaps into the green rice stalks!"
     },
     {
       "id": "shot3_solusi_organik",
@@ -91,7 +93,7 @@
         { "target": "jeriken_organik", "anim": "pop-in", "at": 0, "dur": 1.0 },
         { "target": "petani", "anim": "walk", "at": 0.6, "dur": 3.0, "from": [-3.0, 0, 0.4], "to": [-1.6, 0, 1.4] }
       ],
-      "caption": "Pak Tani bergegas menyiapkan larutan organik ramah lingkungan."
+      "caption": "He hurries to prepare an eco-friendly organic bio-solution."
     },
     {
       "id": "shot4_tanam_kenikir",
@@ -105,7 +107,7 @@
         { "target": "bunga_kenikir", "anim": "grow", "at": 0, "dur": 4.0 },
         { "target": "petani", "anim": "walk", "at": 0.4, "dur": 3.4, "from": [-2.8, 0, 0.0], "to": [-1.7, 0, 1.1] }
       ],
-      "caption": "Bunga kenikir ditanam untuk mengundang predator alami."
+      "caption": "Bright marigolds bloom to attract helpful natural predators."
     },
     {
       "id": "shot5_gotong_royong",
@@ -121,7 +123,7 @@
         { "target": "tetangga", "anim": "talk", "at": 2.8, "dur": 1.8, "expression": "laugh", "emote": "heart" },
         { "target": "petani", "anim": "nod", "at": 3.0, "dur": 1.6, "expression": "laugh" }
       ],
-      "caption": "Tetangga datang berjalan membantu menjaga ekosistem sawah."
+      "caption": "Neighbors join in together to protect the paddy ecosystem."
     },
     {
       "id": "shot6_panen_aman",
@@ -137,7 +139,7 @@
         { "target": "petani", "anim": "cheer", "at": 2.7, "dur": 1.8, "expression": "laugh", "emote": "heart" },
         { "target": "bunga_kenikir", "anim": "grow", "at": 0, "dur": 0.4 }
       ],
-      "caption": "Sawah kembali subur dan aman dari hama."
+      "caption": "At golden sunset, the rice field thrives safe and lush again."
     }
   ],
   "captions": { "enabled": true },

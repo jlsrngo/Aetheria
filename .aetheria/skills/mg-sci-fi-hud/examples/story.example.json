@@ -1,120 +1,122 @@
 {
-  "version": 1,
-  "title": "KESTREL-9 — Target Acquired FUI",
-  "theme": "cyber-cyan",
-  "canvas": {
-    "w": 1080,
-    "h": 1920,
-    "fps": 30
-  },
-  "shots": [
-    {
-      "id": "s1-boot",
-      "start": 0,
-      "duration": 5,
-      "layout": "scope-search",
-      "theme": "cyber-cyan",
-      "badge": "SEARCH MODE",
-      "headline": "ORBITAL SCAN ACTIVE",
-      "coords": "LEO 512 KM · QKD-7 UPLINK 9.6G",
-      "rangeKm": 1712.6,
-      "transition": "scan-wipe"
-    },
-    {
-      "id": "s2-signal",
-      "start": 5,
-      "duration": 5,
-      "layout": "signal-detected",
-      "theme": "stealth-emerald",
-      "badge": "SIGNAL DETECTED",
-      "headline": "BEARING 041° CONTACT",
-      "coords": "▲ 8.412 GHz · SNR 41.2 dB",
-      "rangeKm": 1648.3,
-      "transition": "glitch-cut"
-    },
-    {
-      "id": "s3-lock",
-      "start": 10,
-      "duration": 5,
-      "layout": "target-locked",
-      "theme": "alert-amber",
-      "badge": "TARGET LOCKED",
-      "headline": "TARGET ACQUIRED",
-      "coords": "N31°14′ E121°29′ · MATCH 99.7%",
-      "rangeKm": 842.4,
-      "transition": "shockwave-lock"
-    },
-    {
-      "id": "s4-dive",
-      "start": 15,
-      "duration": 5,
-      "layout": "orbital-dive",
-      "theme": "crimson-lock",
-      "badge": "OPTICAL DIVE",
-      "metric": "99.7%",
-      "headline": "PRECISION TRACKING",
-      "coords": "MAG ×18.4 · GYRO Δ0.0003°",
-      "rangeKm": 312.8,
-      "transition": "scan-wipe"
-    },
-    {
-      "id": "s5-spectrum",
-      "start": 20,
-      "duration": 5,
-      "layout": "spectrum-analysis",
-      "theme": "orbital-violet",
-      "badge": "SPECTRUM SYNC",
-      "headline": "TELEMETRY VERIFIED",
-      "coords": "COHERENCE 98.4% · 4096² FPA",
-      "rangeKm": 235,
-      "transition": "glitch-cut"
-    },
-    {
-      "id": "s6-uplink",
-      "start": 25,
-      "duration": 5,
-      "layout": "uplink-complete",
-      "theme": "cyber-cyan",
-      "badge": "MISSION READY",
-      "headline": "KESTREL-9 ONLINE",
-      "coords": "ALL CHANNELS NOMINAL · 30P",
-      "rangeKm": 235,
-      "transition": "shockwave-lock"
-    }
-  ],
-  "captions": {
-    "enabled": true,
-    "items": [
-      {
-        "start": 0.5,
-        "duration": 4,
-        "text": "ORBITAL SCAN ACTIVE"
-      },
-      {
-        "start": 5.5,
-        "duration": 4,
-        "text": "SIGNAL DETECTED"
-      },
-      {
-        "start": 10.5,
-        "duration": 4,
-        "text": "TARGET ACQUIRED"
-      },
-      {
-        "start": 15.5,
-        "duration": 4,
-        "text": "MATCH 99.7%"
-      },
-      {
-        "start": 20.5,
-        "duration": 4,
-        "text": "TELEMETRY VERIFIED"
-      },
-      {
-        "start": 25.5,
-        "duration": 4,
-        "text": "KESTREL-9 ONLINE"
-      }
-    ]
-  }
+    "version":  1,
+    "title":  "KESTREL-9 — Target Acquired FUI",
+    "theme":  "cyber-cyan",
+    "canvas":  {
+                   "w":  1080,
+                   "h":  1920,
+                   "fps":  30
+               },
+    "shots":  [
+                  {
+                      "id":  "s1-boot",
+                      "start":  0,
+                      "duration":  5,
+                      "layout":  "scope-search",
+                      "theme":  "cyber-cyan",
+                      "badge":  "SEARCH MODE",
+                      "headline":  "ORBITAL SCAN ACTIVE",
+                      "coords":  "LEO 512 KM · QKD-7 UPLINK 9.6G",
+                      "rangeKm":  1712.6,
+                      "transition":  "scan-wipe"
+                  },
+                  {
+                      "id":  "s2-signal",
+                      "start":  5,
+                      "duration":  5,
+                      "layout":  "signal-detected",
+                      "theme":  "stealth-emerald",
+                      "badge":  "SIGNAL DETECTED",
+                      "headline":  "BEARING 041° CONTACT",
+                      "coords":  "â–² 8.412 GHz · SNR 41.2 dB",
+                      "rangeKm":  1648.3,
+                      "transition":  "glitch-cut"
+                  },
+                  {
+                      "id":  "s3-lock",
+                      "start":  10,
+                      "duration":  5,
+                      "layout":  "target-locked",
+                      "theme":  "alert-amber",
+                      "badge":  "TARGET LOCKED",
+                      "headline":  "TARGET ACQUIRED",
+                      "coords":  "N31°14â€² E121°29â€² · MATCH 99.7%",
+                      "rangeKm":  842.4,
+                      "transition":  "shockwave-lock"
+                  },
+                  {
+                      "id":  "s4-dive",
+                      "start":  15,
+                      "duration":  5,
+                      "layout":  "orbital-dive",
+                      "theme":  "crimson-lock",
+                      "badge":  "OPTICAL DIVE",
+                      "metric":  "99.7%",
+                      "headline":  "PRECISION TRACKING",
+                      "coords":  "MAG Ã—18.4 · GYRO Î”0.0003°",
+                      "rangeKm":  312.8,
+                      "transition":  "scan-wipe"
+                  },
+                  {
+                      "id":  "s5-spectrum",
+                      "start":  20,
+                      "duration":  5,
+                      "layout":  "spectrum-analysis",
+                      "theme":  "orbital-violet",
+                      "badge":  "SPECTRUM SYNC",
+                      "headline":  "TELEMETRY VERIFIED",
+                      "coords":  "COHERENCE 98.4% · 4096Â² FPA",
+                      "rangeKm":  235,
+                      "transition":  "glitch-cut"
+                  },
+                  {
+                      "id":  "s6-uplink",
+                      "start":  25,
+                      "duration":  5,
+                      "layout":  "uplink-complete",
+                      "theme":  "cyber-cyan",
+                      "badge":  "MISSION READY",
+                      "headline":  "KESTREL-9 ONLINE",
+                      "coords":  "ALL CHANNELS NOMINAL · 30P",
+                      "rangeKm":  235,
+                      "transition":  "shockwave-lock"
+                  }
+              ],
+    "captions":  {
+                     "enabled":  true,
+                     "items":  [
+                                   {
+                                       "start":  0.5,
+                                       "duration":  4,
+                                       "text":  "ORBITAL SCAN ACTIVE"
+                                   },
+                                   {
+                                       "start":  5.5,
+                                       "duration":  4,
+                                       "text":  "SIGNAL DETECTED"
+                                   },
+                                   {
+                                       "start":  10.5,
+                                       "duration":  4,
+                                       "text":  "TARGET ACQUIRED"
+                                   },
+                                   {
+                                       "start":  15.5,
+                                       "duration":  4,
+                                       "text":  "MATCH 99.7%"
+                                   },
+                                   {
+                                       "start":  20.5,
+                                       "duration":  4,
+                                       "text":  "TELEMETRY VERIFIED"
+                                   },
+                                   {
+                                       "start":  25.5,
+                                       "duration":  4,
+                                       "text":  "KESTREL-9 ONLINE"
+                                   }
+                               ]
+                 },
+    "cameraStyle":  "editorial",
+    "seed":  111
 }

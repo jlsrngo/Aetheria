@@ -36,6 +36,23 @@ interface StoryCoreApi {
   findCaption: (story: unknown, t: number) => { text: string } | null;
   synthesizeWords: (text: string, start: number, duration: number) => Array<{ word: string; start: number; end: number }>;
   computeTotalDuration: (story: unknown) => number;
+  directorVersion?: number;
+  resolveCue?: (
+    phrase: string,
+    words: Array<{ word: string; start: number; end: number }>,
+    shotStart: number,
+    occ?: number,
+    warnings?: string[],
+    shotLabel?: string,
+  ) => number;
+  collectAudioEvents?: (story: unknown, map?: Record<string, Array<{ word: string; start: number; end: number }>>) => Array<unknown>;
+  computeOverlapCount?: (
+    heroBox: { minX: number; maxX: number; minY: number; maxY: number },
+    extraBoxes: Array<{ minX: number; maxX: number; minY: number; maxY: number }>,
+    w: number,
+    h: number,
+    captionsActive: boolean,
+  ) => number;
 }
 
 function loadStoryCore(search = ""): StoryCoreApi {
@@ -130,5 +147,59 @@ describe("apps/public/script/story-core.js (Core API v1)", () => {
       { word: "One", start: 1.0, end: 2.0 },
       { word: "Two", start: 2.0, end: 3.0 },
     ]);
+  });
+
+  it("resolves word cues with stem matching, emits [CHECK] warnings, collects audio events, and detects subtitle overlap", () => {
+    const core = loadStoryCore();
+    expect(core.directorVersion).toBe(2);
+
+    const story = core.normalizeStory({
+      title: "Afro Morning",
+      canvas: { w: 1080, h: 1920, fps: 30 },
+      captions: { enabled: true },
+      shots: [
+        {
+          id: "shot1",
+          start: 0,
+          duration: 4.0,
+          caption: "Afro sprints and greets Nadia warmly.",
+          camera: {
+            initial: { size: "full", focus: "afro" },
+            moves: [{ word: "greet", kind: "push", dur: 1.0 }],
+          },
+          actors: [
+            {
+              id: "afro",
+              actions: [{ word: "greet", pose: "wave" }],
+            },
+          ],
+        },
+      ],
+    });
+    expect(story.title).toBe("Afro Morning");
+    expect(story.canvas).toEqual({ w: 1080, h: 1920, fps: 30 });
+    expect(story.captions.enabled).toBe(true);
+    expect(story.shots[0]).toMatchObject({ id: "shot1", start: 0, duration: 4.0 });
+
+    const words = core.synthesizeWords("Afro sprints and greets Nadia warmly", 0, 4.0);
+    const warnings: string[] = [];
+    // Stem prefix matching: "greet" matches "greets" (index 3)
+    const cueHit = core.resolveCue?.("greet", words, 0, 0, warnings, "shot1");
+    expect(cueHit).toBeGreaterThan(1.0);
+    expect(warnings).toEqual([]);
+
+    // Missing cue logs a [CHECK] warning
+    const cueMiss = core.resolveCue?.("missing_phrase", words, 0, 0, warnings, "shot1");
+    expect(cueMiss).toBe(0);
+    expect(warnings.some((w) => w.includes("[CHECK]"))).toBe(true);
+
+    // Overlap check: hero box colliding with portrait bottom subtitle zone (y >= 0.78*H)
+    const noOverlap = core.computeOverlapCount?.({ minX: 200, maxX: 800, minY: 200, maxY: 1380 }, [], 1080, 1920, true);
+    const hasOverlap = core.computeOverlapCount?.({ minX: 200, maxX: 800, minY: 600, maxY: 1650 }, [], 1080, 1920, true);
+    expect(noOverlap).toBe(0);
+    expect(hasOverlap).toBeGreaterThan(0);
+
+    const audioEvs = core.collectAudioEvents?.(story, { shot1: words }) ?? [];
+    expect(Array.isArray(audioEvs)).toBe(true);
   });
 });

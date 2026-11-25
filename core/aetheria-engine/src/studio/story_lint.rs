@@ -511,13 +511,25 @@ pub fn lint_story_json_value(
                                 );
                             }
                             let at = av.get("at").and_then(Value::as_f64);
+                            let word_cue = av
+                                .get("word")
+                                .and_then(Value::as_str)
+                                .map(str::trim)
+                                .filter(|s| !s.is_empty());
                             let adur = av.get("dur").and_then(Value::as_f64);
-                            if !matches!((at, adur), (Some(a), Some(d)) if a >= 0.0 && d > 0.0 && (shot_dur <= 0.0 || a < shot_dur)) {
+                            let timing_ok = match (at, word_cue, adur) {
+                                (Some(a), _, Some(d)) => {
+                                    a >= 0.0 && d > 0.0 && (shot_dur <= 0.0 || a < shot_dur)
+                                }
+                                (None, Some(_), Some(d)) => d > 0.0,
+                                _ => false,
+                            };
+                            if !timing_ok {
                                 push_issue(
                                     &mut issues,
                                     "STORY_INVALID_ACTION_WINDOW",
                                     ap.clone(),
-                                    "Set `at >= 0` (less than shot duration) and `dur > 0`.",
+                                    "Set `at >= 0` (or non-empty `word` cue) and `dur > 0`.",
                                 );
                             }
                             for pos_key in ["from", "to"] {
@@ -725,6 +737,46 @@ pub fn story_shot_midpoints(story_path: &Path) -> Vec<(String, f64)> {
             }
         })
         .collect()
+}
+
+/// Returns 3 Self-QC timestamps per shot (`start`: `start + 0.25s`, `mid`: `55%`, `end`: `end - 0.35s`,
+/// up to 24 frames / 8 shots) matching the director 3-beat `contact_sheet.jpg` QC standard.
+pub fn story_shot_qc_triplets(story_path: &Path) -> Vec<(String, &'static str, f64)> {
+    let Ok(raw) = std::fs::read_to_string(story_path) else {
+        return Vec::new();
+    };
+    let Ok(raw_val) = serde_json::from_str::<Value>(&raw) else {
+        return Vec::new();
+    };
+    let (val, _) = super::story_dialect::normalize_story_dialect(&raw_val);
+    let Some(shots) = val.get("shots").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let mut out = Vec::with_capacity(shots.len().min(8) * 3);
+    for (i, sh) in shots.iter().take(8).enumerate() {
+        let id = sh
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("shot{}", i + 1));
+        let Some(st) = sh.get("start").and_then(Value::as_f64) else {
+            continue;
+        };
+        let Some(du) = sh.get("duration").and_then(Value::as_f64) else {
+            continue;
+        };
+        if !st.is_finite() || !du.is_finite() || du <= 0.0 {
+            continue;
+        }
+        let end = st + du;
+        let t_start = st + 0.25_f64.min(du * 0.22);
+        let t_mid = st + du * 0.55;
+        let t_end = (end - 0.35_f64.min(du * 0.22)).max(t_mid + 0.06).min((end - 0.04).max(st));
+        out.push((id.clone(), "start", (t_start * 1000.0).round() / 1000.0));
+        out.push((id.clone(), "mid", (t_mid * 1000.0).round() / 1000.0));
+        out.push((id, "end", (t_end * 1000.0).round() / 1000.0));
+    }
+    out
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

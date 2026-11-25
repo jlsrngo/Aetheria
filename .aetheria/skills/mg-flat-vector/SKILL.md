@@ -18,7 +18,8 @@ description: Popwise bold flat-vector and spring-pop motion engine on ultramarin
 ## 3. Declarative Contract (`story.json`)
 Only author `story.json` (validated against `examples/story.schema.json`). Do not edit `examples/script/flat-kit.js` or `examples/script/story-runtime.js`.
 
-## 4. Verification & Mode `'M'`
+## 4. Verification, Visual Assets & Mode `'M'`
+- References & Visual Galleries: [camera.md](references/camera.md) · [visual-gallery.png](assets/visual-gallery.png) · [qc-sheet-example.jpg](assets/qc-sheet-example.jpg) (3-frame-per-shot Self-QC sheet)
 - Deterministic render & contact sheet:
   `node scripts/render-skill-example.mjs --dir ".aetheria/skills/mg-flat-vector/examples" --html "story.html" --times "1,5,10,16,22,27" --out-dir "<outDir>"`
 - Microstock clean-plate mode (`?microstock=1` or key `'M'`): Suppresses all text headlines and taglines while preserving the flat-vector shapes and bouncing coral dot.

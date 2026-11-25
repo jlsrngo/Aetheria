@@ -1,48 +1,49 @@
 {
-  "title": "02-Line-Art — Atelier Linea One Line",
-  "canvas": {
-    "w": 1080,
-    "h": 1920,
-    "fps": 30
-  },
-  "aspect": "9:16",
-  "seed": 202,
-  "microstockMode": false,
-  "shots": [
-    {
-      "id": "shot_1_seed",
-      "start": 0,
-      "duration": 7.5,
-      "layout": "seed-sprout",
-      "headline": "01 · ORIGIN",
-      "tagline": "ONE CONTINUOUS STROKE"
-    },
-    {
-      "id": "shot_2_skyline",
-      "start": 7.5,
-      "duration": 7.5,
-      "layout": "pavilion-skyline",
-      "headline": "02 · ARCHITECTURE",
-      "tagline": "TENDRIL TO BEAM"
-    },
-    {
-      "id": "shot_3_wave",
-      "start": 15,
-      "duration": 7.5,
-      "layout": "breaking-wave",
-      "headline": "03 · HORIZON",
-      "tagline": "EXPONENTIAL WAVE CURL"
-    },
-    {
-      "id": "shot_4_medallion",
-      "start": 22.5,
-      "duration": 7.5,
-      "layout": "atelier-medallion",
-      "headline": "ATELIER LINEA",
-      "tagline": "ONE LINE"
-    }
-  ],
-  "captions": {
-    "enabled": false
-  }
+    "title":  "02-Line-Art — Atelier Linea One Line",
+    "canvas":  {
+                   "w":  1080,
+                   "h":  1920,
+                   "fps":  30
+               },
+    "aspect":  "9:16",
+    "seed":  202,
+    "microstockMode":  false,
+    "shots":  [
+                  {
+                      "id":  "shot_1_seed",
+                      "start":  0,
+                      "duration":  7.5,
+                      "layout":  "seed-sprout",
+                      "headline":  "01 · ORIGIN",
+                      "tagline":  "ONE CONTINUOUS STROKE"
+                  },
+                  {
+                      "id":  "shot_2_skyline",
+                      "start":  7.5,
+                      "duration":  7.5,
+                      "layout":  "pavilion-skyline",
+                      "headline":  "02 · ARCHITECTURE",
+                      "tagline":  "TENDRIL TO BEAM"
+                  },
+                  {
+                      "id":  "shot_3_wave",
+                      "start":  15,
+                      "duration":  7.5,
+                      "layout":  "breaking-wave",
+                      "headline":  "03 · HORIZON",
+                      "tagline":  "EXPONENTIAL WAVE CURL"
+                  },
+                  {
+                      "id":  "shot_4_medallion",
+                      "start":  22.5,
+                      "duration":  7.5,
+                      "layout":  "atelier-medallion",
+                      "headline":  "ATELIER LINEA",
+                      "tagline":  "ONE LINE"
+                  }
+              ],
+    "captions":  {
+                     "enabled":  false
+                 },
+    "cameraStyle":  "editorial"
 }

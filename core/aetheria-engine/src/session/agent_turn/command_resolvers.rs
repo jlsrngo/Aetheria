@@ -492,6 +492,38 @@ fn resolve_dynamic_style_or_skill_command_inner(
                                 )
                             };
 
+                            let mut skill_refs_and_galleries: Vec<String> = Vec::new();
+                            for sub in ["references", "assets"] {
+                                let sub_dir = path.join(sub);
+                                if let Ok(rd) = std::fs::read_dir(&sub_dir) {
+                                    let mut names: Vec<String> = rd
+                                        .flatten()
+                                        .filter(|e| e.path().is_file())
+                                        .filter_map(|e| {
+                                            e.file_name()
+                                                .to_str()
+                                                .filter(|n| {
+                                                    let l = n.to_ascii_lowercase();
+                                                    l.ends_with(".md")
+                                                        || l.ends_with(".png")
+                                                        || l.ends_with(".jpg")
+                                                })
+                                                .map(|n| format!("{}/{}/{}", path.display(), sub, n).replace('\\', "/"))
+                                        })
+                                        .collect();
+                                    names.sort();
+                                    skill_refs_and_galleries.extend(names);
+                                }
+                            }
+                            let refs_gallery_note = if skill_refs_and_galleries.is_empty() {
+                                String::new()
+                            } else {
+                                format!(
+                                    "\nSKILL REFERENCES & CHARACTER GALLERIES (read on demand via `read` tool): {}\n",
+                                    skill_refs_and_galleries.join(", ")
+                                )
+                            };
+
                             let has_story_kit = path
                                 .join("examples")
                                 .join("script")
@@ -575,7 +607,7 @@ fn resolve_dynamic_style_or_skill_command_inner(
                                     1. Generate narrated voiceover/SFX directly via `film_audio` from the coordinator so shot durations derive cleanly from WAV (or omit audio if silent).\n\
                                     2. Write `{project_rel_prefix}story.json` (<= 150 lines) matching `SKILL.md` + `story.example.json` (or delegate solely `story.json` creation to `motion-designer`). Do NOT hand-write `index.html` or `script/scene*.js` (unless a specific shot truly requires `shots[].custom: \"script/sceneK.js\"`), and DO NOT overwrite seeded {kit_glob_hint}.\n\
                                     3. Call `film_scaffold(..., {{ storyMode: true, useThree: {scaffold_three_flag} }})` to generate managed `{project_rel_prefix}index.html` and validate `storyLint` (0 errors required).\n\
-                                    4. Call `capture_film_preview` to render `.aetheria/preview/contact_sheet.jpg` (1 mid-frame per shot) and verify `storyQa.failedShots` is empty; apply at most 1 targeted correction pass if any shot fails framing or lint."
+                                    4. Call `capture_film_preview` to render `.aetheria/preview/contact_sheet.jpg` (3 frames per shot: start, mid, end) and verify `storyQa.failedShots` & `storyQa.directorWarnings` (`[CHECK]`); apply at most 1 targeted correction pass if any shot fails framing or lint."
                                 )
                             } else if has_custom_stage_kit {
                                 format!(
@@ -605,6 +637,7 @@ fn resolve_dynamic_style_or_skill_command_inner(
                                 {examples_section}\
                                 {project_note}\
                                 {seeded_note}\
+                                {refs_gallery_note}\
                                 \"\"\"\n\
                                 {rules_block}",
                                 path_display = path.display()
@@ -693,9 +726,37 @@ fn collect_skill_examples(skill_dir: &Path) -> String {
         .unwrap_or(false);
     if !use_legacy && story_example.is_file() && story_runtime.is_file() {
         if let Ok(example_json) = std::fs::read_to_string(&story_example) {
+            let script_dir = examples_dir.join("script");
+            if script_dir.join("clay-kit.js").is_file() {
+                return format!(
+                    "\nREFERENCE EXAMPLE KIT (from {dir}/examples):\n\
+                     REFERENCE EXAMPLE (examples/script/clay-kit.js — auto-seeded into `script/clay-kit.js` alongside `script/clay-assets.js` & `script/story-runtime.js`; use `ClayKit` declaratively via `story.json` without rewriting JS).\n\n\
+                     REFERENCE EXAMPLE (examples/story.example.json — adapt into `<project>/story.json`):\n```json\n{example_json}\n```\n",
+                    dir = skill_dir.display(),
+                );
+            }
+            let mut seeded_names: Vec<String> = std::fs::read_dir(&script_dir)
+                .ok()
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter_map(|e| {
+                    let p = e.path();
+                    if p.is_file() {
+                        p.file_name()
+                            .and_then(|n| n.to_str())
+                            .filter(|n| n.to_ascii_lowercase().ends_with(".js"))
+                            .map(|n| format!("`script/{n}`"))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            seeded_names.sort();
+            let seeded_list = seeded_names.join(", ");
             return format!(
                 "\nREFERENCE EXAMPLE KIT (from {dir}/examples):\n\
-                 REFERENCE EXAMPLE (examples/script/clay-kit.js — auto-seeded into `script/clay-kit.js` alongside `script/clay-assets.js` & `script/story-runtime.js`; use `ClayKit` declaratively via `story.json` without rewriting JS).\n\n\
+                 REFERENCE EXAMPLE (auto-seeded runtime scripts: {seeded_list}; author declaratively via `story.json` without rewriting JS).\n\n\
                  REFERENCE EXAMPLE (examples/story.example.json — adapt into `<project>/story.json`):\n```json\n{example_json}\n```\n",
                 dir = skill_dir.display(),
             );

@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 const MAX_PREVIEW_FRAMES: usize = 16;
+const MAX_STORY_QC_FRAMES: usize = 24;
 const PREVIEW_VISION_MAX_EDGE: u32 = 960;
 pub(crate) const DEFAULT_REFERENCE_PASS_THRESHOLD: f64 = 0.85;
 pub const RELATIVE_PREVIEW_POSITIONS: [f64; 4] = [0.10, 0.35, 0.60, 0.85];
@@ -234,7 +235,11 @@ pub(crate) fn validate_non_identical_frames(frames: &[PreviewFrameCapture]) -> R
     Ok(())
 }
 
-pub(crate) fn normalize_preview_timestamps(raw: &[f64], duration: f64) -> Vec<f64> {
+pub(crate) fn normalize_preview_timestamps_with_cap(
+    raw: &[f64],
+    duration: f64,
+    cap: usize,
+) -> Vec<f64> {
     let safe_dur = if duration.is_finite() && duration > 0.0 {
         duration
     } else {
@@ -251,7 +256,7 @@ pub(crate) fn normalize_preview_timestamps(raw: &[f64], duration: f64) -> Vec<f6
         raw.iter()
             .copied()
             .filter(|t| t.is_finite() && *t >= 0.0)
-            .take(MAX_PREVIEW_FRAMES)
+            .take(cap)
             .collect()
     };
 
@@ -265,6 +270,10 @@ pub(crate) fn normalize_preview_timestamps(raw: &[f64], duration: f64) -> Vec<f6
         out.push(0.0);
     }
     out
+}
+
+pub(crate) fn normalize_preview_timestamps(raw: &[f64], duration: f64) -> Vec<f64> {
+    normalize_preview_timestamps_with_cap(raw, duration, MAX_PREVIEW_FRAMES)
 }
 
 pub(crate) fn resolve_default_preview_timestamps(
@@ -297,7 +306,7 @@ pub(crate) fn resolve_default_preview_timestamps(
         return story_midpoints
             .iter()
             .map(|(_, t)| *t)
-            .take(MAX_PREVIEW_FRAMES)
+            .take(MAX_STORY_QC_FRAMES)
             .collect();
     }
     if requested_timestamps.is_empty() && scenes.len() >= 2 {
@@ -387,6 +396,7 @@ struct CdpCaptureArgs<'a> {
     effective_visual_inspect_only: bool,
     has_story_json: bool,
     story_midpoints: &'a [(String, f64)],
+    story_phase_labels: &'a [&'static str],
 }
 
 async fn run_cdp_preview_capture(
@@ -456,7 +466,12 @@ async fn run_cdp_preview_capture(
         &meta.scenes,
     );
 
-    let timestamps = normalize_preview_timestamps(&effective_requested, meta.duration);
+    let ts_cap = if args.has_story_json && args.requested_timestamps.is_empty() {
+        MAX_STORY_QC_FRAMES
+    } else {
+        MAX_PREVIEW_FRAMES
+    };
+    let timestamps = normalize_preview_timestamps_with_cap(&effective_requested, meta.duration, ts_cap);
     let _ = tokio::fs::create_dir_all(args.preview_dir).await;
 
     let isolate_js = if args.options.forced_scene_id.is_some() {
@@ -589,14 +604,14 @@ async fn run_cdp_preview_capture(
                 .call(
                     "Runtime.evaluate",
                     json!({
-                        "expression": "(() => ({ shotReport: window.__shotReport || {}, storyStats: window.__storyStats || null }))()",
+                        "expression": "(() => ({ shotReport: window.__shotReport || {}, storyStats: window.__storyStats || null, directorWarnings: Array.isArray(window.__directorWarnings) ? window.__directorWarnings : [], storyWarnings: Array.isArray(window.__storyWarnings) ? window.__storyWarnings : [], audioEventsCount: Array.isArray(window.__audioEvents) ? window.__audioEvents.length : 0 }))()",
                         "returnByValue": true
                     }),
                 )
                 .await
                 .ok()
                 .and_then(|v| v.pointer("/result/value").cloned())
-                .unwrap_or_else(|| json!({ "shotReport": {}, "storyStats": null }));
+                .unwrap_or_else(|| json!({ "shotReport": {}, "storyStats": null, "directorWarnings": [], "storyWarnings": [], "audioEventsCount": 0 }));
 
             let shot_report_val = shot_state
                 .get("shotReport")
@@ -627,9 +642,15 @@ async fn run_cdp_preview_capture(
                     .get(i)
                     .map(|(id, _)| id.clone())
                     .unwrap_or_else(|| format!("shot{}", i + 1));
+                let phase = args
+                    .story_phase_labels
+                    .get(i)
+                    .copied()
+                    .unwrap_or("");
                 let srep = shot_report_val.get(&sid).cloned().unwrap_or(Value::Null);
                 sheet_items.push(json!({
                     "shotId": sid,
+                    "phase": phase,
                     "t": fr.timestamp,
                     "dataUrl": fr.data_url,
                     "report": srep
@@ -662,11 +683,14 @@ async fn run_cdp_preview_capture(
                             const y = pad + row * (th + hdr + pad);
                             const rep = it.report || {{}};
                             const ok = rep.focusBboxInSafeZone !== false && (!Array.isArray(rep.errors) || rep.errors.length === 0);
+                            const warn = ok && ((rep.overlapCount || 0) > 0 || (Array.isArray(rep.warnings) && rep.warnings.length > 0));
+                            const ph = it.phase ? ('·' + it.phase) : '';
+                            const badge = !ok ? 'FAIL' : (warn ? 'CHECK' : 'SAFE');
                             ctx.fillStyle = '#1e293b';
                             ctx.fillRect(x, y, tw, hdr);
-                            ctx.fillStyle = ok ? '#4ade80' : '#f87171';
-                            ctx.font = 'bold 12px monospace';
-                            ctx.fillText(it.shotId + ' t=' + Number(it.t || 0).toFixed(1) + 's [' + (ok ? 'SAFE' : 'FAIL') + ']', x + 6, y + 19);
+                            ctx.fillStyle = !ok ? '#f87171' : (warn ? '#fbbf24' : '#4ade80');
+                            ctx.font = 'bold 11px monospace';
+                            ctx.fillText(it.shotId + ph + ' t=' + Number(it.t || 0).toFixed(2) + 's [' + badge + ']', x + 6, y + 19);
                             const img = new Image();
                             await new Promise((r) => {{ img.onload = r; img.onerror = r; img.src = it.dataUrl; }});
                             ctx.drawImage(img, x, y + hdr, tw, th);
@@ -784,11 +808,16 @@ pub async fn capture_film_preview_with_full_options(
         .unwrap_or_else(|_| film_root.join(".aetheria").join("preview"));
     let story_json_path = film_root.join("story.json");
     let has_story_json = story_json_path.is_file();
-    let story_midpoints = if has_story_json {
-        super::story_lint::story_shot_midpoints(&story_json_path)
+    let story_triplets = if has_story_json {
+        super::story_lint::story_shot_qc_triplets(&story_json_path)
     } else {
         Vec::new()
     };
+    let story_midpoints: Vec<(String, f64)> = story_triplets
+        .iter()
+        .map(|(id, _, t)| (id.clone(), *t))
+        .collect();
+    let story_phase_labels: Vec<&'static str> = story_triplets.iter().map(|(_, p, _)| *p).collect();
 
     let (http_port, _server_guard) =
         start_ephemeral_film_server(film_root.clone(), ws_root.clone()).await?;
@@ -813,6 +842,7 @@ pub async fn capture_film_preview_with_full_options(
         effective_visual_inspect_only,
         has_story_json,
         story_midpoints: &story_midpoints,
+        story_phase_labels: &story_phase_labels,
     };
 
     let raw = match run_cdp_preview_capture(&mut warm.cdp, initial_meta.clone(), &cdp_args).await {
@@ -964,12 +994,16 @@ pub async fn capture_film_preview_with_full_options(
         );
         let qa_json = json!({
             "mode": "story",
+            "framesPerShot": 3,
             "lintValid": story_lint.valid,
             "lintIssues": story_lint.issues,
             "totalShots": story_lint.total_shots,
             "customShots": story_lint.custom_shots,
             "failedShots": failed_shots,
             "shotReport": shot_report_val,
+            "directorWarnings": shot_state.as_ref().and_then(|s| s.get("directorWarnings")).cloned().unwrap_or_else(|| json!([])),
+            "storyWarnings": shot_state.as_ref().and_then(|s| s.get("storyWarnings")).cloned().unwrap_or_else(|| json!([])),
+            "audioEventsCount": shot_state.as_ref().and_then(|s| s.get("audioEventsCount")).cloned().unwrap_or(json!(0)),
             "storyStats": shot_state.as_ref().and_then(|s| s.get("storyStats")).cloned().unwrap_or(Value::Null),
             "contactSheetRelPath": contact_sheet_rel,
             "autoRolledBack": rolled_back,

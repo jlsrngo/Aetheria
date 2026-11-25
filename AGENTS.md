@@ -233,3 +233,30 @@ Rujukan visual: aplikasi Aetheria Agent. Semua komponen UI **wajib** memakai var
 3. **Border & bayangan:** pemisah modul 1px `--border-color`, bukan garis putih kontras. Shadow hanya untuk elemen mengambang (nav pill, dropdown, modal).
 4. **Tipografi:** Inter untuk label, judul, isi, dan tombol. Monospace hanya untuk angka dan kode (ukuran file, frame, FPS, timestamp). Label kecil boleh all-caps + `tracking-wide`, tidak wajib.
 5. **Layout & ketahanan:** layout 4 panel — Activity rail (selalu terlihat) | Explorer | Stage + Timeline | Chat. Navigasi bawah berupa pill mengambang, bukan footer full-width. Kegagalan preview hanya boleh me-remount area player; dilarang mereload seluruh window.
+
+---
+
+## 7. Standar Paket Skill Motion (`.aetheria/skills/mg-*`)
+
+Setiap skill di `.aetheria/skills/mg-*` wajib mematuhi struktur paket standar berikut (diverifikasi oleh `motionHarnessSpec.test.ts` & `story_camera_lint.rs`):
+
+```
+.aetheria/skills/mg-<slug>/
+  SKILL.md                     # Panduan utama <= 150 baris (Bahasa Inggris, tanpa boilerplate terlarang)
+  tokens.json                  # Palet hex, tipografi, timing/motion tokens
+  assets/                      # Aset visual render nyata (bukan placeholder)
+    character-gallery.png      # (atau visual-gallery.png untuk skill non-karakter)
+    qc-sheet-example.jpg       # Contoh lembar Self-QC 3 frame/shot (start, mid, end)
+  references/
+    camera.md                  # Panduan kamera, safe zone, pemicu kata ("word"), & Self-QC
+  examples/
+    kit.json                   # Manifes kit deklaratif (wajib untuk generic story kits)
+    story.example.json         # Contoh kanonik 1080x1920 (9:16) dengan cameraStyle/camera aktif
+    story.html                 # Harness pratinjau/render lokal 1080x1920
+    script/                    # Runtime JS yang di-seed otomatis ke proyek (story-runtime.js + kit)
+```
+
+Aturan wajib isi & visual skill:
+1. **100% Bahasa Inggris** untuk nama file, identifier kode, enum skema, label/badge aset visual, dokumentasi `SKILL.md`/`references/*.md`, dan copy `story.example.json` (kecuali ID tes internal yang menjaga kompatibilitas E2E).
+2. **Portrait 9:16 (`1080x1920`) sebagai kanvas bawaan** pada setiap `story.example.json` & `story.html` (16:9 `1920x1080` tetap didukung sebagai opsi deklaratif).
+3. **Kamera aktif & craft tinggi (anti kaku/murahan):** setiap contoh skill wajib mengaktifkan `StoryCamera` (`cameraStyle` + `seed` atau `camera.initial` + `camera.moves[]`) dan menghindari layout datar murahan (gunakan layer kedalaman, pencahayaan/gradien terarah, serta komposisi safe-zone TikTok `X:49..960, Y:60..1440`).

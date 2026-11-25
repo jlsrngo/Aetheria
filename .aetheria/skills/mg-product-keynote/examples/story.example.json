@@ -2,7 +2,9 @@
   "renderer": "2d-product-keynote",
   "title": "Lumina Studio Pro — Keynote Product Launch",
   "theme": "obsidian-pro",
-  "canvas": { "w": 1920, "h": 1080, "fps": 30 },
+  "cameraStyle": "editorial",
+  "seed": 42,
+  "canvas": { "w": 1080, "h": 1920, "fps": 30 },
   "shots": [
     {
       "id": "shot1_intro",
@@ -12,10 +14,10 @@
       "theme": "obsidian-pro",
       "eyebrow": "INTRODUCING",
       "headline": "LUMINA STUDIO PRO",
-      "subheadline": "Kecepatan desktop. Presisi studio dalam satu ruang kerja.",
+      "subheadline": "Desktop GPU speed and studio precision in one workspace.",
       "icon": "spark",
-      "accentColor": "#2997FF",
-      "secondaryColor": "#A855F7",
+      "accentColor": "#38BDF8",
+      "secondaryColor": "#818CF8",
       "transition": "zoom-cross"
     },
     {
@@ -24,9 +26,9 @@
       "duration": 4.0,
       "layout": "hero-device",
       "theme": "pearl-studio",
-      "eyebrow": "DESAIN ULANG TOTAL",
-      "headline": "SIAP DI SETIAP LAYAR",
-      "subheadline": "Render lokal 100% offline tanpa jeda cloud.",
+      "eyebrow": "RE-ENGINEERED CORE",
+      "headline": "CRAFTED FOR EVERY FRAME",
+      "subheadline": "Zero cloud latency with 100% deterministic local rendering.",
       "device": "laptop",
       "accentColor": "#0071E3",
       "secondaryColor": "#38BDF8",
@@ -38,13 +40,13 @@
       "duration": 4.0,
       "layout": "bento-grid",
       "theme": "aurora-keynote",
-      "eyebrow": "ARSITEKTUR BARU",
-      "headline": "EMPAT KEKUATAN INTI",
+      "eyebrow": "NEW ARCHITECTURE",
+      "headline": "FOUR CORE PILLARS",
       "items": [
-        { "stat": "3.2×", "label": "Lebih Cepat Render", "icon": "bolt" },
-        { "stat": "100%", "label": "Privat & Lokal", "icon": "shield" },
-        { "stat": "4K", "label": "Output Tajam", "icon": "camera" },
-        { "stat": "0", "label": "Biaya Cloud", "icon": "check" }
+        { "stat": "3.2×", "label": "Faster Local Render", "icon": "bolt" },
+        { "stat": "100%", "label": "Private & Offline", "icon": "shield" },
+        { "stat": "4K", "label": "Razor-Sharp Output", "icon": "camera" },
+        { "stat": "$0", "label": "Cloud Render Fees", "icon": "check" }
       ],
       "accentColor": "#38BDF8",
       "secondaryColor": "#C084FC",
@@ -56,11 +58,11 @@
       "duration": 4.0,
       "layout": "spec-counter",
       "theme": "titanium-warm",
-      "eyebrow": "BENCHMARK NYATA",
+      "eyebrow": "LIVE BENCHMARK",
       "statValue": "2.4×",
-      "statLabel": "PERCEPATAN ALUR PRODUKSI",
-      "subheadline": "Dari ide menjadi video siap tayang dalam hitungan menit.",
-      "accentColor": "#E2C799",
+      "statLabel": "PRODUCTION SPEEDUP",
+      "subheadline": "From raw script to publish-ready video in minutes.",
+      "accentColor": "#E7C896",
       "secondaryColor": "#F59E0B",
       "transition": "slide-push"
     },
@@ -70,15 +72,15 @@
       "duration": 4.0,
       "layout": "ui-showcase",
       "theme": "mint-editorial",
-      "eyebrow": "ALUR KERJA CERDAS",
-      "headline": "OTOMATIS DARI AWAL HINGGA EKSPOR",
+      "eyebrow": "SMART WORKFLOW",
+      "headline": "AUTOMATED FROM SCRIPT TO EXPORT",
       "items": [
-        { "label": "Validasi Framing Otomatis", "stat": "0 Error", "icon": "shield" },
-        { "label": "Sinkronisasi Beat & Transisi", "stat": "30 fps", "icon": "wave" },
-        { "label": "Pratinjau Lembar Kontak", "stat": "Instan", "icon": "play" }
+        { "label": "Automated Framing Guard", "stat": "0 Errors", "icon": "shield" },
+        { "label": "Beat & Word Cue Sync", "stat": "30 fps", "icon": "wave" },
+        { "label": "3-Frame Self-QC Sheet", "stat": "Instant", "icon": "play" }
       ],
-      "accentColor": "#059669",
-      "secondaryColor": "#0EA5E9",
+      "accentColor": "#0284C7",
+      "secondaryColor": "#14B8A6",
       "transition": "zoom-cross"
     },
     {
@@ -88,11 +90,11 @@
       "layout": "cta-outro",
       "theme": "obsidian-pro",
       "headline": "LUMINA STUDIO PRO",
-      "subheadline": "Mulai berkarya hari ini.",
-      "cta": "COBA SEKARANG",
+      "subheadline": "Start creating on your desktop today.",
+      "cta": "TRY IT NOW",
       "icon": "spark",
-      "accentColor": "#2997FF",
-      "secondaryColor": "#A855F7",
+      "accentColor": "#38BDF8",
+      "secondaryColor": "#818CF8",
       "transition": "cut"
     }
   ],

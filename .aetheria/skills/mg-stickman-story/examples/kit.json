@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "skillId": "mg-stickman-story",
+  "renderer": "2d-stickman-story",
+  "core": 1,
+  "camera": {
+    "version": 1,
+    "maxZoom": 6.0,
+    "maxPan": 2.5,
+    "maxRollDeg": 12.0
+  },
+  "useThree": false,
+  "background": "#FFF3E2",
+  "scripts": [
+    "script/stickman-rig.js",
+    "script/stickman-world.js",
+    "script/stickman-overlay.js",
+    "script/stickman-timeline.js",
+    "script/story-runtime.js"
+  ],
+  "enums": {
+    "stage": [
+      "bedroom",
+      "park",
+      "classroom",
+      "study",
+      "living-room",
+      "street",
+      "school-yard",
+      "cafeteria",
+      "field",
+      "house-front",
+      "dining-room",
+      "meadow",
+      "plain"
+    ],
+    "timeOfDay": [
+      "morning",
+      "day",
+      "sunset",
+      "night"
+    ]
+  },
+  "limits": {
+    "minShots": 1,
+    "maxShots": 24,
+    "minDurationSec": 2,
+    "maxDurationSec": 300
+  }
+}

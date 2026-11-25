@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Character &amp; Expression Gallery — Stickman Story</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #FFFBF4;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: "Fredoka", "Nunito", "Segoe UI", sans-serif;
+    }
+    canvas {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gallery-canvas" width="1920" height="1080"></canvas>
+  <script>window.__STICKMAN_NO_BOOT = true;</script>
+  <script src="script/stickman-rig.js"></script>
+  <script>
+  (function () {
+    'use strict';
+
+    var Rig = window.StickmanRig;
+    var canvas = document.getElementById('gallery-canvas');
+    var ctx = canvas.getContext('2d');
+    var params = new URLSearchParams(window.location.search || '');
+    var mode = params.get('mode') === 'hero' ? 'hero' : 'main';
+    var FONT = '"Fredoka", "Nunito", "Trebuchet MS", "Segoe UI", sans-serif';
+    var INK = '#22262E';
+
+    function roundRect(x, y, w, h, r, fill, strokeCol, strokeW) {
+      var rr = Math.min(r || 0, w * 0.5, h * 0.5);
+      ctx.beginPath();
+      ctx.moveTo(x + rr, y);
+      ctx.arcTo(x + w, y, x + w, y + h, rr);
+      ctx.arcTo(x + w, y + h, x, y + h, rr);
+      ctx.arcTo(x, y + h, x, y, rr);
+      ctx.arcTo(x, y, x + w, y, rr);
+      ctx.closePath();
+      if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+      if (strokeCol) { ctx.lineWidth = strokeW || 3; ctx.strokeStyle = strokeCol; ctx.stroke(); }
+    }
+
+    function pill(cx, cy, text, bg, fg, fontPx, padX, padY) {
+      ctx.save();
+      ctx.font = '800 ' + fontPx + 'px ' + FONT;
+      var tw = ctx.measureText(text).width;
+      var w = tw + (padX || 36);
+      var h = fontPx + (padY || 20);
+      roundRect(cx - w * 0.5, cy - h * 0.5, w, h, h * 0.45, bg, null);
+      ctx.fillStyle = fg || '#FFFFFF';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, cx, cy + 2);
+      ctx.restore();
+    }
+
+    function drawRigInBox(wc, preset, st, sx, sy, s) {
+      ctx.save();
+      ctx.setTransform(s, 0, 0, s, sx, sy);
+      Rig.drawCharacter(wc, preset, Object.assign({ t: 0.45, s: 1, flip: 1, shadow: false }, st));
+      ctx.restore();
+    }
+
+    function drawHeadOnlyInBox(wc, preset, expr, cx, cy, w, h, s) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(cx - w * 0.5, cy - h * 0.5, w, h);
+      ctx.clip();
+      ctx.setTransform(s, 0, 0, s, cx, cy + 286 * s);
+      Rig.drawCharacter(wc, preset, { t: 0.45, pose: 'idle', expr: expr, s: 1, flip: 1, shadow: false });
+      ctx.restore();
+    }
+
+    function renderMainGallery() {
+      var W = 1920, H = 1080;
+      canvas.width = W;
+      canvas.height = H;
+      var wc = new Rig.WorldCanvas(ctx, W, H, null, { fixed: true });
+
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, W, H);
+
+      var halves = [
+        {
+          preset: 'afro',
+          title: 'Main Hero \u2014 Afro',
+          titleBg: '#4E8084',
+          panelBg: '#EBF3F3',
+          pillBg: '#DDECEC',
+          x0: 0
+        },
+        {
+          preset: 'nadia',
+          title: 'Co-Star \u2014 Nadia',
+          titleBg: '#AE8B5A',
+          panelBg: '#F4EDE3',
+          pillBg: '#EFE5D6',
+          x0: 960
+        }
+      ];
+
+      var exprs = ['happy', 'angry', 'surprised', 'sad', 'thinking', 'laugh'];
+      var poses = ['wave', 'point-right', 'ask', 'greet', 'walk'];
+
+      for (var hi = 0; hi < halves.length; hi++) {
+        var hf = halves[hi];
+        var x0 = hf.x0;
+
+        pill(x0 + 664, 58, hf.title, hf.titleBg, '#FFFFFF', 36, 48, 22);
+        drawRigInBox(wc, hf.preset, { pose: 'greet', expr: 'happy' }, x0 + 206, 515, 1.0);
+
+        roundRect(x0 + 402, 120, 526, 418, 24, hf.panelBg, null);
+        pill(x0 + 665, 152, 'Facial Expressions', '#FFFFFF', INK, 24, 34, 14);
+        for (var ei = 0; ei < exprs.length; ei++) {
+          var col = ei % 3;
+          var row = Math.floor(ei / 3);
+          var cx = x0 + 503 + col * 164;
+          var cy = 264 + row * 168;
+          roundRect(cx - 75, cy - 75, 150, 150, 14, '#FFFFFF', null);
+          drawHeadOnlyInBox(wc, hf.preset, exprs[ei], cx, cy + 4, 144, 144, 0.44);
+        }
+
+        pill(x0 + 480, 602, 'Poses & Gestures', hf.pillBg, INK, 24, 36, 14);
+        for (var pi = 0; pi < poses.length; pi++) {
+          var px = x0 + 96 + pi * 188;
+          drawRigInBox(wc, hf.preset, {
+            pose: poses[pi],
+            expr: 'happy',
+            stride: pi === 4 ? 1.15 : 0,
+            walkAmp: pi === 4 ? 1.0 : 0
+          }, px, 948, 0.56);
+        }
+      }
+    }
+
+    function renderHeroQaSheet() {
+      var W = 1560, H = 960;
+      canvas.width = W;
+      canvas.height = H;
+      var wc = new Rig.WorldCanvas(ctx, W, H, null, { fixed: true });
+
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = '#FFF9F0';
+      ctx.fillRect(0, 0, W, H);
+
+      ctx.fillStyle = INK;
+      ctx.font = '900 38px ' + FONT;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('AFRO \u2014 6-EXPRESSION PROCEDURAL RIG QA', 32, 48);
+
+      var exprs = ['happy', 'angry', 'surprised', 'sad', 'thinking', 'laugh'];
+      var cardW = 478, cardH = 382;
+      for (var i = 0; i < exprs.length; i++) {
+        var col = i % 3;
+        var row = Math.floor(i / 3);
+        var x = 32 + col * 508;
+        var y = 96 + row * 416;
+        roundRect(x, y, cardW, cardH, 12, '#FFFFFF', '#EDE5D8', 2);
+        ctx.strokeStyle = '#DCECEE';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(x + 28, y + cardH - 28);
+        ctx.lineTo(x + cardW - 28, y + cardH - 28);
+        ctx.stroke();
+
+        drawRigInBox(wc, 'afro', { pose: 'idle', expr: exprs[i] }, x + cardW * 0.5, y + 340, 0.72);
+        pill(x + 92, y + cardH - 42, exprs[i], '#4E8084', '#FFFFFF', 24, 34, 12);
+      }
+
+      ctx.fillStyle = '#4A4E58';
+      ctx.font = '800 22px ' + FONT;
+      ctx.textAlign = 'left';
+      ctx.fillText('QA check: afro silhouette leaves glasses/brows clear, bowtie tucks under chin, arms and sneakers match preset.', 32, 932);
+    }
+
+    if (mode === 'hero') {
+      renderHeroQaSheet();
+    } else {
+      renderMainGallery();
+    }
+    window.__ready = true;
+  })();
+  </script>
+</body>
+</html>

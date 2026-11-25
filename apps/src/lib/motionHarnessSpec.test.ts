@@ -55,10 +55,10 @@ function parseRuntimeAmApiExports(): Set<string> {
 }
 
 describe("Harness F1 spec guards (skill-lint & AM API parity)", () => {
-  it("lints all 18 mg-* SKILL.md files against forbidden engine/non-harness boilerplate", () => {
+  it("lints all 19 mg-* SKILL.md files against forbidden engine/non-harness boilerplate", () => {
     const skillFiles = listMgSkillFiles();
-    // 16 original mg-* skills + mg-product-keynote + mg-cobalt-editorial
-    expect(skillFiles.length).toBe(18);
+    // 16 original mg-* skills + mg-product-keynote + mg-cobalt-editorial + mg-stikman-cerita
+    expect(skillFiles.length).toBe(19);
 
     const violations: string[] = [];
     for (const file of skillFiles) {
@@ -104,6 +104,7 @@ describe("Harness F1 spec guards (skill-lint & AM API parity)", () => {
       "drawShapePath",
       "repeatDraw",
       "polystarPath",
+      "createDirectorCamera",
     ]) {
       expect(exported.has(sym)).toBe(true);
     }
@@ -623,5 +624,58 @@ describe("Harness F1 spec guards (skill-lint & AM API parity)", () => {
       (globalThis as { document?: unknown }).document = prevDoc;
       (globalThis as { window?: unknown }).window = prevWin;
     }
+  });
+
+  it("enforces standardized skill anatomy, English assets, 9:16 portrait defaults, and active camera config on all 19 mg-* skills", () => {
+    const skillFiles = listMgSkillFiles();
+    const violations: string[] = [];
+    for (const file of skillFiles) {
+      const skillDir = path.dirname(file);
+      const skillName = path.basename(skillDir);
+
+      const camRef = path.join(skillDir, "references", "camera.md");
+      if (!fs.existsSync(camRef)) {
+        violations.push(`${skillName}: missing references/camera.md`);
+      }
+
+      const assetsDir = path.join(skillDir, "assets");
+      if (!fs.existsSync(assetsDir)) {
+        violations.push(`${skillName}: missing assets/ directory`);
+      } else {
+        const images = fs
+          .readdirSync(assetsDir, { withFileTypes: true })
+          .filter((d) => d.isFile() && /\.(png|jpe?g)$/i.test(d.name))
+          .filter((d) => fs.statSync(path.join(assetsDir, d.name)).size > 2048);
+        const names = new Set(images.map((d) => d.name));
+        if (!names.has("qc-sheet-example.jpg")) {
+          violations.push(`${skillName}: missing assets/qc-sheet-example.jpg`);
+        }
+        if (!names.has("character-gallery.png") && !names.has("visual-gallery.png")) {
+          violations.push(`${skillName}: missing assets/character-gallery.png or visual-gallery.png`);
+        }
+      }
+
+      const storyPath = path.join(skillDir, "examples", "story.example.json");
+      if (!fs.existsSync(storyPath)) {
+        violations.push(`${skillName}: missing examples/story.example.json`);
+      } else {
+        const story = JSON.parse(fs.readFileSync(storyPath, "utf8")) as {
+          canvas?: { w?: number; h?: number };
+          meta?: { width?: number; height?: number };
+          cameraStyle?: string;
+          shots?: Array<{ camera?: unknown }>;
+        };
+        const w = story.canvas?.w ?? story.meta?.width;
+        const h = story.canvas?.h ?? story.meta?.height;
+        if (w !== 1080 || h !== 1920) {
+          violations.push(`${skillName}: default canvas must be 1080x1920 (got ${String(w)}x${String(h)})`);
+        }
+        const hasCam = Boolean(story.cameraStyle) || (story.shots ?? []).some((s) => Boolean(s.camera));
+        if (!hasCam) {
+          violations.push(`${skillName}: missing root cameraStyle or per-shot camera configuration`);
+        }
+      }
+    }
+    expect(violations).toEqual([]);
   });
 });

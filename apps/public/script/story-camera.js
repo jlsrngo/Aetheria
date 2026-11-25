@@ -43,9 +43,44 @@
     return c < 0.5 ? Math.pow(2, 20 * c - 10) * 0.5 : (2 - Math.pow(2, -20 * c + 10)) * 0.5;
   }
 
+  // Quintic smootherstep (6p^5 - 15p^4 + 10p^3): C2 continuous (zero velocity & acceleration at both ends)
+  function smootherstep(x) {
+    var p = clamp(x, 0, 1);
+    return p * p * p * (p * (p * 6 - 15) + 10);
+  }
+
+  function easeInCubic(x) {
+    var p = clamp(x, 0, 1);
+    return p * p * p;
+  }
+
+  function easeOutBack(x, s) {
+    var p = clamp(x, 0, 1);
+    var k = s === undefined ? 1.70158 : Number(s);
+    var u = p - 1;
+    return 1 + (k + 1) * u * u * u + k * u * u;
+  }
+
+  function easeSpring(x) {
+    var p = clamp(x, 0, 1);
+    if (p >= 1) return 1;
+    return 1 - Math.exp(-6.5 * p) * Math.cos(10.5 * p);
+  }
+
+  function easeSnap(x) {
+    var p = clamp(x, 0, 1);
+    return 1 - Math.pow(1 - p, 5);
+  }
+
   function evalCurve(curve, u) {
     var c = clamp(u, 0, 1);
-    if (curve === 'linear') return c;
+    if (curve === 'linear' || curve === 'lin') return c;
+    if (curve === 'smootherstep' || curve === 'io') return smootherstep(c);
+    if (curve === 'in' || curve === 'ease-in') return easeInCubic(c);
+    if (curve === 'out') return easeOutCubic(c);
+    if (curve === 'back') return easeOutBack(c, 1.70158);
+    if (curve === 'spring') return easeSpring(c);
+    if (curve === 'snap') return easeSnap(c);
     if (curve === 'ease-in-out') return easeInOutCubic(c);
     if (curve === 'whip' || curve === 'whip-out') return easeOutExpo(c);
     if (curve === 'whip-inout') return easeInOutExpo(c);
@@ -912,12 +947,474 @@
     return pose;
   }
 
+  // ============================================================================
+  // Director Camera v2: World-Space Log-Zoom, Multi-Beat Stack, Lag Follow & 2.5D Depth Parallax
+  // ============================================================================
+
+  var WORLD_CX0 = 0;
+  var WORLD_CY0 = -300;
+  var SIT_DROP_UNITS = 70;
+
+  // Semantic shot sizes [zoom, yOffsetWorldUnits] (100% English)
+  var SHOT_SIZES = Object.freeze({
+    'extreme-wide': [0.56, -330],
+    wide: [0.86, -300],
+    full: [1.25, -228],
+    medium: [1.9, -330],
+    close: [3.0, -338],
+    'extreme-close': [5.2, -352],
+  });
+
+  function prog01(t, a, b) {
+    return clamp((t - a) / Math.max(1e-6, b - a), 0, 1);
+  }
+
+  function computeUnitScale(W, H) {
+    return W >= H ? H / 1080 : (W / 1080) * 1.25;
+  }
+
+  function makeWorldCam(x, y, z, r, blur) {
+    return {
+      x: x === undefined ? WORLD_CX0 : Number(x),
+      y: y === undefined ? WORLD_CY0 : Number(y),
+      z: z === undefined ? 1 : Math.max(0.05, Number(z)),
+      r: r === undefined ? 0 : Number(r),
+      blur: blur === undefined ? 0 : Math.max(0, Number(blur)),
+      shkX: 0,
+      shkY: 0,
+      whipAmount: 0,
+    };
+  }
+
+  function copyWorldCam(c) {
+    var out = makeWorldCam(c.x, c.y, c.z, c.r, c.blur);
+    out.shkX = c.shkX || 0;
+    out.shkY = c.shkY || 0;
+    out.whipAmount = c.whipAmount || 0;
+    return out;
+  }
+
+  function resolveWorldTarget(targetSpec, t, baseCam, ctxOpts) {
+    var base = baseCam ? copyWorldCam(baseCam) : makeWorldCam();
+    var ke = typeof targetSpec === 'string' ? { size: targetSpec } : (targetSpec && typeof targetSpec === 'object' ? targetSpec : {});
+    var p = copyWorldCam(base);
+    var opts = ctxOpts || {};
+    var W = Math.max(1, Number(opts.W) || 1920);
+    var H = Math.max(1, Number(opts.H) || 1080);
+    var u = opts.unitScale || computeUnitScale(W, H);
+    var getActor = typeof opts.getActorState === 'function' ? opts.getActorState : null;
+
+    var sizeKey = ke.size || null;
+    var focusIds = typeof ke.focus === 'string' ? [ke.focus] : (Array.isArray(ke.focus) ? ke.focus : []);
+    var actorStates = [];
+    if (getActor && focusIds.length) {
+      for (var i = 0; i < focusIds.length; i++) {
+        var st = getActor(focusIds[i], t);
+        if (st) actorStates.push(st);
+      }
+    }
+
+    if (actorStates.length > 0) {
+      var sumX = 0;
+      var sumY = 0;
+      var minX = Infinity;
+      var maxX = -Infinity;
+      for (var ai = 0; ai < actorStates.length; ai++) {
+        var sx = Number(actorStates[ai].x) || 0;
+        var sy = Number(actorStates[ai].y) || 0;
+        sumX += sx;
+        sumY += sy;
+        if (sx < minX) minX = sx;
+        if (sx > maxX) maxX = sx;
+      }
+      var meanX = sumX / actorStates.length;
+      var meanY = sumY / actorStates.length;
+
+      if (sizeKey && SHOT_SIZES[sizeKey]) {
+        var pair = SHOT_SIZES[sizeKey];
+        var z0 = pair[0];
+        var yo = pair[1];
+        var a0 = actorStates[0];
+        var sk = Number(a0.scale) || 1;
+        var isTight = sizeKey !== 'wide' && sizeKey !== 'extreme-wide';
+        var sitDrop = isTight ? SIT_DROP_UNITS * (Number(a0.sit) || 0) : 0;
+        p.y = meanY + (yo + sitDrop) * sk;
+        if (actorStates.length > 1) {
+          var span = (maxX - minX) + 520;
+          p.z = Math.min(z0, Math.max(0.5, ((W / u) * 0.9) / span));
+        } else {
+          p.z = z0;
+        }
+        // Look-room in facing direction
+        var facing = a0.facing || 'front';
+        var fl = facing === 'right' ? 1 : (facing === 'left' ? -1 : 0);
+        p.x = meanX + fl * ((0.05 * W) / u / Math.max(0.1, p.z));
+      } else {
+        p.x = meanX;
+      }
+    } else if (sizeKey && SHOT_SIZES[sizeKey]) {
+      p.z = SHOT_SIZES[sizeKey][0];
+      p.y = SHOT_SIZES[sizeKey][1];
+    }
+
+    var keys = ['x', 'y', 'z', 'r', 'blur'];
+    for (var ki = 0; ki < keys.length; ki++) {
+      var k = keys[ki];
+      if (ke[k] !== undefined && Number.isFinite(Number(ke[k]))) {
+        if ((k === 'x' || k === 'y') && ke.relative) {
+          p[k] += Number(ke[k]);
+        } else {
+          p[k] = Number(ke[k]);
+        }
+      }
+    }
+    if (ke.dx !== undefined && Number.isFinite(Number(ke.dx))) p.x += Number(ke.dx);
+    if (ke.dy !== undefined && Number.isFinite(Number(ke.dy))) p.y += Number(ke.dy);
+    if (ke.zoomMult !== undefined && Number.isFinite(Number(ke.zoomMult)) && Number(ke.zoomMult) > 0) {
+      p.z *= Number(ke.zoomMult);
+    }
+    p.z = Math.max(0.08, p.z);
+    return p;
+  }
+
+  /**
+   * Compiles a declarative Director Camera v2 spec (`{ initial, moves, livingHold, creep }`)
+   * into a deterministic `evalAt(localTime)` evaluator with log-space zoom, fly-to dip, smootherstep C2 easing,
+   * 7-sample historical actor-follow lag, punch, zoom-normalized shake, orbit sway, whip blur, and audio cues.
+   */
+  function createDirectorCamera(camSpec, options) {
+    var kam = camSpec && typeof camSpec === 'object' ? camSpec : {};
+    var opts = options || {};
+    var W = Math.max(1, Number(opts.W) || 1920);
+    var H = Math.max(1, Number(opts.H) || 1080);
+    var dur = Math.max(0.2, Number(opts.duration) || 4.0);
+    var u = opts.unitScale || computeUnitScale(W, H);
+    var whenFn = typeof opts.resolveWhen === 'function'
+      ? opts.resolveWhen
+      : function (g) {
+          if (typeof g === 'number') return g;
+          if (g && typeof g === 'object') return Number(g.at !== undefined ? g.at : (g.t || 0)) + Number(g.offset || 0);
+          return 0;
+        };
+    var whenEndFn = typeof opts.resolveWhenEnd === 'function'
+      ? opts.resolveWhenEnd
+      : function (g, defVal) {
+          if (!g || typeof g !== 'object') return defVal;
+          if (g.until !== undefined && Number.isFinite(Number(g.until))) return Number(g.until);
+          return defVal;
+        };
+    var defaultActorIds = Array.isArray(opts.actorIds) ? opts.actorIds : [];
+
+    var idle = kam.livingHold !== undefined ? Boolean(kam.livingHold) : true;
+    var creep = kam.creep !== undefined ? Number(kam.creep) : 0.05;
+    if (!Number.isFinite(creep)) creep = 0.05;
+
+    var rawInit = kam.initial !== undefined ? kam.initial : (kam.size || (defaultActorIds.length ? 'wide' : { x: WORLD_CX0, y: WORLD_CY0, z: 1.0 }));
+    var initObj;
+    if (typeof rawInit === 'string') {
+      initObj = { size: rawInit, focus: defaultActorIds.slice(0, 1) };
+    } else if (rawInit && typeof rawInit === 'object') {
+      initObj = Object.assign({}, rawInit);
+      if (initObj.size && initObj.focus === undefined && defaultActorIds.length) {
+        initObj.focus = defaultActorIds.slice(0, 1);
+      }
+    } else {
+      initObj = { x: WORLD_CX0, y: WORLD_CY0, z: 1.0 };
+    }
+
+    var ctxOpts = { W: W, H: H, unitScale: u, getActorState: opts.getActorState };
+    var cam0 = resolveWorldTarget(initObj, 0, null, ctxOpts);
+    var cur = copyWorldCam(cam0);
+
+    var rawMoves = Array.isArray(kam.moves) ? kam.moves : [];
+    var sortedMoves = rawMoves
+      .map(function (g, idx) { return { g: g || {}, t0: whenFn(g || {}), idx: idx }; })
+      .sort(function (a, b) { return a.t0 !== b.t0 ? a.t0 - b.t0 : a.idx - b.idx; });
+
+    var segs = [];
+    var follows = [];
+    var punches = [];
+    var shakes = [];
+    var sways = [];
+    var whips = [];
+    var audioEvents = [];
+
+    for (var mi = 0; mi < sortedMoves.length; mi++) {
+      var g = sortedMoves[mi].g;
+      var t0 = sortedMoves[mi].t0;
+      var kind = String(g.kind || g.type || g.move || 'move');
+      var mDur = Number(g.dur !== undefined ? g.dur : (g.duration !== undefined ? g.duration : 1.5));
+      if (!Number.isFinite(mDur) || mDur < 0) mDur = 1.5;
+      var easeName = String(g.ease || g.curve || 'smootherstep');
+
+      var rawTo = g.to !== undefined ? g.to : {};
+      var ke = typeof rawTo === 'string' ? { size: rawTo } : Object.assign({}, rawTo);
+      var copyFields = ['size', 'focus', 'x', 'y', 'z', 'r', 'blur', 'dx', 'dy', 'zoomMult'];
+      for (var cf = 0; cf < copyFields.length; cf++) {
+        var fk = copyFields[cf];
+        if (g[fk] !== undefined && ke[fk] === undefined) ke[fk] = g[fk];
+      }
+      var tEnd = t0 + mDur;
+
+      if (
+        kind === 'move' ||
+        kind === 'push' || kind === 'push-in' ||
+        kind === 'pull' || kind === 'pull-out' || kind === 'reveal' ||
+        kind === 'pan' || kind === 'tilt' || kind === 'crane' ||
+        kind === 'fly-to' ||
+        kind === 'whip' || kind === 'snap-zoom' ||
+        kind === 'cut' ||
+        kind === 'dutch' ||
+        kind === 'rack-focus'
+      ) {
+        var hasZoomSpec = ke.size !== undefined || ke.z !== undefined || ke.zoomMult !== undefined;
+        if ((kind === 'push' || kind === 'push-in') && !hasZoomSpec) {
+          ke.zoomMult = Number(g.mult || 1.4);
+        }
+        if ((kind === 'pull' || kind === 'pull-out') && !hasZoomSpec) {
+          ke.zoomMult = 1 / Math.max(0.1, Number(g.mult || 1.4));
+        }
+
+        var tgt = copyWorldCam(cur);
+        if (kind === 'pan') {
+          if (ke.focus !== undefined || ke.x !== undefined || ke.dx !== undefined) {
+            var panKe = ke.focus !== undefined ? Object.assign({}, ke, { size: null }) : ke;
+            tgt.x = resolveWorldTarget(panKe, tEnd, cur, ctxOpts).x;
+          }
+        } else if (kind === 'tilt' || kind === 'crane') {
+          var tiltTp = resolveWorldTarget(ke, tEnd, cur, ctxOpts);
+          if (ke.y !== undefined || ke.dy !== undefined || ke.focus !== undefined) {
+            tgt.y = tiltTp.y;
+          }
+          if (kind === 'crane' && (ke.z !== undefined || ke.size !== undefined || ke.zoomMult !== undefined)) {
+            tgt.z = tiltTp.z;
+          }
+        } else if (kind === 'dutch') {
+          tgt.r = Number(ke.r !== undefined ? ke.r : (g.r !== undefined ? g.r : 4));
+        } else if (kind === 'rack-focus') {
+          tgt.blur = Math.max(0, Number(ke.blur !== undefined ? ke.blur : (g.blur !== undefined ? g.blur : 6)));
+        } else if (kind === 'cut') {
+          tgt = resolveWorldTarget(ke, t0, cur, ctxOpts);
+          mDur = 0;
+          tEnd = t0;
+        } else {
+          tgt = resolveWorldTarget(ke, tEnd, cur, ctxOpts);
+        }
+
+        if (kind === 'whip') {
+          mDur = Number(g.dur !== undefined ? g.dur : (g.duration !== undefined ? g.duration : 0.38));
+          tEnd = t0 + mDur;
+          easeName = 'smootherstep';
+          whips.push([t0, tEnd]);
+          audioEvents.push([t0, 'whoosh', 1.0]);
+        } else if (kind === 'snap-zoom') {
+          mDur = Number(g.dur !== undefined ? g.dur : (g.duration !== undefined ? g.duration : 0.25));
+          tEnd = t0 + mDur;
+          easeName = 'snap';
+          audioEvents.push([t0, 'soft-whoosh', 0.7]);
+        } else if (kind === 'fly-to' || (tEnd - t0 > 0.2 && tgt.z / Math.max(cur.z, 1e-3) > 1.5)) {
+          audioEvents.push([t0, 'soft-whoosh', 0.7]);
+        }
+
+        var dip = 0;
+        if (kind === 'fly-to') {
+          var dist = Math.hypot(tgt.x - cur.x, tgt.y - cur.y) * cur.z;
+          dip = g.dip !== undefined ? Number(g.dip) : clamp(dist / 2600, 0.12, 0.5);
+        }
+
+        segs.push({ t0: t0, t1: tEnd, p0: copyWorldCam(cur), p1: copyWorldCam(tgt), ease: easeName, dip: dip, kind: kind });
+        cur = tgt;
+      } else if (kind === 'follow') {
+        var fokId = g.focus || (defaultActorIds.length ? defaultActorIds[0] : null);
+        var fEnd = whenEndFn(g, dur);
+        follows.push({
+          t0: t0,
+          t1: fEnd,
+          id: typeof fokId === 'string' ? fokId : (Array.isArray(fokId) ? fokId[0] : null),
+          dx: Number(g.dx !== undefined ? g.dx : (g.offset || 0)),
+          lag: Math.max(0, Number(g.lag !== undefined ? g.lag : 0.5)),
+          z: g.z !== undefined ? Number(g.z) : null,
+        });
+      } else if (kind === 'punch') {
+        var pStrength = Number(g.strength !== undefined ? g.strength : 0.16);
+        var pDur = Number(g.dur !== undefined ? g.dur : (g.duration !== undefined ? g.duration : 0.45));
+        punches.push([t0, pStrength, Math.max(0.12, pDur)]);
+        audioEvents.push([t0, 'thud', 0.8]);
+      } else if (kind === 'shake') {
+        var sAmp = Number(g.strength !== undefined ? g.strength : 14);
+        var sDur = Number(g.dur !== undefined ? g.dur : (g.duration !== undefined ? g.duration : 0.5));
+        shakes.push([t0, sAmp, Math.max(0.08, sDur)]);
+        audioEvents.push([t0, 'thud', 1.0]);
+      } else if (kind === 'orbit-sway') {
+        var ayEnd = whenEndFn(g, dur);
+        var ayAmp = Number(g.strength !== undefined ? g.strength : 70);
+        var ayPer = Math.max(0.5, Number(g.period !== undefined ? g.period : 6));
+        sways.push([t0, ayEnd, ayAmp, ayPer]);
+      }
+    }
+
+    function evalAt(localTime) {
+      var t = Math.max(0, Number(localTime) || 0);
+      var c = copyWorldCam(cam0);
+
+      for (var si = 0; si < segs.length; si++) {
+        var sg = segs[si];
+        if (t >= sg.t1 - 1e-9) {
+          c = copyWorldCam(sg.p1);
+        } else if (t >= sg.t0) {
+          var q = evalCurve(sg.ease, (t - sg.t0) / Math.max(1e-6, sg.t1 - sg.t0));
+          var a = sg.p0;
+          var b = sg.p1;
+          var lz = lerp(Math.log(Math.max(a.z, 1e-3)), Math.log(Math.max(b.z, 1e-3)), q) - sg.dip * Math.sin(Math.PI * q);
+          c = makeWorldCam(lerp(a.x, b.x, q), lerp(a.y, b.y, q), Math.exp(lz), lerp(a.r, b.r, q), lerp(a.blur, b.blur, q));
+          break;
+        } else {
+          break;
+        }
+      }
+
+      // Always-on living camera (idle breathing + slow creep)
+      if (idle) {
+        c.x += 5 * Math.sin(t * 0.37);
+        c.y += 3 * Math.sin(t * 0.51 + 1);
+        c.z *= 1 + 0.004 * Math.sin(t * 0.43);
+      }
+      if (creep) {
+        c.z *= 1 + creep * clamp(t / Math.max(dur, 1), 0, 1);
+      }
+
+      // Lag-tracked actor follow
+      if (follows.length && typeof opts.getActorState === 'function') {
+        for (var fi = 0; fi < follows.length; fi++) {
+          var f = follows[fi];
+          if (!f.id) continue;
+          var w = smootherstep(prog01(t, f.t0, f.t0 + 0.7)) * (1 - smootherstep(prog01(t, f.t1 - 0.5, f.t1 + 0.3)));
+          if (w <= 0) continue;
+          var curActor = opts.getActorState(f.id, t);
+          if (!curActor) continue;
+          var samples = 6;
+          var sumLagX = 0;
+          for (var li = 0; li <= samples; li++) {
+            var sampleSt = opts.getActorState(f.id, Math.max(0, t - (f.lag * li) / samples)) || curActor;
+            sumLagX += Number(sampleSt.x) || 0;
+          }
+          var tx = sumLagX / (samples + 1) + f.dx;
+          var hd = curActor.facing || 'front';
+          tx += (hd === 'right' ? 1 : (hd === 'left' ? -1 : 0)) * 130;
+          c.x = lerp(c.x, tx, w);
+          if (f.z !== null && Number.isFinite(f.z) && f.z > 0) {
+            c.z = lerp(c.z, f.z, w);
+          }
+        }
+      }
+
+      // Punch zoom kick
+      for (var pi = 0; pi < punches.length; pi++) {
+        var pu = punches[pi];
+        var pq = t - pu[0];
+        if (pq >= 0 && pq < pu[2]) {
+          var pk = pq < 0.08 ? easeSnap(pq / 0.08) : 1 - smootherstep((pq - 0.08) / Math.max(0.04, pu[2] - 0.08));
+          c.z *= 1 + pu[1] * pk;
+        }
+      }
+
+      // Parallax sway (`orbit-sway`)
+      for (var ayi = 0; ayi < sways.length; ayi++) {
+        var ay = sways[ayi];
+        if (t >= ay[0] && t <= ay[1]) {
+          var aw = smootherstep(prog01(t, ay[0], ay[0] + 0.8)) * (1 - smootherstep(prog01(t, ay[1] - 0.8, ay[1])));
+          c.x += Math.sin(((t - ay[0]) / ay[3]) * Math.PI * 2) * ay[2] * aw;
+        }
+      }
+
+      // Zoom-normalized decaying shake
+      var sx = 0;
+      var sy = 0;
+      for (var shi = 0; shi < shakes.length; shi++) {
+        var sh = shakes[shi];
+        var sq = t - sh[0];
+        if (sq >= 0 && sq < sh[2]) {
+          var dec = Math.pow(1 - sq / sh[2], 2);
+          sx += Math.sin(sq * 61.0) * sh[1] * dec;
+          sy += Math.cos(sq * 53.0 + 1) * sh[1] * 0.7 * dec;
+        }
+      }
+      var denom = Math.max(c.z * u, 0.01);
+      c.shkX = sx / denom;
+      c.shkY = sy / denom;
+
+      // Whip-pan blur envelope
+      var whipAmt = 0;
+      for (var wi = 0; wi < whips.length; wi++) {
+        var wa = whips[wi][0];
+        var wb = whips[wi][1];
+        if (t >= wa - 0.02 && t <= wb + 0.02) {
+          whipAmt = Math.max(whipAmt, Math.pow(Math.sin(Math.PI * clamp((t - wa) / Math.max(1e-4, wb - wa), 0, 1)), 0.6));
+        }
+      }
+      c.whipAmount = whipAmt;
+      return c;
+    }
+
+    return {
+      initial: cam0,
+      segments: segs,
+      audioEvents: audioEvents,
+      evalAt: evalAt,
+    };
+  }
+
+  function projectWorld2D(worldX, worldY, cam, depth, W, H, unitScale) {
+    var d = depth === undefined || depth === null ? 1.0 : Number(depth);
+    var u = unitScale || computeUnitScale(W, H);
+    var k = u * (1 + (cam.z - 1) * d);
+    var ox = W * 0.5 - (WORLD_CX0 + (cam.x + (cam.shkX || 0) - WORLD_CX0) * d) * k;
+    var oy = H * 0.5 - (WORLD_CY0 + (cam.y + (cam.shkY || 0) - WORLD_CY0) * d) * k;
+    var sx = ox + worldX * k;
+    var sy = oy + worldY * k;
+    if (Math.abs(cam.r || 0) > 0.02) {
+      var rad = (cam.r * Math.PI) / 180;
+      var over = 1 + Math.abs(rad) * 1.1;
+      var dx = sx - W * 0.5;
+      var dy = sy - H * 0.5;
+      var cs = Math.cos(rad) * over;
+      var sn = Math.sin(rad) * over;
+      sx = W * 0.5 + dx * cs - dy * sn;
+      sy = H * 0.5 + dx * sn + dy * cs;
+    }
+    return { x: sx, y: sy, scale: k };
+  }
+
+  function applyWorldLayer2D(ctx, cam, depth, W, H, unitScale) {
+    if (!ctx || !cam) return 1;
+    var d = depth === undefined || depth === null ? 1.0 : Number(depth);
+    var u = unitScale || computeUnitScale(W, H);
+    var k = u * (1 + (cam.z - 1) * d);
+    var ox = W * 0.5 - (WORLD_CX0 + (cam.x + (cam.shkX || 0) - WORLD_CX0) * d) * k;
+    var oy = H * 0.5 - (WORLD_CY0 + (cam.y + (cam.shkY || 0) - WORLD_CY0) * d) * k;
+    if (Math.abs(cam.r || 0) > 0.02) {
+      var rad = (cam.r * Math.PI) / 180;
+      var over = 1 + Math.abs(rad) * 1.1;
+      ctx.translate(W * 0.5, H * 0.5);
+      ctx.rotate(rad);
+      ctx.scale(over, over);
+      ctx.translate(-W * 0.5, -H * 0.5);
+    }
+    ctx.translate(ox, oy);
+    ctx.scale(k, k);
+    return k;
+  }
+
   global.StoryCamera = {
     version: 1,
+    directorVersion: 2,
     IDENTITY_RIG: IDENTITY_RIG,
     CAMERA_STYLES: CAMERA_STYLES,
     MOVES: MOVES,
     LEGACY_PRESETS: LEGACY_PRESETS,
+    SHOT_SIZES: SHOT_SIZES,
+    smootherstep: smootherstep,
+    evalCurve: evalCurve,
     hashSeed: hashSeed,
     createRng: createRng,
     planStoryMoves: planStoryMoves,
@@ -929,5 +1426,8 @@
     apply2D: apply2D,
     compute3DPose: compute3DPose,
     applyTo3D: applyTo3D,
+    createDirectorCamera: createDirectorCamera,
+    projectWorld2D: projectWorld2D,
+    applyWorldLayer2D: applyWorldLayer2D,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

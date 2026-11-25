@@ -114,7 +114,7 @@
         var bw = W * 0.24;
         return { minX: cx - bw * 0.5, maxX: cx + bw * 0.5, minY: cy - 8, maxY: cy + 8, width: bw, height: 16 };
       }
-      var words = String((shot && shot.headline) || 'Kreativitas butuh ruang bermain.').trim().split(/\s+/);
+      var words = String((shot && shot.headline) || 'Creativity needs a playground.').trim().split(/\s+/);
       var fs = isPortrait ? 46 : 42;
       ctx.save();
       ctx.font = '500 ' + fs + 'px "Inter", "Segoe UI", sans-serif';
@@ -1433,10 +1433,10 @@
         blurBuf.ctx.restore();
 
         // Project true 3D forward-tilted tall dashboard (extends below viewport when laid flat) + zoom deep into focal bar
-        var dispW = isPortrait ? safe.w * 0.96 : Math.min(880, safe.w * 0.78);
+        var dispW = isPortrait ? safe.w * 0.88 : Math.min(880, safe.w * 0.78);
         var dispH = dispW * (cardH / cardW);
-        var localZoom = 1.02 + 0.06 * standP + 1.24 * zoomP; // starts large so bottom extends off-screen -> zooms 2.32x into focal bar
-        var targetOffX = -hlRelX * dispW * zoomP;
+        var localZoom = isPortrait ? (0.94 + 0.04 * standP + 0.28 * zoomP) : (1.02 + 0.06 * standP + 1.24 * zoomP);
+        var targetOffX = -hlRelX * dispW * zoomP * (isPortrait ? 0.35 : 1.0);
         var targetOffY = dispH * 0.17 * zoomP + (1 - standP) * 40;
 
         ctx.save();

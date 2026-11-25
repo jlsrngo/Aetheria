@@ -1,56 +1,57 @@
 {
-  "title": "07-Liquid Glossy Studio SDF Motion — drop",
-  "canvas": {
-    "w": 1080,
-    "h": 1920,
-    "fps": 30
-  },
-  "aspect": "9:16",
-  "seed": 707,
-  "microstockMode": false,
-  "shots": [
-    {
-      "id": "shot_1_pour_crown",
-      "start": 0,
-      "duration": 7.5,
-      "layout": "pour-macro",
-      "wordmark": "drop",
-      "tagline": "01 · MACRO POUR & BALL LENS",
-      "subheadline": "VISCOUS PINCH-OFF & SPLASH CROWN",
-      "huePreset": 0.08
-    },
-    {
-      "id": "shot_2_leap_swirl",
-      "start": 7.5,
-      "duration": 7.5,
-      "layout": "marbled-leap",
-      "wordmark": "drop",
-      "tagline": "02 · SURFACE-TENSION LEAP",
-      "subheadline": "3D MARBLED SWIRL & SNAPPING THREAD",
-      "huePreset": 0.38
-    },
-    {
-      "id": "shot_3_diagonal_flood",
-      "start": 15,
-      "duration": 7.5,
-      "layout": "flood-immersion",
-      "wordmark": "drop",
-      "tagline": "03 · DIAGONAL FLOOD SHEETS",
-      "subheadline": "CAUSTIC SHAFTS & BACKLIT SEED BLOBS",
-      "huePreset": 0.62
-    },
-    {
-      "id": "shot_4_jelly_wordmark",
-      "start": 22.5,
-      "duration": 7.5,
-      "layout": "jelly-wordmark",
-      "wordmark": "drop",
-      "tagline": "IT ALL STARTS WITH A DROP",
-      "subheadline": "EVERYTHING BEGINS AS A DROP · LIQUID MOTION",
-      "huePreset": 0.85
-    }
-  ],
-  "captions": {
-    "enabled": false
-  }
+    "title":  "07-Liquid Glossy Studio SDF Motion — drop",
+    "canvas":  {
+                   "w":  1080,
+                   "h":  1920,
+                   "fps":  30
+               },
+    "aspect":  "9:16",
+    "seed":  707,
+    "microstockMode":  false,
+    "shots":  [
+                  {
+                      "id":  "shot_1_pour_crown",
+                      "start":  0,
+                      "duration":  7.5,
+                      "layout":  "pour-macro",
+                      "wordmark":  "drop",
+                      "tagline":  "01 · MACRO POUR \u0026 BALL LENS",
+                      "subheadline":  "VISCOUS PINCH-OFF \u0026 SPLASH CROWN",
+                      "huePreset":  0.08
+                  },
+                  {
+                      "id":  "shot_2_leap_swirl",
+                      "start":  7.5,
+                      "duration":  7.5,
+                      "layout":  "marbled-leap",
+                      "wordmark":  "drop",
+                      "tagline":  "02 · SURFACE-TENSION LEAP",
+                      "subheadline":  "3D MARBLED SWIRL \u0026 SNAPPING THREAD",
+                      "huePreset":  0.38
+                  },
+                  {
+                      "id":  "shot_3_diagonal_flood",
+                      "start":  15,
+                      "duration":  7.5,
+                      "layout":  "flood-immersion",
+                      "wordmark":  "drop",
+                      "tagline":  "03 · DIAGONAL FLOOD SHEETS",
+                      "subheadline":  "CAUSTIC SHAFTS \u0026 BACKLIT SEED BLOBS",
+                      "huePreset":  0.62
+                  },
+                  {
+                      "id":  "shot_4_jelly_wordmark",
+                      "start":  22.5,
+                      "duration":  7.5,
+                      "layout":  "jelly-wordmark",
+                      "wordmark":  "drop",
+                      "tagline":  "IT ALL STARTS WITH A DROP",
+                      "subheadline":  "EVERYTHING BEGINS AS A DROP · LIQUID MOTION",
+                      "huePreset":  0.85
+                  }
+              ],
+    "captions":  {
+                     "enabled":  false
+                 },
+    "cameraStyle":  "calm"
 }

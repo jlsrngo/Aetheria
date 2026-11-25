@@ -1,0 +1,121 @@
+{
+  "renderer": "2d-stickman-story",
+  "title": "Afro's Bright Morning",
+  "canvas": { "w": 1080, "h": 1920, "fps": 30 },
+  "actorsMap": {
+    "afro": "afro",
+    "nadia": "nadia"
+  },
+  "captions": { "enabled": true },
+  "fadeIn": 0.3,
+  "fadeOut": 0.4,
+  "shots": [
+    {
+      "id": "shot1_alarm_hook",
+      "start": 0.0,
+      "duration": 3.4,
+      "stage": "bedroom",
+      "timeOfDay": "morning",
+      "clockTime": "07:00",
+      "alarm": true,
+      "blanket": true,
+      "caption": "Seven AM! The alarm rings loudly, yet Afro is still fast asleep.",
+      "actors": [
+        {
+          "id": "afro",
+          "x": -158,
+          "y": -167,
+          "pose": "sleep",
+          "expr": "sleep",
+          "actions": [
+            { "at": 1.0, "emote": "zzz", "emoteDur": 2.2 }
+          ]
+        }
+      ],
+      "camera": {
+        "initial": { "x": 185, "y": -214, "z": 2.8 },
+        "moves": [
+          { "at": 0.2, "kind": "shake", "strength": 8, "dur": 0.8 },
+          { "at": 1.0, "kind": "fly-to", "to": { "size": "full", "x": -220, "y": -270, "z": 1.05 }, "dur": 1.5 }
+        ]
+      }
+    },
+    {
+      "id": "shot2_bright_idea",
+      "start": 3.4,
+      "duration": 3.3,
+      "stage": "bedroom",
+      "timeOfDay": "morning",
+      "clockTime": "07:00",
+      "blanket": true,
+      "transition": { "kind": "flash", "dur": 0.28 },
+      "caption": "Suddenly Afro wakes up with a brilliant morning idea!",
+      "actors": [
+        {
+          "id": "afro",
+          "x": -160,
+          "y": 0,
+          "pose": "surprised",
+          "expr": "surprised",
+          "actions": [
+            { "at": 0.1, "emote": "exclaim", "emoteDur": 1.2 },
+            { "word": "idea", "offset": -0.2, "pose": "idea", "expr": "excited", "emote": "idea", "emoteDur": 1.6 }
+          ]
+        }
+      ],
+      "camera": {
+        "initial": { "size": "full", "focus": "afro" },
+        "moves": [
+          { "at": 0.3, "kind": "punch", "strength": 0.14 },
+          { "word": "idea", "offset": -0.2, "kind": "snap-zoom", "to": { "focus": "afro", "z": 1.65, "dy": -45 } }
+        ]
+      },
+      "fx": [
+        { "word": "idea", "offset": -0.2, "kind": "speed-lines", "dur": 0.8 }
+      ],
+      "overlays": [
+        { "word": "idea", "offset": -0.2, "style": "burst", "text": "AHA!", "pos": [0.72, 0.26], "until": 3.2 }
+      ]
+    },
+    {
+      "id": "shot3_park_greeting",
+      "start": 6.7,
+      "duration": 3.3,
+      "stage": "park",
+      "timeOfDay": "day",
+      "transition": { "kind": "whip", "dir": "left", "dur": 0.38 },
+      "caption": "He sprints to the park and greets Nadia with a big smile!",
+      "actors": [
+        {
+          "id": "afro",
+          "x": -420,
+          "pose": "run",
+          "expr": "excited",
+          "backpack": true,
+          "actions": [
+            { "at": 0.1, "toX": -150, "dur": 1.25, "style": "run" },
+            { "word": "greets", "pose": "wave", "expr": "laugh", "facing": "right", "emote": "sparkle", "emoteDur": 1.8 }
+          ]
+        },
+        {
+          "id": "nadia",
+          "x": 180,
+          "pose": "wave",
+          "expr": "happy",
+          "facing": "left",
+          "backpack": true
+        }
+      ],
+      "bubbles": [
+        { "by": "afro", "text": "Hello, Nadia!", "word": "greets", "until": 3.2, "side": "left" }
+      ],
+      "camera": {
+        "initial": { "size": "full", "focus": "afro" },
+        "moves": [
+          { "at": 0.0, "kind": "follow", "focus": "afro", "until": 1.35 },
+          { "at": 1.4, "kind": "push", "to": { "focus": ["afro", "nadia"], "z": 1.0, "dy": -40 }, "dur": 1.2 }
+        ]
+      }
+    }
+  ]
+}

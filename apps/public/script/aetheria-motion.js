@@ -2199,6 +2199,17 @@
   }
 
   /**
+   * Creates a multi-beat World-Space Director Camera (`StoryCamera.createDirectorCamera`) with
+   * log-space zoom, fly-to dip, smootherstep C2 easing, actor-follow lag, punch, shake, and living hold.
+   */
+  function createDirectorCamera(camSpec = {}, opts = {}) {
+    if (global.StoryCamera && typeof global.StoryCamera.createDirectorCamera === "function") {
+      return global.StoryCamera.createDirectorCamera(camSpec, opts);
+    }
+    return null;
+  }
+
+  /**
    * Renders a physically inspired 3-layer additive optical glow/bloom orb
    * (wide atmospheric halo + saturated mid bloom + over-exposed white hot core).
    */
@@ -3226,6 +3237,7 @@
     repeatDraw,
     polystarPath,
     syncCamera,
+    createDirectorCamera,
     drawOpticalGlow,
     drawBloomStroke,
     drawSphericalLens,

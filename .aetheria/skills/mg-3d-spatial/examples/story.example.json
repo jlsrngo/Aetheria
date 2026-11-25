@@ -1,48 +1,49 @@
 {
-  "title": "04-3D-Render — SOFT Hexagonal Capsule Bed",
-  "canvas": {
-    "w": 1080,
-    "h": 1920,
-    "fps": 24
-  },
-  "aspect": "9:16",
-  "seed": 404,
-  "microstockMode": false,
-  "shots": [
-    {
-      "id": "shot_1_drop",
-      "start": 0,
-      "duration": 7.5,
-      "layout": "capsule-bed-drop",
-      "headline": "01 · IMPACT",
-      "tagline": "HEXAGONAL CAPSULE BED · SOFT PBR"
-    },
-    {
-      "id": "shot_2_cascade",
-      "start": 7.5,
-      "duration": 7.5,
-      "layout": "letter-cascade",
-      "headline": "02 · CASCADE",
-      "tagline": "3D SCULPTED FORMS · STUDIO SHADOWS"
-    },
-    {
-      "id": "shot_3_shockwave",
-      "start": 15,
-      "duration": 7.5,
-      "layout": "sphere-shockwave",
-      "headline": "03 · SHOCKWAVE",
-      "tagline": "RADIAL CAPSULE CROWN · 24 FPS"
-    },
-    {
-      "id": "shot_4_finale",
-      "start": 22.5,
-      "duration": 7.5,
-      "layout": "soft-finale",
-      "headline": "SOFT.",
-      "tagline": "3D SPATIAL RENDER · TACTILE"
-    }
-  ],
-  "captions": {
-    "enabled": false
-  }
+    "title":  "04-3D-Render — SOFT Hexagonal Capsule Bed",
+    "canvas":  {
+                   "w":  1080,
+                   "h":  1920,
+                   "fps":  24
+               },
+    "aspect":  "9:16",
+    "seed":  404,
+    "microstockMode":  false,
+    "shots":  [
+                  {
+                      "id":  "shot_1_drop",
+                      "start":  0,
+                      "duration":  7.5,
+                      "layout":  "capsule-bed-drop",
+                      "headline":  "01 · IMPACT",
+                      "tagline":  "HEXAGONAL CAPSULE BED · SOFT PBR"
+                  },
+                  {
+                      "id":  "shot_2_cascade",
+                      "start":  7.5,
+                      "duration":  7.5,
+                      "layout":  "letter-cascade",
+                      "headline":  "02 · CASCADE",
+                      "tagline":  "3D SCULPTED FORMS · STUDIO SHADOWS"
+                  },
+                  {
+                      "id":  "shot_3_shockwave",
+                      "start":  15,
+                      "duration":  7.5,
+                      "layout":  "sphere-shockwave",
+                      "headline":  "03 · SHOCKWAVE",
+                      "tagline":  "RADIAL CAPSULE CROWN · 24 FPS"
+                  },
+                  {
+                      "id":  "shot_4_finale",
+                      "start":  22.5,
+                      "duration":  7.5,
+                      "layout":  "soft-finale",
+                      "headline":  "SOFT.",
+                      "tagline":  "3D SPATIAL RENDER · TACTILE"
+                  }
+              ],
+    "captions":  {
+                     "enabled":  false
+                 },
+    "cameraStyle":  "editorial"
 }

@@ -17,7 +17,7 @@
       "heroAction": "run",
       "badge": "WORLD 1-1",
       "headline": "PIXEL QUEST",
-      "subtext": "Petualangan 16-bit melintasi lembah air terjun",
+      "subtext": "16-bit adventure across the waterfall valley",
       "score": 1200,
       "coins": 4,
       "transition": "palette-shift"
@@ -30,8 +30,8 @@
       "theme": "afternoon",
       "heroAction": "bop",
       "badge": "COMBO +500",
-      "headline": "LOMPAT SLIME",
-      "subtext": "Kumpulkan koin emas dan kalahkan slime penjaga",
+      "headline": "SLIME JUMP",
+      "subtext": "Collect gold coins and defeat the guardian slime",
       "score": 2800,
       "coins": 9,
       "transition": "pixel-dissolve"
@@ -44,8 +44,8 @@
       "theme": "golden",
       "heroAction": "run",
       "badge": "GOLDEN HOUR",
-      "headline": "JEMBATAN EMAS",
-      "subtext": "Langit senja berubah halus lewat palet 32 warna",
+      "headline": "GOLDEN BRIDGE",
+      "subtext": "Dusk sky shifts smoothly across a 32-color palette",
       "score": 4500,
       "coins": 14,
       "transition": "palette-shift"
@@ -58,8 +58,8 @@
       "theme": "sunset",
       "heroAction": "item-get",
       "metric": "99,900 PTS",
-      "headline": "KRISTAL DITEMUKAN",
-      "subtext": "Peti harta terbuka dengan aura kristal biru",
+      "headline": "CRYSTAL FOUND",
+      "subtext": "Treasure chest opens with a radiant blue crystal aura",
       "score": 99900,
       "coins": 25,
       "transition": "crt-flash"
@@ -72,8 +72,8 @@
       "theme": "dusk",
       "heroAction": "cheer",
       "badge": "STAGE CLEAR",
-      "headline": "MISI SELESAI",
-      "subtext": "Bintang bermunculan di langit senja piksel",
+      "headline": "MISSION COMPLETE",
+      "subtext": "Stars emerge across the twilight pixel sky",
       "score": 99900,
       "coins": 30,
       "transition": "palette-shift"
@@ -108,12 +108,12 @@
       {
         "start": 10.5,
         "duration": 4,
-        "text": "JEMBATAN EMAS"
+        "text": "GOLDEN BRIDGE"
       },
       {
         "start": 15.5,
         "duration": 4,
-        "text": "KRISTAL BARU"
+        "text": "CRYSTAL FOUND"
       },
       {
         "start": 20.5,
@@ -126,5 +126,7 @@
         "text": "PRESS START"
       }
     ]
-  }
+  },
+  "cameraStyle": "kinetic",
+  "seed": 110
 }

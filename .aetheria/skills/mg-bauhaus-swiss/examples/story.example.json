@@ -15,7 +15,7 @@
       "layout": "kandinsky-assembly",
       "theme": "cream-1919",
       "headline": "KONSTRUKTION 01",
-      "subtext": "Lingkaran merah, persegi biru, dan balok struktural",
+      "subtext": "Red circle, blue square, and structural beams",
       "transition": "block-wipe"
     },
     {
@@ -24,8 +24,8 @@
       "duration": 5,
       "layout": "escapement-pivot",
       "theme": "cream-1919",
-      "headline": "POROS ESCAPEMENT",
-      "subtext": "Rotasi mekanis 12-detent bertumpu pada titik Passkreuz",
+      "headline": "ESCAPEMENT PIVOT",
+      "subtext": "12-detent mechanical rotation anchored on the Passkreuz mark",
       "transition": "tile-flip"
     },
     {
@@ -34,7 +34,7 @@
       "duration": 5,
       "layout": "tile-cascade",
       "theme": "cream-1919",
-      "headline": "KASKADE 120 BPM",
+      "headline": "CASCADE 120 BPM",
       "transition": "tile-flip"
     },
     {
@@ -43,7 +43,7 @@
       "duration": 5,
       "layout": "flip-matrix",
       "theme": "weimar-ochre",
-      "headline": "MATRIKS DUA SISI",
+      "headline": "TWO-SIDED MATRIX",
       "transition": "invert-cut"
     },
     {
@@ -79,17 +79,17 @@
       {
         "start": 5.5,
         "duration": 4,
-        "text": "POROS MEKANIS"
+        "text": "MECHANICAL PIVOT"
       },
       {
         "start": 10.5,
         "duration": 4,
-        "text": "KASKADE 120 BPM"
+        "text": "CASCADE 120 BPM"
       },
       {
         "start": 15.5,
         "duration": 4,
-        "text": "MATRIKS DUA SISI"
+        "text": "TWO-SIDED MATRIX"
       },
       {
         "start": 20.5,
@@ -102,5 +102,7 @@
         "text": "FORM FARBE FUNKTION"
       }
     ]
-  }
+  },
+  "cameraStyle": "editorial",
+  "seed": 102
 }

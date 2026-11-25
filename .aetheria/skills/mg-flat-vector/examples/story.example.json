@@ -1,48 +1,49 @@
 {
-  "title": "01-Flat-Vector — Popwise One Dot",
-  "canvas": {
-    "w": 1080,
-    "h": 1920,
-    "fps": 30
-  },
-  "aspect": "9:16",
-  "seed": 101,
-  "microstockMode": false,
-  "shots": [
-    {
-      "id": "shot_1_dot",
-      "start": 0,
-      "duration": 7.5,
-      "layout": "sky-dot-bounce",
-      "headline": "ONE DOT",
-      "tagline": "01 · ULTRAMARINE & CORAL"
-    },
-    {
-      "id": "shot_2_city",
-      "start": 7.5,
-      "duration": 7.5,
-      "layout": "city-pop-rise",
-      "headline": "CITY POP",
-      "tagline": "02 · SPRING SKYLINE & CLOUDS"
-    },
-    {
-      "id": "shot_3_ping",
-      "start": 15,
-      "duration": 7.5,
-      "layout": "character-ping",
-      "headline": "PING!",
-      "tagline": "03 · VECTOR REACTION"
-    },
-    {
-      "id": "shot_4_wordmark",
-      "start": 22.5,
-      "duration": 7.5,
-      "layout": "popwise-wordmark",
-      "headline": "popwise",
-      "tagline": "FLAT VECTOR · EVERY DAY"
-    }
-  ],
-  "captions": {
-    "enabled": false
-  }
+    "title":  "01-Flat-Vector — Popwise One Dot",
+    "canvas":  {
+                   "w":  1080,
+                   "h":  1920,
+                   "fps":  30
+               },
+    "aspect":  "9:16",
+    "seed":  101,
+    "microstockMode":  false,
+    "shots":  [
+                  {
+                      "id":  "shot_1_dot",
+                      "start":  0,
+                      "duration":  7.5,
+                      "layout":  "sky-dot-bounce",
+                      "headline":  "ONE DOT",
+                      "tagline":  "01 · ULTRAMARINE \u0026 CORAL"
+                  },
+                  {
+                      "id":  "shot_2_city",
+                      "start":  7.5,
+                      "duration":  7.5,
+                      "layout":  "city-pop-rise",
+                      "headline":  "CITY POP",
+                      "tagline":  "02 · SPRING SKYLINE \u0026 CLOUDS"
+                  },
+                  {
+                      "id":  "shot_3_ping",
+                      "start":  15,
+                      "duration":  7.5,
+                      "layout":  "character-ping",
+                      "headline":  "PING!",
+                      "tagline":  "03 · VECTOR REACTION"
+                  },
+                  {
+                      "id":  "shot_4_wordmark",
+                      "start":  22.5,
+                      "duration":  7.5,
+                      "layout":  "popwise-wordmark",
+                      "headline":  "popwise",
+                      "tagline":  "FLAT VECTOR · EVERY DAY"
+                  }
+              ],
+    "captions":  {
+                     "enabled":  false
+                 },
+    "cameraStyle":  "kinetic"
 }

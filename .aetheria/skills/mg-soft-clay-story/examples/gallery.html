@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>3D Character, Expression &amp; Prop Gallery — Soft Clay Story</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #F4F7FB;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: "Inter", "Segoe UI", sans-serif;
+    }
+    canvas {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+  </style>
+  <script src="/script/three.min.js"></script>
+  <script src="script/clay-kit.js"></script>
+  <script src="script/clay-buildings.js"></script>
+  <script src="script/clay-people.js"></script>
+  <script src="script/clay-gestures.js"></script>
+  <script src="script/clay-assets.js"></script>
+</head>
+<body>
+  <canvas id="clay-gallery" width="1920" height="1080"></canvas>
+  <script>
+  (function () {
+    'use strict';
+
+    var W = 1920, H = 1080;
+    var canvas = document.getElementById('clay-gallery');
+    var ctx = canvas.getContext('2d');
+    var FONT = '"Inter", "Segoe UI", sans-serif';
+    var INK = '#231F20';
+
+    var glCanvas = document.createElement('canvas');
+    var GL_SZ = 360;
+    glCanvas.width = GL_SZ;
+    glCanvas.height = GL_SZ;
+
+    var renderer = new THREE.WebGLRenderer({
+      canvas: glCanvas,
+      antialias: true,
+      alpha: true,
+      preserveDrawingBuffer: true
+    });
+    renderer.setPixelRatio(1);
+    renderer.setSize(GL_SZ, GL_SZ, false);
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    renderer.toneMapping = THREE.NoToneMapping;
+
+    var scene = new THREE.Scene();
+    scene.add(new THREE.AmbientLight(0xffffff, 0.72));
+    var keyLight = new THREE.DirectionalLight(0xfffbeb, 0.62);
+    keyLight.position.set(8, 14, 12);
+    scene.add(keyLight);
+    var fillLight = new THREE.DirectionalLight(0xe0f2fe, 0.25);
+    fillLight.position.set(-8, 6, 8);
+    scene.add(fillLight);
+
+    var camera = new THREE.PerspectiveCamera(34, 1, 0.1, 100);
+
+    function roundRect(x, y, w, h, r, fill, strokeCol, strokeW) {
+      var rr = Math.min(r || 0, w * 0.5, h * 0.5);
+      ctx.beginPath();
+      ctx.moveTo(x + rr, y);
+      ctx.arcTo(x + w, y, x + w, y + h, rr);
+      ctx.arcTo(x + w, y + h, x, y + h, rr);
+      ctx.arcTo(x, y + h, x, y, rr);
+      ctx.arcTo(x, y, x + w, y, rr);
+      ctx.closePath();
+      if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+      if (strokeCol) { ctx.lineWidth = strokeW || 2; ctx.strokeStyle = strokeCol; ctx.stroke(); }
+    }
+
+    function snapAsset(item) {
+      var asset = ClayKit.makeAsset(item.spec);
+      if (item.expr) asset.setExpression(item.expr);
+      if (item.emote) asset.setEmote(item.emote, 0.6);
+      if (item.anim) asset.animate(item.anim, item.prog != null ? item.prog : 0.5, { elapsedSec: 0.5 });
+
+      var holder = new THREE.Group();
+      holder.add(asset.group);
+      asset.group.rotation.y = item.rotY != null ? item.rotY : 0.28;
+      scene.add(holder);
+      holder.updateMatrixWorld(true);
+
+      var box = new THREE.Box3().setFromObject(holder);
+      var size = new THREE.Vector3();
+      var center = new THREE.Vector3();
+      box.getSize(size);
+      box.getCenter(center);
+
+      var maxDim = Math.max(size.x, size.y, size.z, 0.5);
+      var fovRad = (camera.fov * Math.PI) / 180;
+      var dist = (maxDim * 0.58) / Math.tan(fovRad * 0.5) + size.z * 0.55;
+      camera.position.set(center.x, center.y + size.y * 0.08, center.z + dist);
+      camera.lookAt(center.x, center.y, center.z);
+      camera.updateProjectionMatrix();
+
+      renderer.clear();
+      renderer.render(scene, camera);
+      scene.remove(holder);
+      return glCanvas;
+    }
+
+    function drawCard(x, y, w, h, title, sub, item, badgeBg) {
+      roundRect(x, y, w, h, 16, '#FFFFFF', '#DCE5F2', 2.5);
+      // Soft pastel plinth behind hero
+      roundRect(x + 14, y + 14, w - 28, h - 66, 12, '#EEF5FF', null);
+      snapAsset(item);
+      var pad = 10;
+      var boxW = w - 28 - pad * 2;
+      var boxH = h - 68 - pad * 2;
+      var drawSz = Math.min(boxW, boxH);
+      ctx.drawImage(
+        glCanvas,
+        x + 14 + (w - 28 - drawSz) * 0.5,
+        y + 14 + (h - 68 - drawSz) * 0.5,
+        drawSz,
+        drawSz
+      );
+      ctx.fillStyle = INK;
+      ctx.font = '800 17px ' + FONT;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(title, x + 16, y + h - 34);
+      if (sub) {
+        ctx.fillStyle = '#64748B';
+        ctx.font = '600 13px ' + FONT;
+        ctx.fillText(sub, x + 16, y + h - 15);
+      }
+      if (badgeBg) {
+        roundRect(x + w - 24, y + h - 36, 10, 10, 5, badgeBg, null);
+      }
+    }
+
+    // Background & Header
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#F0F7FF');
+    grad.addColorStop(1, '#FFFBF5');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = '#1E293B';
+    ctx.font = '900 34px ' + FONT;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('SOFT-CLAY 3D STORY \u2014 CHARACTER, EXPRESSION & PROP GALLERY (ClayKit.makeAsset)', 42, 46);
+
+    ctx.fillStyle = '#475569';
+    ctx.font = '600 17px ' + FONT;
+    ctx.fillText('All procedural 3D assets rendered live in Three.js WebGL with #594637 ink outline & 9:16 / 16:9 auto-framing.', 42, 78);
+
+    // Row 1 (4 Humanoid variants & accessories)
+    var row1Y = 104, row1H = 310;
+    var r1W = (W - 84 - 3 * 22) / 4;
+    var humanoids = [
+      { title: 'elder + hat-conical + beard', sub: 'hair: short \u2022 anim: walk', item: { spec: { id: 'g_elder', kind: 'humanoid', variant: 'elder', hair: 'short', accessories: ['hat-conical', 'beard'], palette: { primary: '#60A5FA', secondary: '#78716C', hat: '#FDE68A' } }, expr: 'happy', anim: 'walk', prog: 0.25 } },
+      { title: 'adult + hijab + glasses', sub: 'hair: bun \u2022 anim: wave', item: { spec: { id: 'g_hijab', kind: 'humanoid', variant: 'adult', hair: 'bun', accessories: ['hijab', 'glasses'], palette: { primary: '#34D399', secondary: '#57534E', hat: '#F472B6' } }, expr: 'happy', anim: 'wave', prog: 0.45 } },
+      { title: 'kid + hat-cap + backpack', sub: 'hair: spiky \u2022 anim: cheer', item: { spec: { id: 'g_kid', kind: 'humanoid', variant: 'kid', hair: 'spiky', accessories: ['hat-cap', 'backpack'], palette: { primary: '#F59E0B', secondary: '#334155', hat: '#EF4444' } }, expr: 'laugh', anim: 'cheer', prog: 0.5 } },
+      { title: 'chubby + towel + bun', sub: 'hair: long \u2022 anim: work', item: { spec: { id: 'g_chubby', kind: 'humanoid', variant: 'chubby', hair: 'long', accessories: ['towel'], palette: { primary: '#FB7185', secondary: '#57534E', accent: '#FEF08A' } }, expr: 'happy', anim: 'work', prog: 0.4 } }
+    ];
+    for (var i = 0; i < humanoids.length; i++) {
+      drawCard(42 + i * (r1W + 22), row1Y, r1W, row1H, humanoids[i].title, humanoids[i].sub, humanoids[i].item, '#3B82F6');
+    }
+
+    // Row 2 (6 Expressions & Emotes)
+    var row2Y = 434, row2H = 295;
+    var sixW = (W - 84 - 5 * 18) / 6;
+    var exprCards = [
+      { title: 'happy + heart', expr: 'happy', emote: 'heart', anim: 'wave', col: '#60A5FA' },
+      { title: 'surprised + exclaim', expr: 'surprised', emote: 'exclaim', anim: 'shock', col: '#F59E0B' },
+      { title: 'angry + anger', expr: 'angry', emote: 'anger', anim: 'point', col: '#EF4444' },
+      { title: 'sad + sweat', expr: 'sad', emote: 'sweat', anim: 'idle', col: '#94A3B8' },
+      { title: 'laugh + idea', expr: 'laugh', emote: 'idea', anim: 'cheer', col: '#10B981' },
+      { title: 'sleepy + sleep', expr: 'sleepy', emote: 'sleep', anim: 'nod', col: '#8B5CF6' }
+    ];
+    for (var ei = 0; ei < exprCards.length; ei++) {
+      var ec = exprCards[ei];
+      drawCard(42 + ei * (sixW + 18), row2Y, sixW, row2H, ec.title, 'expression & head emote', {
+        spec: { id: 'g_ex_' + ei, kind: 'humanoid', variant: 'adult', hair: 'short', palette: { primary: ec.col, secondary: '#475569' } },
+        expr: ec.expr,
+        emote: ec.emote,
+        anim: ec.anim,
+        prog: 0.45,
+        rotY: 0.14
+      }, '#10B981');
+    }
+
+    // Row 3 (6 Non-humanoid props & buildings)
+    var row3Y = 749, row3H = 295;
+    var propCards = [
+      { title: 'flower-row', sub: 'anim: grow', item: { spec: { id: 'g_fl', kind: 'flower-row', palette: { primary: '#FB923C', accent: '#FACC15', stem: '#4ADE80' } }, anim: 'grow', prog: 1.0 } },
+      { title: 'container', sub: 'anim: pop-in', item: { spec: { id: 'g_ct', kind: 'container', palette: { primary: '#38BDF8', accent: '#FACC15', secondary: '#FFFDF9' } }, anim: 'pop-in', prog: 1.0 } },
+      { title: 'insect', sub: 'anim: hop', item: { spec: { id: 'g_in', kind: 'insect', palette: { primary: '#A3E635', secondary: '#4D7C0F', accent: '#E0F2FE' } }, anim: 'hop', prog: 0.35 } },
+      { title: 'tree', sub: 'backdrop greenery', item: { spec: { id: 'g_tr', kind: 'tree', palette: { primary: '#4ADE80', secondary: '#86EFAC' } } } },
+      { title: 'building (hut)', sub: 'shop|house|hut|barn|school', item: { spec: { id: 'g_bd', kind: 'building', variant: 'hut', palette: { primary: '#FDE68A', accent: '#D97706' } }, rotY: -0.35 } },
+      { title: 'vehicle', sub: 'anim: walk (roll)', item: { spec: { id: 'g_vh', kind: 'vehicle', palette: { primary: '#FF8FAB', secondary: '#FFF0F3' } }, rotY: 0.55 } }
+    ];
+    for (var pi = 0; pi < propCards.length; pi++) {
+      var pc = propCards[pi];
+      drawCard(42 + pi * (sixW + 18), row3Y, sixW, row3H, pc.title, pc.sub, pc.item, '#F97316');
+    }
+
+    window.__ready = true;
+  })();
+  </script>
+</body>
+</html>

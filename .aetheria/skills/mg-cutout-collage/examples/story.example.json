@@ -1,7 +1,9 @@
 {
   "renderer": "2d-cutout-collage",
-  "title": "Rahasia Otak Kreatif — Kolase Dokumenter",
+  "title": "Secret of the Creative Brain — Documentary Collage",
   "theme": "kraft",
+  "cameraStyle": "kinetic",
+  "seed": 23,
   "canvas": { "w": 1080, "h": 1920, "fps": 30 },
   "shots": [
     {
@@ -10,16 +12,16 @@
       "duration": 5.0,
       "layout": "dossier-hero",
       "paper": "kraft",
-      "header": "ARSIP KREATIF // FILE 01",
-      "stamp": "RAHASIA",
+      "header": "CREATIVE ARCHIVE // FILE 01",
+      "stamp": "SECRET",
       "cutout": "portrait",
-      "headline": "OTAK ADALAH KOLASE",
-      "subheadline": "BUKAN MESIN FOTOKOPI",
+      "headline": "THE BRAIN IS A COLLAGE",
+      "subheadline": "NOT A PHOTOCOPY MACHINE",
       "accentColor": "#C0392B",
       "secondaryColor": "#F59E0B",
       "accents": ["rose", "manicule"],
       "transition": "tear-wipe",
-      "caption": "Pernah sadar ide terbaik lahir dari potongan tak terduga?"
+      "caption": "Ever notice how the best ideas grow from unexpected fragments?"
     },
     {
       "id": "shot2_compare",
@@ -27,19 +29,19 @@
       "duration": 5.0,
       "layout": "split-compare",
       "paper": "newsprint",
-      "header": "PERBANDINGAN POLA PIKIR",
-      "stamp": "FAKTA",
+      "header": "MINDSET COMPARISON",
+      "stamp": "FACT",
       "items": [
-        { "label": "RUTIN MONOTON", "cutout": "clock" },
-        { "label": "KOMBINASI BARU", "cutout": "rocket" }
+        { "label": "MONOTONOUS ROUTINE", "cutout": "clock" },
+        { "label": "FRESH REMIX", "cutout": "rocket" }
       ],
-      "headline": "RUTIN VS TEROBOSAN",
-      "subheadline": "CAMPUR DUA BIDANG BERBEDA",
+      "headline": "ROUTINE VS BREAKTHROUGH",
+      "subheadline": "BLEND TWO DIFFERENT WORLDS",
       "accentColor": "#1D4ED8",
       "secondaryColor": "#F59E0B",
       "accents": ["scissors", "star"],
       "transition": "tear-wipe",
-      "caption": "Berhenti meniru satu sumber, gabungkan dua dunia berbeda."
+      "caption": "Stop copying one source and combine two unrelated worlds."
     },
     {
       "id": "shot3_evidence",
@@ -47,21 +49,21 @@
       "duration": 5.0,
       "layout": "evidence-board",
       "paper": "corkboard",
-      "header": "PAPAN BUKTI INOVASI",
-      "stamp": "TERBUKTI",
+      "header": "INNOVATION EVIDENCE BOARD",
+      "stamp": "PROVEN",
       "items": [
-        { "label": "AMATI", "cutout": "eye" },
-        { "label": "HUBUNGKAN", "cutout": "brain" },
-        { "label": "RAKIT", "cutout": "gear" },
-        { "label": "LUNCURKAN", "cutout": "megaphone" }
+        { "label": "OBSERVE", "cutout": "eye" },
+        { "label": "CONNECT", "cutout": "brain" },
+        { "label": "ASSEMBLE", "cutout": "gear" },
+        { "label": "SHIP", "cutout": "megaphone" }
       ],
-      "headline": "EMPAT LANGKAH KOLASE",
-      "subheadline": "POLA PENEMU BESAR",
+      "headline": "FOUR COLLAGE STEPS",
+      "subheadline": "PATTERN OF GREAT INVENTORS",
       "accentColor": "#C0392B",
       "secondaryColor": "#F59E0B",
       "accents": ["wax-seal", "paperclip"],
       "transition": "tear-wipe",
-      "caption": "Amati detail kecil, hubungkan pola, lalu rakit jadi karya."
+      "caption": "Spot tiny details, link patterns together, then ship original work."
     },
     {
       "id": "shot4_stat",
@@ -69,18 +71,18 @@
       "duration": 5.0,
       "layout": "stat-callout",
       "paper": "charcoal",
-      "header": "DATA RISET KREATIVITAS",
+      "header": "CREATIVITY RESEARCH DATA",
       "stamp": "2026",
       "cutout": "chart",
       "statValue": "3X",
-      "statLabel": "LEBIH CEPAT TEMUKAN SOLUSI BARU",
-      "headline": "EFEK PENGALI IDE",
-      "subheadline": "SAAT REFERENSI LINTAS DISIPLIN",
+      "statLabel": "FASTER TO DISCOVER NOVEL SOLUTIONS",
+      "headline": "IDEA MULTIPLIER EFFECT",
+      "subheadline": "CROSS-DISCIPLINE REFERENCES",
       "accentColor": "#15803D",
       "secondaryColor": "#FFDE59",
       "accents": ["arrow", "star"],
       "transition": "tear-wipe",
-      "caption": "Tim lintas bidang menemukan terobosan tiga kali lebih cepat."
+      "caption": "Cross-disciplinary teams unlock breakthroughs three times faster."
     },
     {
       "id": "shot5_timeline",
@@ -88,20 +90,20 @@
       "duration": 5.0,
       "layout": "timeline-strip",
       "paper": "scrapbook",
-      "header": "PROSES 15 MENIT HARIAN",
-      "stamp": "PRAKTIK",
+      "header": "15-MINUTE DAILY RITUAL",
+      "stamp": "PRACTICE",
       "items": [
-        { "tag": "01", "label": "KUMPULKAN 3 KLIPING", "cutout": "book" },
-        { "tag": "02", "label": "CORET SATU KONSEP", "cutout": "lightbulb" },
-        { "tag": "03", "label": "BAGIKAN KE PUBLIK", "cutout": "globe" }
+        { "tag": "01", "label": "COLLECT 3 CLIPS", "cutout": "book" },
+        { "tag": "02", "label": "SKETCH ONE CONCEPT", "cutout": "lightbulb" },
+        { "tag": "03", "label": "SHARE PUBLICLY", "cutout": "globe" }
       ],
-      "headline": "MULAI DARI MEJAMU",
-      "subheadline": "TIGA LANGKAH TANPA RIBET",
+      "headline": "START AT YOUR DESK",
+      "subheadline": "THREE SIMPLE DAILY STEPS",
       "accentColor": "#C0392B",
       "secondaryColor": "#F59E0B",
       "accents": ["manicule", "gear"],
       "transition": "tear-wipe",
-      "caption": "Cukup lima belas menit sehari untuk melatih insting kolase."
+      "caption": "Fifteen focused minutes a day trains your creative collage instinct."
     },
     {
       "id": "shot6_closing",
@@ -109,16 +111,16 @@
       "duration": 5.0,
       "layout": "quote-scrap",
       "paper": "kraft",
-      "header": "CATATAN AKHIR // ARSIP",
-      "stamp": "SIMPAN",
-      "quote": "IDE ORISINAL LAHIR DARI KEBERANIAN MENGGUNTING DAN MENEMPEL ULANG.",
-      "headline": "BUAT KOLASEMU HARI INI",
-      "subheadline": "IKUTI UNTUK SERI BERIKUTNYA",
+      "header": "CLOSING NOTE // ARCHIVE",
+      "stamp": "SAVE",
+      "quote": "ORIGINAL IDEAS GROW FROM THE COURAGE TO CUT APART AND REASSEMBLE.",
+      "headline": "BUILD YOUR COLLAGE TODAY",
+      "subheadline": "FOLLOW FOR THE NEXT EPISODE",
       "accentColor": "#1A1A1A",
       "secondaryColor": "#F59E0B",
       "accents": ["rose", "wax-seal"],
       "transition": "cut",
-      "caption": "Gunting kebiasaan lama, tempel ide baru, dan mulai berkarya."
+      "caption": "Cut out old habits, paste fresh ideas, and start creating today."
     }
   ],
   "captions": { "enabled": true },

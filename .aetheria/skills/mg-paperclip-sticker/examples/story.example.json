@@ -1,48 +1,49 @@
 {
-  "title": "19-Paperclip — Die-Cut Sticker & Editorial Tech",
-  "canvas": {
-    "w": 1080,
-    "h": 1920,
-    "fps": 30
-  },
-  "aspect": "9:16",
-  "seed": 1919,
-  "microstockMode": false,
-  "shots": [
-    {
-      "id": "shot_1_slap",
-      "start": 0,
-      "duration": 7.5,
-      "layout": "sticker-slap",
-      "headline": "HARDWARE",
-      "tagline": "01 · DIE-CUT STICKER SLAP"
-    },
-    {
-      "id": "shot_2_chain",
-      "start": 7.5,
-      "duration": 7.5,
-      "layout": "supply-chain",
-      "headline": "SUPPLY",
-      "tagline": "02 · GLOBAL NODE ROUTING"
-    },
-    {
-      "id": "shot_3_matrix",
-      "start": 15,
-      "duration": 7.5,
-      "layout": "chip-matrix",
-      "headline": "ELEMENTS",
-      "tagline": "03 · PERIODIC TILE MATRIX"
-    },
-    {
-      "id": "shot_4_pullback",
-      "start": 22.5,
-      "duration": 7.5,
-      "layout": "bezel-pullback",
-      "headline": "PAPERCLIP",
-      "tagline": "04 · EDITORIAL INFOGRAPHIC"
-    }
-  ],
-  "captions": {
-    "enabled": false
-  }
+    "title":  "19-Paperclip — Die-Cut Sticker \u0026 Editorial Tech",
+    "canvas":  {
+                   "w":  1080,
+                   "h":  1920,
+                   "fps":  30
+               },
+    "aspect":  "9:16",
+    "seed":  1919,
+    "microstockMode":  false,
+    "shots":  [
+                  {
+                      "id":  "shot_1_slap",
+                      "start":  0,
+                      "duration":  7.5,
+                      "layout":  "sticker-slap",
+                      "headline":  "HARDWARE",
+                      "tagline":  "01 · DIE-CUT STICKER SLAP"
+                  },
+                  {
+                      "id":  "shot_2_chain",
+                      "start":  7.5,
+                      "duration":  7.5,
+                      "layout":  "supply-chain",
+                      "headline":  "SUPPLY",
+                      "tagline":  "02 · GLOBAL NODE ROUTING"
+                  },
+                  {
+                      "id":  "shot_3_matrix",
+                      "start":  15,
+                      "duration":  7.5,
+                      "layout":  "chip-matrix",
+                      "headline":  "ELEMENTS",
+                      "tagline":  "03 · PERIODIC TILE MATRIX"
+                  },
+                  {
+                      "id":  "shot_4_pullback",
+                      "start":  22.5,
+                      "duration":  7.5,
+                      "layout":  "bezel-pullback",
+                      "headline":  "PAPERCLIP",
+                      "tagline":  "04 · EDITORIAL INFOGRAPHIC"
+                  }
+              ],
+    "captions":  {
+                     "enabled":  false
+                 },
+    "cameraStyle":  "kinetic"
 }

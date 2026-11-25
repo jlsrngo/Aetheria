@@ -1,68 +1,69 @@
 {
-  "title": "05-Cel-Boil Hand-Drawn Match & Flame Spirit",
-  "canvas": {
-    "w": 1080,
-    "h": 1920,
-    "fps": 24
-  },
-  "aspect": "9:16",
-  "seed": 505,
-  "microstockMode": false,
-  "shots": [
-    {
-      "id": "shot_1_strike",
-      "start": 0,
-      "duration": 7.5,
-      "layout": "strike-smear",
-      "exposure": "on-1s",
-      "drawingNumber": 12,
-      "sceneCode": "SC. 05A",
-      "headline": "STRIKE!",
-      "subheadline": "SMEAR & MULTIPLES",
-      "tagline": "24 FPS ON ONES · FRICTION SPARKS",
-      "spiritFace": "fierce"
-    },
-    {
-      "id": "shot_2_ignition",
-      "start": 7.5,
-      "duration": 7.5,
-      "layout": "spirit-jump",
-      "exposure": "on-2s",
-      "drawingNumber": 48,
-      "sceneCode": "SC. 05B",
-      "headline": "IGNITE",
-      "subheadline": "SQUASH & STRETCH",
-      "tagline": "12 FPS ON TWOS · COL-ERASE ARCS",
-      "spiritFace": "squeeze"
-    },
-    {
-      "id": "shot_3_dance",
-      "start": 15,
-      "duration": 7.5,
-      "layout": "box-dance",
-      "exposure": "on-2s",
-      "drawingNumber": 96,
-      "sceneCode": "SC. 05C",
-      "headline": "CEL BOIL",
-      "subheadline": "OFF-REGISTER INK",
-      "tagline": "RUBBER-HOSE SPIRIT · HAND HATCHED",
-      "spiritFace": "happy"
-    },
-    {
-      "id": "shot_4_finale",
-      "start": 22.5,
-      "duration": 7.5,
-      "layout": "badge-riffle",
-      "exposure": "on-3s",
-      "drawingNumber": 146,
-      "sceneCode": "SC. 05D",
-      "headline": "HAND MADE",
-      "subheadline": "FRAME BY FRAME",
-      "tagline": "TOTAL 146 DRAWINGS · ACME PEG BAR",
-      "spiritFace": "wink"
-    }
-  ],
-  "captions": {
-    "enabled": false
-  }
+    "title":  "05-Cel-Boil Hand-Drawn Match \u0026 Flame Spirit",
+    "canvas":  {
+                   "w":  1080,
+                   "h":  1920,
+                   "fps":  24
+               },
+    "aspect":  "9:16",
+    "seed":  505,
+    "microstockMode":  false,
+    "shots":  [
+                  {
+                      "id":  "shot_1_strike",
+                      "start":  0,
+                      "duration":  7.5,
+                      "layout":  "strike-smear",
+                      "exposure":  "on-1s",
+                      "drawingNumber":  12,
+                      "sceneCode":  "SC. 05A",
+                      "headline":  "STRIKE!",
+                      "subheadline":  "SMEAR \u0026 MULTIPLES",
+                      "tagline":  "24 FPS ON ONES · FRICTION SPARKS",
+                      "spiritFace":  "fierce"
+                  },
+                  {
+                      "id":  "shot_2_ignition",
+                      "start":  7.5,
+                      "duration":  7.5,
+                      "layout":  "spirit-jump",
+                      "exposure":  "on-2s",
+                      "drawingNumber":  48,
+                      "sceneCode":  "SC. 05B",
+                      "headline":  "IGNITE",
+                      "subheadline":  "SQUASH \u0026 STRETCH",
+                      "tagline":  "12 FPS ON TWOS · COL-ERASE ARCS",
+                      "spiritFace":  "squeeze"
+                  },
+                  {
+                      "id":  "shot_3_dance",
+                      "start":  15,
+                      "duration":  7.5,
+                      "layout":  "box-dance",
+                      "exposure":  "on-2s",
+                      "drawingNumber":  96,
+                      "sceneCode":  "SC. 05C",
+                      "headline":  "CEL BOIL",
+                      "subheadline":  "OFF-REGISTER INK",
+                      "tagline":  "RUBBER-HOSE SPIRIT · HAND HATCHED",
+                      "spiritFace":  "happy"
+                  },
+                  {
+                      "id":  "shot_4_finale",
+                      "start":  22.5,
+                      "duration":  7.5,
+                      "layout":  "badge-riffle",
+                      "exposure":  "on-3s",
+                      "drawingNumber":  146,
+                      "sceneCode":  "SC. 05D",
+                      "headline":  "HAND MADE",
+                      "subheadline":  "FRAME BY FRAME",
+                      "tagline":  "TOTAL 146 DRAWINGS · ACME PEG BAR",
+                      "spiritFace":  "wink"
+                  }
+              ],
+    "captions":  {
+                     "enabled":  false
+                 },
+    "cameraStyle":  "kinetic"
 }

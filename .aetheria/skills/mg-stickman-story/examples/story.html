@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stickman Story — Afro's Bright Morning</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #FFF3E2;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: "Fredoka", "Nunito", "Segoe UI", sans-serif;
+    }
+    canvas {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="stage-2d" width="1080" height="1920"></canvas>
+  <script src="/script/story-core.js"></script>
+  <script src="/script/story-camera.js"></script>
+  <script src="script/stickman-rig.js"></script>
+  <script src="script/stickman-world.js"></script>
+  <script src="script/stickman-overlay.js"></script>
+  <script src="script/stickman-timeline.js"></script>
+  <script src="script/story-runtime.js"></script>
+</body>
+</html>

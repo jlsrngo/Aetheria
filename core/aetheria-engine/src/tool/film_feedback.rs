@@ -817,6 +817,7 @@ pub fn collect_file_feedback(workspace_dir: &str, target: &Path) -> FileFeedback
                     || crate::studio::builtin_runtime::is_builtin_tracks_path(&script_rel)
                     || crate::studio::builtin_runtime::is_builtin_behaviors_path(&script_rel)
                     || crate::studio::builtin_runtime::is_builtin_shapes_text_path(&script_rel)
+                    || crate::studio::builtin_runtime::is_builtin_story_core_path(&script_rel)
                     || crate::studio::builtin_runtime::is_builtin_story_camera_path(&script_rel)
                     || crate::studio::builtin_runtime::is_builtin_three_path(&script_rel)
                 {

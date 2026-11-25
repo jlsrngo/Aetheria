@@ -28,10 +28,52 @@ pub const VALID_CAMERA_DIRS: &[&str] = &["auto", "left", "right", "up", "down", 
 pub const VALID_CAMERA_CURVES: &[&str] = &[
     "ease-out",
     "ease-in-out",
+    "ease-in",
     "linear",
+    "lin",
+    "smootherstep",
+    "io",
+    "in",
+    "out",
+    "back",
+    "spring",
+    "snap",
     "whip",
     "whip-out",
     "whip-inout",
+];
+
+pub const VALID_SHOT_SIZES: &[&str] = &[
+    "extreme-wide",
+    "wide",
+    "full",
+    "medium",
+    "close",
+    "extreme-close",
+    "insert",
+];
+
+pub const VALID_DIRECTOR_MOVES: &[&str] = &[
+    "move",
+    "push",
+    "push-in",
+    "pull",
+    "pull-out",
+    "reveal",
+    "pan",
+    "tilt",
+    "crane",
+    "fly-to",
+    "whip",
+    "snap-zoom",
+    "cut",
+    "dutch",
+    "rack-focus",
+    "follow",
+    "punch",
+    "shake",
+    "orbit-sway",
+    "hold",
 ];
 
 #[derive(Debug, Clone, Default)]
@@ -249,7 +291,7 @@ pub fn validate_shot_camera(
             if let Some(r_val) = cam.get(field) {
                 let ok = r_val
                     .as_f64()
-                    .is_some_and(|r| r.is_finite() && r.abs() <= max_roll);
+                    .is_some_and(|r| impl_finite_abs_le(r, max_roll));
                 if !ok {
                     push_issue(
                         issues,
@@ -261,6 +303,124 @@ pub fn validate_shot_camera(
             }
         }
     }
+
+    // Director Camera v2 optional fields (`size`, `initial`, `moves[]`)
+    if let Some(sz_val) = cam.get("size") {
+        if !sz_val.as_str().is_some_and(|s| VALID_SHOT_SIZES.contains(&s)) {
+            push_issue(
+                issues,
+                STORY_CAMERA_INVALID_CODE,
+                format!("{shot_path}.camera.size"),
+                format!(
+                    "Invalid `camera.size`. Allowed: {}.",
+                    VALID_SHOT_SIZES.join(", ")
+                ),
+            );
+        }
+    }
+
+    if let Some(init_val) = cam.get("initial") {
+        match init_val {
+            Value::String(s) => {
+                if !VALID_SHOT_SIZES.contains(&s.as_str()) {
+                    push_issue(
+                        issues,
+                        STORY_CAMERA_INVALID_CODE,
+                        format!("{shot_path}.camera.initial"),
+                        format!(
+                            "Invalid `camera.initial` '{}'. Allowed: {}.",
+                            s,
+                            VALID_SHOT_SIZES.join(", ")
+                        ),
+                    );
+                }
+            }
+            Value::Object(init_obj) => {
+                if let Some(sv) = init_obj.get("size") {
+                    if !sv.as_str().is_some_and(|s| VALID_SHOT_SIZES.contains(&s)) {
+                        push_issue(
+                            issues,
+                            STORY_CAMERA_INVALID_CODE,
+                            format!("{shot_path}.camera.initial.size"),
+                            format!(
+                                "Invalid `camera.initial.size`. Allowed: {}.",
+                                VALID_SHOT_SIZES.join(", ")
+                            ),
+                        );
+                    }
+                }
+            }
+            _ => push_issue(
+                issues,
+                STORY_CAMERA_INVALID_CODE,
+                format!("{shot_path}.camera.initial"),
+                "`camera.initial` must be a shot size string or target object.".to_string(),
+            ),
+        }
+    }
+
+    if let Some(mvs_val) = cam.get("moves") {
+        let Some(arr) = mvs_val.as_array() else {
+            push_issue(
+                issues,
+                STORY_CAMERA_INVALID_CODE,
+                format!("{shot_path}.camera.moves"),
+                "`camera.moves` must be an array of move objects.".to_string(),
+            );
+            return;
+        };
+        for (mi, item) in arr.iter().enumerate() {
+            let mp = format!("{shot_path}.camera.moves[{mi}]");
+            let Some(mobj) = item.as_object() else {
+                push_issue(
+                    issues,
+                    STORY_CAMERA_INVALID_CODE,
+                    mp,
+                    "Each camera move entry must be an object.".to_string(),
+                );
+                continue;
+            };
+            if let Some(k_val) = mobj
+                .get("kind")
+                .or_else(|| mobj.get("type"))
+                .or_else(|| mobj.get("move"))
+            {
+                if !k_val
+                    .as_str()
+                    .is_some_and(|s| VALID_DIRECTOR_MOVES.contains(&s))
+                {
+                    push_issue(
+                        issues,
+                        STORY_CAMERA_INVALID_CODE,
+                        format!("{mp}.kind"),
+                        format!(
+                            "Invalid director camera move. Allowed: {}.",
+                            VALID_DIRECTOR_MOVES.join(", ")
+                        ),
+                    );
+                }
+            }
+            for ef in ["ease", "curve"] {
+                if let Some(ev) = mobj.get(ef) {
+                    if !ev.as_str().is_some_and(|s| VALID_CAMERA_CURVES.contains(&s)) {
+                        push_issue(
+                            issues,
+                            STORY_CAMERA_INVALID_CODE,
+                            format!("{mp}.{ef}"),
+                            format!(
+                                "Invalid `{ef}`. Allowed: {}.",
+                                VALID_CAMERA_CURVES.join(", ")
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn impl_finite_abs_le(v: f64, limit: f64) -> bool {
+    v.is_finite() && v.abs() <= limit
 }
 
 #[cfg(test)]

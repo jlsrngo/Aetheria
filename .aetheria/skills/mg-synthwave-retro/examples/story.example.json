@@ -17,7 +17,7 @@
       "carMode": "cruising",
       "badge": "Midnight",
       "headline": "NEON DRIVE",
-      "subtext": "Melaju menembus grid neon 1986 menuju cakrawala",
+      "subtext": "Cruising through the 1986 neon grid toward the horizon",
       "transition": "neon-flash"
     },
     {
@@ -29,7 +29,7 @@
       "carMode": "cruising",
       "badge": "Turbo 86",
       "headline": "MIAMI NIGHTS",
-      "subtext": "Siluet palem berlapis cahaya magenta dan cyan",
+      "subtext": "Palm silhouettes bathed in magenta and cyan glow",
       "transition": "grid-warp"
     },
     {
@@ -41,7 +41,7 @@
       "carMode": "boost",
       "badge": "Overdrive",
       "headline": "FULL THROTTLE",
-      "subtext": "Pantulan lampu belakang menyala di aspal basah",
+      "subtext": "Tail-light reflections blazing across wet asphalt",
       "transition": "vhs-rewind"
     },
     {
@@ -52,8 +52,8 @@
       "theme": "midnight-chrome",
       "carMode": "cruising",
       "metric": "1986",
-      "headline": "ERA EMAS SYNTHWAVE",
-      "subtext": "Tipografi krom reflektif dengan kilau bintang",
+      "headline": "SYNTHWAVE GOLDEN ERA",
+      "subtext": "Reflective chrome typography with starburst sparkles",
       "transition": "neon-flash"
     },
     {
@@ -65,7 +65,7 @@
       "carMode": "boost",
       "badge": "Analog Hi-Fi",
       "headline": "ENDLESS GRID",
-      "subtext": "Pegunungan wireframe di bawah langit berbintang",
+      "subtext": "Wireframe mountains beneath a starry night sky",
       "transition": "grid-warp"
     },
     {
@@ -77,7 +77,7 @@
       "carMode": "cruising",
       "badge": "Replay",
       "headline": "OUTRUN FOREVER",
-      "subtext": "Nostalgia retro-futuristik siap pakai di Studio",
+      "subtext": "Retro-futuristic nostalgia ready out of the box in Studio",
       "transition": "vhs-rewind"
     }
   ],
@@ -102,7 +102,7 @@
       {
         "start": 15.5,
         "duration": 4,
-        "text": "ERA SYNTHWAVE"
+        "text": "SYNTHWAVE ERA"
       },
       {
         "start": 20.5,
@@ -115,5 +115,7 @@
         "text": "OUTRUN FOREVER"
       }
     ]
-  }
+  },
+  "cameraStyle": "kinetic",
+  "seed": 113
 }
