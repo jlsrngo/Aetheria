@@ -46,7 +46,6 @@ pub fn capture_film_preview_tool_definition() -> Value {
                     },
                     "framesPerShot": {
                         "type": "integer",
-                        "enum": [3, 9],
                         "description": "Self-QC frames per shot for story.json (`3` default: start/mid/end, or `9` for a 9-frame motion strip on fast follow/fly-to/whip shots)."
                     },
                     "stripShotId": {

@@ -50,6 +50,20 @@ pub fn sanitize_gemini_schema(schema: &Value) -> Value {
                     continue;
                 }
 
+                // Gemini only allows string enums on string properties (rejects numeric enums with 400 INVALID_ARGUMENT).
+                if k == "enum" {
+                    let is_string_type = effective_map
+                        .get("type")
+                        .and_then(|t| t.as_str())
+                        .map_or(true, |t| t.eq_ignore_ascii_case("string"));
+                    let all_strings = v
+                        .as_array()
+                        .is_some_and(|arr| !arr.is_empty() && arr.iter().all(Value::is_string));
+                    if !(is_string_type && all_strings) {
+                        continue;
+                    }
+                }
+
                 // Gemini expects single string type, not array of types
                 if k == "type" {
                     if let Some(arr) = v.as_array() {
@@ -470,6 +484,23 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_gemini_strips_numeric_enum_while_keeping_string_enum() {
+        let raw = json!({
+            "type": "object",
+            "properties": {
+                "framesPerShot": { "type": "integer", "enum": [3, 9] },
+                "mood": { "type": "string", "enum": ["cheerful", "warm"] }
+            }
+        });
+        let san = sanitize_gemini_schema(&raw);
+        assert!(san.pointer("/properties/framesPerShot/enum").is_none());
+        assert_eq!(
+            san.pointer("/properties/mood/enum"),
+            Some(&json!(["cheerful", "warm"]))
+        );
     }
 }
 
