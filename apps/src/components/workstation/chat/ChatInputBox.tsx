@@ -41,7 +41,7 @@ import {
   type AttachedFileItem,
 } from "./input";
 import { PresetStudioModal } from "./presets/PresetStudioModal";
-import { AddSkillModal } from "./presets/AddSkillModal";
+import { AddSkillModal, type RegisteredSkillSummary } from "./presets/AddSkillModal";
 
 export type { AttachedFileItem };
 
@@ -119,9 +119,7 @@ export const ChatInputBox = memo(function ChatInputBox({
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [showPresetModal, setShowPresetModal] = useState(false);
   const [showAddSkillModal, setShowAddSkillModal] = useState(false);
-  const [registeredSkills, setRegisteredSkills] = useState<
-    Array<{ id: string; name: string; command: string; description: string }>
-  >([]);
+  const [registeredSkills, setRegisteredSkills] = useState<RegisteredSkillSummary[]>([]);
   const [voicePresets, setVoicePresets] = useState<
     Array<{ id: string; name: string; command: string; description: string }>
   >([]);
@@ -203,7 +201,7 @@ export const ChatInputBox = memo(function ChatInputBox({
     const base: SlashCommandItem[] = [
       {
         name: "/add skill",
-        description: "Upload brief & register new motion graphics style to .aetheria/skills/",
+        description: "Buat skill dari video referensi, import paket skill, atau kelola & hapus skill kustom",
         icon: Sparkles,
       },
       {
@@ -390,6 +388,7 @@ export const ChatInputBox = memo(function ChatInputBox({
     if (cmdName === "/add skill" || cmdName === "/add-skill") {
       setLocalPrompt("");
       setShowCommands(false);
+      loadRegisteredSkillsAndPresets();
       setShowAddSkillModal(true);
       return;
     }
@@ -528,10 +527,16 @@ export const ChatInputBox = memo(function ChatInputBox({
       <AddSkillModal
         open={showAddSkillModal}
         onClose={() => setShowAddSkillModal(false)}
+        skills={registeredSkills}
         onSkillRegistered={(cmd) => {
           loadRegisteredSkillsAndPresets();
           setLocalPrompt(`${cmd} `);
           if (textareaRef.current) textareaRef.current.focus();
+        }}
+        onSkillsChanged={loadRegisteredSkillsAndPresets}
+        onStartReferenceSkill={(prompt) => {
+          setShowAddSkillModal(false);
+          onSendMessage(prompt);
         }}
       />
 

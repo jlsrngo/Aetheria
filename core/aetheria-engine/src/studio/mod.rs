@@ -31,7 +31,6 @@ pub mod media_stream;
 pub mod microstock;
 pub mod motion;
 pub(crate) mod motion_blur;
-pub(crate) mod motion_gate;
 pub mod motion_linter;
 pub mod native_canvas;
 pub mod native_renderer;
@@ -191,10 +190,18 @@ pub fn router() -> Router {
         )
         .route("/api/skills/add", post(styles::handle_add_style))
         .route(
+            "/api/skills/:id",
+            axum::routing::delete(styles::handle_delete_skill),
+        )
+        .route(
             "/api/styles",
             get(styles::handle_list_styles).post(styles::handle_list_styles),
         )
         .route("/api/styles/add", post(styles::handle_add_style))
+        .route(
+            "/api/styles/:id",
+            axum::routing::delete(styles::handle_delete_skill),
+        )
         .route(
             "/api/skills/styles",
             get(styles::handle_list_styles).post(styles::handle_list_styles),

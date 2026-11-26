@@ -89,6 +89,7 @@ pub fn build_tool_definitions() -> Vec<Value> {
         snapshot::snapshot_tool_definition(),
         codemode::codemode_tool_definition(),
         register_style_tool_definition(),
+        delete_style_tool_definition(),
         crate::session::agent_turn::subagent::spawn_subagent_tool_definition(),
     ];
     tools.extend(skill_manager::skill_tool_definitions());
@@ -100,24 +101,73 @@ pub fn register_style_tool_definition() -> Value {
         "type": "function",
         "function": {
             "name": "register_motion_style",
-            "description": "Registers a new motion graphics style / skill from an uploaded markdown brief file. Automatically generates style.md, tokens.json, REMOTION_BRIEF.md, and makes it available as a slash command (e.g. /editorial-kinetic).",
+            "description": "Promotes an approved declarative motion skill package (SKILL.md + examples/kit.json + examples/script/<slug>-kit.js + examples/story.example.json + assets/kit-gallery.jpg) from a workspace `draft_dir` or `files[]` into `.aetheria/skills/<slug>/` so it becomes a reusable `/<slug>` command. Only call after explicit user approval via `question`.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "The style name or slug, e.g. 'editorial-kinetic' or 'cyber-neon'"
+                        "description": "Kebab-case skill slug, e.g. 'cobalt-editorial' or 'cyber-neon'"
+                    },
+                    "draft_dir": {
+                        "type": "string",
+                        "description": "Relative workspace path to a draft skill directory containing SKILL.md and optional examples/ & assets/ (e.g. 'projects/my-ref/draft-skill')"
+                    },
+                    "files": {
+                        "type": "array",
+                        "description": "Optional multi-file skill package payload when registering directly in-memory",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "path": { "type": "string" },
+                                "content": { "type": "string" }
+                            },
+                            "required": ["path", "content"]
+                        }
                     },
                     "file_path": {
                         "type": "string",
-                        "description": "Path to the markdown brief / instruction file (e.g. 'kinetic_motion_brief.md')"
+                        "description": "Optional path to a local SKILL.md file or skill package directory"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Optional inline SKILL.md markdown content"
                     },
                     "description": {
                         "type": "string",
-                        "description": "Optional short summary or style description"
+                        "description": "Short human-readable summary of the skill style"
+                    },
+                    "origin": {
+                        "type": "string",
+                        "enum": ["reference", "custom", "imported"],
+                        "description": "Skill origin tag (use 'reference' when created from a reference video)"
+                    },
+                    "source_video": {
+                        "type": "string",
+                        "description": "Optional source reference video filename (e.g. 'ref_pinterest.mp4')"
                     }
                 },
-                "required": ["name", "file_path"]
+                "required": ["name"]
+            }
+        }
+    })
+}
+
+pub fn delete_style_tool_definition() -> Value {
+    json!({
+        "type": "function",
+        "function": {
+            "name": "delete_motion_style",
+            "description": "Deletes a user-created or reference-created custom skill from `.aetheria/skills/<slug>/`. Built-in skills are protected and cannot be deleted.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "The custom skill slug or command to delete (e.g. 'cobalt-ref' or '/cobalt-ref')"
+                    }
+                },
+                "required": ["name"]
             }
         }
     })

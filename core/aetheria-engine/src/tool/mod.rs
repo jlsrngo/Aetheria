@@ -321,26 +321,80 @@ async fn execute_tool_call_inner(
         }
         "register_motion_style" | "register_style" | "add_style" | "add_skill" => {
             let name = arguments.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            let file_path = arguments.get("file_path").and_then(|v| v.as_str());
+            let raw_file_path = arguments
+                .get("file_path")
+                .or_else(|| arguments.get("filePath"))
+                .and_then(|v| v.as_str());
+            let raw_draft_dir = arguments
+                .get("draft_dir")
+                .or_else(|| arguments.get("draftDir"))
+                .and_then(|v| v.as_str());
             let desc = arguments.get("description").and_then(|v| v.as_str());
             let content = arguments.get("content").and_then(|v| v.as_str());
+            let origin = arguments.get("origin").and_then(|v| v.as_str());
+            let source_video = arguments
+                .get("source_video")
+                .or_else(|| arguments.get("sourceVideo"))
+                .and_then(|v| v.as_str());
             let files: Option<Vec<crate::studio::styles::SkillPackageFile>> = arguments
                 .get("files")
                 .and_then(|v| serde_json::from_value(v.clone()).ok());
-            match crate::studio::styles::register_skill_package_internal(
+
+            let resolved_draft_dir = match raw_draft_dir {
+                Some(raw) if !raw.trim().is_empty() => {
+                    match path_guard::resolve_isolated_path(workspace_dir, raw) {
+                        Ok(p) => Some(p.to_string_lossy().to_string()),
+                        Err(e) => return json!({ "success": false, "error": e }),
+                    }
+                }
+                _ => None,
+            };
+            let resolved_file_path = match raw_file_path {
+                Some(raw) if !raw.trim().is_empty() => {
+                    match path_guard::resolve_isolated_path(workspace_dir, raw) {
+                        Ok(p) => Some(p.to_string_lossy().to_string()),
+                        Err(e) => return json!({ "success": false, "error": e }),
+                    }
+                }
+                _ => None,
+            };
+
+            match crate::studio::styles::register_skill_package_with_meta(
                 name,
-                file_path,
+                resolved_file_path.as_deref(),
+                resolved_draft_dir.as_deref(),
                 content,
                 desc,
+                origin,
+                source_video,
                 files.as_deref(),
             ) {
                 Ok(style) => json!({
                     "success": true,
-                    "style": style,
+                    "skill": style.clone(),
+                    "style": style.clone(),
                     "command": style.command,
-                    "message": format!("Style '{}' successfully registered! Available as {}", style.name, style.command)
+                    "message": format!("Skill '{}' successfully registered to .aetheria/skills/! Available as {}", style.name, style.command)
                 }),
-                Err(e) => json!({ "error": e }),
+                Err(e) => json!({ "success": false, "error": e }),
+            }
+        }
+        "delete_motion_style" | "delete_style" | "delete_skill" | "remove_skill" => {
+            let name = arguments
+                .get("name")
+                .or_else(|| arguments.get("id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            match crate::studio::styles::delete_skill_internal(name) {
+                Ok(slug) => json!({
+                    "success": true,
+                    "deletedId": slug,
+                    "message": format!("Custom skill '/{}' deleted from .aetheria/skills/.", slug)
+                }),
+                Err(err) => json!({
+                    "success": false,
+                    "error": err.message()
+                }),
             }
         }
         _ => json!({

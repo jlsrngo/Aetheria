@@ -104,6 +104,8 @@ pub fn is_tool_allowed_in_role(role: &str, name: &str, include_render: bool) -> 
                     | "fetch_web_image"
                     | "websearch"
                     | "webfetch"
+                    | "register_motion_style"
+                    | "delete_motion_style"
             ) || (include_render && name == "render_video")
         }
         "motion-designer" => matches!(
@@ -294,6 +296,9 @@ fn prompt_mentions_plugins_or_styles(prompt_text: &str) -> bool {
         "mcp",
         "register_motion_style",
         "register_style",
+        "delete_motion_style",
+        "hapus skill",
+        "delete skill",
         "plugin_install",
         "plugin_list",
     ]
@@ -558,6 +563,7 @@ mod tests {
                 "bash",
                 "capture_film_preview",
                 "codemode",
+                "delete_motion_style",
                 "edit",
                 "extract_video_reference",
                 "fetch_web_image",
@@ -569,6 +575,7 @@ mod tests {
                 "question",
                 "read",
                 "read_filmstrip",
+                "register_motion_style",
                 "sample_ref_region",
                 "task",
                 "webfetch",
@@ -589,6 +596,7 @@ mod tests {
                 "bash",
                 "capture_film_preview",
                 "codemode",
+                "delete_motion_style",
                 "edit",
                 "extract_video_reference",
                 "fetch_web_image",
@@ -600,6 +608,7 @@ mod tests {
                 "question",
                 "read",
                 "read_filmstrip",
+                "register_motion_style",
                 "render_video",
                 "sample_ref_region",
                 "task",
