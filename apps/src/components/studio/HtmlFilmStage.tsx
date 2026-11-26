@@ -11,6 +11,7 @@ import { apiFetch } from "../../lib/api";
 import {
   STAGE_MSG_ASSET_REQUEST,
   STAGE_MSG_ASSET_RESPONSE,
+  STAGE_MSG_AUDIO_EVENTS,
   STAGE_MSG_ERROR,
   STAGE_MSG_HOT_SWAP_SCRIPT,
   STAGE_MSG_READY,
@@ -18,6 +19,10 @@ import {
   isTrustedStageMessageSource,
   normalizeSandboxedAssetPath,
 } from "./htmlStageBridge";
+import {
+  normalizeRuntimeAudioEvents,
+  type RuntimeAudioEvent,
+} from "./runtimeSfxPlayer";
 
 export {
   type HtmlFilmScene,
@@ -64,6 +69,7 @@ export const HtmlFilmStage: React.FC<HtmlFilmStageProps> = ({
   const stageBoxRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [iframeReady, setIframeReady] = useState(false);
+  const [runtimeAudioEvents, setRuntimeAudioEvents] = useState<RuntimeAudioEvent[]>([]);
   const [boxSize, setBoxSize] = useState<{ w: number; h: number }>({
     w: width,
     h: height,
@@ -95,6 +101,7 @@ export const HtmlFilmStage: React.FC<HtmlFilmStageProps> = ({
 
   useEffect(() => {
     setIframeReady(false);
+    setRuntimeAudioEvents([]);
   }, [srcDoc]);
 
   const fpsRef = useRef(fps);
@@ -117,6 +124,11 @@ export const HtmlFilmStage: React.FC<HtmlFilmStageProps> = ({
           },
           "*",
         );
+        return;
+      }
+
+      if (msg.type === STAGE_MSG_AUDIO_EVENTS) {
+        setRuntimeAudioEvents(normalizeRuntimeAudioEvents(msg.events));
         return;
       }
 
@@ -253,6 +265,7 @@ export const HtmlFilmStage: React.FC<HtmlFilmStageProps> = ({
       <SceneAudioSync
         scenes={film.scenes}
         activeDir={film.activeDir}
+        runtimeAudioEvents={runtimeAudioEvents}
         onAudioError={reportAudioError}
       />
       <div

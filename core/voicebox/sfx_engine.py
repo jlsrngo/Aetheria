@@ -128,6 +128,14 @@ SFX_CATALOG_ALIASES: Dict[str, str] = {
     "kilat": "flash",
     "iris": "iris",
     "riser": "riser",
+    "fold": "fold",
+    "lipat": "fold",
+    "paper": "fold",
+    "kertas": "fold",
+    "door": "door",
+    "pintu": "door",
+    "notif": "notif",
+    "notification": "notif",
 }
 
 SFX_CATALOG_NAMES: List[str] = sorted(set(SFX_CATALOG_ALIASES.values()))
@@ -178,20 +186,109 @@ def _sfx_noise(n: int, seed: int, smooth_k: int) -> List[float]:
     return out
 
 
+def _load_custom_foley_sample(kind: str) -> Optional[List[float]]:
+    """Loads an optional recorded WAV foley sample from `.aetheria/sfx-samples/<kind>.wav`."""
+    try:
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        sample_path = repo_root / ".aetheria" / "sfx-samples" / f"{kind}.wav"
+        if not sample_path.is_file():
+            return None
+        with wave.open(str(sample_path), "rb") as wf:
+            n_ch = wf.getnchannels()
+            sw = wf.getsampwidth()
+            sr = wf.getframerate()
+            n_fr = wf.getnframes()
+            if sw != 2 or sr <= 0 or n_fr <= 0:
+                return None
+            raw = wf.readframes(n_fr)
+        total_ints = len(raw) // 2
+        ints = struct.unpack(f"<{total_ints}h", raw)
+        mono = [
+            sum(ints[i + c] for c in range(n_ch)) / (32768.0 * n_ch)
+            for i in range(0, total_ints - n_ch + 1, n_ch)
+        ]
+        if sr == SAMPLE_RATE or not mono:
+            return mono
+        out_len = max(1, int(round(len(mono) * SAMPLE_RATE / float(sr))))
+        ratio = (len(mono) - 1) / float(max(1, out_len - 1))
+        resampled = []
+        for i in range(out_len):
+            pos = i * ratio
+            lo = int(pos)
+            hi = min(len(mono) - 1, lo + 1)
+            frac = pos - lo
+            resampled.append(mono[lo] * (1.0 - frac) + mono[hi] * frac)
+        return resampled
+    except Exception:
+        return None
+
+
+def _bandpass_noise(n: int, seed: int, f_low: float, f_high: float) -> List[float]:
+    """Two-pole resonant-feel bandpass filtered noise for organic cinematic whoosh/foley texture."""
+    import random
+    rng = random.Random(seed)
+    out = [0.0] * n
+    lp = 0.0
+    hp_prev_in = 0.0
+    hp_prev_out = 0.0
+    dt = 1.0 / float(SAMPLE_RATE)
+    rc_hi = 1.0 / (2.0 * math.pi * max(40.0, f_high))
+    rc_lo = 1.0 / (2.0 * math.pi * max(20.0, f_low))
+    a_lp = dt / (rc_hi + dt)
+    a_hp = rc_lo / (rc_lo + dt)
+    for i in range(n):
+        x = rng.uniform(-1.0, 1.0)
+        lp += a_lp * (x - lp)
+        hp = a_hp * (hp_prev_out + lp - hp_prev_in)
+        hp_prev_in = lp
+        hp_prev_out = hp
+        out[i] = hp
+    return out
+
+
 def synthesize_sfx(raw_kind: str, volume: float = 1.0) -> List[float]:
-    """Synthesizes a named SFX clip from the shared engine catalog at SAMPLE_RATE (48kHz)."""
+    """Synthesizes a named SFX clip (optional WAV foley override, else layered cinematic DSP at 48kHz)."""
     kind = normalize_sfx_kind(raw_kind)
     vol = max(0.05, min(1.5, float(volume)))
 
+    custom_sample = _load_custom_foley_sample(kind)
+    if custom_sample:
+        return [max(-0.98, min(0.98, s * vol)) for s in custom_sample]
+
     if kind == "pop":
-        base = [s * 0.70 for s in _sfx_sweep(500.0, 1800.0, 0.09, 0.002, 0.03)]
+        # Layered tactile bubble/marimba pop: pitch-curved body + 2nd harmonic + crisp 6ms transient click
+        n = int(0.095 * SAMPLE_RATE)
+        s_body = _sfx_sweep(460.0, 1680.0, 0.095, 0.0018, 0.028)
+        s_harm = _sfx_sweep(920.0, 2600.0, 0.05, 0.001, 0.014)
+        nz = _bandpass_noise(int(0.012 * SAMPLE_RATE), 31, 1200.0, 4800.0)
+        base = [0.0] * n
+        for i in range(n):
+            v = s_body[i] * 0.68
+            if i < len(s_harm):
+                v += s_harm[i] * 0.22
+            if i < len(nz):
+                v += nz[i] * _sfx_env(i, SAMPLE_RATE, 0.0008, 0.004) * 0.35
+            base[i] = math.tanh(v * 1.15)
     elif kind == "tick":
-        base = [s * 0.42 for s in _sfx_sweep(1850.0, 1650.0, 0.035, 0.001, 0.012)]
-    elif kind == "ding":
-        n = int(0.55 * SAMPLE_RATE)
+        # Crisp mechanical UI click: micro filtered transient + resonant wood-tick body
+        n = int(0.040 * SAMPLE_RATE)
+        s_click = _sfx_sweep(2650.0, 1450.0, 0.040, 0.0008, 0.010)
+        nz = _bandpass_noise(n, 41, 1800.0, 6200.0)
         base = [
-            (math.sin(2.0 * math.pi * 1318.5 * i / SAMPLE_RATE) + 0.5 * math.sin(2.0 * math.pi * 1975.5 * i / SAMPLE_RATE))
-            * _sfx_env(i, SAMPLE_RATE, 0.002, 0.18) * 0.45
+            math.tanh((s_click[i] * 0.42 + nz[i] * _sfx_env(i, SAMPLE_RATE, 0.0005, 0.006) * 0.45) * 1.1)
+            for i in range(n)
+        ]
+    elif kind == "ding":
+        # Warm glassy bell with slight detuned chorus overtones
+        n = int(0.60 * SAMPLE_RATE)
+        base = [
+            (
+                math.sin(2.0 * math.pi * 1318.5 * i / SAMPLE_RATE) * 0.50
+                + math.sin(2.0 * math.pi * 1321.2 * i / SAMPLE_RATE) * 0.22
+                + math.sin(2.0 * math.pi * 2637.0 * i / SAMPLE_RATE) * 0.24 * math.exp(-i / (0.14 * SAMPLE_RATE))
+                + math.sin(2.0 * math.pi * 3633.0 * i / SAMPLE_RATE) * 0.10 * math.exp(-i / (0.07 * SAMPLE_RATE))
+            )
+            * _sfx_env(i, SAMPLE_RATE, 0.002, 0.20) * 0.55
             for i in range(n)
         ]
     elif kind == "question":
@@ -199,12 +296,12 @@ def synthesize_sfx(raw_kind: str, volume: float = 1.0) -> List[float]:
         s2 = _sfx_sweep(520.0, 720.0, 0.20, 0.004, 0.09)
         base = [s * 0.52 for s in (s1 + s2)]
     elif kind == "sparkle":
-        n = int(0.68 * SAMPLE_RATE)
+        n = int(0.72 * SAMPLE_RATE)
         base = [0.0] * n
         notes = (1318.5, 1568.0, 2093.0, 2637.0)  # E6, G6, C7, E7 musicbox shimmer
-        note_n = int(0.32 * SAMPLE_RATE)
+        note_n = int(0.36 * SAMPLE_RATE)
         for ni, freq in enumerate(notes):
-            off = int(ni * 0.07 * SAMPLE_RATE)
+            off = int(ni * 0.068 * SAMPLE_RATE)
             for i in range(note_n):
                 idx = off + i
                 if idx >= n:
@@ -212,8 +309,9 @@ def synthesize_sfx(raw_kind: str, volume: float = 1.0) -> List[float]:
                 t = i / float(SAMPLE_RATE)
                 sig = (
                     math.sin(2.0 * math.pi * freq * t)
-                    + 0.35 * math.sin(2.0 * math.pi * 2.76 * freq * t) * math.exp(-t / 0.12)
-                ) * _sfx_env(i, SAMPLE_RATE, 0.002, 0.16) * 0.34
+                    + 0.22 * math.sin(2.0 * math.pi * (freq * 1.003) * t)
+                    + 0.35 * math.sin(2.0 * math.pi * 2.756 * freq * t) * math.exp(-t / 0.11)
+                ) * _sfx_env(i, SAMPLE_RATE, 0.002, 0.17) * 0.30
                 base[idx] += sig
     elif kind == "zzz":
         base = [s * 0.26 for s in _sfx_sweep(420.0, 240.0, 0.65, 0.05, 0.38)]
@@ -227,41 +325,63 @@ def synthesize_sfx(raw_kind: str, volume: float = 1.0) -> List[float]:
             phase += 2.0 * math.pi * f / SAMPLE_RATE
             base[i] = math.sin(phase) * _sfx_env(i, SAMPLE_RATE, 0.003, 0.22) * 0.52
     elif kind == "footstep":
-        n = int(0.065 * SAMPLE_RATE)
-        nz = _sfx_noise(n, 11, 8)
+        n = int(0.070 * SAMPLE_RATE)
+        nz = _bandpass_noise(n, 11, 280.0, 1200.0)
         base = [
-            (
-                math.sin(2.0 * math.pi * 135.0 * i / SAMPLE_RATE) * _sfx_env(i, SAMPLE_RATE, 0.001, 0.02)
-                + nz[i] * _sfx_env(i, SAMPLE_RATE, 0.001, 0.012) * 0.65
-            ) * 0.38
+            math.tanh(
+                (
+                    math.sin(2.0 * math.pi * 130.0 * i / SAMPLE_RATE) * _sfx_env(i, SAMPLE_RATE, 0.001, 0.022)
+                    + nz[i] * _sfx_env(i, SAMPLE_RATE, 0.001, 0.015) * 0.72
+                ) * 0.44
+            )
             for i in range(n)
         ]
     elif kind in ("whoosh", "soft-whoosh"):
-        dur = 0.38 if kind == "whoosh" else 0.58
-        smooth_k = 20 if kind == "whoosh" else 38
-        gain = 1.45 if kind == "whoosh" else 1.05
+        # 2-layer cinematic air whoosh: warm low-mid body + airy high-frequency swish with fast-peak envelope
+        is_fast = kind == "whoosh"
+        dur = 0.36 if is_fast else 0.56
         n = int(dur * SAMPLE_RATE)
-        nz = _sfx_noise(n, 5 if kind == "whoosh" else 17, smooth_k)
-        base = [nz[i] * (math.sin(math.pi * i / float(max(1, n - 1))) ** 2) * gain for i in range(n)]
+        body = _bandpass_noise(n, 5 if is_fast else 17, 160.0, 880.0 if is_fast else 620.0)
+        air = _bandpass_noise(n, 13 if is_fast else 29, 1300.0, 5200.0 if is_fast else 3400.0)
+        gain = 1.45 if is_fast else 1.05
+        base = []
+        denom = float(max(1, n - 1))
+        for i in range(n):
+            p = i / denom
+            # Asymmetric cinematic swell (peaks around p=0.38 then glides out cleanly)
+            shaped = (p ** 0.72) if p < 0.38 else max(0.0, (1.0 - (p - 0.38) / 0.62) ** 1.45)
+            env_w = math.sin(math.pi * min(1.0, p)) * (0.45 + 0.55 * shaped)
+            v = (body[i] * 0.72 + air[i] * 0.48) * env_w * gain
+            base.append(math.tanh(v))
     elif kind == "thud":
-        n = int(0.30 * SAMPLE_RATE)
-        nz = _sfx_noise(n, 7, 10)
+        # 3-layer cinematic impact: sub-bass drop + warm woody punch + crisp slap transient
+        n = int(0.34 * SAMPLE_RATE)
+        nz_snap = _bandpass_noise(n, 7, 650.0, 3400.0)
         base = [0.0] * n
-        phase = 0.0
+        phase_sub = 0.0
+        phase_mid = 0.0
         for i in range(n):
             t = i / float(SAMPLE_RATE)
-            f = 95.0 - 52.0 * (t / 0.30)
-            phase += 2.0 * math.pi * f / SAMPLE_RATE
-            base[i] = (
-                math.sin(phase) * _sfx_env(i, SAMPLE_RATE, 0.002, 0.11) * 0.80
-                + nz[i] * _sfx_env(i, SAMPLE_RATE, 0.001, 0.022) * 0.35
+            f_sub = 135.0 * math.exp(-14.0 * t) + 38.0
+            f_mid = 250.0 * math.exp(-22.0 * t) + 88.0
+            phase_sub += 2.0 * math.pi * f_sub / SAMPLE_RATE
+            phase_mid += 2.0 * math.pi * f_mid / SAMPLE_RATE
+            v = (
+                math.sin(phase_sub) * _sfx_env(i, SAMPLE_RATE, 0.0018, 0.13) * 0.78
+                + math.sin(phase_mid) * _sfx_env(i, SAMPLE_RATE, 0.0012, 0.045) * 0.36
+                + nz_snap[i] * _sfx_env(i, SAMPLE_RATE, 0.0008, 0.018) * 0.52
             )
+            base[i] = math.tanh(v * 1.15)
     elif kind == "burst":
-        s1 = _sfx_sweep(420.0, 160.0, 0.22, 0.003, 0.09)
-        s2 = _sfx_sweep(900.0, 1450.0, 0.10, 0.002, 0.04)
-        base = [s * 0.62 for s in s1]
-        for i, v in enumerate(s2):
-            base[i] += v * 0.22
+        s1 = _sfx_sweep(420.0, 150.0, 0.22, 0.0025, 0.09)
+        s2 = _sfx_sweep(950.0, 1550.0, 0.10, 0.0015, 0.04)
+        nz = _bandpass_noise(len(s1), 47, 1400.0, 5400.0)
+        base = []
+        for i in range(len(s1)):
+            v = s1[i] * 0.58 + nz[i] * _sfx_env(i, SAMPLE_RATE, 0.002, 0.045) * 0.28
+            if i < len(s2):
+                v += s2[i] * 0.24
+            base.append(math.tanh(v * 1.1))
     elif kind == "alarm":
         n = int(1.35 * SAMPLE_RATE)
         base = [0.0] * n
@@ -275,15 +395,46 @@ def synthesize_sfx(raw_kind: str, volume: float = 1.0) -> List[float]:
                 sq = 1.0 if math.sin(2.0 * math.pi * 2300.0 * i / SAMPLE_RATE) >= 0.0 else -1.0
                 base[idx] += sq * 0.20 * _sfx_env(i, SAMPLE_RATE, 0.002, 0.08)
     elif kind == "flash":
-        s1 = _sfx_sweep(320.0, 2400.0, 0.20, 0.002, 0.11)
-        nz = _sfx_noise(len(s1), 9, 3)
-        base = [s1[i] * 0.38 + nz[i] * _sfx_env(i, SAMPLE_RATE, 0.001, 0.055) * 0.28 for i in range(len(s1))]
+        s1 = _sfx_sweep(340.0, 2600.0, 0.22, 0.002, 0.11)
+        nz = _bandpass_noise(len(s1), 9, 2200.0, 8200.0)
+        base = [math.tanh((s1[i] * 0.38 + nz[i] * _sfx_env(i, SAMPLE_RATE, 0.001, 0.055) * 0.42) * 1.1) for i in range(len(s1))]
     elif kind == "iris":
         s1 = _sfx_sweep(620.0, 220.0, 0.18, 0.004, 0.10)
         s2 = _sfx_sweep(220.0, 540.0, 0.18, 0.004, 0.10)
         base = [s * 0.45 for s in (s1 + s2)]
     elif kind == "riser":
-        base = generate_noise_sweep(0.75, 250.0, 6000.0, 0.42)
+        # Dual-layer cinematic tension riser: sweeping filtered air + rising sub harmonic
+        n = int(0.75 * SAMPLE_RATE)
+        nz = generate_noise_sweep(0.75, 250.0, 6200.0, 0.44)
+        sub = _sfx_sweep(65.0, 220.0, 0.75, 0.12, 0.55)
+        base = [math.tanh((nz[i] * 0.75 + sub[i] * 0.32 * (i / float(max(1, n - 1)))) * 1.1) for i in range(n)]
+    elif kind == "fold":
+        # Tactile paper fold (Aetheria-skills PaperWorld)
+        n = int(0.15 * SAMPLE_RATE)
+        nz = _bandpass_noise(n, 21, 900.0, 4200.0)
+        sw = _sfx_sweep(420.0, 960.0, 0.15, 0.002, 0.04)
+        base = [math.tanh((nz[i] * _sfx_env(i, SAMPLE_RATE, 0.003, 0.055) * 0.62 + sw[i] * 0.28) * 1.1) for i in range(n)]
+    elif kind == "door":
+        # Soft tactile door open/thump (Aetheria-skills PaperWorld)
+        n = int(0.18 * SAMPLE_RATE)
+        nz = _bandpass_noise(n, 23, 320.0, 1400.0)
+        sw = _sfx_sweep(310.0, 165.0, 0.18, 0.004, 0.06)
+        base = [math.tanh((sw[i] * 0.48 + nz[i] * _sfx_env(i, SAMPLE_RATE, 0.002, 0.045) * 0.45) * 1.1) for i in range(n)]
+    elif kind == "notif":
+        # Crisp two-tone musicbox notification chime (C6 -> G6)
+        n1 = int(0.14 * SAMPLE_RATE)
+        n2 = int(0.30 * SAMPLE_RATE)
+        p1 = [
+            (math.sin(2.0 * math.pi * 1046.5 * i / SAMPLE_RATE) + 0.35 * math.sin(2.0 * math.pi * 2.756 * 1046.5 * i / SAMPLE_RATE) * math.exp(-i / (0.14 * SAMPLE_RATE)))
+            * _sfx_env(i, SAMPLE_RATE, 0.002, 0.12) * 0.48
+            for i in range(n1)
+        ]
+        p2 = [
+            (math.sin(2.0 * math.pi * 1568.0 * i / SAMPLE_RATE) + 0.35 * math.sin(2.0 * math.pi * 2.756 * 1568.0 * i / SAMPLE_RATE) * math.exp(-i / (0.14 * SAMPLE_RATE)))
+            * _sfx_env(i, SAMPLE_RATE, 0.002, 0.22) * 0.52
+            for i in range(n2)
+        ]
+        base = p1 + p2
     else:
         base = [s * 0.70 for s in _sfx_sweep(500.0, 1800.0, 0.09, 0.002, 0.03)]
 

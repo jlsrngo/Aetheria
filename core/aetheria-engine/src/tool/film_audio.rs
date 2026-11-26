@@ -53,7 +53,7 @@ pub fn film_audio_tool_definition() -> Value {
                                 "minScene": { "type": "number", "description": "Optional minimum duration floor (seconds) for this scene." },
                                 "sfxCues": {
                                     "type": "array",
-                                    "description": "SFX cues from the shared engine catalog (`{ type: 'pop'|'tick'|'ding'|'question'|'sparkle'|'zzz'|'boing'|'footstep'|'whoosh'|'soft-whoosh'|'thud'|'burst'|'alarm'|'flash'|'iris'|'riser', time?: sec, frame?: n, volume?: 0..1 }` or shorthand cue name). When omitted, deterministic transition & beat SFX cues are generated into `audio/sfx_<id>.wav` (declarative StoryCore skills auto-override with timeline-synced `window.__audioEvents` at render time).",
+                                    "description": "SFX cues from the shared engine catalog (`{ type: 'pop'|'tick'|'ding'|'question'|'sparkle'|'zzz'|'boing'|'footstep'|'whoosh'|'soft-whoosh'|'thud'|'burst'|'alarm'|'flash'|'iris'|'riser'|'fold'|'door'|'notif', time?: sec, frame?: n, volume?: 0..1 }` or shorthand cue name). When omitted, deterministic transition & beat SFX cues are generated into `audio/sfx_<id>.wav` (declarative StoryCore skills auto-override with timeline-synced `window.__audioEvents` at render time).",
                                     "items": {}
                                 },
                                 "disableSfx": {

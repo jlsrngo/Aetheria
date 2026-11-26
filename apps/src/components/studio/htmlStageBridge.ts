@@ -10,6 +10,7 @@ export const STAGE_MSG_HOT_SWAP_SCRIPT = "aetheria:hotSwapScript" as const;
 export const STAGE_MSG_ERROR = "aetheria:error" as const;
 export const STAGE_MSG_ASSET_REQUEST = "aetheria:assetRequest" as const;
 export const STAGE_MSG_ASSET_RESPONSE = "aetheria:assetResponse" as const;
+export const STAGE_MSG_AUDIO_EVENTS = "aetheria:audioEvents" as const;
 
 const WORKSPACE_ASSET_PREFIXES = [
   "audio/",
@@ -379,6 +380,7 @@ export function buildSandboxStageBridgeScript(): string {
             window.__aetheriaInHostCall = false;
           }
         }
+        emitAudioEventsIfChanged();
       } catch (_) {
         // Ignore transient syntax errors while the user is mid-keystroke in the editor
       }
@@ -402,6 +404,7 @@ export function buildSandboxStageBridgeScript(): string {
             window.__aetheriaInHostCall = false;
           }
         }
+        emitAudioEventsIfChanged();
       } catch (err) {
         var msg = err && err.message ? err.message : String(err);
         window.parent.postMessage({ type: "${STAGE_MSG_ERROR}", message: msg }, "*");
@@ -426,11 +429,24 @@ export function buildSandboxStageBridgeScript(): string {
     }
   });
 
+  var lastAudioEventsSig = "";
+  function emitAudioEventsIfChanged() {
+    try {
+      if (!Array.isArray(window.__audioEvents)) return;
+      var evs = window.__audioEvents;
+      var sig = evs.length + ":" + (evs.length > 0 ? JSON.stringify(evs[0]) + "|" + JSON.stringify(evs[evs.length - 1]) : "");
+      if (sig === lastAudioEventsSig) return;
+      lastAudioEventsSig = sig;
+      window.parent.postMessage({ type: "${STAGE_MSG_AUDIO_EVENTS}", events: evs }, "*");
+    } catch (_) {}
+  }
+
   var readySent = false;
   function emitReadyIfPossible() {
     if (readySent) return true;
     if (typeof window.renderAt === "function") {
       readySent = true;
+      emitAudioEventsIfChanged();
       window.parent.postMessage({ type: "${STAGE_MSG_READY}", hasRenderAt: true }, "*");
       return true;
     }
