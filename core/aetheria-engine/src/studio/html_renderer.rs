@@ -267,7 +267,7 @@ pub(super) async fn wait_for_film_ready(cdp: &mut CdpWebSocket, meta: &mut FilmM
                         .call(
                             "Runtime.evaluate",
                             json!({
-                                "expression": "Promise.race([(document.fonts && document.fonts.ready) ? document.fonts.ready.catch(() => {}) : Promise.resolve(), new Promise(r => setTimeout(r, 1200))]).then(() => { const s = document.createElement('style'); s.textContent = '#loading,#controls,.aetheria-standalone-controls,[data-aetheria-standalone-chrome]{display:none!important;opacity:0!important;visibility:hidden!important;}'; (document.head || document.documentElement).appendChild(s); return true; })",
+                                "expression": "Promise.race([(document.fonts ? Promise.all(Array.from(document.fonts).map(f => f.load().catch(() => {}))).then(() => document.fonts.ready).catch(() => {}) : Promise.resolve()), new Promise(r => setTimeout(r, 3500))]).then(() => { const s = document.createElement('style'); s.textContent = '#loading,#controls,.aetheria-standalone-controls,[data-aetheria-standalone-chrome]{display:none!important;opacity:0!important;visibility:hidden!important;}'; (document.head || document.documentElement).appendChild(s); return true; })",
                                 "awaitPromise": true
                             }),
                         )

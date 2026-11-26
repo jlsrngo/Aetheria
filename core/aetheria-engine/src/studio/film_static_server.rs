@@ -57,6 +57,11 @@ async fn serve_static_film_file(film_root: &Path, _ws_root: &Path, rel_raw: &str
         let mut html =
             super::builtin_runtime::rewrite_three_cdn_tags(&raw_html, Some("/script/three.min.js"));
         let mut injected = String::new();
+        if !html.contains("fonts.googleapis.com") && !html.contains("@font-face") {
+            injected.push_str(
+                "<link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Instrument+Serif:ital@0;1&family=Playfair+Display:ital,wght@0,600;0,700;1,500;1,600&family=Space+Grotesk:wght@500;700&display=swap\" />\n",
+            );
+        }
         if !html.contains("aetheria-post.js") {
             injected.push_str("<script src=\"/script/aetheria-post.js\"></script>\n");
         }
@@ -281,6 +286,7 @@ mod tests {
         assert_eq!(resp.status(), reqwest::StatusCode::OK);
         let body = resp.text().await.unwrap();
         assert!(body.contains("aetheria-motion.js"));
+        assert!(body.contains("fonts.googleapis.com") && body.contains("Instrument+Serif"));
 
         let cam_resp = reqwest::get(format!("http://127.0.0.1:{}/script/story-camera.js", port))
             .await

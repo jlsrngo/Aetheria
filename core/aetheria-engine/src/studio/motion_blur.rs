@@ -130,9 +130,11 @@ pub(crate) fn collect_motion_blur_profile(
     let mut hard_cuts: Vec<f64> = Vec::new();
     let pad = 0.04;
 
+    let mut has_film_scenes = false;
     if let Ok(raw) = std::fs::read_to_string(film_root.join("film.json")) {
         if let Ok(val) = serde_json::from_str::<Value>(&raw) {
             if let Some(scenes) = val.get("scenes").and_then(Value::as_array) {
+                has_film_scenes = !scenes.is_empty();
                 for (idx, sc) in scenes.iter().enumerate() {
                     let tb = sc.get("transitionBridge");
                     let kind = tb
@@ -161,6 +163,54 @@ pub(crate) fn collect_motion_blur_profile(
                     }
                 }
             }
+        }
+    }
+
+    // Also support declarative story/director JSON films (story.json / director.json)
+    // so kinetic entry/exit bursts get selective 180-degree shutter blur with strict hard-cut clamping.
+    if !has_film_scenes {
+        for candidate in ["story.json", "director.json"] {
+            let Ok(raw) = std::fs::read_to_string(film_root.join(candidate)) else {
+                continue;
+            };
+            let Ok(val) = serde_json::from_str::<Value>(&raw) else {
+                continue;
+            };
+            let Some(shots) = val.get("shots").and_then(Value::as_array) else {
+                continue;
+            };
+            if shots.is_empty() {
+                continue;
+            }
+            let mut cursor = 0.0_f64;
+            for (idx, sh) in shots.iter().enumerate() {
+                let dur = sh.get("duration").and_then(Value::as_f64).unwrap_or(0.0);
+                if dur <= 0.0 {
+                    continue;
+                }
+                let start = sh.get("start").and_then(Value::as_f64).unwrap_or(cursor);
+                let end = start + dur;
+                cursor = end;
+                let tb = sh.get("transitionBridge");
+                let kind = tb
+                    .and_then(|v| v.get("kind"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let is_soft = is_soft_bridge_kind(kind);
+                if idx > 0 && !is_soft && start > 0.0 {
+                    hard_cuts.push(start);
+                }
+                // Kinetic entry burst & exit transition windows inside each shot
+                let entry_hi = (start + 0.36).min(end);
+                if entry_hi > start {
+                    windows.push((start.max(0.0), entry_hi));
+                }
+                let exit_lo = (end - 0.32).max(start);
+                if end > exit_lo {
+                    windows.push((exit_lo, end));
+                }
+            }
+            break;
         }
     }
 
@@ -411,6 +461,27 @@ mod tests {
         assert_eq!(adaptive_samples(2.2, 4, 12), 4);
         assert_eq!(adaptive_samples(8.5, 4, 12), 9);
         assert_eq!(adaptive_samples(50.0, 4, 12), 12);
+
+        // Declarative director.json without film.json also derives entry/exit blur windows & hard cuts
+        let decl_dir = tmp.join("decl_film");
+        std::fs::create_dir_all(&decl_dir).unwrap();
+        std::fs::write(
+            decl_dir.join("director.json"),
+            serde_json::to_string(&json!({
+                "shots": [
+                    { "id": "shot_1", "start": 0.0, "duration": 2.4 },
+                    { "id": "shot_2", "start": 2.4, "duration": 2.8 }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let decl_auto = MotionBlurMode::parse_spec("auto", &decl_dir, &decl_dir);
+        assert_eq!(decl_auto.samples_for_time(0.15), 8, "shot entry burst should get motion blur");
+        assert_eq!(decl_auto.samples_for_time(1.20), 1, "mid-shot hold should stay 1x");
+        assert_eq!(decl_auto.samples_for_time(2.25), 8, "shot exit burst should get motion blur");
+        let (_, pre_decl_hi) = decl_auto.shutter_bounds(2.398, 30.0);
+        assert!(pre_decl_hi < 2.4, "declarative hard cut at 2.4 must clamp pre-cut shutter");
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

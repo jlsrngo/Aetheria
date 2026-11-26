@@ -227,9 +227,9 @@ pub fn resolve_reference_report_for_prompt(workspace_dir: &str, prompt_text: &st
         "[Active Video Reference Blueprint (Reference-to-Skill Source)]:\n\"\"\"\n{}\n\"\"\"\n\
         GUIDELINES WHEN PRODUCING FROM REFERENCE:\n\
         0. REFERENCE-TO-SKILL CONSENT FLOW: This reference overrides existing built-in `/mg-*` aesthetics — do NOT ask the user to pick an existing built-in `/skill`. Instead, unless the user already chose in this turn, call `question` once asking: (1) Buat Video + Calon Skill Gaya Baru (`draft-skill/` + video), or (2) Buat Video Sekali Pakai Saja. Never call `register_motion_style` until AFTER showing the finished preview/gallery and getting explicit approval via `question`.\n\
-        1. CRAFT KIT + COMPONENT GALLERY QC: Inspect keyframes (`read_filmstrip`, `sample_ref_region`, `inspect_ref_frame`), then build a dedicated Style Craft Kit (`script/<slug>-kit.js` + `kit.json` + semantic `story.json`) matching the reference's aspect ratio at crisp HD (`>= 720x1280` for 9:16 or `>= 1280x720` for 16:9). Render and inspect a Component Gallery (`assets/kit-gallery.jpg`) against reference crops before assembling all scenes. (`ref/` and `ref/extracted/*` live at workspace root, NOT inside `projects/<slug>/ref/`.)\n\
+        1. AE-GRADE CRAFT KIT & ASSET REALISM: Inspect keyframes (`read_filmstrip`, `sample_ref_region`, `inspect_ref_frame`), then build a dedicated Style Craft Kit (`script/<slug>-kit.js` + `kit.json` + semantic `story.json`/`director.json`) matching the reference's aspect ratio at crisp HD (`>= 720x1280` for 9:16 or `>= 1280x720` for 16:9). Use `fetch_web_image` (transparent cutout PNGs stored in `img/` & `draft-skill/assets/`) or `/script/three.min.js` for photorealistic/organic/3D subjects (NEVER hand-sketch photorealistic subjects with flat 2D lines). Load Google Fonts `<link>` matching reference typography and use `window.AM` (`AM.ease.aeGlide`, `AM.ease.aeSnap`, `AM.drawBlurRevealText`, `AM.renderFrameWithTransitions`) instead of plain `smoothstep` + abrupt hard-cuts. (`ref/` and `ref/extracted/*` live at workspace root, NOT inside `projects/<slug>/ref/`.)\n\
         2. AUDIO OPT-IN ONLY (`film_audio`): Only call `film_audio` when audio is desired; skip audio completely if the user asks for no audio (e.g. 'ga perlu audio', 'no audio', 'silent').\n\
-        3. DETERMINISTIC ENGINE & VERIFICATION: Expose `window.__filmMeta`, deterministic `window.renderAt(t)`, and `window.__ready = true` (NEVER paste `ref/ref_*` images directly as a backdrop). Verify visually with `capture_film_preview` before presenting results and requesting final consent to save (`register_motion_style`), keep video only, revise, or delete draft.",
+        3. SIDE-BY-SIDE QC & MANDATORY POLISH (v1 -> v2): Expose `window.__filmMeta`, deterministic `window.renderAt(t)`, and `window.__ready = true` (NEVER paste `ref/ref_*` images directly as a backdrop). Render and inspect a **2-column side-by-side Component Gallery QC** (`assets/kit-gallery.jpg`: `REF crop` left vs `YOU component` right) before scene assembly, then run `capture_film_preview({{ compareToReference: true }})`, inspect `comparison_strip.jpg`, and perform **at least 1 dedicated visual polish iteration (v1 -> v2)** fixing asset realism, font/scale match, and transitions BEFORE `render_video` and requesting final consent (`register_motion_style`).",
         sections.join("\n\n---\n\n")
     ))
 }
@@ -352,6 +352,44 @@ fn seed_skill_kit_scripts(workspace_dir: &str, skill_dir: &Path) -> Vec<String> 
                     let _ = std::fs::create_dir_all(parent);
                 }
                 let _ = std::fs::copy(&kit_manifest_src, &dest);
+            }
+        }
+    }
+    // Seed non-QC raster/SVG cutout assets from `assets/` into `img/` so reference-built skills
+    // that rely on real PNG cutouts work plug-and-play in new projects.
+    let assets_src = skill_dir.join("assets");
+    if assets_src.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&assets_src) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if !p.is_file() {
+                    continue;
+                }
+                let Some(fname) = p.file_name().and_then(|n| n.to_str()) else {
+                    continue;
+                };
+                let lower = fname.to_ascii_lowercase();
+                let is_img = lower.ends_with(".png")
+                    || lower.ends_with(".webp")
+                    || lower.ends_with(".svg")
+                    || lower.ends_with(".jpg")
+                    || lower.ends_with(".jpeg");
+                let is_qc_sheet = lower.contains("gallery")
+                    || lower.contains("qc-sheet")
+                    || lower.contains("contact_sheet")
+                    || lower.contains("comparison");
+                if !is_img || is_qc_sheet {
+                    continue;
+                }
+                let rel = format!("img/{fname}");
+                if let Ok(dest) = crate::tool::path_guard::resolve_isolated_path(workspace_dir, &rel) {
+                    if !dest.exists() {
+                        if let Some(parent) = dest.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+                        let _ = std::fs::copy(&p, &dest);
+                    }
+                }
             }
         }
     }
