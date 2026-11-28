@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Snappy Tech Showcase Story Schema",
+  "type": "object",
+  "required": ["title", "theme", "canvas", "beats"],
+  "properties": {
+    "title": { "type": "string", "minLength": 1 },
+    "theme": {
+      "type": "string",
+      "enum": ["obsidian-bloom", "plush-3d-studio", "cobalt-editorial", "photo-os-warm", "aurora-light"]
+    },
+    "cameraStyle": {
+      "type": "string",
+      "enum": ["calm", "kinetic", "editorial"]
+    },
+    "canvas": {
+      "type": "object",
+      "required": ["w", "h", "fps"],
+      "properties": {
+        "w": { "type": "integer", "enum": [1080, 1280, 1920] },
+        "h": { "type": "integer", "enum": [720, 1080, 1920] },
+        "fps": { "type": "integer", "enum": [30, 60] }
+      }
+    },
+    "beats": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["id", "start", "duration", "module"],
+        "properties": {
+          "id": { "type": "string" },
+          "start": { "type": "number", "minimum": 0 },
+          "duration": { "type": "number", "exclusiveMinimum": 0 },
+          "module": {
+            "type": "string",
+            "enum": [
+              "navbar-letter-wave",
+              "deployment-card",
+              "neon-score-gauge",
+              "prompt-box-typing",
+              "bloom-morph-cta",
+              "3d-plush-desk",
+              "icon-ribbon-shake",
+              "feature-wheel",
+              "cylinder-ring-360",
+              "ascii-wordmark-decode",
+              "photo-os-dock",
+              "ai-notes-enhance",
+              "waveform-pill",
+              "team-call-grid",
+              "aurora-star-iris"
+            ]
+          },
+          "headline": { "type": "string" },
+          "subheadline": { "type": "string" },
+          "accentColor": { "type": "string" }
+        }
+      }
+    },
+    "captions": {
+      "type": "object",
+      "properties": { "enabled": { "type": "boolean" } }
+    }
+  }
+}

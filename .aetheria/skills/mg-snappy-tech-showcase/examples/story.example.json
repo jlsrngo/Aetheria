@@ -1,0 +1,53 @@
+{
+  "title": "Aetheria Studio — Snappy Tech Showcase",
+  "theme": "obsidian-bloom",
+  "cameraStyle": "kinetic",
+  "canvas": { "w": 1080, "h": 1920, "fps": 60 },
+  "beats": [
+    {
+      "id": "beat1_navbar",
+      "start": 0.0,
+      "duration": 1.66,
+      "module": "navbar-letter-wave",
+      "headline": "Products · Resources · Pricing",
+      "accentColor": "#FFFFFF"
+    },
+    {
+      "id": "beat2_deploy",
+      "start": 1.66,
+      "duration": 1.38,
+      "module": "deployment-card",
+      "headline": "aetheria-studio",
+      "subheadline": "studio.aetheria.app",
+      "accentColor": "#4ADE80"
+    },
+    {
+      "id": "beat3_score",
+      "start": 3.04,
+      "duration": 1.40,
+      "module": "neon-score-gauge",
+      "headline": "Real Experience Score",
+      "subheadline": "96",
+      "accentColor": "#5CF2AE"
+    },
+    {
+      "id": "beat4_prompt",
+      "start": 4.44,
+      "duration": 2.12,
+      "module": "prompt-box-typing",
+      "headline": "What do you want to create?",
+      "subheadline": "Build a modern product website.",
+      "accentColor": "#FFFFFF"
+    },
+    {
+      "id": "beat5_outro",
+      "start": 6.56,
+      "duration": 2.77,
+      "module": "bloom-morph-cta",
+      "headline": "Visit ↗",
+      "subheadline": "aetheria.studio",
+      "accentColor": "#FFFFFF"
+    }
+  ],
+  "captions": { "enabled": false }
+}
