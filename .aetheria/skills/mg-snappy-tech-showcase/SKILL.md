@@ -17,10 +17,11 @@ command: /mg-snappy-tech-showcase
 **Supported Formats:** `1080×1920` (Portrait 9:16 TikTok/Reels, default) · `1920×1080` (Landscape 16:9 Product Commercial) · `1080×1080` (Square 1:1 Social Loop) · `30 fps` or `60 fps` CFR.
 
 **Seeded Runtime & References:**
-- Reusable motion kit: [script/snappy-tech-kit.js](script/snappy-tech-kit.js) (`window.SnappyTechKit`)
+- Reusable motion kit (21 primitives covering Videos 1–5 + Video 6): [script/snappy-tech-kit.js](script/snappy-tech-kit.js) (`window.SnappyTechKit`)
+- Visual galleries & photo assets: [visual-gallery.png](assets/visual-gallery.png), [sheet-2-photo-os-aurora.png](assets/sheet-2-photo-os-aurora.png), [sheet-3-characters-props.png](assets/sheet-3-characters-props.png), [qc-sheet-example.jpg](assets/qc-sheet-example.jpg), [wallpaper-alpine.jpg](assets/wallpaper-alpine.jpg), [call-grid-team.jpg](assets/call-grid-team.jpg)
 - Camera & optical lens laws: [references/camera.md](references/camera.md)
 - Declarative spec & example: [examples/story.schema.json](examples/story.schema.json), [examples/story.example.json](examples/story.example.json)
-- Planned Video 6 blueprint & timing notes: [references/video6-gemini-notes.md](references/video6-gemini-notes.md)
+- Planned Video 6 blueprint & bundled portable reference MP4: [references/video6-gemini-notes.md](references/video6-gemini-notes.md), [ref6_mc_7603768.mp4](references/video6/ref6_mc_7603768.mp4)
 
 ## Visual Archetypes (5 Themes)
 

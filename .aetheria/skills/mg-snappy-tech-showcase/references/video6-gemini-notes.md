@@ -3,7 +3,7 @@
 > **Status:** Planned / Deferred for next pass (per user direction: ship `mg-snappy-tech-showcase` skill first, then add Video 6 implementation & showcase).
 
 ## Native Reference Spec
-- **Source reference:** `ref6_mc_7603768.mp4` (TikTok `@mcvisuals`)
+- **Bundled reference video (portable across machines):** [ref6_mc_7603768.mp4](video6/ref6_mc_7603768.mp4) (`0.33 MB`, includes original audio for offline remake & side-by-side verification on any computer after `git pull`)
 - **Format:** `1080×1080` (Square 1:1) · **60 fps CFR** · **590 frames** · **9.833s**
 - **Theme mapping in skill:** `aurora-light`
 

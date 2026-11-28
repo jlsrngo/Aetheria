@@ -220,6 +220,115 @@
     ctx.closePath();
   }
 
+  /** Localized impact vibration (Video 1 padlock slam / Video 3 logo snap) — never continuous full-scene shake. */
+  function localizedImpactShake(t, hitTime, amp, duration) {
+    const dt = t - hitTime;
+    const dur = duration || 0.28;
+    if (dt < 0 || dt > dur) return { x: 0, y: 0 };
+    const decay = Math.exp(-dt * 14);
+    const a = amp || 6;
+    return {
+      x: Math.sin(dt * 68) * decay * a,
+      y: Math.cos(dt * 58) * decay * (a * 0.72),
+    };
+  }
+
+  /** Cylindrical 3D orbit interpolation around lookAt (Video 2 180-deg flip without zenith gimbal-flip). */
+  function sampleCylindricalOrbit(pos0, pos1, look0, look1, u) {
+    const lx = lerp(look0[0], look1[0], u);
+    const ly = lerp(look0[1], look1[1], u);
+    const lz = lerp(look0[2], look1[2], u);
+    const r0 = Math.hypot(pos0[0] - look0[0], pos0[2] - look0[2]);
+    const r1 = Math.hypot(pos1[0] - look1[0], pos1[2] - look1[2]);
+    const a0 = Math.atan2(pos0[0] - look0[0], pos0[2] - look0[2]);
+    let a1 = Math.atan2(pos1[0] - look1[0], pos1[2] - look1[2]);
+    if (a1 - a0 > Math.PI) a1 -= Math.PI * 2;
+    if (a1 - a0 < -Math.PI) a1 += Math.PI * 2;
+    const r = lerp(r0, r1, u);
+    const ang = lerp(a0, a1, u);
+    return {
+      pos: [lx + Math.sin(ang) * r, lerp(pos0[1], pos1[1], u), lz + Math.cos(ang) * r],
+      look: [lx, ly, lz],
+    };
+  }
+
+  /** Velocity-driven 180-deg shutter motion blur amount in pixels during whip-pans (Video 2). */
+  function computeShutterBlur(speed, threshold, maxPx) {
+    const th = threshold != null ? threshold : 14;
+    const cap = maxPx != null ? maxPx : 11;
+    return Math.min(cap, Math.max(0, (speed - th) * 0.22));
+  }
+
+  /** Rhythmic beat-shake transform for horizontal tech icon ribbons (Video 3). */
+  function computeBeatShake(t, idx, beatTimes) {
+    let pulse = 0;
+    const beats = beatTimes || [2.98, 3.48, 3.98, 4.48];
+    for (let i = 0; i < beats.length; i++) {
+      pulse += Math.exp(-Math.pow((t - beats[i]) * 14, 2));
+    }
+    const amp = 1.6 + pulse * 3.2;
+    return {
+      x: Math.sin(t * 27 + idx * 2.3) * amp + Math.cos(t * 41 + idx * 1.1) * amp * 0.45,
+      y: Math.cos(t * 23 + idx * 1.9) * amp * 1.15,
+      rot: Math.sin(t * 19 + idx * 1.7) * (0.09 + pulse * 0.10),
+      scale: 1 + pulse * 0.08 * Math.sin(idx * 1.4 + t * 12),
+    };
+  }
+
+  /** Neon radial score gauge with outer bloom (Video 4 Real Experience Score 96). */
+  function drawNeonScoreGauge(ctx, opts) {
+    const cx = opts.cx || 0;
+    const cy = opts.cy || 0;
+    const r = opts.radius || 104;
+    const pct = clamp01(opts.progress || 0);
+    const lineW = opts.lineWidth || 15;
+    if (opts.trackAlpha && opts.trackAlpha > 0.01) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255,255,255,${opts.trackAlpha.toFixed(3)})`;
+      ctx.lineWidth = lineW - 1;
+      ctx.stroke();
+      ctx.restore();
+    }
+    if (pct > 0.005) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, -Math.PI * 0.5, -Math.PI * 0.5 + pct * Math.PI * 2);
+      ctx.strokeStyle = opts.color || "#5CF2AE";
+      ctx.lineWidth = lineW;
+      ctx.lineCap = "round";
+      ctx.shadowColor = opts.glow || "rgba(74, 222, 128, 0.92)";
+      ctx.shadowBlur = opts.shadowBlur != null ? opts.shadowBlur : 32;
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  /** Frosted top-lit glass pill with optional inner ambient color spill (Video 5 Granola vertical/horizontal pills). */
+  function drawFrostedGlassPill(ctx, opts) {
+    const x = opts.x || -84;
+    const y = opts.y || -172;
+    const w = opts.w || 168;
+    const h = opts.h || 344;
+    const r = opts.r != null ? opts.r : Math.min(w, h) * 0.5;
+    const grad = ctx.createLinearGradient(0, y, 0, y + h);
+    grad.addColorStop(0, "rgba(68, 70, 66, 0.72)");
+    grad.addColorStop(0.35, "rgba(32, 34, 31, 0.88)");
+    grad.addColorStop(1, "rgba(22, 24, 21, 0.94)");
+    ctx.save();
+    ctx.shadowColor = opts.glowColor || "rgba(155, 225, 60, 0.22)";
+    ctx.shadowBlur = opts.glowBlur != null ? opts.glowBlur : 55;
+    traceRoundedRect(ctx, x, y, w, h, r);
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.restore();
+    traceRoundedRect(ctx, x, y, w, h, r);
+    ctx.strokeStyle = opts.border || "rgba(255,255,255,0.22)";
+    ctx.lineWidth = opts.borderWidth || 2;
+    ctx.stroke();
+  }
+
   return {
     clamp01,
     lerp,
@@ -229,11 +338,17 @@
     springOut,
     whipEase,
     impactDip,
+    localizedImpactShake,
+    sampleCylindricalOrbit,
+    computeShutterBlur,
+    computeBeatShake,
     traceRoundedRect,
     drawBacklitCard,
     drawGlowingEmblem,
     drawLetterWave,
     drawWaveformBars,
+    drawNeonScoreGauge,
+    drawFrostedGlassPill,
     projectCylinderRing,
     traceAuroraStar,
   };
